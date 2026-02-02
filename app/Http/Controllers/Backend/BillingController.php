@@ -106,7 +106,7 @@ if (
 ) {
     $links[] = [
         'linkClass' => 'bg-purple-600 text-white semi-bold',
-        'link' => route('backend.backend.due.collect', $data->id),
+        'link' => route('backend.backend.backend.due.collect', $data->id),
         'linkLabel' => 'Due Collect',
     ];
 }

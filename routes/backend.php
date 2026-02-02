@@ -507,11 +507,11 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
     // Due collect form
     Route::get('due-collect/{id}', [DueCollectController::class, 'index'])
-        ->name('backend.backend.due.collect');
+        ->name('backend.backend.backend.due.collect');
 
     // Due collect submit
     Route::post('due-collect/{id}', [DueCollectController::class, 'store'])
-        ->name('backend.backend.due.collect.store');
+        ->name('backend.backend.backend.due.collect.store');
     //});
  
 });
