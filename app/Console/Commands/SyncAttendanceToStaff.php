@@ -117,6 +117,14 @@ class SyncAttendanceToStaff extends Command
             }
         }
 
+        // Fallback for codes like test_emp_1 or EMP-3 where trailing digits represent admin id.
+        if (preg_match('/(\d+)$/', $employeeCode, $matches)) {
+            $bySuffixId = Admin::find((int) $matches[1]);
+            if ($bySuffixId) {
+                return $bySuffixId;
+            }
+        }
+
         $detail = AdminDetail::where('staff_id', $employeeCode)->first();
         if ($detail && !empty($detail->admin_id)) {
             return Admin::find((int) $detail->admin_id);
