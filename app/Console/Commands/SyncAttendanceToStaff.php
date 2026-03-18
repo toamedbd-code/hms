@@ -9,6 +9,7 @@ use App\Models\Admin;
 use App\Models\AdminDetail;
 use App\Models\DutyRoster;
 use App\Models\AttendanceShift;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class SyncAttendanceToStaff extends Command
@@ -121,7 +122,13 @@ class SyncAttendanceToStaff extends Command
             return Admin::find((int) $detail->admin_id);
         }
 
-        return Admin::where('username', $employeeCode)->first();
+        // Some deployments do not have a `username` column on `admins`.
+        // Guard the fallback lookup so the sync command never crashes.
+        if (Schema::hasColumn('admins', 'username')) {
+            return Admin::where('username', $employeeCode)->first();
+        }
+
+        return null;
     }
 
     private function isLate(int $adminId, string $employeeCode, Carbon $inTs): bool
