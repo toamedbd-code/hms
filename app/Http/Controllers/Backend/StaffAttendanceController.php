@@ -404,7 +404,7 @@ class StaffAttendanceController extends Controller
         $totalDaysInMonth = $monthDate->daysInMonth;
 
         $staffList = Admin::query()
-            ->with(['role:id,name', 'details.department:id,department_name', 'details.designation:id,designation_name'])
+            ->with(['role:id,name', 'details.department:id,name', 'details.designation:id,name'])
             ->where('status', 'Active')
             ->whereNull('deleted_at')
             ->orderBy('first_name')
@@ -606,8 +606,8 @@ class StaffAttendanceController extends Controller
                 'staff_admin_id' => (int) $staff->id,
                 'name' => trim(($staff->first_name ?? '') . ' ' . ($staff->last_name ?? '')),
                 'role' => $staff->role->name ?? 'N/A',
-                'department' => $staff->details->department->department_name ?? 'N/A',
-                'designation' => $staff->details->designation->designation_name ?? 'N/A',
+                'department' => $staff->details->department->name ?? 'N/A',
+                'designation' => $staff->details->designation->name ?? 'N/A',
                 'basic_salary' => round($basicSalary, 2),
                 'total_days' => $totalDaysInMonth,
                 'workable_days' => $totalWorkableDays,
