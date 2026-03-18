@@ -78,7 +78,9 @@ const integrationOptions = computed(() => {
 const money = (value) => Number(value ?? 0).toFixed(2);
 
 const printSheet = () => {
-  window.print();
+  const targetMonth = selectedMonth.value || props.filters?.month || new Date().toISOString().slice(0, 7);
+  const printUrl = route('backend.staffattendance.salary-sheet.print', { month: targetMonth });
+  window.open(printUrl, '_blank');
 };
 
 const exportCsv = () => {

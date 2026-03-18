@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Backend\AdminController;
 use App\Http\Controllers\Backend\DashboardController;
+use App\Http\Controllers\Backend\DashboardSettingController;
 use App\Http\Controllers\Backend\PermissionController;
 use App\Http\Controllers\Backend\RoleController;
 use App\Http\Controllers\LoginController;
@@ -13,6 +14,8 @@ use App\Http\Controllers\Backend\BillingController;
 use App\Http\Controllers\Backend\AppoinmentController;
 use App\Http\Controllers\Backend\OpdPatientController;
 use App\Http\Controllers\Backend\IpdPatientController;
+use App\Http\Controllers\Backend\IpdChargeController;
+
 use App\Http\Controllers\Backend\PharmacyController;
 use App\Http\Controllers\Backend\PathologyController;
 use App\Http\Controllers\Backend\RadiologyController;
@@ -29,6 +32,10 @@ use App\Http\Controllers\Backend\FinanceController;
 use App\Http\Controllers\Backend\InventoryController;
 use App\Http\Controllers\Backend\CertificateController;
 use App\Http\Controllers\Backend\ReportsController;
+use App\Http\Controllers\Backend\SampleCollectionController;
+use App\Http\Controllers\Backend\ReportingController;
+use App\Http\Controllers\Backend\ReportSettingController;
+use App\Http\Controllers\Backend\ReportDeliveryController;
 use App\Http\Controllers\Backend\SetupController;
 use App\Http\Controllers\Backend\DesignationController;
 use App\Http\Controllers\Backend\DepartmentController;
@@ -66,6 +73,7 @@ use App\Http\Controllers\Backend\StockManagementController;
 use App\Http\Controllers\Backend\ReferralCategoryController;
 
 use App\Http\Controllers\Backend\ReferralPersonController;
+use App\Http\Controllers\Backend\SymptomTypeController;
 
 
 use App\Http\Controllers\Backend\InvoiceDesignController;
@@ -74,7 +82,13 @@ use App\Http\Controllers\Backend\ReportController;
 use App\Http\Controllers\Backend\WebSettingController;
 
 use App\Http\Controllers\Backend\PharmacyBillController;
+
+Route::get('/test-upload', function () {
+    return ini_get('upload_tmp_dir');
+});
 use App\Http\Controllers\Backend\StaffAttendanceController;
+use App\Http\Controllers\Backend\AttendanceSyncController;
+use App\Http\Controllers\Backend\FaceAttendanceController;
 
 use App\Http\Controllers\Backend\ExpenseHeadController;
 
@@ -85,6 +99,7 @@ use App\Http\Controllers\Backend\DueCollectController;
 use App\Http\Controllers\Backend\BillingDoctorController;
 use App\Http\Controllers\Backend\ChargeImportController;
 use App\Http\Controllers\Backend\FinanceReportController;
+use App\Http\Controllers\Backend\ActivityLogController;
 
 //don't remove this comment from route namespace
 
@@ -100,6 +115,16 @@ use App\Http\Controllers\Backend\FinanceReportController;
 */
 
 Route::get('/', [LoginController::class, 'loginPage'])->name('home')->middleware('AuthCheck');
+
+// Test-only registration endpoint (no admin auth) for automated browser tests
+Route::post('/test/attendance/face/register', [FaceAttendanceController::class, 'registerStoreTest']);
+Route::post('/test/attendance/face/mark', [FaceAttendanceController::class, 'markTest']);
+Route::get('/test/attendance/face/register-page', function () {
+    return view('backend.staffattendance.face_register', ['testMode' => true]);
+});
+Route::get('/test/attendance/face/page', function () {
+    return view('backend.staffattendance.face', ['testMode' => true]);
+});
 
 Route::get('/cache-clear', function () {
     Artisan::call('cache:clear');
@@ -125,11 +150,22 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
+    Route::get('/dashboard-setting', [DashboardSettingController::class, 'edit'])->name('dashboard-setting.edit');
+    Route::post('/dashboard-setting', [DashboardSettingController::class, 'update'])->name('dashboard-setting.update');
+
+    Route::post('/symptom-types', [SymptomTypeController::class, 'store'])->name('symptom-types.store');
+
     Route::resource('admin', AdminController::class);
     Route::get('admin/{id}/status/{status}/change', [AdminController::class, 'changeStatus'])->name('admin.status.change');
 
     // for role
     Route::resource('role', RoleController::class);
+
+    // Attendance sync (admin trigger)
+    Route::post('attendance/sync', [AttendanceSyncController::class, 'sync'])->name('attendance.sync');
+    Route::post('attendance/sync/{id}', [AttendanceSyncController::class, 'syncDevice'])->name('attendance.sync.device');
+    Route::get('attendance/devices', [\App\Http\Controllers\Backend\AttendanceAdminController::class, 'devices'])->name('attendance.devices');
+    Route::get('attendance/shifts', [\App\Http\Controllers\Backend\AttendanceAdminController::class, 'shifts'])->name('attendance.shifts');
 
     // for permission entry
     Route::resource('permission', PermissionController::class);
@@ -170,12 +206,67 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     //for OpdPatient
     Route::resource('opdpatient', OpdPatientController::class);
     Route::get('opdpatient/{id}/status/{status}/change', [OpdPatientController::class, 'changeStatus'])->name('opdpatient.status.change');
-    Route::get('/download-opd-bill-print', [InvoiceController::class, 'downloadOpdInvoice'])->name('download.opd.bill');
+    Route::get('opdpatient/{id}/prescription', [OpdPatientController::class, 'prescription'])->name('opdpatient.prescription');
+    Route::post('opdpatient/{id}/prescription', [OpdPatientController::class, 'storePrescription'])->name('opdpatient.prescription.store');
+    Route::get('opdpatient/{id}/prescription/print', [OpdPatientController::class, 'printPrescription'])->name('opdpatient.prescription.print');
+    Route::get('opdpatient/{id}/prescription/pdf', [OpdPatientController::class, 'downloadPrescriptionPdf'])->name('opdpatient.prescription.pdf');
+        Route::get('/download-opd-bill-print', [InvoiceController::class, 'downloadOpdInvoice'])->name('download.opd.bill');
+    Route::get('/download/ipd/invoice', [InvoiceController::class, 'downloadIpdInvoice'])->name('download.ipd.invoice');
+    Route::get('/download/ipd/final-bill', [InvoiceController::class, 'downloadIpdFinalBill'])->name('download.ipd.final-bill');
+        Route::get('/print/ipd/invoice', [InvoiceController::class, 'printIpdInvoice'])->name('print.ipd.invoice');
+        Route::get('/print/ipd/final-bill', [InvoiceController::class, 'printIpdFinalBill'])->name('print.ipd.final-bill');
 
+
+
+        
+
+
+
+        
 
     //for IpdPatient
+    // NOTE: keep this route before Route::resource(), otherwise "discharged" may match the resource show route.
+    Route::get('ipdpatient/discharged', [IpdPatientController::class, 'discharged'])->name('ipdpatient.discharged');
+
     Route::resource('ipdpatient', IpdPatientController::class);
     Route::get('ipdpatient/{id}/status/{status}/change', [IpdPatientController::class, 'changeStatus'])->name('ipdpatient.status.change');
+    Route::post('ipdpatient/{id}/discharge-billing/regenerate', [IpdPatientController::class, 'regenerateDischargeBilling'])->name('ipdpatient.discharge-billing.regenerate');
+    Route::get('ipdpatient/{id}/prescription', [IpdPatientController::class, 'prescription'])->name('ipdpatient.prescription');
+    Route::post('ipdpatient/{id}/prescription', [IpdPatientController::class, 'storePrescription'])->name('ipdpatient.prescription.store');
+        Route::get('ipdpatient/{id}/prescription/print', [IpdPatientController::class, 'printPrescription'])->name('ipdpatient.prescription.print');
+    Route::get('ipdpatient/{id}/prescription/pdf', [IpdPatientController::class, 'downloadPrescriptionPdf'])->name('ipdpatient.prescription.pdf');
+        Route::get('ipdpatient/{id}/running-bill/print', [IpdPatientController::class, 'printRunningBill'])->name('ipdpatient.running-bill.print');
+
+    // IPD Payments - simple create endpoint for payments related to an IPD admission
+    Route::post('ipdpatient/{id}/payments', [IpdPatientController::class, 'storePayment'])->name('ipdpatient.payments.store');
+    // IPD Notes (nurse notes, consultant register, operations, bed history)
+    Route::post('ipdpatient/{id}/notes', [IpdPatientController::class, 'storeNote'])->name('ipdpatient.notes.store');
+    // Live consultation toggle/update
+    Route::post('ipdpatient/{id}/live-consultation', [IpdPatientController::class, 'updateLiveConsultation'])->name('ipdpatient.live_consultation.update');
+
+    // IPD Charges (room rent / bed / OT)
+    Route::post('ipdpatient/{id}/charges/room-rent', [IpdChargeController::class, 'storeRoomRent'])->name('ipdpatient.charges.room-rent.store');
+    Route::delete('ipdpatient/{id}/charges/room-rent/{chargeId}', [IpdChargeController::class, 'destroyRoomRent'])->name('ipdpatient.charges.room-rent.destroy');
+
+    Route::post('ipdpatient/{id}/charges/bed', [IpdChargeController::class, 'storeBedCharge'])->name('ipdpatient.charges.bed.store');
+    Route::delete('ipdpatient/{id}/charges/bed/{chargeId}', [IpdChargeController::class, 'destroyBedCharge'])->name('ipdpatient.charges.bed.destroy');
+
+        Route::post('ipdpatient/{id}/charges/ot', [IpdChargeController::class, 'storeOtCharge'])->name('ipdpatient.charges.ot.store');
+    Route::delete('ipdpatient/{id}/charges/ot/{chargeId}', [IpdChargeController::class, 'destroyOtCharge'])->name('ipdpatient.charges.ot.destroy');
+
+    Route::post('ipdpatient/{id}/charges/doctor-visit', [IpdChargeController::class, 'storeDoctorVisitCharge'])->name('ipdpatient.charges.doctor-visit.store');
+    Route::delete('ipdpatient/{id}/charges/doctor-visit/{chargeId}', [IpdChargeController::class, 'destroyDoctorVisitCharge'])->name('ipdpatient.charges.doctor-visit.destroy');
+
+
+    // Discharge Certificate
+
+    Route::get('ipdpatient/{id}/discharge-certificate/print', [IpdPatientController::class, 'printDischargeCertificate'])->name('ipdpatient.discharge-certificate.print');
+    Route::get('ipdpatient/{id}/discharge-certificate/pdf', [IpdPatientController::class, 'downloadDischargeCertificatePdf'])->name('ipdpatient.discharge-certificate.pdf');
+
+
+
+
+
 
 
     //for Pharmacy
@@ -226,6 +317,13 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::resource('referral', ReferralController::class);
     Route::get('referral/{id}/status/{status}/change', [ReferralController::class, 'changeStatus'])->name('referral.status.change');
     Route::post('referral/commission/preview', [ReferralController::class, 'commissionPreview'])->name('referral.commission.preview');
+    Route::post('referral/{id}/commission-payment', [ReferralController::class, 'commissionPayment'])->name('referral.commission.payment');
+    Route::get('referral/{id}/commission-payment/paid', [ReferralController::class, 'commissionPaymentPaid'])->name('referral.commission.payment.paid');
+    Route::get('referral/{id}/commission-payment/partial', [ReferralController::class, 'commissionPaymentForm'])->name('referral.commission.payment.form');
+    Route::get('referral/payee/{payeeId}/commission-payment/paid', [ReferralController::class, 'commissionPaymentPayeePaid'])->name('referral.commission.payment.payee.paid');
+    Route::get('referral/payee/{payeeId}/commission-payment/partial', [ReferralController::class, 'commissionPaymentPayeeForm'])->name('referral.commission.payment.payee.form');
+    Route::get('referral/payee/{payeeId}/commission-payment/print', [ReferralController::class, 'commissionPaymentPayeePrint'])->name('referral.commission.payment.payee.print');
+    Route::post('referral/payee/{payeeId}/commission-payment', [ReferralController::class, 'commissionPaymentPayee'])->name('referral.commission.payment.payee');
 
 
     //for Inventory
@@ -241,6 +339,24 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     //for Reports
     Route::resource('reports', ReportsController::class);
     Route::get('reports/{id}/status/{status}/change', [ReportsController::class, 'changeStatus'])->name('reports.status.change');
+
+    // for Sample Collection
+    Route::get('sample-collection', [SampleCollectionController::class, 'index'])->name('sample-collection.index');
+    Route::post('sample-collection/{billing}/collect', [SampleCollectionController::class, 'collect'])->name('sample-collection.collect');
+    Route::get('sample-collection/{billing}/barcode', [SampleCollectionController::class, 'barcode'])->name('sample-collection.barcode');
+
+    // for Reporting
+    Route::get('reporting', [ReportingController::class, 'index'])->name('reporting.index');
+    Route::get('reporting/search', [ReportingController::class, 'search'])->name('reporting.search');
+    Route::get('reporting/{billing}/edit', [ReportingController::class, 'edit'])->name('reporting.edit');
+    Route::post('reporting/{billing}', [ReportingController::class, 'update'])->name('reporting.update');
+    Route::post('reporting/item/{billItem}', [ReportingController::class, 'updateItem'])->name('reporting.item.update');
+    Route::get('reporting/print/{billItem}', [ReportingController::class, 'print'])->name('reporting.print');
+
+    // for Report Delivery
+    Route::get('report-delivery', [ReportDeliveryController::class, 'index'])->name('report-delivery.index');
+    Route::post('report-delivery/{billItem}/send', [ReportDeliveryController::class, 'send'])->name('report-delivery.send');
+    Route::post('report-delivery/{billItem}/deliver', [ReportDeliveryController::class, 'deliver'])->name('report-delivery.deliver');
 
 
     //for Setup
@@ -289,11 +405,15 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
 
     //for Bed
+    Route::get('bed/status/snapshot', [BedController::class, 'statusSnapshot'])->name('bed.status.snapshot');
     Route::resource('bed', BedController::class);
     Route::get('bed/{id}/status/{status}/change', [BedController::class, 'changeStatus'])->name('bed.status.change');
 
 
     //for PathologyTest
+    Route::get('testpathology/search', [PathologyTestController::class, 'search'])->name('testpathology.search');
+    Route::get('testpathology/sample-csv', [PathologyTestController::class, 'downloadSampleCsv'])->name('testpathology.sample-csv');
+    Route::post('testpathology/import', [PathologyTestController::class, 'importCsv'])->name('testpathology.import');
     Route::resource('testpathology', PathologyTestController::class);
     Route::get('testpathology/{id}/status/{status}/change', [PathologyTestController::class, 'changeStatus'])->name('testpathology.status.change');
 
@@ -380,6 +500,10 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
 
     // for MedicineInventory
+    Route::get(
+        'medicineinventory/search',
+        [MedicineInventoryController::class, 'search']
+    )->name('medicineinventory.search');
     Route::resource(
         'medicineinventory',
         MedicineInventoryController::class
@@ -394,6 +518,11 @@ Route::group(['middleware' => 'AdminAuth'], function () {
         'medicineinventory/import-csv',
         [MedicineInventoryController::class, 'importCsv']
     )->name('medicineinventory.import.csv');
+
+    Route::get(
+        'medicineinventory/sample-csv',
+        [MedicineInventoryController::class, 'downloadSampleCsv']
+    )->name('medicineinventory.sample-csv');
 
     // for MedicinePurchase
     Route::resource('medicinepurchase', \App\Http\Controllers\Backend\MedicinePurchaseController::class);
@@ -429,6 +558,7 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
     //for InvoiceDesign
     Route::resource('invoicedesign', InvoiceDesignController::class);
+    Route::match(['post', 'delete'], 'invoicedesign/{id}/delete', [InvoiceDesignController::class, 'destroy'])->name('invoicedesign.delete');
     Route::get('invoicedesign/{id}/status/{status}/change', [InvoiceDesignController::class, 'changeStatus'])->name('invoicedesign.status.change');
 
     //for report
@@ -439,6 +569,10 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('websetting-create', [WebSettingController::class, 'create'])->name('websetting.create');
     Route::match(['get', 'post'], 'websetting-store', [WebSettingController::class, 'store'])->name('websetting.store');
 
+    // for Report Settings
+    Route::get('report-setting', [ReportSettingController::class, 'edit'])->name('report-setting.edit');
+    Route::post('report-setting', [ReportSettingController::class, 'update'])->name('report-setting.update');
+
     //for PharmacyBill
     Route::resource('pharmacybill', PharmacyBillController::class);
     Route::get('pharmacybill/{id}/status/{status}/change', [PharmacyBillController::class, 'changeStatus'])->name('pharmacybill.status.change');
@@ -448,6 +582,23 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('staffattendance/{id}/status/{status}/change', [StaffAttendanceController::class, 'changeStatus'])->name('staffattendance.status.change');
     Route::get('/backend/staffattendance/fetch', [StaffAttendanceController::class, 'fetchDate'])->name('staffattendance.fetch');
     Route::get('/backend/staffattendance/report', [StaffAttendanceController::class, 'attendanceReport'])->name('staffattendance.report');
+
+    // Simple webcam face-detect attendance (testing)
+    Route::get('attendance/face', [FaceAttendanceController::class, 'index'])->name('attendance.face');
+    Route::post('attendance/face/mark', [FaceAttendanceController::class, 'mark'])->name('attendance.face.mark');
+    Route::get('attendance/face/register', [FaceAttendanceController::class, 'registerIndex'])->name('attendance.face.register');
+    Route::post('attendance/face/register', [FaceAttendanceController::class, 'registerStore'])->name('attendance.face.register.store');
+    Route::get('attendance/face/encodings', [FaceAttendanceController::class, 'registerList'])->name('attendance.face.encodings');
+    Route::get('attendance/face/encodings/{id}/edit', [FaceAttendanceController::class, 'registerEdit'])->name('attendance.face.encodings.edit');
+    Route::put('attendance/face/encodings/{id}', [FaceAttendanceController::class, 'registerUpdate'])->name('attendance.face.encodings.update');
+    Route::delete('attendance/face/encodings/{id}', [FaceAttendanceController::class, 'registerDelete'])->name('attendance.face.encodings.delete');
+    Route::get('/backend/staffattendance/salary-sheet', [StaffAttendanceController::class, 'salarySheet'])->name('staffattendance.salary-sheet');
+    Route::get('/backend/staffattendance/salary-sheet/print', [StaffAttendanceController::class, 'salarySheetPrint'])->name('staffattendance.salary-sheet.print');
+    Route::post('/backend/staffattendance/salary-sheet/pay', [StaffAttendanceController::class, 'salaryPay'])->name('staffattendance.salary-sheet.pay');
+    Route::get('/backend/staffattendance/duty-roster', [\App\Http\Controllers\Backend\DutyRosterController::class, 'index'])->name('staffattendance.duty-roster');
+    Route::get('/backend/staffattendance/duty-roster/print', [\App\Http\Controllers\Backend\DutyRosterController::class, 'print'])->name('staffattendance.duty-roster.print');
+    Route::post('/backend/staffattendance/duty-roster', [\App\Http\Controllers\Backend\DutyRosterController::class, 'store'])->name('staffattendance.duty-roster.store');
+    Route::delete('/backend/staffattendance/duty-roster/{id}', [\App\Http\Controllers\Backend\DutyRosterController::class, 'destroy'])->name('staffattendance.duty-roster.destroy');
     Route::get('/staffattendance/report/{id}', [StaffAttendanceController::class, 'attendanceReportDetails'])->name('staffattendance.report.details');
     Route::get('/staff/payslip/{id}', [StaffAttendanceController::class, 'staffPaySlip'])->name('staff.payslip');
     Route::get('/payslip/download', [StaffAttendanceController::class, 'download'])->name('download.payslip');
@@ -480,6 +631,7 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
     //for Expense
     Route::resource('expense', ExpenseController::class);
+    Route::get('expense/{id}/print', [ExpenseController::class, 'print'])->name('expense.print');
     Route::get('expense/{id}/status/{status}/change', [ExpenseController::class, 'changeStatus'])->name('expense.status.change');
 
 
@@ -497,6 +649,15 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('finance/report', [FinanceReportController::class, 'reportPage'])->name('finance-report.index');
     Route::get('/finance/report/download-pdf', [FinanceReportController::class, 'downloadPDF'])->name('finance.report.pdf');
 
+    // for activity logs
+    Route::get('activity-logs', [ActivityLogController::class, 'index'])->name('activity-logs.index');
+    Route::get('activity-logs/print', [ActivityLogController::class, 'print'])->name('activity-logs.print');
+    Route::get('activity-logs/{activityLog}', [ActivityLogController::class, 'show'])->name('activity-logs.show');
+    Route::get('activity-logs/user/summary', [ActivityLogController::class, 'userSummary'])->name('activity-logs.user-summary');
+    Route::get('activity-logs/module/summary', [ActivityLogController::class, 'moduleSummary'])->name('activity-logs.module-summary');
+    Route::get('activity-logs/export', [ActivityLogController::class, 'export'])->name('activity-logs.export');
+    Route::post('activity-logs/delete-old', [ActivityLogController::class, 'deleteOldLogs'])->name('activity-logs.delete-old');
+
 
 
     //Route::middleware(['auth:admin'])->group(function () {
@@ -504,14 +665,15 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     // Pending billings
     //Route::get('pending-billings', [BillingController::class, 'pending'])
        // ->name('pending.billings');
+Route::get('due-collect/{id}', [DueCollectController::class, 'index'])
+    ->name('due.collect');
 
-    // Due collect form
-    Route::get('due-collect/{id}', [DueCollectController::class, 'index'])
-        ->name('backend.backend.backend.due.collect');
+Route::post('due-collect/{id}', [DueCollectController::class, 'store'])
+    ->name('due.collect.store');
 
-    // Due collect submit
-    Route::post('due-collect/{id}', [DueCollectController::class, 'store'])
-        ->name('backend.backend.backend.due.collect.store');
-    //});
- 
+Route::get('opd-due-collect/{id}', [DueCollectController::class, 'opdIndex'])
+    ->name('opd.due.collect');
+
+Route::post('opd-due-collect/{id}', [DueCollectController::class, 'opdStore'])
+    ->name('opd.due.collect.store');
 });

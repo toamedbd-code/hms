@@ -389,6 +389,40 @@ class StaffAttendanceController extends Controller
 
     public function salarySheet(Request $request)
     {
+        $salaryData = $this->buildSalarySheetData($request);
+
+        return Inertia::render('Backend/StaffAttendance/SalarySheet', [
+            'pageTitle' => 'Salary Sheet',
+            'websetting' => [
+                'company_name' => $salaryData['websetting']?->company_name ?? config('app.name', 'Hospital'),
+                'address' => $salaryData['websetting']?->address ?? $salaryData['websetting']?->report_title ?? 'N/A',
+                'attendance_device_options' => $salaryData['websetting']?->attendance_device_options,
+            ],
+            'filters' => [
+                'month' => $salaryData['month_input'],
+            ],
+            'rows' => $salaryData['rows'],
+            'totals' => $salaryData['totals'],
+        ]);
+    }
+
+    public function salarySheetPrint(Request $request)
+    {
+        $salaryData = $this->buildSalarySheetData($request);
+
+        return view('backend.staffattendance.salary_sheet_print', [
+            'pageTitle' => 'Salary Sheet Print',
+            'websetting' => $salaryData['websetting'],
+            'monthInput' => $salaryData['month_input'],
+            'monthLabel' => $salaryData['month_label'],
+            'rows' => $salaryData['rows'],
+            'totals' => $salaryData['totals'],
+            'generatedAt' => now(),
+        ]);
+    }
+
+    private function buildSalarySheetData(Request $request): array
+    {
         $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
         $monthInput = (string) $request->input('month', now()->format('Y-m'));
 
@@ -634,19 +668,13 @@ class StaffAttendanceController extends Controller
             'payable_salary' => round($rows->sum('payable_salary'), 2),
         ];
 
-        return Inertia::render('Backend/StaffAttendance/SalarySheet', [
-            'pageTitle' => 'Salary Sheet',
-            'websetting' => [
-                'company_name' => $websetting?->company_name ?? config('app.name', 'Hospital'),
-                'address' => $websetting?->address ?? $websetting?->report_title ?? 'N/A',
-                'attendance_device_options' => $websetting?->attendance_device_options,
-            ],
-            'filters' => [
-                'month' => $monthInput,
-            ],
+        return [
+            'websetting' => $websetting,
+            'month_input' => $monthInput,
+            'month_label' => $monthDate->format('F Y'),
             'rows' => $rows,
             'totals' => $totals,
-        ]);
+        ];
     }
 
     public function salaryPay(Request $request)
