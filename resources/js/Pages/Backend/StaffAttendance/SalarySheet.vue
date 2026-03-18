@@ -24,17 +24,33 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  printUrl: {
+    type: String,
+    default: '',
+  },
 });
 
 const selectedMonth = ref(props.filters?.month ?? new Date().toISOString().slice(0, 7));
-
-// Safely read CSRF token only in browser
-const csrfToken = (typeof document !== 'undefined') ? (document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '') : '';
+const lateFeePerLate = ref(Number(props.filters?.late_fee_per_late ?? 0));
+const overtimeMultiplier = ref(Number(props.filters?.overtime_multiplier ?? 1));
+const csrfToken = (typeof document !== 'undefined')
+  ? (document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '')
+  : '';
 
 const applyFilter = () => {
+  const normalizedLateFee = Number.isFinite(Number(lateFeePerLate.value)) ? Math.max(Number(lateFeePerLate.value), 0) : 0;
+  const normalizedOvertimeMultiplier = Number.isFinite(Number(overtimeMultiplier.value)) ? Math.max(Number(overtimeMultiplier.value), 0) : 0;
+
+  lateFeePerLate.value = normalizedLateFee;
+  overtimeMultiplier.value = normalizedOvertimeMultiplier;
+
   router.get(
     route('backend.staffattendance.salary-sheet'),
-    { month: selectedMonth.value },
+    {
+      month: selectedMonth.value,
+      late_fee_per_late: normalizedLateFee,
+      overtime_multiplier: normalizedOvertimeMultiplier,
+    },
     { preserveState: true, preserveScroll: true, replace: true }
   );
 };
@@ -70,7 +86,7 @@ const integrationOptions = computed(() => {
         ...(parsed?.modules ?? {}),
       },
     };
-  } catch (error) {
+  } catch {
     return defaults;
   }
 });
@@ -79,8 +95,19 @@ const money = (value) => Number(value ?? 0).toFixed(2);
 
 const printSheet = () => {
   const targetMonth = selectedMonth.value || props.filters?.month || new Date().toISOString().slice(0, 7);
-  const printUrl = route('backend.staffattendance.salary-sheet.print', { month: targetMonth });
-  window.open(printUrl, '_blank');
+  const base = props.printUrl || '/admin/backend/staffattendance/salary-sheet/print';
+  const params = new URLSearchParams({
+    month: targetMonth,
+    late_fee_per_late: String(Math.max(Number(lateFeePerLate.value) || 0, 0)),
+    overtime_multiplier: String(Math.max(Number(overtimeMultiplier.value) || 0, 0)),
+  });
+  const separator = base.includes('?') ? '&' : '?';
+  const printTarget = `${base}${separator}${params.toString()}`;
+
+  const win = window.open(printTarget, '_blank');
+  if (!win) {
+    window.location.href = printTarget;
+  }
 };
 
 const exportCsv = () => {
@@ -93,8 +120,10 @@ const exportCsv = () => {
     'Basic Salary',
     'Workable Days',
     'Paid Days',
+    'Late Days',
     'Unpaid Days',
     'Biometric Deduction',
+    'Late Fee',
     'Overtime Bonus',
     'Advance Paid',
     'Deduction',
@@ -113,8 +142,10 @@ const exportCsv = () => {
       money(row.basic_salary),
       row.workable_days,
       row.paid_days,
+      row.late,
       row.unpaid_days,
       money(row.biometric_deduction),
+      money(row.late_fee),
       money(row.overtime_bonus),
       money(row.advance_paid),
       money(row.deduction),
@@ -135,6 +166,9 @@ const exportCsv = () => {
       '',
       '',
       '',
+      '',
+      money(props.totals?.late_fee),
+      money(props.totals?.overtime_bonus),
       '',
       '',
       money(props.totals?.deduction),
@@ -158,6 +192,7 @@ const exportCsv = () => {
 const paySalary = async (staffId, defaultAmount) => {
   const amount = window.prompt('Enter amount to pay (TK)', String(defaultAmount ?? ''));
   if (!amount) return;
+
   const numeric = parseFloat(amount);
   if (Number.isNaN(numeric) || numeric < 0) {
     alert('Invalid amount');
@@ -178,6 +213,7 @@ const paySalary = async (staffId, defaultAmount) => {
       body: payload,
       headers: { 'X-CSRF-TOKEN': csrfToken },
     });
+
     location.reload();
   } catch (err) {
     console.error(err);
@@ -192,7 +228,7 @@ const paySalary = async (staffId, defaultAmount) => {
       <div class="flex flex-wrap items-center justify-between gap-3 p-4 bg-gray-100 rounded">
         <div>
           <h1 class="text-xl font-bold text-gray-800">{{ pageTitle }}</h1>
-          <p class="text-sm text-gray-600">Human Resource + Payroll ভিত্তিক মাসিক সেলারি শীট</p>
+          <p class="text-sm text-gray-600">Human Resource + Payroll based monthly salary sheet</p>
         </div>
         <div class="flex flex-wrap items-center gap-2 print:hidden">
           <input
@@ -242,28 +278,80 @@ const paySalary = async (staffId, defaultAmount) => {
         Salary computation is fed by auto-updated attendance IN/OUT with roster and leave integration.
       </div>
 
+      <div class="grid grid-cols-1 gap-3 mt-3 md:grid-cols-3 print:hidden">
+        <label class="flex flex-col text-sm text-gray-700">
+          <span class="mb-1 font-semibold">Late Fee Per Late Day (Tk)</span>
+          <input
+            v-model.number="lateFeePerLate"
+            type="number"
+            min="0"
+            step="0.01"
+            class="p-2 border border-gray-300 rounded"
+          />
+        </label>
+        <label class="flex flex-col text-sm text-gray-700">
+          <span class="mb-1 font-semibold">Overtime Multiplier</span>
+          <input
+            v-model.number="overtimeMultiplier"
+            type="number"
+            min="0"
+            step="0.01"
+            class="p-2 border border-gray-300 rounded"
+          />
+        </label>
+        <div class="flex items-end">
+          <button
+            type="button"
+            class="px-3 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700"
+            @click="applyFilter"
+          >
+            Apply Options
+          </button>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 gap-3 mt-4 sm:grid-cols-2 lg:grid-cols-5 print:hidden">
-        <Link v-if="integrationOptions.modules.face_attendance" :href="route('backend.attendance.face')" class="p-3 rounded-md border border-violet-200 bg-violet-50 hover:bg-violet-100 transition">
+        <Link
+          v-if="integrationOptions.modules.face_attendance"
+          :href="route('backend.attendance.face')"
+          class="p-3 rounded-md border border-violet-200 bg-violet-50 hover:bg-violet-100 transition"
+        >
           <div class="text-xs font-semibold text-violet-700">Attendance</div>
           <div class="text-sm font-bold text-violet-900 mt-1">Face Attendance</div>
         </Link>
 
-        <a v-if="integrationOptions.modules.fingerprint || integrationOptions.modules.face_attendance" href="/admin/attendance/devices" class="p-3 rounded-md border border-cyan-200 bg-cyan-50 hover:bg-cyan-100 transition">
+        <a
+          v-if="integrationOptions.modules.fingerprint || integrationOptions.modules.face_attendance"
+          href="/admin/attendance/devices"
+          class="p-3 rounded-md border border-cyan-200 bg-cyan-50 hover:bg-cyan-100 transition"
+        >
           <div class="text-xs font-semibold text-cyan-700">Device</div>
           <div class="text-sm font-bold text-cyan-900 mt-1">Fingerprint/Face Devices</div>
         </a>
 
-        <Link v-if="integrationOptions.modules.leave" :href="route('backend.pending.request')" class="p-3 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 transition">
+        <Link
+          v-if="integrationOptions.modules.leave"
+          :href="route('backend.pending.request')"
+          class="p-3 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 transition"
+        >
           <div class="text-xs font-semibold text-amber-700">Leave</div>
           <div class="text-sm font-bold text-amber-900 mt-1">Leave Requests</div>
         </Link>
 
-        <Link v-if="integrationOptions.modules.duty_roster" :href="route('backend.staffattendance.duty-roster')" class="p-3 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 transition">
+        <Link
+          v-if="integrationOptions.modules.duty_roster"
+          :href="route('backend.staffattendance.duty-roster')"
+          class="p-3 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 transition"
+        >
           <div class="text-xs font-semibold text-emerald-700">Roster</div>
           <div class="text-sm font-bold text-emerald-900 mt-1">Duty Roster</div>
         </Link>
 
-        <Link v-if="integrationOptions.modules.salary_sheet" :href="route('backend.staffattendance.report')" class="p-3 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 transition">
+        <Link
+          v-if="integrationOptions.modules.salary_sheet"
+          :href="route('backend.staffattendance.report')"
+          class="p-3 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 transition"
+        >
           <div class="text-xs font-semibold text-slate-700">Summary</div>
           <div class="text-sm font-bold text-slate-900 mt-1">Attendance Report</div>
         </Link>
@@ -281,8 +369,10 @@ const paySalary = async (staffId, defaultAmount) => {
               <th class="px-3 py-2 border">Basic Salary</th>
               <th class="px-3 py-2 border">Workable Days</th>
               <th class="px-3 py-2 border">Paid Days</th>
+              <th class="px-3 py-2 border">Late Days</th>
               <th class="px-3 py-2 border">Unpaid Days</th>
               <th class="px-3 py-2 border">Biometric Deduction</th>
+              <th class="px-3 py-2 border">Late Fee</th>
               <th class="px-3 py-2 border">Overtime Bonus</th>
               <th class="px-3 py-2 border">Advance Paid</th>
               <th class="px-3 py-2 border">Deduction</th>
@@ -295,31 +385,33 @@ const paySalary = async (staffId, defaultAmount) => {
               <td class="px-3 py-2 border">{{ row.sl }}</td>
               <td class="px-3 py-2 border">{{ row.staff_id }}</td>
               <td class="px-3 py-2 border">{{ row.name }}</td>
-              <td class="px-3 py-2 border">{{ row.workable_days }}</td>
               <td class="px-3 py-2 border">{{ row.department }}</td>
               <td class="px-3 py-2 border">{{ row.designation }}</td>
+              <td class="px-3 py-2 border">{{ money(row.basic_salary) }}</td>
+              <td class="px-3 py-2 border">{{ row.workable_days }}</td>
+              <td class="px-3 py-2 border">{{ row.paid_days }}</td>
+              <td class="px-3 py-2 border">{{ row.late }}</td>
+              <td class="px-3 py-2 border">{{ row.unpaid_days }}</td>
               <td class="px-3 py-2 border">{{ money(row.biometric_deduction) }}</td>
+              <td class="px-3 py-2 border">{{ money(row.late_fee) }}</td>
               <td class="px-3 py-2 border">{{ money(row.overtime_bonus) }}</td>
               <td class="px-3 py-2 border">{{ money(row.advance_paid) }}</td>
-              <td class="px-3 py-2 border">{{ money(row.basic_salary) }}</td>
-              <td class="px-3 py-2 border">{{ row.paid_days }}</td>
-              <td class="px-3 py-2 border">{{ row.unpaid_days }}</td>
               <td class="px-3 py-2 border">{{ money(row.deduction) }}</td>
               <td class="px-3 py-2 font-semibold text-emerald-700 border">{{ money(row.payable_salary) }}</td>
               <td class="px-3 py-2 border">
-                  @click.prevent="paySalary(row.staff_admin_id, row.payable_salary)"
+                <button
                   type="button"
                   class="px-3 py-1 text-sm text-white bg-emerald-600 rounded hover:bg-emerald-700"
-                  @click.prevent="paySalary(row.staff_id, row.payable_salary)"
+                  @click.prevent="paySalary(row.staff_admin_id, row.payable_salary)"
                 >
                   Pay
                 </button>
-              <td colspan="15" class="px-3 py-6 text-center text-gray-500 border">No staff data found for this month.</td>
+              </td>
             </tr>
             <tr v-if="rows.length === 0">
-              <td colspan="11" class="px-3 py-6 text-center text-gray-500 border">No staff data found for this month.</td>
+              <td colspan="17" class="px-3 py-6 text-center text-gray-500 border">No staff data found for this month.</td>
             </tr>
-              <td colspan="5" class="px-3 py-2 font-semibold border">Total ({{ totals.staff_count ?? 0 }} staff)</td>
+          </tbody>
           <tfoot v-if="rows.length > 0" class="bg-gray-100">
             <tr>
               <td colspan="5" class="px-3 py-2 font-semibold border">Total ({{ totals.staff_count ?? 0 }} staff)</td>
@@ -328,6 +420,8 @@ const paySalary = async (staffId, defaultAmount) => {
               <td class="px-3 py-2 border"></td>
               <td class="px-3 py-2 border"></td>
               <td class="px-3 py-2 border"></td>
+              <td class="px-3 py-2 font-semibold border">{{ money(totals.late_fee) }}</td>
+              <td class="px-3 py-2 font-semibold border">{{ money(totals.overtime_bonus) }}</td>
               <td class="px-3 py-2 border"></td>
               <td class="px-3 py-2 font-semibold border">{{ money(totals.deduction) }}</td>
               <td class="px-3 py-2 font-semibold text-emerald-700 border">{{ money(totals.payable_salary) }}</td>

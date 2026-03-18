@@ -398,8 +398,11 @@ class StaffAttendanceController extends Controller
                 'address' => $salaryData['websetting']?->address ?? $salaryData['websetting']?->report_title ?? 'N/A',
                 'attendance_device_options' => $salaryData['websetting']?->attendance_device_options,
             ],
+            'printUrl' => route('backend.staffattendance.salary-sheet.print'),
             'filters' => [
                 'month' => $salaryData['month_input'],
+                'late_fee_per_late' => $salaryData['late_fee_per_late'],
+                'overtime_multiplier' => $salaryData['overtime_multiplier'],
             ],
             'rows' => $salaryData['rows'],
             'totals' => $salaryData['totals'],
@@ -415,6 +418,8 @@ class StaffAttendanceController extends Controller
             'websetting' => $salaryData['websetting'],
             'monthInput' => $salaryData['month_input'],
             'monthLabel' => $salaryData['month_label'],
+            'lateFeePerLate' => $salaryData['late_fee_per_late'],
+            'overtimeMultiplier' => $salaryData['overtime_multiplier'],
             'rows' => $salaryData['rows'],
             'totals' => $salaryData['totals'],
             'generatedAt' => now(),
@@ -432,6 +437,9 @@ class StaffAttendanceController extends Controller
             $monthDate = now()->startOfMonth();
             $monthInput = $monthDate->format('Y-m');
         }
+
+        $lateFeePerLate = max((float) $request->input('late_fee_per_late', 0), 0);
+        $overtimeMultiplier = max((float) $request->input('overtime_multiplier', 1), 0);
 
         $startDate = $monthDate->copy()->startOfMonth()->toDateString();
         $endDate = $monthDate->copy()->endOfMonth()->toDateString();
@@ -534,7 +542,7 @@ class StaffAttendanceController extends Controller
             ->groupBy('staff_id')
             ->pluck('total_advance', 'staff_id');
 
-        $rows = $staffList->map(function ($staff, $index) use ($attendanceRows, $approvedLeaves, $monthDate, $totalDaysInMonth, $rosterRows, $attendanceFinancials, $advanceByStaff) {
+        $rows = $staffList->map(function ($staff, $index) use ($attendanceRows, $approvedLeaves, $monthDate, $totalDaysInMonth, $rosterRows, $attendanceFinancials, $advanceByStaff, $lateFeePerLate, $overtimeMultiplier) {
             $staffAttendances = collect($attendanceRows->get($staff->id, []));
             $attendanceMap = $staffAttendances
                 ->keyBy(fn($row) => Carbon::parse($row->attendance_date)->toDateString());
@@ -627,12 +635,14 @@ class StaffAttendanceController extends Controller
 
             $financials = $attendanceFinancials->get($staff->id, ['deduction' => 0, 'overtime' => 0]);
             $biometricDeduction = round((float) ($financials['deduction'] ?? 0), 2);
-            $overtimeBonus = round((float) ($financials['overtime'] ?? 0), 2);
-            $grossPayable = round(max($basePayable - $biometricDeduction + $overtimeBonus, 0), 2);
+            $attendanceOvertime = round((float) ($financials['overtime'] ?? 0), 2);
+            $overtimeBonus = round($attendanceOvertime * $overtimeMultiplier, 2);
+            $lateFee = round($late * $lateFeePerLate, 2);
+            $grossPayable = round(max($basePayable - $biometricDeduction - $lateFee + $overtimeBonus, 0), 2);
 
             $advancePaid = round((float) ($advanceByStaff[$staff->id] ?? 0), 2);
             $payableSalary = round(max($grossPayable - $advancePaid, 0), 2);
-            $deduction = round(max(($basicSalary - $basePayable) + $biometricDeduction, 0), 2);
+            $deduction = round(max(($basicSalary - $basePayable) + $biometricDeduction + $lateFee, 0), 2);
 
             return [
                 'sl' => $index + 1,
@@ -652,7 +662,9 @@ class StaffAttendanceController extends Controller
                 'absent' => $absent,
                 'paid_days' => $paidDays,
                 'unpaid_days' => $unpaidDays,
+                'late_fee' => $lateFee,
                 'biometric_deduction' => $biometricDeduction,
+                'overtime_base' => $attendanceOvertime,
                 'overtime_bonus' => $overtimeBonus,
                 'gross_payable' => $grossPayable,
                 'advance_paid' => $advancePaid,
@@ -664,6 +676,8 @@ class StaffAttendanceController extends Controller
         $totals = [
             'staff_count' => $rows->count(),
             'basic_salary' => round($rows->sum('basic_salary'), 2),
+            'late_fee' => round($rows->sum('late_fee'), 2),
+            'overtime_bonus' => round($rows->sum('overtime_bonus'), 2),
             'deduction' => round($rows->sum('deduction'), 2),
             'payable_salary' => round($rows->sum('payable_salary'), 2),
         ];
@@ -672,6 +686,8 @@ class StaffAttendanceController extends Controller
             'websetting' => $websetting,
             'month_input' => $monthInput,
             'month_label' => $monthDate->format('F Y'),
+            'late_fee_per_late' => $lateFeePerLate,
+            'overtime_multiplier' => $overtimeMultiplier,
             'rows' => $rows,
             'totals' => $totals,
         ];

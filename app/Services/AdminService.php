@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Admin;
 use App\Models\AdminDetail;
+use App\Models\ApplyLeave;
 use App\Models\StaffAttendance;
 
 class AdminService
@@ -57,10 +58,12 @@ class AdminService
                 'deleted_at' => date('Y-m-d H:i:s')
             ]);
 
-            $adminDetails->update([
-                'status' => 'Deleted',
-                'deleted_at' => date('Y-m-d H:i:s')
-            ]);
+            if (!empty($adminDetails)) {
+                $adminDetails->update([
+                    'status' => 'Deleted',
+                    'deleted_at' => date('Y-m-d H:i:s')
+                ]);
+            }
 
             return $dataInfo;
         }

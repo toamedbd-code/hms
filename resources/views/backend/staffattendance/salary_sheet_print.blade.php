@@ -181,6 +181,11 @@
             <div>Generated: {{ $generatedAt->format('Y-m-d h:i A') }}</div>
         </div>
 
+        <div class="meta" style="margin-top: 0;">
+            <div>Late Fee / Late Day: {{ number_format((float) ($lateFeePerLate ?? 0), 2) }}</div>
+            <div>Overtime Multiplier: {{ number_format((float) ($overtimeMultiplier ?? 1), 2) }}x</div>
+        </div>
+
         <table>
             <thead>
                 <tr>
@@ -192,8 +197,10 @@
                     <th>Basic Salary</th>
                     <th>Workable Days</th>
                     <th>Paid Days</th>
+                    <th>Late Days</th>
                     <th>Unpaid Days</th>
                     <th>Biometric Deduction</th>
+                    <th>Late Fee</th>
                     <th>Overtime Bonus</th>
                     <th>Advance Paid</th>
                     <th>Total Deduction</th>
@@ -211,8 +218,10 @@
                         <td class="money">{{ number_format((float) ($row['basic_salary'] ?? 0), 2) }}</td>
                         <td>{{ $row['workable_days'] }}</td>
                         <td>{{ $row['paid_days'] }}</td>
+                        <td>{{ $row['late'] }}</td>
                         <td>{{ $row['unpaid_days'] }}</td>
                         <td class="money">{{ number_format((float) ($row['biometric_deduction'] ?? 0), 2) }}</td>
+                        <td class="money">{{ number_format((float) ($row['late_fee'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($row['overtime_bonus'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($row['advance_paid'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($row['deduction'] ?? 0), 2) }}</td>
@@ -220,7 +229,7 @@
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="14">No salary data found for {{ $monthLabel }}.</td>
+                        <td colspan="16">No salary data found for {{ $monthLabel }}.</td>
                     </tr>
                 @endforelse
             </tbody>
@@ -229,7 +238,10 @@
                     <tr>
                         <td colspan="5">Grand Total</td>
                         <td class="money">{{ number_format((float) ($totals['basic_salary'] ?? 0), 2) }}</td>
-                        <td colspan="6"></td>
+                        <td colspan="4"></td>
+                        <td class="money">{{ number_format((float) ($totals['late_fee'] ?? 0), 2) }}</td>
+                        <td class="money">{{ number_format((float) ($totals['overtime_bonus'] ?? 0), 2) }}</td>
+                        <td></td>
                         <td class="money">{{ number_format((float) ($totals['deduction'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($totals['payable_salary'] ?? 0), 2) }}</td>
                     </tr>
