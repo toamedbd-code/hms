@@ -12,7 +12,12 @@ use Spatie\Permission\Traits\HasRoles;
 
 class Admin extends Authenticatable
 {
-    use  Notifiable, HasFactory, HasRoles;
+    use Notifiable, HasFactory, HasRoles;
+
+    /**
+     * Spatie permissions must use the same guard as the admin authentication guard.
+     */
+    protected string $guard_name = 'admin';
 
     protected $table = 'admins';
 
@@ -59,5 +64,10 @@ class Admin extends Authenticatable
     public function details()
     {
         return $this->hasOne(AdminDetail::class);
+    }
+
+    public function staffAttendance()
+    {
+        return $this->hasMany(StaffAttendance::class, 'staff_id', 'id');
     }
 }
