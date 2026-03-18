@@ -4,7 +4,13 @@ namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StaffAttendanceRequest;
+use App\Models\Admin;
+use App\Models\ApplyLeave;
+use App\Models\Attendance;
+use App\Models\AdminDetail;
+use App\Models\DutyRoster;
 use App\Models\StaffAttendance;
+use App\Models\WebSetting;
 use App\Services\AdminService;
 use App\Services\RoleService;
 use Illuminate\Support\Facades\DB;
@@ -13,8 +19,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
+use App\Models\SalaryPayment;
+use Illuminate\Support\Facades\Auth;
 use App\Traits\SystemTrait;
 use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 use Exception;
 use Ramsey\Uuid\Type\Decimal;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -34,6 +43,8 @@ class StaffAttendanceController extends Controller
 
         $this->middleware('auth:admin');
         $this->middleware('permission:staff-attendance-list');
+        // Require explicit permission to perform salary payments
+        $this->middleware('permission:salary-sheet-pay')->only('salaryPay');
     }
 
     public function index()
@@ -354,6 +365,8 @@ class StaffAttendanceController extends Controller
 
     public function attendanceReport()
     {
+        // added route link for duty roster menu usage
+        $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
         $users = $this->adminService->activeList();
         return Inertia::render(
             'Backend/StaffAttendance/Report',
@@ -367,8 +380,299 @@ class StaffAttendanceController extends Controller
                 'dataFields' => fn() => $this->getReportDataFields(),
                 'datas' => fn() => $this->getReportDatas(),
                 'users' => fn() => $users,
+                'websetting' => fn() => [
+                    'attendance_device_options' => $websetting?->attendance_device_options,
+                ],
             ]
         );
+    }
+
+    public function salarySheet(Request $request)
+    {
+        $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
+        $monthInput = (string) $request->input('month', now()->format('Y-m'));
+
+        try {
+            $monthDate = Carbon::createFromFormat('Y-m', $monthInput)->startOfMonth();
+        } catch (\Throwable $th) {
+            $monthDate = now()->startOfMonth();
+            $monthInput = $monthDate->format('Y-m');
+        }
+
+        $startDate = $monthDate->copy()->startOfMonth()->toDateString();
+        $endDate = $monthDate->copy()->endOfMonth()->toDateString();
+        $totalDaysInMonth = $monthDate->daysInMonth;
+
+        $staffList = Admin::query()
+            ->with(['role:id,name', 'details.department:id,department_name', 'details.designation:id,designation_name'])
+            ->where('status', 'Active')
+            ->whereNull('deleted_at')
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get();
+
+        $staffIds = $staffList->pluck('id')->map(fn($id) => (int) $id)->all();
+
+        $rosterRows = DutyRoster::query()
+            ->select('staff_id', 'date')
+            ->whereBetween('date', [$startDate, $endDate])
+            ->whereIn('staff_id', $staffIds)
+            ->get()
+            ->groupBy('staff_id');
+
+        $attendanceRows = StaffAttendance::query()
+            ->select('staff_id', 'attendance_date', 'attendance_status')
+            ->whereBetween('attendance_date', [$startDate, $endDate])
+            ->whereIn('staff_id', $staffList->pluck('id')->all())
+            ->get()
+            ->groupBy('staff_id');
+
+        $approvedLeaves = ApplyLeave::query()
+            ->select('employee_id', 'from', 'to')
+            ->where('status', 'Approved')
+            ->whereIn('employee_id', $staffIds)
+            ->where(function ($query) use ($startDate, $endDate) {
+                $query
+                    ->whereBetween('from', [$startDate, $endDate])
+                    ->orWhereBetween('to', [$startDate, $endDate])
+                    ->orWhere(function ($nested) use ($startDate, $endDate) {
+                        $nested->where('from', '<=', $startDate)
+                            ->where('to', '>=', $endDate);
+                    });
+            })
+            ->get()
+            ->groupBy('employee_id');
+
+        $staffCodeToAdminId = AdminDetail::query()
+            ->whereIn('admin_id', $staffIds)
+            ->whereNotNull('staff_id')
+            ->pluck('admin_id', 'staff_id');
+
+        $attendanceFinancials = collect();
+        if (!empty($staffIds)) {
+            $attendanceRowsRaw = Attendance::query()
+                ->select('employee_code', 'deduction_amount', 'overtime_amount')
+                ->whereDate('recorded_at', '>=', $startDate)
+                ->whereDate('recorded_at', '<=', $endDate)
+                ->whereNotNull('recorded_out')
+                ->get();
+
+            $attendanceFinancials = $attendanceRowsRaw
+                ->map(function ($row) use ($staffCodeToAdminId, $staffIds) {
+                    $employeeCode = (string) ($row->employee_code ?? '');
+                    $adminId = null;
+
+                    if ($employeeCode !== '' && ctype_digit($employeeCode)) {
+                        $numericId = (int) $employeeCode;
+                        if (in_array($numericId, $staffIds, true)) {
+                            $adminId = $numericId;
+                        }
+                    }
+
+                    if ($adminId === null && $employeeCode !== '' && $staffCodeToAdminId->has($employeeCode)) {
+                        $adminId = (int) $staffCodeToAdminId->get($employeeCode);
+                    }
+
+                    if ($adminId === null) {
+                        return null;
+                    }
+
+                    return [
+                        'staff_id' => $adminId,
+                        'deduction' => (float) ($row->deduction_amount ?? 0),
+                        'overtime' => (float) ($row->overtime_amount ?? 0),
+                    ];
+                })
+                ->filter()
+                ->groupBy('staff_id')
+                ->map(function ($items) {
+                    return [
+                        'deduction' => (float) $items->sum('deduction'),
+                        'overtime' => (float) $items->sum('overtime'),
+                    ];
+                });
+        }
+
+        $advanceByStaff = SalaryPayment::query()
+            ->select('staff_id', DB::raw('SUM(amount) as total_advance'))
+            ->where('month', $monthInput)
+            ->where('is_advance', true)
+            ->groupBy('staff_id')
+            ->pluck('total_advance', 'staff_id');
+
+        $rows = $staffList->map(function ($staff, $index) use ($attendanceRows, $approvedLeaves, $monthDate, $totalDaysInMonth, $rosterRows, $attendanceFinancials, $advanceByStaff) {
+            $staffAttendances = collect($attendanceRows->get($staff->id, []));
+            $attendanceMap = $staffAttendances
+                ->keyBy(fn($row) => Carbon::parse($row->attendance_date)->toDateString());
+
+            $rosterDates = collect($rosterRows->get($staff->id, []))
+                ->map(function ($row) {
+                    return Carbon::parse($row->date)->toDateString();
+                })
+                ->unique()
+                ->values();
+
+            $approvedLeaveDates = collect($approvedLeaves->get($staff->id, []))
+                ->flatMap(function ($leave) use ($monthDate) {
+                    $leaveStart = Carbon::parse($leave->from)->startOfDay();
+                    $leaveEnd = Carbon::parse($leave->to)->startOfDay();
+
+                    $rangeStart = $leaveStart->greaterThan($monthDate->copy()->startOfMonth())
+                        ? $leaveStart
+                        : $monthDate->copy()->startOfMonth();
+                    $rangeEnd = $leaveEnd->lessThan($monthDate->copy()->endOfMonth())
+                        ? $leaveEnd
+                        : $monthDate->copy()->endOfMonth();
+
+                    if ($rangeStart->greaterThan($rangeEnd)) {
+                        return [];
+                    }
+
+                    return collect(CarbonPeriod::create($rangeStart, $rangeEnd))
+                        ->map(function ($date) {
+                            return Carbon::parse((string) $date)->toDateString();
+                        })
+                        ->all();
+                })
+                ->unique();
+
+            $evaluationDates = $rosterDates->isNotEmpty()
+                ? $rosterDates
+                : collect(range(1, $totalDaysInMonth))->map(function ($day) use ($monthDate) {
+                    return $monthDate->copy()->day($day)->toDateString();
+                });
+
+            $totalWorkableDays = $evaluationDates->count();
+
+            $present = 0;
+            $late = 0;
+            $holiday = 0;
+            $absent = 0;
+            $approvedLeaveCount = 0;
+
+            foreach ($evaluationDates as $dateKey) {
+                $record = $attendanceMap->get($dateKey);
+
+                if ($record) {
+                    $status = (string) $record->attendance_status;
+                    if ($status === 'Present') {
+                        $present++;
+                        continue;
+                    }
+                    if ($status === 'Late') {
+                        $late++;
+                        continue;
+                    }
+                    if ($status === 'Holiday') {
+                        $holiday++;
+                        continue;
+                    }
+                    if ($status === 'Absent') {
+                        if ($approvedLeaveDates->contains($dateKey)) {
+                            $approvedLeaveCount++;
+                        } else {
+                            $absent++;
+                        }
+                        continue;
+                    }
+                }
+
+                if ($approvedLeaveDates->contains($dateKey)) {
+                    $approvedLeaveCount++;
+                } else {
+                    $absent++;
+                }
+            }
+
+            $paidDays = $present + $late + $holiday + $approvedLeaveCount;
+            $unpaidDays = max($totalWorkableDays - $paidDays, 0);
+
+            $basicSalary = (float) ($staff->details->basic_salary ?? 0);
+            $dailyRate = $totalWorkableDays > 0 ? ($basicSalary / $totalWorkableDays) : 0;
+            $basePayable = round($dailyRate * $paidDays, 2);
+
+            $financials = $attendanceFinancials->get($staff->id, ['deduction' => 0, 'overtime' => 0]);
+            $biometricDeduction = round((float) ($financials['deduction'] ?? 0), 2);
+            $overtimeBonus = round((float) ($financials['overtime'] ?? 0), 2);
+            $grossPayable = round(max($basePayable - $biometricDeduction + $overtimeBonus, 0), 2);
+
+            $advancePaid = round((float) ($advanceByStaff[$staff->id] ?? 0), 2);
+            $payableSalary = round(max($grossPayable - $advancePaid, 0), 2);
+            $deduction = round(max(($basicSalary - $basePayable) + $biometricDeduction, 0), 2);
+
+            return [
+                'sl' => $index + 1,
+                'staff_id' => $staff->details->staff_id ?? (string) $staff->id,
+                'staff_admin_id' => (int) $staff->id,
+                'name' => trim(($staff->first_name ?? '') . ' ' . ($staff->last_name ?? '')),
+                'role' => $staff->role->name ?? 'N/A',
+                'department' => $staff->details->department->department_name ?? 'N/A',
+                'designation' => $staff->details->designation->designation_name ?? 'N/A',
+                'basic_salary' => round($basicSalary, 2),
+                'total_days' => $totalDaysInMonth,
+                'workable_days' => $totalWorkableDays,
+                'present' => $present,
+                'late' => $late,
+                'holiday' => $holiday,
+                'approved_leaves' => $approvedLeaveCount,
+                'absent' => $absent,
+                'paid_days' => $paidDays,
+                'unpaid_days' => $unpaidDays,
+                'biometric_deduction' => $biometricDeduction,
+                'overtime_bonus' => $overtimeBonus,
+                'gross_payable' => $grossPayable,
+                'advance_paid' => $advancePaid,
+                'deduction' => max($deduction, 0),
+                'payable_salary' => max($payableSalary, 0),
+            ];
+        })->values();
+
+        $totals = [
+            'staff_count' => $rows->count(),
+            'basic_salary' => round($rows->sum('basic_salary'), 2),
+            'deduction' => round($rows->sum('deduction'), 2),
+            'payable_salary' => round($rows->sum('payable_salary'), 2),
+        ];
+
+        return Inertia::render('Backend/StaffAttendance/SalarySheet', [
+            'pageTitle' => 'Salary Sheet',
+            'websetting' => [
+                'company_name' => $websetting?->company_name ?? config('app.name', 'Hospital'),
+                'address' => $websetting?->address ?? $websetting?->report_title ?? 'N/A',
+                'attendance_device_options' => $websetting?->attendance_device_options,
+            ],
+            'filters' => [
+                'month' => $monthInput,
+            ],
+            'rows' => $rows,
+            'totals' => $totals,
+        ]);
+    }
+
+    public function salaryPay(Request $request)
+    {
+        $validated = $request->validate([
+            'staff_id' => 'required|exists:admins,id',
+            'month' => 'required|string|size:7',
+            'amount' => 'required|numeric|min:0',
+            'payment_method' => 'nullable|string',
+            'note' => 'nullable|string',
+            'is_advance' => 'sometimes|boolean',
+        ]);
+
+        $payment = SalaryPayment::create([
+            'staff_id' => $validated['staff_id'],
+            'month' => $validated['month'],
+            'amount' => $validated['amount'],
+            'payment_method' => $validated['payment_method'] ?? null,
+            'note' => $validated['note'] ?? null,
+            'is_advance' => $request->boolean('is_advance'),
+            'paid_at' => now(),
+            'admin_id' => Auth::guard('admin')->id() ?? null,
+            'status' => 'Paid',
+        ]);
+
+        return back()->with('successMessage', 'Salary payment recorded.');
     }
 
     private function getReportTableHeaders()
@@ -560,6 +864,7 @@ class StaffAttendanceController extends Controller
 
     public function staffPaySlip($id)
     {
+        $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
         $request = request();
         $monthParam = $request->input('month');
         $unpaidDays = (int)$request->input('unpaidDays');
@@ -588,6 +893,10 @@ class StaffAttendanceController extends Controller
                 'attendanceInfo' => fn() => $attendanceInfo,
                 'grossSalary' => fn() => $grossSalary,
                 'netSalary' => fn() => $netSalary,
+                'websetting' => fn() => [
+                    'company_name' => $websetting?->company_name ?? config('app.name', 'Hospital'),
+                    'address' => $websetting?->address ?? $websetting?->report_title ?? 'N/A',
+                ],
             ]
         );
     }
