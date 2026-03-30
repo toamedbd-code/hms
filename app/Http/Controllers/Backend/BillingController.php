@@ -1440,15 +1440,26 @@ if ($existingBill) {
 
         // Small epsilon to avoid floating point noise
         if ($delta > 0.0001) {
-            Payment::create([
-                'billing_id' => $billingId,
-                'amount' => round($delta, 2),
-                'payment_method' => $data['pay_mode'] ?? null,
-                'transaction_id' => $data['card_number'] ?? null,
-                'notes' => $data['remarks'] ?? null,
-                'received_by' => auth('admin')->user()->id,
-                'payment_status' => $this->determinePaymentStatus($incomingPaid, $data['payable_amount'] ?? 0, $data['total'] ?? 0, $data['receiving_amt'] ?? 0),
-            ]);
+            // Only create a Payment when there is an explicit receiving amount
+            // provided in the request. This prevents accidental payment records
+            // when editing unrelated patient info where `paid_amt` may differ
+            // on the client-side but no real payment was made.
+            $receivingAmount = floatval($data['receiving_amt'] ?? 0);
+            if ($receivingAmount > 0.0001) {
+                // Create payment for the amount actually received (cap by delta)
+                $paymentAmount = round(min($delta, $receivingAmount), 2);
+                if ($paymentAmount > 0.0001) {
+                    Payment::create([
+                        'billing_id' => $billingId,
+                        'amount' => $paymentAmount,
+                        'payment_method' => $data['pay_mode'] ?? null,
+                        'transaction_id' => $data['card_number'] ?? null,
+                        'notes' => $data['remarks'] ?? null,
+                        'received_by' => auth('admin')->user()->id,
+                        'payment_status' => $this->determinePaymentStatus($incomingPaid, $data['payable_amount'] ?? 0, $data['total'] ?? 0, $data['receiving_amt'] ?? 0),
+                    ]);
+                }
+            }
         }
 
         // Always refresh billing aggregates from DB (payments + due collections)
