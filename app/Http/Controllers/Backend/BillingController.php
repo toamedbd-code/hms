@@ -1476,7 +1476,6 @@ if ($existingBill) {
             $billing->invoice_amount = $billing->paid_amt;
             $billing->save();
         }
-        }
     }
 
     private function generateRadiologyNumber($lastRadiology = null)
