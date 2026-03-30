@@ -16,12 +16,17 @@ use App\Models\Payment;
 use App\Models\Radiology;
 use App\Models\Referral;
 use App\Models\Test;
+use App\Models\OpdPatient;
+use App\Models\IpdPatient;
 use App\Services\AdminService;
 use Illuminate\Support\Facades\DB;
 use App\Services\BillingService;
+use App\Services\IpdDischargeBillingService;
+
 use App\Services\MedicineInventoryService;
 use App\Services\PatientService;
 use App\Services\ReferralPersonService;
+use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
@@ -47,6 +52,7 @@ class BillingController extends Controller
 
         // Add permission middleware
         $this->middleware('permission:billing', ['only' => ['index']]);
+        $this->middleware('permission:billing-create', ['only' => ['create', 'billing', 'billingPage', 'store']]);
         $this->middleware('permission:billing-delete', ['only' => ['destroy']]);
         $this->middleware('permission:billing-edit', ['only' => ['edit', 'update']]);
     }
@@ -59,6 +65,7 @@ class BillingController extends Controller
             'Backend/Billing/Index',
             [
                 'pageTitle' => fn() => 'Billing List',
+                'filters' => fn() => request()->only(['search', 'numOfData']),
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
@@ -70,8 +77,21 @@ class BillingController extends Controller
     {
         $query = $this->billingService->activeList();
 
-        if (request()->filled('name'))
-            $query->where('name', 'like', '%' . request()->name . '%');
+        $search = trim((string) request()->input('search', request()->input('bill_no', '')));
+
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $q->where('bill_number', 'like', '%' . $search . '%')
+                    ->orWhereHas('patient', function ($patientQuery) use ($search) {
+                        $patientQuery->where('name', 'like', '%' . $search . '%');
+                    });
+
+                $parsedDate = $this->parseBillingSearchDate($search);
+                if ($parsedDate) {
+                    $q->orWhereDate('created_at', $parsedDate);
+                }
+            });
+        }
 
 
         $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
@@ -82,10 +102,13 @@ class BillingController extends Controller
             $customData = new \stdClass();
             $customData->index = $index + 1;
             $customData->bill_number = $data->bill_number;
+            $customData->row_id = $data->id;
+            $customData->row_type = 'billing';
             $customData->patient_id = $data?->patient?->name ?? '';
             $customData->total = $data->total;
             $customData->paid_amt = $data->paid_amt;
-            $customData->receiving_amt = $data->receiving_amt;
+            $customData->due_amount = $data->due_amount ?? 0;
+            $customData->due_amount_display = number_format((float) ($data->due_amount ?? 0), 2);
             $customData->delivery_date = !empty($data->delivery_date) ? Carbon::parse($data->delivery_date)->format('d-m-Y h:i A') : '';
             $customData->created_by = $data?->admin?->name ?? '';
             $customData->payment_status = $data->payment_status;
@@ -102,12 +125,15 @@ $links = [];
 if (
     isset($data->due_amount) &&
     (float)$data->due_amount > 0 &&
-    in_array($data->payment_status, ['Pending', 'Partial'])
+    in_array($data->payment_status, ['Pending', 'Partial']) &&
+    \Illuminate\Support\Facades\Gate::forUser($user)->check('billing-due-collect')
 ) {
     $links[] = [
         'linkClass' => 'bg-purple-600 text-white semi-bold',
-        'link' => route('backend.backend.backend.due.collect', $data->id),
+        'link' => route('backend.due.collect', $data->id),
         'linkLabel' => 'Due Collect',
+        'action_name' => 'due-collect',
+        'action_id' => 'billing|' . $data->id,
     ];
 }
 
@@ -159,6 +185,30 @@ $customData->links = $links;
         return regeneratePagination($formatedDatas, $datas->total(), $datas->perPage(), $datas->currentPage());
     }
 
+    private function parseBillingSearchDate(string $value): ?string
+    {
+        $value = trim($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        $formats = ['Y-m-d', 'd-m-Y', 'd/m/Y'];
+
+        foreach ($formats as $format) {
+            try {
+                $date = Carbon::createFromFormat($format, $value);
+                if ($date && $date->format($format) === $value) {
+                    return $date->format('Y-m-d');
+                }
+            } catch (\Throwable $e) {
+                // Ignore invalid date formats and continue trying.
+            }
+        }
+
+        return null;
+    }
+
     private function dataFields()
     {
         return [
@@ -167,11 +217,11 @@ $customData->links = $links;
             ['fieldName' => 'patient_id', 'class' => 'text-center'],
             ['fieldName' => 'total', 'class' => 'text-center'],
             ['fieldName' => 'paid_amt', 'class' => 'text-center'],
-            ['fieldName' => 'receiving_amt', 'class' => 'text-center'],
-            ['fieldName' => 'delivery_date', 'class' => 'text-center'],
+            ['fieldName' => 'due_amount_display', 'class' => 'text-center'],
+            ['fieldName' => 'delivery_date', 'class' => 'text-center whitespace-nowrap'],
             ['fieldName' => 'created_by', 'class' => 'text-center'],
             ['fieldName' => 'payment_status', 'class' => 'text-center'],
-            ['fieldName' => 'created_at', 'class' => 'text-center'],
+            ['fieldName' => 'created_at', 'class' => 'text-center whitespace-nowrap'],
         ];
     }
     private function getTableHeaders()
@@ -182,7 +232,7 @@ $customData->links = $links;
             'Patient',
             'Total',
             'Paid Amount',
-            'Received',
+            'Due Amount',
             'Delivery Date',
             'Created By',
             'Payment Status',
@@ -191,30 +241,83 @@ $customData->links = $links;
         ];
     }
 
-    public function searchShow(Request $request)
+        public function searchShow(Request $request)
     {
         $request->validate([
-            'case_id' => 'required|string'
+            'case_id' => 'required|string',
+            // When true, we are allowed to create an IPD auto bill if no billing exists yet.
+            // We keep it false for debounced (auto) searching.
+            'auto_create' => 'nullable|boolean',
         ]);
 
-        $results = Billing::where('case_number', 'like', '%' . $request->case_id . '%')
+        $caseId = trim((string) $request->case_id);
+        $autoCreate = (bool) $request->boolean('auto_create');
+
+        $mapBilling = function (Billing $billing) {
+            return [
+                'id' => $billing->id,
+                'case_number' => $billing->case_number,
+                'patient_name' => $billing->patient?->name ?? 'N/A',
+                'patient_mobile' => $billing->patient?->phone ?? 'N/A',
+                'created_at' => $billing->created_at?->format('d M Y h:i A') ?? '',
+                'status' => $billing->status,
+                'payment_status' => $billing->payment_status,
+            ];
+        };
+
+        $results = Billing::query()
+            ->where('case_number', 'like', '%' . $caseId . '%')
             ->with(['patient', 'doctor'])
             ->limit(10)
             ->get()
-            ->map(function ($billing) {
-                return [
-                    'id' => $billing->id,
-                    'case_number' => $billing->case_number,
-                    'patient_name' => $billing->patient?->name ?? 'N/A',
-                    'patient_mobile' => $billing->patient?->phone ?? 'N/A',
-                    'created_at' => $billing->created_at->format('d M Y h:i A'),
-                    'status' => $billing->status,
-                    'payment_status' => $billing->payment_status
-                ];
-            });
+            ->map($mapBilling);
+
+        // If nothing found and user explicitly asked => try IPD auto billing.
+        if ($results->isEmpty() && $autoCreate) {
+            $ipdId = $this->extractIpdIdFromSearch($caseId);
+
+            if ($ipdId) {
+                $ipdpatient = IpdPatient::query()->find($ipdId);
+
+                if ($ipdpatient) {
+                    /** @var IpdDischargeBillingService $service */
+                    $service = app(IpdDischargeBillingService::class);
+
+                    // Works both for Discharged & Active patients.
+                    // For Active patients, it uses "now" as dischargeAt to build a provisional bill.
+                    $billing = $service->createOrGetForDischarge($ipdpatient, auth('admin')->id());
+
+                    if (empty($ipdpatient->billing_id)) {
+                        $ipdpatient->billing_id = $billing->id;
+                        $ipdpatient->save();
+                    }
+
+                    $billing->loadMissing(['patient', 'doctor']);
+
+                    $results = collect([$mapBilling($billing)]);
+                }
+            }
+        }
 
         return response()->json($results);
     }
+
+    private function extractIpdIdFromSearch(string $caseId): ?int
+    {
+        $caseId = trim($caseId);
+
+        // Accept: "123", "IPD-000123", "ipd 123"
+        if (preg_match('/^ipd\s*[-_]?\s*0*(\d+)$/i', $caseId, $m)) {
+            return (int) $m[1];
+        }
+
+        if (ctype_digit($caseId)) {
+            return (int) $caseId;
+        }
+
+        return null;
+    }
+
 
 
     public function create()
@@ -304,17 +407,25 @@ $customData->links = $links;
             $patientId = $patientResult['patient_id'];
             $data = $patientResult['processed_data'];
 
-            $lastBilling = $this->billingService->getLastBilling();
-            $billNumber = $this->generateBillNumber($lastBilling);
-            $invoiceNumber = $this->generateInvoiceNumber($lastBilling);
-            $caseNumber = $this->generateCaseNumber($lastBilling);
+            // Duplicate billing check (same patient same day). If billing_date provided
+            // use that date for duplicate detection so bills can be created for other dates.
+            $billDateToCheck = $data['billing_date'] ?? now()->toDateString();
+            $existingBill = Billing::where('patient_id', $patientId)
+                ->whereDate('created_at', $billDateToCheck)
+                ->first();
+
+if ($existingBill) {
+    DB::rollBack();
+    return back()->with('error', 'This patient already billed today!');
+}
+
+
+            
 
             $referrer = isset($data['referrer_id']) ? $this->referrerService->find($data['referrer_id']) : null;
 
             $billingData = [
-                'invoice_number' => $invoiceNumber,
-                'bill_number' => $billNumber,
-                'case_number' => $caseNumber,
+                // invoice_number/bill_number/case_number are set below in a retry-safe way
                 'patient_id' => $patientId,
                 'patient_mobile' => $data['patient_mobile'],
                 'gender' => $data['gender'],
@@ -331,6 +442,7 @@ $customData->links = $links;
                 'discount_type' => $data['discount_type'] ?? 'percentage',
                 'payable_amount' => $data['payable_amount'] ?? $data['total'],
                 'paid_amt' => $data['paid_amt'],
+                'invoice_amount' => $data['paid_amt'],
                 'change_amt' => $data['change_amt'] ?? 0,
                 'due_amount' => $data['due_amount'] ?? 0,
                 'receiving_amt' => $data['receiving_amt'] ?? 0,
@@ -343,11 +455,40 @@ $customData->links = $links;
                 'created_by' => auth('admin')->user()->id,
             ];
 
-            $billing = $this->billingService->create($billingData);
+            $billing = null;
+            $attempts = 0;
+
+            while (!$billing && $attempts < 5) {
+                $attempts++;
+
+                $billingData['bill_number'] = $this->generateBillNumber();
+                $billingData['invoice_number'] = $this->generateInvoiceNumber();
+                $billingData['case_number'] = $this->generateCaseNumber();
+
+                try {
+                    // If frontend provided a billing date/time, set created_at
+                    // so the bill is recorded on that datetime.
+                    if (!empty($data['billing_date'])) {
+                        $time = $data['billing_time'] ?? '00:00:00';
+                        $billingData['created_at'] = Carbon::parse($data['billing_date'] . ' ' . $time)->toDateTimeString();
+                    }
+
+                    $billing = $this->billingService->create($billingData);
+                } catch (\Illuminate\Database\QueryException $e) {
+                    // Retry on duplicate key (bill_number/invoice_number/case_number)
+                    if (($e->errorInfo[0] ?? null) === '23000') {
+                        usleep(random_int(10000, 50000));
+                        continue;
+                    }
+
+                    throw $e;
+                }
+            }
 
             if (!$billing) {
-                throw new Exception('Failed to create billing record');
+                throw new Exception('Failed to create billing record (duplicate number)');
             }
+
 
             // Rest of your store method remains the same...
             $totalBillAmountBeforeDiscount = collect($data['items'])->sum('total_amount');
@@ -410,6 +551,13 @@ $customData->links = $links;
                     'total_bill_amount' => $data['total'],
                     'status' => 'Active'
                 ]);
+
+                if (empty($data['commission_total'])) {
+                    $data['commission_total'] = $totalCommission;
+                }
+                if (empty($data['physyst_amt'])) {
+                    $data['physyst_amt'] = $data['commission_total'] ?? 0;
+                }
             }
 
             foreach ($data['items'] as $item) {
@@ -450,9 +598,7 @@ $customData->links = $links;
                 ]);
             }
 
-            if ($data['referrer_id']) {
-                $this->updateOrCreateExpenseRecord($billing, $data);
-            }
+            // Commission expense is recorded on referral payment
 
             $pathologyItems = collect($data['items'])->where('category', 'Pathology');
             if ($pathologyItems->isNotEmpty()) {
@@ -469,8 +615,21 @@ $customData->links = $links;
                 $this->createPharmacyBillRecord($billing, $medicineItems, $data);
             }
 
-            $message = 'Billing created successfully with Bill No: ' . $billNumber;
+                        $message = 'Billing created successfully with Bill No: ' . ($billing->bill_number ?? ''); 
+
             $this->storeAdminWorkLog($billing->id, 'billings', $message);
+                        ActivityLogService::logCreate(
+                            'Billing',
+                            $billing->id,
+                            $billing->bill_number ?? ('Billing#' . $billing->id),
+                            [
+                                'bill_number' => $billing->bill_number,
+                                'invoice_number' => $billing->invoice_number,
+                                'case_number' => $billing->case_number,
+                                'patient_id' => $billing->patient_id,
+                                'total' => $billing->total,
+                            ]
+                        );
 
             DB::commit();
 
@@ -573,7 +732,7 @@ $customData->links = $links;
 
     private function updateOrCreateExpenseRecord($billing, $data)
     {
-        $existingExpense = Expense::where('bill_number', $billing->bill_number)->first();
+        $commissionAmount = $data['physyst_amt'] ?? $data['commission_total'] ?? 0;
 
         $categories = collect($data['items'])->pluck('category')->map(function ($category) {
             return strtolower($category);
@@ -607,18 +766,18 @@ $customData->links = $links;
             'case_id' => $billing->case_number,
             'name' => auth('admin')->user()->name ?? '',
             'description' => 'Commission expense for ' . implode(', ', $categories) . ' services',
-            'amount' => $data['physyst_amt'] ?? 0,
+            'amount' => $commissionAmount,
             'date' => now(),
             'status' => 'Active'
         ];
 
-        if ($existingExpense) {
-            $expenseData['updated_by'] = auth('admin')->user()->id;
-            $existingExpense->update($expenseData);
-        } else {
-            $expenseData['created_by'] = auth('admin')->user()->id;
-            Expense::create($expenseData);
-        }
+        $expenseData['updated_by'] = auth('admin')->user()->id;
+        $expenseData['created_by'] = auth('admin')->user()->id;
+
+        Expense::updateOrCreate(
+            ['bill_number' => $billing->bill_number],
+            $expenseData
+        );
     }
 
     private function createPathologyRecord($billing, $pathologyItems, $data)
@@ -701,7 +860,7 @@ $customData->links = $links;
 
     private function generatePathologyNumber($lastPathology = null)
     {
-        $prefix = 'PATB';
+        $prefix = web_setting_prefix('pathology_bill_prefix', 'Bill');
 
         if ($lastPathology && $lastPathology->pathology_no) {
             $lastNumber = (int) substr($lastPathology->pathology_no, strlen($prefix));
@@ -877,7 +1036,7 @@ $customData->links = $links;
 
     private function generatePharmacyNumber($lastPharmacyBill = null)
     {
-        $prefix = 'PHARM';
+        $prefix = web_setting_prefix('pharmacy_bill_prefix', 'PHAB');
         $year = date('Y');
 
         if ($lastPharmacyBill && $lastPharmacyBill->pharmacy_no) {
@@ -1170,13 +1329,18 @@ $customData->links = $links;
                     'total_bill_amount' => $data['total'],
                     'status' => 'Active'
                 ]);
+
+                if (empty($data['commission_total'])) {
+                    $data['commission_total'] = $totalCommission;
+                }
+                if (empty($data['physyst_amt'])) {
+                    $data['physyst_amt'] = $data['commission_total'] ?? 0;
+                }
             } else {
                 Referral::where('billing_id', $id)->delete();
             }
 
-            if ($data['referrer_id']) {
-                $this->updateOrCreateExpenseRecord($billing, $data);
-            } else {
+            if (!$data['referrer_id']) {
                 Expense::where('bill_number', $billing->bill_number)->delete();
             }
 
@@ -1256,22 +1420,57 @@ $customData->links = $links;
     // Helper method for updating payment records
     private function updatePaymentRecords($billingId, $data)
     {
-        if ($data['paid_amt'] > 0) {
+        // The incoming `paid_amt` is the total paid on the billing record.
+        // To avoid creating duplicate payments when editing/printing,
+        // only create a new Payment for the positive difference (delta)
+        // between the requested total and already recorded payments.
+        $incomingPaid = floatval($data['paid_amt'] ?? 0);
+
+        if ($incomingPaid <= 0) {
+            return;
+        }
+
+        // Consider both Payments and DueCollections when computing what has
+        // already been paid for this billing. This avoids creating duplicate
+        // payment records when due collections exist.
+        $existingPaymentsSum = (float) Payment::where('billing_id', $billingId)->whereNull('deleted_at')->sum('amount');
+        $existingDueCollected = (float) \App\Models\DueCollection::where('billing_id', $billingId)->sum('collected_amount');
+        $existingPaid = $existingPaymentsSum + $existingDueCollected;
+        $delta = $incomingPaid - $existingPaid;
+
+        // Small epsilon to avoid floating point noise
+        if ($delta > 0.0001) {
             Payment::create([
                 'billing_id' => $billingId,
-                'amount' => $data['paid_amt'],
-                'payment_method' => $data['pay_mode'],
+                'amount' => round($delta, 2),
+                'payment_method' => $data['pay_mode'] ?? null,
                 'transaction_id' => $data['card_number'] ?? null,
                 'notes' => $data['remarks'] ?? null,
                 'received_by' => auth('admin')->user()->id,
-                'payment_status' => $this->determinePaymentStatus($data['paid_amt'], $data['payable_amount'], $data['total'], $data['receiving_amt']),
+                'payment_status' => $this->determinePaymentStatus($incomingPaid, $data['payable_amount'] ?? 0, $data['total'] ?? 0, $data['receiving_amt'] ?? 0),
             ]);
+        }
+
+        // Always refresh billing aggregates from DB (payments + due collections)
+        $billing = Billing::find($billingId);
+        if ($billing) {
+            $paymentsSum = (float) Payment::where('billing_id', $billingId)->whereNull('deleted_at')->sum('amount');
+            $dueCollected = (float) \App\Models\DueCollection::where('billing_id', $billingId)->sum('collected_amount');
+            $totalPaid = round($paymentsSum + $dueCollected, 2);
+
+            $billing->paid_amt = $totalPaid;
+            $payable = floatval($data['payable_amount'] ?? $billing->payable_amount ?? $billing->total ?? 0);
+            $billing->due_amount = max(0, round($payable - $billing->paid_amt, 2));
+            $billing->payment_status = $this->determinePaymentStatus($billing->paid_amt, $payable, $billing->total ?? 0, $data['receiving_amt'] ?? 0);
+            $billing->invoice_amount = $billing->paid_amt;
+            $billing->save();
+        }
         }
     }
 
     private function generateRadiologyNumber($lastRadiology = null)
     {
-        $prefix = 'RAD';
+        $prefix = web_setting_prefix('radiology_bill_prefix', 'RADB');
         $year = date('Y');
 
         if ($lastRadiology && $lastRadiology->radiology_no) {
@@ -1284,53 +1483,39 @@ $customData->links = $links;
         return $prefix . $year . $newNumber;
     }
 
+        private function nextSequentialBillingNumber(string $field, string $prefix, int $digits): string
+    {
+        $ym = now()->format('Ym');
+        $like = $prefix . $ym . '%';
+
+        $lastValue = Billing::withTrashed()
+            ->where($field, 'like', $like)
+            ->lockForUpdate()
+            ->orderBy($field, 'desc')
+            ->value($field);
+
+        $lastNumber = $lastValue ? (int) substr($lastValue, -$digits) : 0;
+
+        return $prefix . $ym . str_pad((string) ($lastNumber + 1), $digits, '0', STR_PAD_LEFT);
+    }
+
     private function generateBillNumber($lastBilling = null)
     {
-        $prefix = 'BILL';
-        $year = date('Ym');
-
-        if ($lastBilling && $lastBilling->bill_number) {
-            // Extract the last number from the bill number
-            $lastNumber = (int) substr($lastBilling->bill_number, -4);
-            $newNumber = str_pad($lastNumber + 1, 4, '0', STR_PAD_LEFT);
-        } else {
-            $newNumber = '0001';
-        }
-
-        return $prefix . $year . $newNumber;
+        $prefix = web_setting_prefix('billing_bill_prefix', 'BILL');
+        return $this->nextSequentialBillingNumber('bill_number', $prefix, 4);
     }
 
     private function generateInvoiceNumber($lastBilling = null)
     {
-        $prefix = 'INV';
-        $year = date('Ym');
-
-        if ($lastBilling && $lastBilling->invoice_number) {
-            // Extract the last number from the invoice number
-            $lastNumber = (int) substr($lastBilling->invoice_number, -4);
-            $newNumber = rand(00000, 99999);
-        } else {
-            $newNumber = '0001';
-        }
-
-        return $prefix . $year . $newNumber;
+        // Keep the existing compact format: INVYYYYMMxxxxx
+        return $this->nextSequentialBillingNumber('invoice_number', 'INV', 5);
     }
 
     private function generateCaseNumber($lastBilling = null)
     {
-        $prefix = 'CASE';
-        $year = date('Ym');
-
-        if ($lastBilling && $lastBilling->case_number) {
-            // Extract the last number from the case number
-            $lastNumber = (int) substr($lastBilling->case_number, -4);
-            $newNumber = str_pad($lastNumber + 1, 4, '0', STR_PAD_LEFT);
-        } else {
-            $newNumber = '0001';
-        }
-
-        return $prefix . $year . $newNumber;
+        return $this->nextSequentialBillingNumber('case_number', 'CASE', 4);
     }
+
 
     public function destroy($id)
     {
@@ -1338,10 +1523,22 @@ $customData->links = $links;
         DB::beginTransaction();
 
         try {
+            $billingInfo = Billing::find($id);
 
             if ($this->billingService->deleteBIllingWithPathoRadioPharm($id)) {
                 $message = 'Billing deleted successfully';
                 $this->storeAdminWorkLog($id, 'billings', $message);
+                ActivityLogService::logDelete(
+                    'Billing',
+                    $id,
+                    $billingInfo?->bill_number ?? ('Billing#' . $id),
+                    [
+                        'bill_number' => $billingInfo?->bill_number,
+                        'invoice_number' => $billingInfo?->invoice_number,
+                        'case_number' => $billingInfo?->case_number,
+                        'patient_id' => $billingInfo?->patient_id,
+                    ]
+                );
 
                 DB::commit();
 
@@ -1418,67 +1615,140 @@ $customData->links = $links;
 
     private function getpendingListDatas()
     {
-        $query = $this->billingService->pendingList();
+        $nameFilter = trim((string) request('name', ''));
 
-        if (request()->filled('name'))
-            $query->where('name', 'like', '%' . request()->name . '%');
+        $billingRows = $this->billingService->pendingList()
+            ->when($nameFilter !== '', function ($query) use ($nameFilter) {
+                $query->whereHas('patient', function ($patientQuery) use ($nameFilter) {
+                    $patientQuery->where('name', 'like', '%' . $nameFilter . '%');
+                });
+            })
+            ->get()
+            ->map(function ($data) {
+                $customData = new \stdClass();
+                $customData->sort_at = $data->created_at;
+                $customData->bill_number = $data->bill_number;
+                $customData->row_id = $data->id;
+                $customData->row_type = 'billing';
+                $customData->case_number = $data->case_number;
+                $customData->patient_id = $data?->patient?->name ?? '';
+                $customData->total = number_format((float) ($data->total ?? 0), 2);
+                $customData->paid_amt = number_format((float) ($data->paid_amt ?? 0), 2);
+                $customData->due_amount = (float) ($data->due_amount ?? 0);
+                $customData->due_amount_display = number_format((float) ($data->due_amount ?? 0), 2);
+                $customData->delivery_date = $data->delivery_date;
+                $customData->created_by = $data?->admin?->name ?? '';
+                $customData->payment_status = $data->payment_status;
+                $customData->hasLink = true;
 
+                $links = [];
 
-        $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
+                if (
+                    $data->payment_status !== 'Paid' &&
+                    (float) $data->due_amount > 0 &&
+                    \Illuminate\Support\Facades\Gate::forUser(auth()->guard('admin')->user())->check('billing-due-collect')
+                ) {
+                    $links[] = [
+                        'linkClass' => 'bg-purple-600 text-white semi-bold',
+                        'link' => route('backend.due.collect', $data->id),
+                        'linkLabel' => 'Due Collect',
+                        'action_name' => 'due-collect',
+                        'action_id' => 'billing|' . $data->id,
+                    ];
+                }
 
-        $formatedDatas = $datas->map(function ($data, $index) {
-            $customData = new \stdClass();
-            $customData->index = $index + 1;
-            $customData->bill_number = $data->bill_number;
-            $customData->case_number = $data->case_number;
-            $customData->patient_id = $data?->patient?->name ?? '';
-            $customData->total = $data->total;
-            $customData->paid_amt = $data->paid_amt;
-            $customData->receiving_amt = $data->receiving_amt;
-            $customData->delivery_date = $data->delivery_date;
-            $customData->created_by = $data?->admin?->name ?? '';
-            $customData->payment_status = $data->payment_status;
+                $links[] = [
+                    'linkClass' => 'bg-teal-500 text-white semi-bold',
+                    'link' => route('backend.download.invoice', [
+                        'id' => $data->id,
+                        'module' => 'billing'
+                    ]),
+                    'linkLabel' => 'Invoice',
+                    'target' => '_blank',
+                ];
 
-            $customData->hasLink = true;
-$links = [];
+                $customData->links = $links;
 
-/*
-|--------------------------------------------------------------------------
-| Pending Bill → Due Collect
-|--------------------------------------------------------------------------
-*/
-if (
-    $data->payment_status !== 'Paid' &&
-    (float)$data->due_amount > 0
-) {
-    $links[] = [
-        'linkClass' => 'bg-purple-600 text-white semi-bold',
-        'link' => url('due-collect/' . $data->id),
-        'linkLabel' => 'Due Collect',
-    ];
-}
+                return $customData;
+            });
 
-/*
-|--------------------------------------------------------------------------
-| Invoice
-|--------------------------------------------------------------------------
-*/
-$links[] = [
-    'linkClass' => 'bg-teal-500 text-white semi-bold',
-    'link' => route('backend.download.invoice', [
-        'id' => $data->id,
-        'module' => 'billing'
-    ]),
-    'linkLabel' => 'Invoice',
-    'target' => '_blank',
-];
+        $opdRows = OpdPatient::query()
+            ->with(['patient', 'doctor'])
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->where('payment_status', '!=', 'Paid')
+            ->where('balance_amount', '>', 0)
+            ->when($nameFilter !== '', function ($query) use ($nameFilter) {
+                $query->whereHas('patient', function ($patientQuery) use ($nameFilter) {
+                    $patientQuery->where('name', 'like', '%' . $nameFilter . '%');
+                });
+            })
+            ->get()
+            ->map(function ($data) {
+                $customData = new \stdClass();
+                $customData->sort_at = $data->created_at;
+                $customData->bill_number = 'OPD-' . str_pad((string) $data->id, 4, '0', STR_PAD_LEFT);
+                $customData->row_id = $data->id;
+                $customData->row_type = 'opd';
+                $customData->case_number = 'OPD';
+                $customData->patient_id = $data?->patient?->name ?? '';
+                $customData->total = number_format((float) ($data->amount ?? 0), 2);
+                $customData->paid_amt = number_format((float) ($data->paid_amount ?? 0), 2);
+                $customData->due_amount = (float) ($data->balance_amount ?? 0);
+                $customData->due_amount_display = number_format((float) ($data->balance_amount ?? 0), 2);
+                $customData->delivery_date = $data->appointment_date;
+                $customData->created_by = $data?->doctor?->name ?? '';
+                $customData->payment_status = $data->payment_status;
+                $customData->hasLink = true;
 
-$customData->links = $links;
+                $links = [];
 
-            return $customData;
-        });
+                if (\Illuminate\Support\Facades\Gate::forUser(auth()->guard('admin')->user())->check('billing-due-collect')) {
+                    $links[] = [
+                        'linkClass' => 'bg-purple-600 text-white semi-bold',
+                        'link' => route('backend.opd.due.collect', $data->id),
+                        'linkLabel' => 'Due Collect',
+                        'action_name' => 'due-collect',
+                        'action_id' => 'opd|' . $data->id,
+                    ];
+                }
 
-        return regeneratePagination($formatedDatas, $datas->total(), $datas->perPage(), $datas->currentPage());
+                $links[] = [
+                    'linkClass' => 'bg-teal-500 text-white semi-bold',
+                    'link' => route('backend.download.opd.bill', [
+                        'id' => $data->id,
+                        'module' => 'opd'
+                    ]),
+                    'linkLabel' => 'Invoice',
+                    'target' => '_blank',
+                ];
+
+                $customData->links = $links;
+
+                return $customData;
+            });
+
+        $mergedRows = $billingRows
+            ->concat($opdRows)
+            ->sortByDesc(function ($row) {
+                return $row->sort_at;
+            })
+            ->values();
+
+        $perPage = (int) (request()->numOfData ?? 10);
+        $currentPage = (int) request()->get('page', 1);
+        $offset = max(0, ($currentPage - 1) * $perPage);
+
+        $pageRows = $mergedRows
+            ->slice($offset, $perPage)
+            ->values()
+            ->map(function ($row, $index) use ($offset) {
+                $row->index = $offset + $index + 1;
+                unset($row->sort_at);
+                return $row;
+            });
+
+        return regeneratePagination($pageRows, $mergedRows->count(), $perPage, $currentPage);
     }
 
     private function datapendingListFields()
@@ -1490,7 +1760,7 @@ $customData->links = $links;
             ['fieldName' => 'patient_id', 'class' => 'text-center'],
             ['fieldName' => 'total', 'class' => 'text-center'],
             ['fieldName' => 'paid_amt', 'class' => 'text-center'],
-            ['fieldName' => 'receiving_amt', 'class' => 'text-center'],
+            ['fieldName' => 'due_amount_display', 'class' => 'text-center'],
             ['fieldName' => 'delivery_date', 'class' => 'text-center'],
             ['fieldName' => 'created_by', 'class' => 'text-center'],
             ['fieldName' => 'payment_status', 'class' => 'text-center'],
@@ -1505,7 +1775,7 @@ $customData->links = $links;
             'Patient',
             'Total',
             'Paid Amount',
-            'Received',
+            'Due Amount',
             'Delivery Date',
             'Created By',
             'Payment Status',
