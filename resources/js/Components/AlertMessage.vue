@@ -1,9 +1,6 @@
 <template>
     <div>
-        <div v-if="$page.props.flash.successMessage"
-            class="p-4 mb-1 text-green-600 bg-green-300 border-green-500 shadow-md alert">
-            {{ $page.props.flash.successMessage }}
-        </div>
+        <!-- Inline success messages removed to avoid duplicate inline/toast displays -->
         <div v-if="$page.props.flash.errorMessage" class= "p-4 mb-1 text-white bg-red-500 bg-opacity-75 shadow-md alert">
             {{ $page.props.flash.errorMessage }}
         </div>
