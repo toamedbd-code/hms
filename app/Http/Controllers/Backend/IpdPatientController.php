@@ -335,7 +335,8 @@ class IpdPatientController extends Controller
 
                 return redirect()
                     ->back()
-                    ->with('successMessage', $message);
+                    ->with('successMessage', $message)
+                    ->with('billId', $dataInfo->id);
             } else {
                 DB::rollBack();
 
@@ -532,7 +533,8 @@ class IpdPatientController extends Controller
 
             return redirect()
                 ->back()
-                ->with('successMessage', $message);
+                ->with('successMessage', $message)
+                ->with('billId', $dataInfo->id);
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'IpdPatientController', 'update', substr($err->getMessage(), 0, 1000));

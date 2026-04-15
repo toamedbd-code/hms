@@ -31,15 +31,15 @@
         }
 
         .footer-content {
-            position: fixed;
-            bottom: {{ (int) floor($__inv_footer_h / 2) }}px;
+            /* keep footer content relative inside footer area so it appears above the footer image */
+            position: relative;
             left: 0;
             right: 0;
             width: 100%;
             text-align: center;
             z-index: 60;
             border-top: none !important;
-            padding-top: 0;
+            padding: 6px 12px 0;
             background: transparent;
         }
         @media print and (min-width: 149mm) {

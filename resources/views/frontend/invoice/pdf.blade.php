@@ -327,16 +327,16 @@
         }
 
         .footer-content {
-            position: fixed;
-            bottom: {{ (int) floor($__inv_footer_h / 2) }}px; /* sit centered vertically with footer image */
+            /* position relative so it sits above the footer image inside the footer area */
+            position: relative;
             left: 0;
             right: 0;
             margin: 0 auto;
             font-size: 14px;
             text-align: center;
-            padding: 0 20px;
+            padding: 6px 20px 0;
             width: 100%;
-            z-index: 60; /* above footer image */
+            z-index: 60;
             background: transparent;
         }
 

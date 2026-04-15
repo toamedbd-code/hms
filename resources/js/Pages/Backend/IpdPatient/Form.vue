@@ -7,6 +7,7 @@ import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import AlertMessage from '@/Components/AlertMessage.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
+import { showToastIfNoFlash } from '@/responseMessage.js';
 import PatientModal from '@/Components/PatientModal.vue';
 import SymptomTypeModal from '@/Components/SymptomTypeModal.vue';
 import Multiselect from 'vue-multiselect';
@@ -110,28 +111,22 @@ const submit = () => {
     })).post(routeName, {
         onSuccess: (response) => {
             if (!props.id) form.reset();
-
-            // If the server returned a flash success message it will be
-            // displayed by the inline AlertMessage component. Avoid calling
-            // the global toast display to prevent duplicate notifications.
-            if (response?.props?.flash?.successMessage) return;
-
-            // Fallback: sometimes Inertia updates page props on redirect
-            // rather than returning the flash in the callback. Check page
-            // props and skip toast if there is a flash there.
-            try {
-                const page = usePage();
-                if (page.props.flash?.successMessage) return;
-            } catch (e) {
-                // ignore
-            }
-
-            // No server flash found — show the response if it contains one.
+            // Always display server flash messages as toast pop-ups.
             try {
                 displayResponse(response);
             } catch (e) {
                 // ignore
             }
+            const billId = response?.props?.flash?.billId;
+
+            if (billId) {
+                // Open IPD invoice PDF in a new tab when server provides billId
+                window.open(route('backend.download.ipd.invoice', { id: billId }), "_blank");
+            }
+
+            // Show toast only when server did not set a flash (to avoid duplicates
+            // when the page already renders an inline AlertMessage from flash props).
+            showToastIfNoFlash(response);
         },
         onError: (errorObject) => {
             displayWarning(errorObject);
