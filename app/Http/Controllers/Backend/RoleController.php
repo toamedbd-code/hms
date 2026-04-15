@@ -10,6 +10,8 @@ use App\Services\PermissionService;
 use App\Services\RoleService;
 use App\Services\AdminService;
 use App\Traits\SystemTrait;
+use Spatie\Permission\Models\Permission as SpatiePermission;
+use Spatie\Permission\PermissionRegistrar;
 use Illuminate\Support\Facades\DB;
 use Exception;
 
@@ -115,6 +117,8 @@ class RoleController extends Controller
 
     public function create()
     {
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
         return Inertia::render(
             'Backend/Role/Form',
             [
@@ -132,7 +136,13 @@ class RoleController extends Controller
             $data = $request->validated();
             $dataInfo = $this->roleService->create($data);
             if ($dataInfo) {
-                $this->roleService->syncPermissions($dataInfo->id, $request->permission_ids);
+                $permissionIds = SpatiePermission::whereIn('id', $request->permission_ids ?? [])
+                    ->where('guard_name', 'admin')
+                    ->pluck('id')
+                    ->toArray();
+
+                app(PermissionRegistrar::class)->forgetCachedPermissions();
+                $this->roleService->syncPermissions($dataInfo->id, $permissionIds);
                 $message = 'Role created successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'roles', $message);
 
@@ -162,6 +172,8 @@ class RoleController extends Controller
 
     public function edit($id)
     {
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
         $role = $this->roleService->spatieRoleFind($id);
 
         return Inertia::render(
@@ -182,7 +194,13 @@ class RoleController extends Controller
 
             $data = $request->validated();
             if ($this->roleService->update($data, $id)) {
-                $role = $this->roleService->syncPermissions($id, $request->permission_ids);
+                $permissionIds = SpatiePermission::whereIn('id', $request->permission_ids ?? [])
+                    ->where('guard_name', 'admin')
+                    ->pluck('id')
+                    ->toArray();
+
+                app(PermissionRegistrar::class)->forgetCachedPermissions();
+                $role = $this->roleService->syncPermissions($id, $permissionIds);
                 $users = $this->AdminService->list()->where('status', 'Active')->where('role_id', $id)->get();
                 //dd($permissions);
                 foreach ($users as $key => $user)

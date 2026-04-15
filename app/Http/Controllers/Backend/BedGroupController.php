@@ -27,10 +27,11 @@ class BedGroupController extends Controller
 
         $this->middleware('auth:admin');
         $this->middleware('permission:bed-group-list');
-        $this->middleware('permission:bed-group-create', ['only' => ['create', 'store']]);
-        $this->middleware('permission:bed-group-edit', ['only' => ['edit', 'update']]);
-        $this->middleware('permission:bed-group-delete', ['only' => ['destroy']]);
-        $this->middleware('permission:bed-group-status', ['only' => ['changeStatus']]);
+        // PermissionSeeder generates permissions like: bed-group-list-create/edit/delete/status
+        $this->middleware('permission:bed-group-list-create', ['only' => ['create', 'store']]);
+        $this->middleware('permission:bed-group-list-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:bed-group-list-delete', ['only' => ['destroy']]);
+        $this->middleware('permission:bed-group-list-status', ['only' => ['changeStatus']]);
     }
 
 

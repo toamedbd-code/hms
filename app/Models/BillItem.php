@@ -13,9 +13,31 @@ class BillItem extends Model
 
     protected $guarded = [];
 
+    protected $casts = [
+        'sample_collected_at' => 'datetime',
+        'reported_at' => 'datetime',
+        'sent_at' => 'datetime',
+        'delivered_at' => 'datetime',
+    ];
+
     public function billing()
     {
         return $this->belongsTo(Billing::class);
+    }
+
+    public function collectedBy()
+    {
+        return $this->belongsTo(Admin::class, 'sample_collected_by');
+    }
+
+    public function reportedBy()
+    {
+        return $this->belongsTo(Admin::class, 'reported_by');
+    }
+
+    public function deliveredBy()
+    {
+        return $this->belongsTo(Admin::class, 'delivered_by');
     }
 
     public function itemable()

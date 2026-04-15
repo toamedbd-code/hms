@@ -4,7 +4,7 @@ import InputLabel from '@/Components/InputLabel.vue';
 import InputError from '@/Components/InputError.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
-import { displayResponse, displayWarning } from '@/responseMessage.js';
+import { displayResponse, displayWarning, showToastIfNoFlash } from '@/responseMessage.js';
 import { ref } from 'vue';
 
 const props = defineProps({
@@ -28,7 +28,7 @@ const submit = () => {
         onSuccess: (response) => {
             props.form.reset();
             closeModal();
-            displayResponse(response);
+            showToastIfNoFlash(response);
             if (props.reloadOnly) {
                 router.reload({ only: props.reloadOnly });
             }

@@ -75,6 +75,8 @@ class PermissionService
     {
         return $this->permissionModel
                 ->whereNull('parent_id')
+                ->where('guard_name', 'admin')
+                ->whereNotIn('name', ['dutyroaster-management', 'salary-management'])
                 ->with('child','child.child')
                 ->get();
     }

@@ -56,6 +56,30 @@ return [
             'collation' => 'utf8mb4_unicode_ci',
             'prefix' => '',
             'prefix_indexes' => true,
+            'timezone' => (function () {
+                $tz = env('DB_TIMEZONE', '+06:00');
+                if (preg_match('/^[+-][0-1][0-9]:[0-5][0-9]$/', $tz)) {
+                    return $tz;
+                }
+                try {
+                    $date = new \DateTime('now', new \DateTimeZone($tz));
+                    return $date->format('P');
+                } catch (\Exception $e) {
+                    return '+06:00';
+                }
+            })(),
+            'timezone_offset' => (function () {
+                $tz = env('DB_TIMEZONE', '+06:00');
+                if (preg_match('/^[+-][0-1][0-9]:[0-5][0-9]$/', $tz)) {
+                    return $tz;
+                }
+                try {
+                    $date = new \DateTime('now', new \DateTimeZone($tz));
+                    return $date->format('P');
+                } catch (\Exception $e) {
+                    return '+06:00';
+                }
+            })(),
             'strict' => true,
             'engine' => 'innoDB',
             'options' => extension_loaded('pdo_mysql') ? array_filter([

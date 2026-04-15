@@ -13,6 +13,13 @@ const props = defineProps({
 // Emits
 const emit = defineEmits(['close', 'save']);
 
+const now = new Date();
+const pad2 = (value) => String(value).padStart(2, '0');
+const billingDate = ref(
+    `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+);
+const billingTime = ref(`${pad2(now.getHours())}:${pad2(now.getMinutes())}`);
+
 // Reactive data
 const itemForm = ref({
     category: '',
@@ -113,7 +120,9 @@ const saveBill = () => {
         items: items.value,
         patient: patientForm.value,
         summary: summary.value,
-        commission: commission.value
+        commission: commission.value,
+        billingDate: billingDate.value,
+        billingTime: billingTime.value
     };
     
     emit('save', billData);
@@ -127,9 +136,22 @@ const saveBill = () => {
                 <!-- Item Details Section -->
                 <div class="mb-4">
                     <div
-                        class="flex justify-between items-center bg-[#053855] text-white px-4 py-2 text-sm font-semibold rounded-t">
+                        class="flex flex-wrap justify-between items-center bg-[#053855] text-white px-4 py-2 text-sm font-semibold rounded-t gap-2">
                         <div>ITEM DETAILS</div>
-                        <div class="flex items-center space-x-2">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <div class="flex items-center gap-2 text-white">
+                                <span class="text-[11px] font-semibold">Billing Date &amp; Time</span>
+                                <input
+                                    type="date"
+                                    v-model="billingDate"
+                                    class="px-2 py-1 border border-white/30 rounded text-[11px] bg-white/10 focus:border-white focus:outline-none"
+                                />
+                                <input
+                                    type="time"
+                                    v-model="billingTime"
+                                    class="px-2 py-1 border border-white/30 rounded text-[11px] bg-white/10 focus:border-white focus:outline-none"
+                                />
+                            </div>
                             <button class="text-white hover:text-gray-300 p-1">📋</button>
                             <button class="text-white hover:text-gray-300 p-1">🖨</button>
                             <button class="text-white hover:text-gray-300 p-1">👤</button>

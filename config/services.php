@@ -31,4 +31,8 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'patient_portal' => [
+        'payment_gateway_url' => env('PATIENT_PORTAL_PAYMENT_URL', ''),
+    ],
+
 ];

@@ -55,6 +55,7 @@ class BillingRequest extends FormRequest
             'paid_amt' => 'required|numeric|min:0',
             'change_amt' => 'nullable|numeric',
             'receiving_amt' => 'nullable|numeric|min:0',
+            'return_amt' => 'nullable|numeric|min:0',
             'due_amount' => 'nullable|numeric|min:0',
             'extra_flat_discount' => 'nullable|numeric|min:0',
 
@@ -158,6 +159,8 @@ class BillingRequest extends FormRequest
             'change_amt.numeric' => 'Change amount must be a valid number.',
             'receiving_amt.numeric' => 'Receiving amount must be a valid number.',
             'receiving_amt.min' => 'Receiving amount cannot be negative.',
+            'return_amt.numeric' => 'Return amount must be a valid number.',
+            'return_amt.min' => 'Return amount cannot be negative.',
             'due_amount.numeric' => 'Due amount must be a valid number.',
             'due_amount.min' => 'Due amount cannot be negative.',
             'extra_flat_discount.numeric' => 'Extra flat discount must be a valid number.',
@@ -207,14 +210,58 @@ class BillingRequest extends FormRequest
                 $validator->errors()->add('patient_id', 'Valid patient ID is required when selecting existing patient.');
             }
 
-            $payableAmount = (float) $this->input('payable_amount', 0);
-            $paidAmount = (float) $this->input('paid_amt', 0);
-            $changeAmount = (float) $this->input('change_amt', 0);
+            $payableAmount = max(0, (float) $this->input('payable_amount', 0));
+            $paidAmount = max(0, (float) $this->input('paid_amt', 0));
+            $receivingAmount = max(0, (float) $this->input('receiving_amt', 0));
+            $returnAmount = max(0, (float) $this->input('return_amt', 0));
 
-            if ($paidAmount > $payableAmount && $changeAmount <= 0) {
-                $validator->errors()->add('paid_amt', 'Paid amount cannot exceed payable amount unless change is given.');
+            $effectivePaid = min($payableAmount, $paidAmount);
+            $grossReceived = max($receivingAmount, $effectivePaid);
+            $maxAllowedReturn = max(0, $grossReceived - $effectivePaid);
+
+            if ($returnAmount > $maxAllowedReturn + 0.01) {
+                $validator->errors()->add('return_amt', 'Return amount cannot exceed the overpayment amount.');
+            }
+
+            $total = (float) $this->input('total', 0);
+            if ($total <= 0) {
+                return;
+            }
+
+            $maxDiscountPercent = $this->resolveMaxBillingDiscountPercent();
+            $discountType = (string) $this->input('discount_type', 'percentage');
+            $discountValue = (float) $this->input('discount', 0);
+            $extraFlatDiscount = (float) $this->input('extra_flat_discount', 0);
+
+            $discountAmount = $discountType === 'percentage'
+                ? ($total * $discountValue) / 100
+                : $discountValue;
+
+            $totalDiscountAmount = max(0, $discountAmount) + max(0, $extraFlatDiscount);
+            $appliedDiscountPercent = ($totalDiscountAmount / $total) * 100;
+
+            if ($appliedDiscountPercent > $maxDiscountPercent) {
+                $formattedMaxPercent = rtrim(rtrim(number_format($maxDiscountPercent, 2, '.', ''), '0'), '.');
+                $validator->errors()->add(
+                    'discount',
+                    "Total discount cannot exceed {$formattedMaxPercent}% of total bill amount."
+                );
             }
         });
+    }
+
+    private function resolveMaxBillingDiscountPercent(): float
+    {
+        $default = 100.0;
+
+        if (!function_exists('get_cached_web_setting')) {
+            return $default;
+        }
+
+        $setting = get_cached_web_setting();
+        $configured = (float) ($setting?->max_billing_discount_percent ?? $default);
+
+        return max(0, min(100, $configured));
     }
 
     /**
@@ -224,6 +271,12 @@ class BillingRequest extends FormRequest
     {
         $this->merge([
             'is_new_patient' => $this->input('is_new_patient', false),
+            'paid_amt' => (float) $this->input('paid_amt', 0),
+            'payable_amount' => (float) $this->input('payable_amount', 0),
+            'change_amt' => (float) $this->input('change_amt', 0),
+            'receiving_amt' => (float) $this->input('receiving_amt', 0),
+            'return_amt' => (float) $this->input('return_amt', 0),
+            'due_amount' => (float) $this->input('due_amount', 0),
         ]);
     }
 }

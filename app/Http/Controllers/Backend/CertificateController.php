@@ -21,6 +21,12 @@ class CertificateController extends Controller
     public function __construct(CertificateService $certificateService)
     {
         $this->certificateService = $certificateService;
+        $this->middleware('auth:admin');
+        $this->middleware('permission:certificate-list', ['only' => ['index', 'show']]);
+        $this->middleware('permission:certificate-create', ['only' => ['create', 'store']]);
+        $this->middleware('permission:certificate-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:certificate-delete', ['only' => ['destroy']]);
+        $this->middleware('permission:certificate-status', ['only' => ['changeStatus']]);
     }
 
 
@@ -127,11 +133,9 @@ class CertificateController extends Controller
 
             $data = $request->validated();
 
-            if ($request->hasFile('image'))
-                $data['image'] = $this->imageUpload($request->file('image'), 'certificates');
-
-            if ($request->hasFile('file'))
-                $data['file'] = $this->fileUpload($request->file('file'), 'certificates');
+            if ($request->hasFile('photo')) {
+                $data['photo'] = $this->imageUpload($request->file('photo'), 'certificates');
+            }
 
 
             $dataInfo = $this->certificateService->create($data);
@@ -193,26 +197,10 @@ class CertificateController extends Controller
             $data = $request->validated();
             $certificate = $this->certificateService->find($id);
 
-            if ($request->hasFile('image')) {
-                $data['image'] = $this->imageUpload($request->file('image'), 'certificates');
-                $path = strstr($certificate->image, 'storage/');
-                if (file_exists($path)) {
-                    unlink($path);
-                }
+            if ($request->hasFile('photo')) {
+                $data['photo'] = $this->imageUpload($request->file('photo'), 'certificates');
             } else {
-
-                $data['image'] = strstr($certificate->image ?? '', 'certificates');
-            }
-
-            if ($request->hasFile('file')) {
-                $data['file'] = $this->fileUpload($request->file('file'), 'certificates/');
-                $path = strstr($certificate->file, 'storage/');
-                if (file_exists($path)) {
-                    unlink($path);
-                }
-            } else {
-
-                $data['file'] = strstr($certificate->file ?? '', 'certificates/');
+                $data['photo'] = strstr((string) ($certificate->photo ?? ''), 'certificates');
             }
 
             $dataInfo = $this->certificateService->update($data, $id);

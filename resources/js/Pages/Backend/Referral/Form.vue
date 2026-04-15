@@ -48,6 +48,9 @@ watch([() => form.billing_id, () => form.payee_id], async () => {
     }
 });
 
+// Safely read CSRF token in browser
+const csrfToken = (typeof document !== 'undefined') ? (document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '') : '';
+
 const calculateCommissionPreview = async () => {
     if (!form.billing_id || !form.payee_id) return;
     
@@ -67,7 +70,7 @@ const calculateCommissionPreview = async () => {
             payee_id: payeeId,
         }, {
             headers: {
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                'X-CSRF-TOKEN': csrfToken,
                 'Accept': 'application/json',
                 'Content-Type': 'application/json',
             }

@@ -2,7 +2,11 @@
 
 namespace App\Services;
 
+use App\Models\Expense;
+use App\Models\ExpenseHead;
 use App\Models\Referral;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class ReferralService
 {
@@ -88,6 +92,163 @@ public function update(array $data, $id)
         $referral->update();
 
         return $referral;
+    }
+
+    public function recordCommissionPayment($id, $paymentType, $amount = null)
+    {
+        $referral = $this->referralModel->findOrFail($id);
+
+        $totalCommission = (float) $referral->total_commission_amount;
+        $currentPaid = (float) $referral->paid_amount;
+        $pending = max(0, $totalCommission - $currentPaid);
+
+        if ($pending <= 0) {
+            return $referral;
+        }
+
+        if ($paymentType === 'paid') {
+            $appliedAmount = $pending;
+        } else {
+            $amount = max(0, (float) $amount);
+            if ($amount <= 0) {
+                return $referral;
+            }
+            $appliedAmount = min($amount, $pending);
+        }
+        $newPaid = $currentPaid + $appliedAmount;
+
+        if ($newPaid >= $totalCommission) {
+            $paidStatus = 'Paid';
+        } elseif ($newPaid > 0) {
+            $paidStatus = 'Partial Paid';
+        } else {
+            $paidStatus = 'Unpaid';
+        }
+
+        $referral->update([
+            'paid_amount' => $newPaid,
+            'paid_status' => $paidStatus,
+            'last_paid_at' => Carbon::now()
+        ]);
+
+        $this->updateCommissionExpense($referral);
+
+        return $referral;
+    }
+
+    public function recordCommissionPaymentByPayee($payeeId, $paymentType, $amount = null)
+    {
+        $referrals = $this->referralModel
+            ->where('payee_id', $payeeId)
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->orderBy('date')
+            ->get();
+
+        if ($referrals->isEmpty()) {
+            return null;
+        }
+
+        $totalCommission = (float) $referrals->sum('total_commission_amount');
+        $totalPaid = (float) $referrals->sum('paid_amount');
+        $pending = max(0, $totalCommission - $totalPaid);
+
+        if ($pending <= 0) {
+            return $referrals;
+        }
+
+        if ($paymentType === 'paid') {
+            $amountToApply = $pending;
+        } else {
+            $amount = max(0, (float) $amount);
+            if ($amount <= 0) {
+                return $referrals;
+            }
+            $amountToApply = min($amount, $pending);
+        }
+
+        foreach ($referrals as $referral) {
+            if ($amountToApply <= 0) {
+                break;
+            }
+
+            $refPending = max(0, (float) $referral->total_commission_amount - (float) $referral->paid_amount);
+            if ($refPending <= 0) {
+                continue;
+            }
+
+            $apply = min($amountToApply, $refPending);
+            $newPaid = (float) $referral->paid_amount + $apply;
+
+            if ($newPaid >= (float) $referral->total_commission_amount) {
+                $paidStatus = 'Paid';
+            } elseif ($newPaid > 0) {
+                $paidStatus = 'Partial Paid';
+            } else {
+                $paidStatus = 'Unpaid';
+            }
+
+            $referral->update([
+                'paid_amount' => $newPaid,
+                'paid_status' => $paidStatus,
+                'last_paid_at' => Carbon::now()
+            ]);
+
+            $this->updateCommissionExpense($referral);
+
+            $amountToApply -= $apply;
+        }
+
+        return $referrals;
+    }
+
+    private function updateCommissionExpense(Referral $referral)
+    {
+        $commissionAmount = (float) $referral->paid_amount;
+        if ($commissionAmount <= 0) {
+            Log::info('Referral commission expense skipped (zero amount)', [
+                'referral_id' => $referral->id,
+                'bill_number' => $referral->billing->bill_number ?? null,
+            ]);
+            return;
+        }
+
+        $expenseHeader = ExpenseHead::firstOrCreate(
+            ['name' => 'Commission'],
+            ['status' => 'Active']
+        );
+
+        $expenseData = [
+            'expense_header_id' => $expenseHeader->id,
+            'bill_number' => $referral->billing->bill_number ?? null,
+            'case_id' => null,
+            'name' => $referral->payee->name ?? '',
+            'description' => 'Referral commission payment (Ref #' . $referral->id . ')',
+            'amount' => $commissionAmount,
+            'date' => Carbon::now()->toDateString(),
+            'status' => 'Active',
+            'updated_by' => auth('admin')->user()->id ?? null,
+            'created_by' => auth('admin')->user()->id ?? null,
+        ];
+
+        if (!empty($expenseData['bill_number'])) {
+            $expense = Expense::updateOrCreate(
+                ['bill_number' => $expenseData['bill_number']],
+                $expenseData
+            );
+
+            Log::info('Referral commission expense upserted', [
+                'referral_id' => $referral->id,
+                'bill_number' => $expenseData['bill_number'],
+                'amount' => $commissionAmount,
+                'expense_id' => $expense->id,
+            ]);
+        } else {
+            Log::warning('Referral commission expense skipped (missing bill_number)', [
+                'referral_id' => $referral->id,
+                'amount' => $commissionAmount,
+            ]);
+        }
     }
 
     public function activeList()

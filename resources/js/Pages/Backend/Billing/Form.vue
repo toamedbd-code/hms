@@ -6,7 +6,7 @@ import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import AlertMessage from '@/Components/AlertMessage.vue';
-import { displayResponse, displayWarning } from '@/responseMessage.js';
+import { displayResponse, displayWarning, showToastIfNoFlash } from '@/responseMessage.js';
 
 const props = defineProps(['billing', 'id']);
 
@@ -38,7 +38,8 @@ const submit = () => {
         onSuccess: (response) => {
             if (!props.id)
                 form.reset();
-            displayResponse(response);
+
+            showToastIfNoFlash(response);
         },
         onError: (errorObject) => {
 

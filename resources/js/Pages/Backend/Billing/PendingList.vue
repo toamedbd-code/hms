@@ -3,7 +3,7 @@ import { ref } from "vue";
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
-import { router } from '@inertiajs/vue3';
+import { router, usePage } from '@inertiajs/vue3';
 
 let props = defineProps({
     filters: Object,
@@ -20,6 +20,66 @@ const applyFilter = () => {
 
 const goToBillingAdd = () => {
     router.visit(route('backend.billing.view'));
+};
+
+const page = usePage();
+const showDueModal = ref(false);
+const dueForm = ref({
+    rowType: 'billing',
+    rowId: null,
+    billNo: 'N/A',
+    patientName: 'N/A',
+    dueAmount: 0,
+    amount: ''
+});
+
+const openDueModal = (rowType, rowId) => {
+    const rows = page.props?.datas?.data || [];
+    const row = rows.find((item) => String(item.row_id) === String(rowId) && String(item.row_type) === String(rowType));
+
+    dueForm.value.rowType = rowType;
+    dueForm.value.rowId = rowId;
+    dueForm.value.billNo = row?.bill_number || 'N/A';
+    dueForm.value.patientName = row?.patient_id || 'N/A';
+    dueForm.value.dueAmount = Number(row?.due_amount || 0);
+    dueForm.value.amount = '';
+    showDueModal.value = true;
+};
+
+const closeDueModal = () => {
+    showDueModal.value = false;
+    dueForm.value.amount = '';
+};
+
+const submitDueCollect = () => {
+    const amount = Number(dueForm.value.amount || 0);
+    const dueAmount = Number(dueForm.value.dueAmount || 0);
+
+    if (!Number.isFinite(amount) || amount <= 0 || amount > dueAmount) {
+        alert('Invalid amount.');
+        return;
+    }
+
+    const routeName = dueForm.value.rowType === 'opd'
+        ? 'backend.opd.due.collect.store'
+        : 'backend.due.collect.store';
+
+    router.post(route(routeName, dueForm.value.rowId), {
+        amount
+    }, {
+        preserveScroll: true,
+        onSuccess: () => {
+            closeDueModal();
+            router.reload({ only: ['datas'] });
+        }
+    });
+};
+
+const handleAction = (actionName, actionId) => {
+    if (actionName !== 'due-collect') return;
+    const [rowType, rowId] = String(actionId || '').split('|');
+    if (!rowType || !rowId) return;
+    openDueModal(rowType, rowId);
 };
 
 </script>
@@ -94,9 +154,58 @@ const goToBillingAdd = () => {
             </div>
 
             <div class="w-full my-3 overflow-x-auto">
-                <BaseTable />
+                <BaseTable @action="handleAction" />
             </div>
             <Pagination />
+        </div>
+
+        <div v-if="showDueModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div class="w-full max-w-md rounded-lg bg-white shadow-xl">
+                <div class="flex items-center justify-between border-b px-5 py-3">
+                    <h3 class="text-base font-semibold text-gray-800">Due Collect</h3>
+                    <button type="button" class="text-gray-500 hover:text-gray-700" @click="closeDueModal">✕</button>
+                </div>
+                <div class="px-5 py-4">
+                    <table class="w-full text-sm text-gray-700">
+                        <tr>
+                            <td class="py-1 font-semibold">Bill No</td>
+                            <td class="py-1">{{ dueForm.billNo }}</td>
+                        </tr>
+                        <tr>
+                            <td class="py-1 font-semibold">Patient</td>
+                            <td class="py-1">{{ dueForm.patientName }}</td>
+                        </tr>
+                        <tr>
+                            <td class="py-1 font-semibold">Due Amount</td>
+                            <td class="py-1 text-red-600 font-semibold">Tk {{ Number(dueForm.dueAmount || 0).toFixed(2) }}</td>
+                        </tr>
+                    </table>
+
+                    <div class="mt-4">
+                        <label class="mb-1 block text-sm font-semibold text-gray-700">Pay Amount</label>
+                        <input
+                            v-model="dueForm.amount"
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            :max="dueForm.dueAmount"
+                            @keydown.enter.prevent="submitDueCollect"
+                            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                        >
+                        <p class="mt-1 text-xs text-gray-500">Max: Tk {{ Number(dueForm.dueAmount || 0).toFixed(2) }}</p>
+                    </div>
+                </div>
+                <div class="flex items-center justify-end gap-2 border-t px-5 py-3">
+                    <button type="button" class="rounded-md bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700" @click="closeDueModal">Cancel</button>
+                    <button
+                        type="button"
+                        class="rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white"
+                        @click="submitDueCollect"
+                    >
+                        Collect Due
+                    </button>
+                </div>
+            </div>
         </div>
     </BackendLayout>
 </template>

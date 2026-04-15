@@ -1,9 +1,9 @@
 <script setup>
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
-import { router } from '@inertiajs/vue3';
+import { router, usePage } from '@inertiajs/vue3';
 
 const props = defineProps({
     filters: Object,
@@ -12,6 +12,18 @@ const props = defineProps({
 const filters = ref({
     name: props.filters?.name ?? '',
     numOfData: props.filters?.numOfData ?? 10,
+    expiry_filter: props.filters?.expiry_filter ?? 'all',
+});
+
+const page = usePage();
+const expiryAlert = computed(() => page.props?.pharmacyAlerts?.medicineExpiry || {
+    expired_count: 0,
+    expiring_soon_count: 0,
+});
+const totalAlerts = computed(() => {
+    const expired = Number(expiryAlert.value.expired_count || 0);
+    const expiringSoon = Number(expiryAlert.value.expiring_soon_count || 0);
+    return expired + expiringSoon;
 });
 
 const applyFilter = () => {
@@ -27,6 +39,11 @@ const applyFilter = () => {
 
 const goToInventoryAdd = () => {
     router.visit(route('backend.medicineinventory.create'));
+};
+
+const setExpiryFilter = (value) => {
+    filters.value.expiry_filter = value;
+    applyFilter();
 };
 </script>
 
@@ -88,6 +105,49 @@ const goToInventoryAdd = () => {
                     
                     </select>
                 </div>
+
+                <div class="md:col-span-5 flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        @click="setExpiryFilter('alerts')"
+                        class="px-3 py-1.5 text-xs font-semibold rounded border transition"
+                        :class="filters.expiry_filter === 'alerts'
+                            ? 'bg-violet-600 text-white border-violet-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'"
+                    >
+                        All Alerts ({{ totalAlerts }})
+                    </button>
+                    <button
+                        type="button"
+                        @click="setExpiryFilter('all')"
+                        class="px-3 py-1.5 text-xs font-semibold rounded border transition"
+                        :class="filters.expiry_filter === 'all'
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'"
+                    >
+                        All Medicines
+                    </button>
+                    <button
+                        type="button"
+                        @click="setExpiryFilter('expired')"
+                        class="px-3 py-1.5 text-xs font-semibold rounded border transition"
+                        :class="filters.expiry_filter === 'expired'
+                            ? 'bg-rose-600 text-white border-rose-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'"
+                    >
+                        Only Expired ({{ Number(expiryAlert.expired_count || 0) }})
+                    </button>
+                    <button
+                        type="button"
+                        @click="setExpiryFilter('expiring_soon')"
+                        class="px-3 py-1.5 text-xs font-semibold rounded border transition"
+                        :class="filters.expiry_filter === 'expiring_soon'
+                            ? 'bg-amber-500 text-white border-amber-500'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'"
+                    >
+                        Expiring Soon (30 Days) ({{ Number(expiryAlert.expiring_soon_count || 0) }})
+                    </button>
+                </div>
             </div>
 
             <!-- ===== Table ===== -->
@@ -96,7 +156,7 @@ const goToInventoryAdd = () => {
             </div>
 
             <!-- ===== Pagination ===== -->
-            <Pagination v-if="$page.props.data?.links" />
+            <Pagination v-if="$page.props.datas?.links" />
 
         </div>
 

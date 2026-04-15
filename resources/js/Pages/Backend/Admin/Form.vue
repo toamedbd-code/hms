@@ -9,8 +9,11 @@ import AlertMessage from '@/Components/AlertMessage.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 import AddItemModal from '@/Components/AddItemModal.vue';
 
-const props = defineProps(['user', 'id', 'roles', 'designations', 'departments', 'specialists', 'adminDetails']);
+const props = defineProps(['user', 'id', 'roles', 'designations', 'departments', 'specialists', 'adminDetails', 'hasPassword']);
 const showPassword = ref(false);
+const page = usePage();
+const lastSavedPassword = ref(page.props.flash?.savedPassword ?? '');
+const getPasswordStorageKey = () => `admin-last-saved-password-${props.id ?? 'new'}`;
 
 const showDesignationModal = ref(false);
 const showDepartmentModal = ref(false);
@@ -44,7 +47,6 @@ const form = useForm({
     phone: props.user?.phone ?? '',
     emergency_contact: props.adminDetails?.emergency_contact ?? '',
     email: props.user?.email ?? '',
-    password: props.user?.password ?? '',
     photo: '',
     photoPreview: props.user?.photo ?? '',
     role_id: props.user?.role_id ?? '',
@@ -52,7 +54,7 @@ const form = useForm({
     designation_id: props.adminDetails?.designation_id ?? '',
     department_id: props.adminDetails?.department_id ?? '',
     specialist_id: props.adminDetails?.specialist_id ?? '',
-    password: '',
+    password: lastSavedPassword.value || '',
     current_address: props.adminDetails?.current_address ?? '',
     permanent_address: props.adminDetails?.permanent_address ?? '',
     pan_number: props.adminDetails?.pan_number ?? '',
@@ -103,6 +105,28 @@ watch(() => form.role_id, (newRoleId) => {
     if (newRoleId != '2') {
         form.doctor_charge = '';
         form.specialist_id = '';
+    }
+});
+
+watch(() => page.props.flash?.savedPassword, (newValue) => {
+    lastSavedPassword.value = newValue ?? '';
+    if (lastSavedPassword.value) {
+        form.password = lastSavedPassword.value;
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(getPasswordStorageKey(), lastSavedPassword.value);
+        }
+    }
+});
+
+onMounted(() => {
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    const persisted = window.localStorage.getItem(getPasswordStorageKey()) || '';
+    if (persisted) {
+        lastSavedPassword.value = persisted;
+        form.password = persisted;
     }
 });
 
@@ -171,6 +195,13 @@ const submit = () => {
         };
     }).post(routeName, {
         onSuccess: (response) => {
+            if (form.password) {
+                lastSavedPassword.value = form.password;
+                if (typeof window !== 'undefined') {
+                    window.localStorage.setItem(getPasswordStorageKey(), form.password);
+                }
+            }
+
             if (!props.id)
                 form.reset();
             displayResponse(response);
@@ -461,6 +492,9 @@ const goToRoleList = () => {
                                     </svg>
                                 </button>
                             </div>
+                            <p v-if="lastSavedPassword" class="mt-1 text-xs text-green-600">
+                                Last saved password: {{ lastSavedPassword }}
+                            </p>
                             <InputError class="mt-2" :message="form.errors.password" />
                         </div>
 
@@ -578,14 +612,14 @@ const goToRoleList = () => {
 
                         <div class="col-span-1">
                             <InputLabel for="work_shift" value="Work Shift" />
-                            <input id="work_shift" v-model="form.leave_level" type="text" placeholder="Work Shift"
+                            <input id="work_shift" v-model="form.work_shift" type="text" placeholder="Work Shift"
                                 class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.work_shift" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="work_location" value="Work Location" />
-                            <input id="work_location" v-model="form.leave_level" type="text" placeholder="Work Location"
+                            <input id="work_location" v-model="form.work_location" type="text" placeholder="Work Location"
                                 class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.work_location" />
                         </div>

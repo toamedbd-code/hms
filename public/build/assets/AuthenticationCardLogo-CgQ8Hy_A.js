@@ -1,0 +1,1 @@
+import{c as a,w as o,a as t,u as e,m as c,o as r}from"./app-1GlCAcAS.js";const n="/build/assets/toamed-DqzF15ec.jpeg",_=["src"],p={__name:"AuthenticationCardLogo",setup(l){const s=n;return(i,u)=>(r(),a(e(c),{href:"/"},{default:o(()=>[t("img",{class:"w-32",src:e(s),alt:"logo"},null,8,_)]),_:1}))}};export{p as _};

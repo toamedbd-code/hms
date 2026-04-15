@@ -1,0 +1,16 @@
+name: Local Config
+version: 1.0.0
+schema: v1
+
+models:
+  - name: GPT-5.2
+    provider: openai
+    model: gpt-5.2
+    apiKey: ${OPENAI_API_KEY}
+
+autocompleteModel:
+  provider: openai
+  model: gpt-5.2
+  apiKey: ${OPENAI_API_KEY}
+
+

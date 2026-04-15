@@ -40,6 +40,7 @@ class PharmacyBillRequest extends FormRequest
             'net_amount' => 'required|numeric|min:0',
             'payment_mode' => 'required|in:Cash,Card,Bank Transfer',
             'payment_amount' => 'required|numeric|min:0',
+            'return_amount' => 'nullable|numeric|min:0',
             'note' => 'nullable|string',
         ];
 
@@ -82,6 +83,7 @@ class PharmacyBillRequest extends FormRequest
             'extra_discount' => (float) $this->extra_discount,
             'net_amount' => (float) $this->net_amount,
             'payment_amount' => (float) $this->payment_amount,
+            'return_amount' => (float) ($this->return_amount ?? 0),
         ]);
     }
 }

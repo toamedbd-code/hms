@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\MedicineSupplierRequest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use App\Services\MedicineSupplierService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -48,7 +49,10 @@ class MedicineSupplierController extends Controller
 
     private function getDatas()
     {
-        $query = $this->medicinesupplierService->list();
+        $query = $this->medicinesupplierService->list()
+            ->withSum('medicinePurchases as purchase_total_amount', 'total_amount')
+            ->withSum('medicinePurchases as purchase_paid_amount', 'paid_amount')
+            ->withSum('medicinePurchases as purchase_due_amount', 'due_amount');
 
         if (request()->filled('name'))
             $query->where('name', 'like', request()->name . '%');
@@ -59,6 +63,8 @@ class MedicineSupplierController extends Controller
 
         $formatedDatas = $datas->map(function ($data, $index) use ($user) {
             $customData = new \stdClass();
+            $gate = Gate::forUser($user);
+            $customData->id = $data->id;
             $customData->index = $index + 1;
             $customData->name = $data->name;
             $customData->phone = $data->phone;
@@ -66,11 +72,30 @@ class MedicineSupplierController extends Controller
             $customData->contact_person_phone = $data->contact_person_phone;
             $customData->drug_lisence_no = $data->drug_lisence_no;
             $customData->address = $data->address;
+            $customData->purchase_total_amount = number_format((float) ($data->purchase_total_amount ?? 0), 2);
+            $customData->purchase_paid_amount = number_format((float) ($data->purchase_paid_amount ?? 0), 2);
+            $customData->purchase_due_amount = number_format((float) ($data->purchase_due_amount ?? 0), 2);
+            $dueAmount = (float) ($data->purchase_due_amount ?? 0);
+            $customData->purchase_due_amount_numeric = $dueAmount;
+            $customData->payment_status = $dueAmount > 0
+                ? '<span class="px-2 py-1 text-xs rounded bg-amber-100 text-amber-700">Pending</span>'
+                : '<span class="px-2 py-1 text-xs rounded bg-emerald-100 text-emerald-700">Paid</span>';
             $customData->status = getStatusText($data->status);
 
             $customData->links = [];
 
-            if ($user->can('medicine-supplier-list-status')) {
+            if ($dueAmount > 0 && $gate->allows('supplier-payment-list-status')) {
+                $customData->links[] = [
+                    'linkClass' => 'bg-blue-600 text-white semi-bold',
+                    'linkStyle' => 'background: linear-gradient(to right, #3b82f6, #60a5fa); color: #ffffff; border: 0;',
+                    'link' => '#',
+                    'linkLabel' => getLinkLabel('Due Payment', null, null),
+                    'actionName' => 'supplier-due-payment',
+                    'actionId' => $data->id,
+                ];
+            }
+
+            if ($gate->allows('medicine-supplier-list-status')) {
                 $customData->links[] = [
                     'linkClass' => 'semi-bold text-white statusChange ' . (($data->status == 'Active') ? "bg-gray-500" : "bg-green-500"),
                     'link' => route('backend.medicinesupplier.status.change', ['id' => $data->id, 'status' => $data->status == 'Active' ? 'Inactive' : 'Active']),
@@ -78,7 +103,7 @@ class MedicineSupplierController extends Controller
                 ];
             }
 
-            if ($user->can('medicine-supplier-list-edit')) {
+            if ($gate->allows('medicine-supplier-list-edit')) {
                 $customData->links[] = [
                     'linkClass' => 'bg-yellow-400 text-black semi-bold',
                     'link' => route('backend.medicinesupplier.edit',  $data->id),
@@ -86,7 +111,7 @@ class MedicineSupplierController extends Controller
                 ];
             }
 
-            if ($user->can('medicine-supplier-list-delete')) {
+            if ($gate->allows('medicine-supplier-list-delete')) {
                 $customData->links[] = [
                     'linkClass' => 'deleteButton bg-red-500 text-white semi-bold',
                     'link' => route('backend.medicinesupplier.destroy', $data->id),
@@ -110,6 +135,10 @@ class MedicineSupplierController extends Controller
             ['fieldName' => 'contact_person_phone', 'class' => 'text-center'],
             ['fieldName' => 'drug_lisence_no', 'class' => 'text-center'],
             ['fieldName' => 'address', 'class' => 'text-center'],
+            ['fieldName' => 'purchase_total_amount', 'class' => 'text-center'],
+            ['fieldName' => 'purchase_paid_amount', 'class' => 'text-center'],
+            ['fieldName' => 'purchase_due_amount', 'class' => 'text-center'],
+            ['fieldName' => 'payment_status', 'class' => 'text-center'],
             ['fieldName' => 'status', 'class' => 'text-center'],
         ];
     }
@@ -123,6 +152,10 @@ class MedicineSupplierController extends Controller
             'Contact Person Phone',
             'Drug Lisence Number',
             'Address',
+            'Purchase Total',
+            'Paid',
+            'Due',
+            'Payment Status',
             'Status',
             'Action',
         ];

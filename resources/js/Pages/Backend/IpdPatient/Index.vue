@@ -1,25 +1,37 @@
 <script setup>
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { router } from '@inertiajs/vue3';
 
-let props = defineProps({
+const props = defineProps({
     filters: Object,
+    isDischargedPage: Boolean,
 });
 
 const filters = ref({
-
     numOfData: props.filters?.numOfData ?? 10,
 });
 
+const listRouteName = computed(() =>
+    props.isDischargedPage ? 'backend.ipdpatient.discharged' : 'backend.ipdpatient.index'
+);
+
 const applyFilter = () => {
-    router.get(route('backend.ipdpatient.index'), filters.value, { preserveState: true });
+    router.get(route(listRouteName.value), filters.value, { preserveState: true });
 };
 
 const goToIpdAdd = () => {
     router.visit(route('backend.ipdpatient.create'));
+};
+
+const goToAllList = () => {
+    router.visit(route('backend.ipdpatient.index'));
+};
+
+const goToDischargedList = () => {
+    router.visit(route('backend.ipdpatient.discharged'));
 };
 
 </script>
@@ -36,6 +48,23 @@ const goToIpdAdd = () => {
                 </div>
 
                 <div class="p-4 py-2 flex items-center space-x-2">
+                    <div class="flex items-center space-x-2">
+                        <button @click="goToAllList" type="button"
+                            class="px-3 py-2 text-sm font-semibold rounded-md border"
+                            :class="!props.isDischargedPage
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'">
+                            All IPD
+                        </button>
+                        <button @click="goToDischargedList" type="button"
+                            class="px-3 py-2 text-sm font-semibold rounded-md border"
+                            :class="props.isDischargedPage
+                                ? 'bg-amber-600 text-white border-amber-600'
+                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'">
+                            Discharged
+                        </button>
+                    </div>
+
                     <div class="flex items-center space-x-3">
                         <button @click="goToIpdAdd"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out"

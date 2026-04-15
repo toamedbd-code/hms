@@ -13,13 +13,13 @@ import Breadcrumb from '@/Layouts/Partials/Breadcrumb.vue';
         <Head :title="$page.props.pageTitle" />
 
 
-        <div class="w-full bg-slate-300 dark:bg-slate-950">
+        <div class="w-full app-shell-surface dark:bg-slate-950">
             <Navbar />
 
             <div class="flex w-full">
                 <Sidebar />
 
-                <div class="w-full h-[calc(100vh-48px)] mt-12 overflow-y-auto p-2 bg-gray-200">
+                <div class="w-full h-[calc(100vh-48px)] mt-12 overflow-y-auto p-2 app-content-surface">
                     <Breadcrumb :breadcrumbs="$page.props.breadcrumbs" />
                     <main>
                         <slot />
@@ -35,24 +35,38 @@ import Breadcrumb from '@/Layouts/Partials/Breadcrumb.vue';
 <style>
 /* width */
 ::-webkit-scrollbar {
-    width: 3px;
-    height: 5px;
+    width: 10px;
+    height: 10px;
 }
 
 /* Track */
 ::-webkit-scrollbar-track {
-    box-shadow: inset 0 0 5px grey;
-    border-radius: 10px;
+    background: color-mix(in srgb, var(--app-theme-soft) 26%, #e2e8f0);
+    border-radius: 8px;
 }
 
 /* Handle */
 ::-webkit-scrollbar-thumb {
-    background: rgb(17, 0, 62);
-    border-radius: 10px;
+    background: color-mix(in srgb, var(--app-theme-primary) 40%, #94a3b8);
+    border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--app-theme-primary) 56%, #64748b);
+}
+
+.app-shell-surface {
+    background:
+        radial-gradient(circle at top right, color-mix(in srgb, var(--app-theme-soft) 55%, white) 0%, transparent 58%),
+        linear-gradient(160deg, color-mix(in srgb, var(--app-theme-soft) 52%, #e2e8f0) 0%, color-mix(in srgb, var(--app-theme-surface) 78%, #f8fafc) 100%);
+}
+
+.app-content-surface {
+    background: color-mix(in srgb, var(--app-theme-surface) 86%, #f8fafc);
 }
 
 
 body {
-    background-color: #f8f3f2 !important;
+    background-color: color-mix(in srgb, var(--app-theme-surface) 88%, #ffffff) !important;
 }
 </style>

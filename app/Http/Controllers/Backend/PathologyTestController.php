@@ -12,6 +12,11 @@ use App\Services\TestCategoryService;
 use App\Services\PathologyParameterService;
 use App\Services\PathologyUnitService;
 use App\Services\TestService;
+use App\Models\Test;
+use App\Models\TestCategory;
+use App\Models\Charge;
+use App\Models\PathologyUnit;
+use App\Models\PathologyParameter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -50,6 +55,7 @@ class PathologyTestController extends Controller
         $this->middleware('auth:admin');
         $this->middleware('permission:test-list');
         $this->middleware('permission:test-list-create', ['only' => ['create', 'store']]);
+        $this->middleware('permission:test-list-create', ['only' => ['importCsv']]);
         $this->middleware('permission:test-list-edit', ['only' => ['edit', 'update']]);
         $this->middleware('permission:test-list-delete', ['only' => ['destroy']]);
         $this->middleware('permission:test-list-status', ['only' => ['changeStatus']]);
@@ -66,6 +72,341 @@ class PathologyTestController extends Controller
                 'datas' => fn() => $this->getDatas(),
             ]
         );
+    }
+
+    public function search(Request $request)
+    {
+        $query = trim((string) $request->get('q', ''));
+
+        if ($query === '') {
+            return response()->json(['results' => []]);
+        }
+
+        $results = Test::query()
+            ->where('status', 'Active')
+            ->where('test_name', 'like', '%' . $query . '%')
+            ->orderBy('test_name')
+            ->limit(15)
+            ->pluck('test_name')
+            ->values();
+
+        return response()->json(['results' => $results]);
+    }
+
+    public function downloadSampleCsv()
+    {
+        $content = "category_type,test_name,test_category,test_short_name,test_sub_category,method,report_days,tax,standard_charge,amount,reference_from,reference_to,unit\n"
+            . "Pathology,Complete Blood Count,Hematology,CBC,,Automated,1,0,500,500,12.0,16.0,g/dL\n"
+            . "Radiology,Chest X-Ray,Radiology,ChestXR,,X-Ray,0,0,800,800,,,\n";
+
+        return response()->streamDownload(function () use ($content) {
+            echo $content;
+        }, 'test-sample.csv', [
+            'Content-Type' => 'text/csv',
+        ]);
+    }
+
+    public function importCsv(Request $request)
+    {
+        $request->validate([
+            'csv_file' => 'required|file|mimes:csv,txt|max:5120',
+        ], [
+            'csv_file.uploaded' => 'CSV upload failed. Check file size or server upload limits.',
+            'csv_file.max' => 'CSV file must be 5 MB or smaller.',
+        ]);
+
+        $file = $request->file('csv_file');
+        $path = $file->getRealPath();
+
+        if (!$path || !file_exists($path)) {
+            return redirect()
+                ->back()
+                ->with('errorMessage', 'Invalid CSV file.');
+        }
+
+        $handle = fopen($path, 'r');
+        if (!$handle) {
+            return redirect()
+                ->back()
+                ->with('errorMessage', 'Unable to read CSV file.');
+        }
+
+        DB::beginTransaction();
+        try {
+            $header = fgetcsv($handle);
+            if (!$header) {
+                fclose($handle);
+                return redirect()
+                    ->back()
+                    ->with('errorMessage', 'CSV file is empty.');
+            }
+
+            $header = array_map(function ($value) {
+                return strtolower(trim((string) $value));
+            }, $header);
+
+            $imported = 0;
+            $skipped = 0;
+            $duplicates = 0;
+
+            while (($row = fgetcsv($handle)) !== false) {
+                if (!array_filter($row, fn($cell) => trim((string) $cell) !== '')) {
+                    continue;
+                }
+
+                $rowData = [];
+                foreach ($header as $index => $key) {
+                    $rowData[$key] = isset($row[$index]) ? trim((string) $row[$index]) : null;
+                }
+
+                $categoryType = strtolower((string)($rowData['category_type'] ?? ''));
+                if (!in_array($categoryType, ['pathology', 'radiology'], true)) {
+                    $skipped++;
+                    continue;
+                }
+
+                $testName = $rowData['test_name'] ?? null;
+                $categoryName = $rowData['test_category'] ?? $rowData['main_category'] ?? null;
+
+                if (!$testName || !$categoryName) {
+                    $skipped++;
+                    continue;
+                }
+
+                $exists = Test::query()
+                    ->where('test_name', $testName)
+                    ->exists();
+
+                if ($exists) {
+                    $duplicates++;
+                    continue;
+                }
+
+                $category = TestCategory::firstOrCreate([
+                    'name' => $categoryName,
+                ], [
+                    'status' => 'Active',
+                ]);
+
+                $subCategoryId = null;
+                $subCategoryName = $rowData['test_sub_category'] ?? $rowData['sub_category'] ?? null;
+                if ($subCategoryName) {
+                    $subCategory = TestCategory::firstOrCreate([
+                        'name' => $subCategoryName,
+                        'parent_id' => $category->id,
+                    ], [
+                        'status' => 'Active',
+                    ]);
+                    $subCategoryId = (string) $subCategory->id;
+                }
+
+                $shortName = $rowData['test_short_name'] ?? null;
+                if (!$shortName) {
+                    $words = preg_split('/\s+/', trim($testName));
+                    $shortName = implode('', array_map(fn($w) => strtoupper(substr($w, 0, 1)), $words));
+                }
+
+                $testType = $rowData['test_type'] ?? $testName;
+
+                $normalizeNullable = function ($value) {
+                    $trimmed = trim((string) $value);
+                    return $trimmed === '' ? null : $trimmed;
+                };
+
+                $normalizeNullableNumber = function ($value) {
+                    $trimmed = trim((string) $value);
+                    if ($trimmed === '' || !is_numeric($trimmed)) {
+                        return null;
+                    }
+
+                    return $trimmed;
+                };
+
+                $reportDays = $normalizeNullableNumber($rowData['report_days'] ?? null);
+                $normalRange = $normalizeNullable($rowData['normal_range'] ?? null);
+                $chargeCategoryId = $normalizeNullableNumber($rowData['charge_category_id'] ?? null);
+                $chargeName = $normalizeNullable($rowData['charge_name'] ?? null);
+                $tax = $normalizeNullable($rowData['tax'] ?? null);
+                $standardCharge = $normalizeNullableNumber($rowData['standard_charge'] ?? null);
+                $amount = $normalizeNullableNumber($rowData['amount'] ?? null);
+
+                // If upload only provides test_name, use it for charge_name by default.
+                $chargeName = $chargeName ?? $testName;
+
+                if ($chargeCategoryId === null && $chargeName !== null) {
+                    $matchedCharge = Charge::query()
+                        ->whereRaw('LOWER(name) = ?', [strtolower($chargeName)])
+                        ->first();
+
+                    if ($matchedCharge) {
+                        $chargeCategoryId = $matchedCharge->id;
+                        $tax = $tax ?? $matchedCharge->tax;
+                        $standardCharge = $standardCharge ?? $matchedCharge->standard_charge;
+
+                        if ($amount === null && $standardCharge !== null) {
+                            $standardChargeFloat = (float) $standardCharge;
+                            $taxFloat = (float) ($tax ?? 0);
+                            $amount = (string) ($standardChargeFloat + (($standardChargeFloat * $taxFloat) / 100));
+                        }
+                    }
+                }
+
+                $splitList = function (?string $value) {
+                    if ($value === null) {
+                        return [];
+                    }
+
+                    $parts = array_map('trim', explode('|', $value));
+                    return array_values(array_filter($parts, fn($part) => $part !== ''));
+                };
+
+                $parameterNames = $splitList($normalizeNullable($rowData['parameter_name'] ?? $rowData['test_parameter_name'] ?? null));
+                $referenceFroms = $splitList($normalizeNullable($rowData['reference_from'] ?? $rowData['referance_from'] ?? null));
+                $referenceTos = $splitList($normalizeNullable($rowData['reference_to'] ?? $rowData['referance_to'] ?? null));
+                $unitNames = $splitList($normalizeNullable($rowData['unit'] ?? $rowData['unit_name'] ?? null));
+
+                // If parameter_name is missing, keep it same as test_name.
+                if (empty($parameterNames)) {
+                    $parameterNames = [$testName];
+                }
+
+                $maxParameterRows = max(count($parameterNames), count($referenceFroms), count($referenceTos), count($unitNames));
+                $parameterPayloads = [];
+
+                for ($index = 0; $index < $maxParameterRows; $index++) {
+                    $parameterName = $parameterNames[$index] ?? ($maxParameterRows === 1 ? ($parameterNames[0] ?? null) : null);
+                    $referenceFrom = $referenceFroms[$index] ?? ($maxParameterRows === 1 ? ($referenceFroms[0] ?? null) : null);
+                    $referenceTo = $referenceTos[$index] ?? ($maxParameterRows === 1 ? ($referenceTos[0] ?? null) : null);
+                    $unitName = $unitNames[$index] ?? ($maxParameterRows === 1 ? ($unitNames[0] ?? null) : null);
+
+                    if ($parameterName === null && $referenceFrom === null && $referenceTo === null && $unitName === null) {
+                        continue;
+                    }
+
+                    $unitId = null;
+                    if ($unitName !== null) {
+                        $unit = PathologyUnit::query()->firstOrCreate([
+                            'name' => $unitName,
+                        ]);
+
+                        $unitId = $unit->id;
+                    }
+
+                    $testParameterId = null;
+                    if ($parameterName !== null) {
+                        $matchedParameter = PathologyParameter::query()
+                            ->whereRaw('LOWER(name) = ?', [strtolower($parameterName)])
+                            ->first();
+
+                        if (!$matchedParameter) {
+                            if ($unitId === null) {
+                                $fallbackUnit = PathologyUnit::query()->firstOrCreate([
+                                    'name' => 'N/A',
+                                ]);
+                                $unitId = $fallbackUnit->id;
+                            }
+
+                            $matchedParameter = PathologyParameter::query()->create([
+                                'name' => $parameterName,
+                                'referance_from' => $referenceFrom ?? '',
+                                'referance_to' => $referenceTo ?? '',
+                                'pathology_unit_id' => $unitId,
+                                'description' => null,
+                                'status' => 'Active',
+                            ]);
+                        }
+
+                        $testParameterId = $matchedParameter->id;
+                        $parameterName = $matchedParameter->name;
+                        $unitId = $unitId ?? $matchedParameter->pathology_unit_id;
+                        $referenceFrom = $referenceFrom ?? $matchedParameter->referance_from;
+                        $referenceTo = $referenceTo ?? $matchedParameter->referance_to;
+                    }
+
+                    $parameterPayloads[] = [
+                        'test_parameter_id' => $testParameterId,
+                        'name' => $parameterName,
+                        'reference_from' => $referenceFrom,
+                        'reference_to' => $referenceTo,
+                        'pathology_unit_id' => $unitId,
+                    ];
+                }
+
+                if (empty($parameterPayloads) && $normalRange !== null) {
+                    $parameterPayloads[] = [
+                        'test_parameter_id' => null,
+                        'name' => 'Normal Range',
+                        'reference_from' => $normalRange,
+                        'reference_to' => null,
+                        'pathology_unit_id' => null,
+                    ];
+                }
+
+                $importedParameters = null;
+                if (!empty($parameterPayloads)) {
+                    $importedParameters = json_encode(array_map(function ($parameter) {
+                        return [
+                            'test_parameter_id' => $parameter['test_parameter_id'],
+                            'name' => $parameter['name'],
+                            'referance_from' => $parameter['reference_from'],
+                            'referance_to' => $parameter['reference_to'],
+                            'pathology_unit_id' => $parameter['pathology_unit_id'],
+                        ];
+                    }, $parameterPayloads));
+                }
+
+                $test = Test::create([
+                    'category_type' => ucfirst($categoryType),
+                    'test_name' => $testName,
+                    'test_short_name' => $shortName,
+                    'test_type' => $testType,
+                    'test_category_id' => $category->id,
+                    'test_sub_category_id' => $subCategoryId,
+                    'method' => $rowData['method'] ?? null,
+                    'report_days' => $reportDays,
+                    'charge_category_id' => $chargeCategoryId,
+                    'charge_name' => $chargeName,
+                    'tax' => $tax,
+                    'standard_charge' => $standardCharge,
+                    'amount' => $amount,
+                    'test_parameters' => $importedParameters,
+                    'status' => 'Active',
+                ]);
+
+                foreach ($parameterPayloads as $parameterPayload) {
+                    DB::table('pathology_test_parameters')->insert([
+                        'pathology_test_id' => $test->id,
+                        'test_parameter_id' => $parameterPayload['test_parameter_id'],
+                        'name' => $parameterPayload['name'],
+                        'reference_from' => $parameterPayload['reference_from'],
+                        'reference_to' => $parameterPayload['reference_to'],
+                        'pathology_unit_id' => $parameterPayload['pathology_unit_id'],
+                    ]);
+                }
+
+                $imported++;
+            }
+
+            fclose($handle);
+
+            $message = 'Tests imported: ' . $imported . '. Skipped: ' . $skipped . '. Duplicates: ' . $duplicates . '.';
+            $this->storeAdminWorkLog(0, 'tests', $message);
+
+            DB::commit();
+
+            return redirect()
+                ->back()
+                ->with('successMessage', $message);
+        } catch (Exception $err) {
+            fclose($handle);
+            DB::rollBack();
+            $this->storeSystemError('Backend', 'PathologyTestController', 'importCsv', substr($err->getMessage(), 0, 1000));
+            DB::commit();
+
+            return redirect()
+                ->back()
+                ->with('errorMessage', 'Server Errors Occur. Please Try Again.');
+        }
     }
 
     private function getDatas()
@@ -184,7 +525,7 @@ class PathologyTestController extends Controller
                 'test_sub_category_id' => $data['test_sub_category_id'] ?? null,
                 'method' => $data['method'] ?? null,
                 'report_days' => $data['report_days'] ?? null,
-                'charge_category_id' => $data['charge_id'] ?? null,
+                'charge_category_id' => $data['charge_id'] ?? $data['charge_category_id'] ?? null,
                 'charge_name' => $data['charge_name'] ?? null,
                 'tax' => $data['tax'] ?? null,
                 'standard_charge' => $data['standard_charge'] ?? null,
@@ -311,7 +652,7 @@ class PathologyTestController extends Controller
                 'test_sub_category_id' => $data['test_sub_category_id'] ?? null,
                 'method' => $data['method'] ?? null,
                 'report_days' => $data['report_days'] ?? null,
-                'charge_category_id' => $data['charge_id'] ?? null,
+                'charge_category_id' => $data['charge_id'] ?? $data['charge_category_id'] ?? null,
                 'charge_name' => $data['charge_name'] ?? null,
                 'tax' => $data['tax'] ?? null,
                 'standard_charge' => $data['standard_charge'] ?? null,

@@ -1,10 +1,10 @@
 <script setup>
-import { ref, computed, watch, nextTick, onMounted } from "vue";
-import { router, useForm } from "@inertiajs/vue3";
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
+import { router, useForm, usePage } from "@inertiajs/vue3";
 import InputLabel from "@/Components/InputLabel.vue";
 import { Head } from "@inertiajs/vue3";
 import PatientModal from "@/Components/PatientModal.vue";
-import { displayResponse, displayWarning } from "@/responseMessage.js";
+import { displayResponse, displayWarning, successMessage } from "@/responseMessage.js";
 import { debounce } from 'lodash';
 import { parse, format, isValid, differenceInYears, differenceInMonths, differenceInDays, subYears, subMonths, subDays } from 'date-fns';
 
@@ -22,6 +22,14 @@ const props = defineProps({
   billingDoctors: Array,
 });
 
+const page = usePage();
+const unitCompanyName = computed(() => page.props.webSetting?.company_name || 'ToaMed.');
+const maxBillingDiscountPercent = computed(() => {
+  const raw = Number(page.props?.webSetting?.max_billing_discount_percent ?? 100);
+  if (!Number.isFinite(raw)) return 100;
+  return Math.min(100, Math.max(0, raw));
+});
+
 const isPatientModalOpen = ref(false);
 const patientsList = ref([...props.patients]);
 
@@ -34,10 +42,11 @@ const payModeRef = ref(null);
 const cardNumberRef = ref(null);
 const discountRef = ref(null);
 const extraDiscountRef = ref(null);
-const takingAmtRef = ref(null);
 const receivingAmtRef = ref(null);
 const deliveryDateRef = ref(null);
 const deliveryTimeRef = ref(null);
+const billingDateRef = ref(null);
+const billingTimeRef = ref(null);
 const remarksRef = ref(null);
 const referrerSelectRef = ref(null);
 const commissionSliderRef = ref(null);
@@ -100,12 +109,27 @@ const summary = ref({
   changeAmt: 0.0,
   dueAmount: 0.0,
   receivingAmt: 0.0,
-  takingAmt: 0.0,
   returnAmt: 0.0,
   deliveryDate: "",
   deliveryTime: "",
   remarks: "",
 });
+
+const billingDate = ref("");
+const billingTime = ref("");
+const billingDateTouched = ref(false);
+const billingEditing = ref(false);
+const billingLiveText = ref("");
+const prescriptionSearchId = ref('');
+const prescriptionSearchLoading = ref(false);
+const prescriptionSuggestions = ref([]);
+const prescriptionSuggestionLoading = ref(false);
+const showPrescriptionSuggestions = ref(false);
+const prescriptionSearchInputRef = ref(null);
+let billingLiveTimer = null;
+
+const deliveryDateTouched = ref(false);
+let deliveryLiveTimer = null;
 
 const commission = ref({
   total: 0.0,
@@ -137,24 +161,68 @@ const selectedIndex = ref(-1);
 const getCurrentDateTime = () => {
   const now = new Date();
   const date = format(now, 'yyyy-MM-dd');
-  const time = format(now, 'HH:mm');
+  const time = format(now, 'HH:mm:ss');
   return { date, time };
 };
 
-const setCurrentDeliveryDateTime = () => {
-  const now = new Date();
+const setCurrentBillingDateTime = () => {
+  const { date, time } = getCurrentDateTime();
+  billingDate.value = date;
+  billingTime.value = time;
+  billingLiveText.value = `${date} ${time}`;
+};
 
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
+const startBillingLiveClock = () => {
+  if (billingLiveTimer) return;
+  billingLiveTimer = setInterval(() => {
+    if (!billingDateTouched.value) {
+      setCurrentBillingDateTime();
+    }
+  }, 1000);
+};
+
+const handleBillingDateTimeInput = () => {
+  billingDateTouched.value = !!billingDate.value || !!billingTime.value;
+};
+
+const setCurrentDeliveryDateTime = () => {
+  // Set delivery time to the next occurrence of 7:00 PM (19:00)
+  const now = new Date();
+  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 19, 0, 0, 0);
+  if (now >= target) {
+    // If it's already past 7 PM today, use tomorrow 7 PM
+    target.setDate(target.getDate() + 1);
+  }
+
+  const year = target.getFullYear();
+  const month = String(target.getMonth() + 1).padStart(2, '0');
+  const day = String(target.getDate()).padStart(2, '0');
+  const hours = String(target.getHours()).padStart(2, '0');
+  const minutes = String(target.getMinutes()).padStart(2, '0');
 
   const datetimeLocal = `${year}-${month}-${day}T${hours}:${minutes}`;
 
   summary.value.deliveryDate = datetimeLocal;
-
   summary.value.deliveryTime = `${hours}:${minutes}`;
+};
+
+const ensureDeliveryDateTime = () => {
+  if (!summary.value.deliveryDate) {
+    setCurrentDeliveryDateTime();
+  }
+};
+
+const handleDeliveryDateInput = () => {
+  deliveryDateTouched.value = !!summary.value.deliveryDate;
+};
+
+const startDeliveryLiveClock = () => {
+  if (deliveryLiveTimer) return;
+  deliveryLiveTimer = setInterval(() => {
+    if (!deliveryDateTouched.value) {
+      setCurrentDeliveryDateTime();
+    }
+  }, 1000);
 };
 
 const openDropdown = (selectRef) => {
@@ -426,15 +494,6 @@ const handleExtraDiscountEnter = (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     nextTick(() => {
-      takingAmtRef.value?.focus();
-    });
-  }
-};
-
-const handleTakingAmtEnter = (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    nextTick(() => {
       receivingAmtRef.value?.focus();
     });
   }
@@ -452,7 +511,7 @@ const handleReceivingAmtEnter = (event) => {
 const handleDeliveryDateEnter = (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-    setCurrentDeliveryDateTime();
+    ensureDeliveryDateTime();
     nextTick(() => {
       if (remarksRef.value && typeof remarksRef.value.focus === 'function') {
         remarksRef.value.focus();
@@ -464,8 +523,7 @@ const handleDeliveryDateEnter = (event) => {
 const handleDeliveryTimeEnter = (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-
-    setCurrentDeliveryDateTime();
+    ensureDeliveryDateTime();
 
     nextTick(() => {
       if (remarksRef.value && typeof remarksRef.value.focus === 'function') {
@@ -909,11 +967,11 @@ watch(() => summary.value.extraFlatDiscount, () => {
   updateSummary();
 });
 
-watch(() => summary.value.takingAmt, () => {
+watch(() => summary.value.receivingAmt, () => {
   calculateChangeAndDue();
 });
 
-watch(() => summary.value.receivingAmt, () => {
+watch(() => summary.value.payableAmount, () => {
   calculateChangeAndDue();
 });
 
@@ -924,36 +982,6 @@ watch([() => summary.value.discount, () => summary.value.discountType], () => {
 watch(() => commission.value.slider, () => {
   commission.value.commissionRate = commission.value.slider;
   updateCommission();
-});
-
-watch(() => summary.value.paidAmt, () => {
-  calculateChangeAndDue();
-});
-
-watch(() => summary.value.receivingAmt, () => {
-  const receivingAmount = parseFloat(summary.value.receivingAmt) || 0;
-  const paidAmount = parseFloat(summary.value.paidAmt) || 0;
-
-  if (props.id && props.editData) {
-    const originalPaidAmount = parseFloat(props.editData.paid_amt) || 0;
-
-    if (receivingAmount > 0) {
-      const newPaidAmount = originalPaidAmount + receivingAmount;
-      summary.value.paidAmt = Math.min(newPaidAmount, summary.value.payableAmount);
-      summary.value.paidAmt = parseFloat(summary.value.paidAmt.toFixed(2));
-    } else {
-      summary.value.paidAmt = originalPaidAmount;
-    }
-  } else {
-    if (receivingAmount > 0) {
-      summary.value.paidAmt = Math.min(receivingAmount, summary.value.payableAmount);
-      summary.value.paidAmt = parseFloat(summary.value.paidAmt.toFixed(2));
-    } else {
-      summary.value.paidAmt = 0;
-    }
-  }
-
-  calculateChangeAndDue();
 });
 
 watch(selectedIndex, (newIndex) => {
@@ -1090,31 +1118,29 @@ const updateCommission = () => {
 };
 
 const calculateChangeAndDue = () => {
-  const payableAmount = summary.value.payableAmount;
-  let paidAmount = parseFloat(summary.value.paidAmt) || 0;
-  let receivingAmount = parseFloat(summary.value.receivingAmt) || 0;
-  let takingAmount = parseFloat(summary.value.takingAmt) || 0;
+  const roundMoney = (value) => parseFloat((value || 0).toFixed(2));
+  const payableAmount = Math.max(0, parseFloat(summary.value.payableAmount) || 0);
+  const receivingAmount = Math.max(0, parseFloat(summary.value.receivingAmt) || 0);
 
-  if (props.id && props.editData) {
-    const originalPaidAmount = parseFloat(props.editData.paid_amt) || 0;
+  // Keep edit mode behavior: receiving amount is treated as additional payment.
+  const originalPaidAmount = props.id && props.editData
+    ? Math.max(0, parseFloat(props.editData.paid_amt) || 0)
+    : 0;
 
-    if (receivingAmount > 0) {
-      paidAmount = originalPaidAmount + receivingAmount;
-      summary.value.paidAmt = Math.min(paidAmount, payableAmount);
-    } else {
-      paidAmount = originalPaidAmount;
-    }
-  }
+  const requestedPaid = props.id && props.editData
+    ? originalPaidAmount + receivingAmount
+    : receivingAmount;
 
-  summary.value.returnAmt = Math.max(0, takingAmount - receivingAmount);
+  const effectivePaid = Math.min(payableAmount, requestedPaid);
+  const grossReceived = Math.max(receivingAmount, effectivePaid);
+  const returnAmount = Math.max(0, grossReceived - effectivePaid);
+  const dueAmount = Math.max(0, payableAmount - effectivePaid);
 
-  if (paidAmount >= payableAmount) {
-    summary.value.changeAmt = parseFloat((paidAmount - payableAmount).toFixed(2));
-    summary.value.dueAmount = 0;
-  } else {
-    summary.value.changeAmt = 0;
-    summary.value.dueAmount = parseFloat((payableAmount - paidAmount).toFixed(2));
-  }
+  summary.value.receivingAmt = roundMoney(receivingAmount);
+  summary.value.paidAmt = roundMoney(effectivePaid);
+  summary.value.returnAmt = roundMoney(returnAmount);
+  summary.value.changeAmt = 0;
+  summary.value.dueAmount = roundMoney(dueAmount);
 };
 
 const commissionBreakdown = computed(() => {
@@ -1196,6 +1222,17 @@ const allAvailableItems = computed(() => {
     }));
 
   return [...tests, ...medicines];
+});
+
+const deliveryDateFormatted = computed(() => {
+  const raw = summary.value.deliveryDate;
+  if (!raw) return "";
+  try {
+    const d = new Date(raw);
+    return format(d, 'dd-MMM-yyyy');
+  } catch (e) {
+    return "";
+  }
 });
 
 const filteredItems = computed(() => {
@@ -1323,9 +1360,232 @@ const removeItem = (index) => {
   updateSummary();
 };
 
+const normalizeText = (value) => String(value ?? '').trim().toLowerCase();
+
+const applyPrescriptionPatient = (patient) => {
+  if (!patient || typeof patient !== 'object') {
+    return;
+  }
+
+  isNewPatient.value = false;
+  isNewPatientFlag.value = false;
+
+  if (patient.id) {
+    patientForm.value.patient_id = patient.id;
+  }
+
+  patientSearchQuery.value = patient.name ?? patientSearchQuery.value;
+  patientForm.value.patientMobile = patient.phone ?? patientForm.value.patientMobile;
+  patientForm.value.gender = patient.gender ?? patientForm.value.gender;
+  patientForm.value.dob = patient.dob ?? patientForm.value.dob;
+  calculateAgeFromDOB(patientForm.value.dob);
+};
+
+const addPrescriptionTestsToItems = (tests = []) => {
+  const availableTests = props.pathologyAndRadiologyTests.map((test) => ({
+    id: test.id,
+    name: String(test.test_name ?? '').trim(),
+    category: String(test.category_type ?? 'Pathology').trim(),
+    unitPrice: Number(test.amount ?? 0),
+  }));
+
+  const existingKeys = new Set(
+    items.value
+      .filter((item) => String(item.category ?? '').toLowerCase() !== 'medicine')
+      .map((item) => `${normalizeText(item.name)}::${normalizeText(item.category)}`)
+  );
+
+  let addedCount = 0;
+  let skippedCount = 0;
+
+  tests.forEach((rawName) => {
+    const targetName = String(rawName ?? '').trim();
+    if (!targetName) {
+      return;
+    }
+
+    const matched = availableTests.find((test) => normalizeText(test.name) === normalizeText(targetName));
+    if (!matched) {
+      skippedCount += 1;
+      return;
+    }
+
+    const uniqueKey = `${normalizeText(matched.name)}::${normalizeText(matched.category)}`;
+    if (existingKeys.has(uniqueKey)) {
+      skippedCount += 1;
+      return;
+    }
+
+    items.value.push({
+      id: matched.id,
+      name: matched.name,
+      category: matched.category,
+      unitPrice: matched.unitPrice,
+      quantity: 1,
+      totalAmount: matched.unitPrice,
+      discount: 0,
+      rugound: 0,
+      netAmount: matched.unitPrice,
+    });
+
+    existingKeys.add(uniqueKey);
+    addedCount += 1;
+  });
+
+  if (addedCount > 0) {
+    updateSummary();
+  }
+
+  return { addedCount, skippedCount };
+};
+
+const searchPrescriptionCharge = async () => {
+  const trimmedId = String(prescriptionSearchId.value ?? '').trim();
+  if (!trimmedId) {
+    displayWarning({ message: 'Prescription ID দিন।' });
+    return;
+  }
+
+  prescriptionSearchLoading.value = true;
+
+  try {
+    const endpoint = route('backend.billing.prescriptions.search');
+    const url = `${endpoint}?prescription_id=${encodeURIComponent(trimmedId)}`;
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    const payload = await response.json();
+
+    if (!response.ok) {
+      displayWarning({ message: payload?.message || 'Prescription পাওয়া যায়নি।' });
+      return;
+    }
+
+    applyPrescriptionPatient(payload?.patient);
+    const { addedCount = 0, skippedCount = 0 } = addPrescriptionTestsToItems(payload?.tests || []) || {};
+
+    if (addedCount === 0) {
+      displayWarning({ message: 'Prescription থেকে নতুন কোনো test add করা যায়নি।' });
+      return;
+    }
+
+    const source = payload?.source ? ` (${payload.source})` : '';
+    const skipText = skippedCount > 0 ? `, ${skippedCount} skip` : '';
+    displayResponse({ message: `${addedCount}টি test auto add হয়েছে${source}${skipText}.` });
+
+    // Reset input after successful load for faster next scan/search.
+    prescriptionSearchId.value = '';
+    prescriptionSuggestions.value = [];
+    showPrescriptionSuggestions.value = false;
+    nextTick(() => {
+      prescriptionSearchInputRef.value?.focus();
+    });
+  } catch (error) {
+    console.error('Prescription charge search failed:', error);
+    displayWarning({ message: 'Prescription search failed. আবার চেষ্টা করুন।' });
+  } finally {
+    prescriptionSearchLoading.value = false;
+  }
+};
+
+const fetchPrescriptionSuggestions = debounce(async (query) => {
+  const normalized = String(query ?? '').trim();
+  if (!normalized) {
+    prescriptionSuggestions.value = [];
+    showPrescriptionSuggestions.value = false;
+    return;
+  }
+
+  prescriptionSuggestionLoading.value = true;
+  try {
+    const endpoint = route('backend.billing.prescriptions.suggest');
+    const response = await fetch(`${endpoint}?search=${encodeURIComponent(normalized)}`, {
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    const payload = await response.json();
+    if (!response.ok || !Array.isArray(payload)) {
+      prescriptionSuggestions.value = [];
+      showPrescriptionSuggestions.value = false;
+      return;
+    }
+
+    prescriptionSuggestions.value = payload;
+    showPrescriptionSuggestions.value = payload.length > 0;
+  } catch (error) {
+    console.error('Prescription suggestion error:', error);
+    prescriptionSuggestions.value = [];
+    showPrescriptionSuggestions.value = false;
+  } finally {
+    prescriptionSuggestionLoading.value = false;
+  }
+}, 250);
+
+const handlePrescriptionInput = () => {
+  fetchPrescriptionSuggestions(prescriptionSearchId.value);
+};
+
+const handlePrescriptionBlur = () => {
+  setTimeout(() => {
+    showPrescriptionSuggestions.value = false;
+  }, 180);
+};
+
+const selectPrescriptionSuggestion = (suggestion) => {
+  prescriptionSearchId.value = String(suggestion?.id ?? '').trim();
+  showPrescriptionSuggestions.value = false;
+  searchPrescriptionCharge();
+};
+
+const normalizeDiscountInputsByLimit = () => {
+  const total = Number(summary.value.total) || 0;
+  const maxPercent = Number(maxBillingDiscountPercent.value) || 0;
+
+  if (total <= 0) {
+    summary.value.discount = 0;
+    summary.value.extraFlatDiscount = 0;
+    return;
+  }
+
+  const maxDiscountAmount = (total * maxPercent) / 100;
+  const discountType = summary.value.discountType;
+  const rawDiscount = Math.max(0, Number(summary.value.discount) || 0);
+  const rawExtra = Math.max(0, Number(summary.value.extraFlatDiscount) || 0);
+
+  if (discountType === 'percentage') {
+    const safePercent = Math.min(rawDiscount, maxPercent);
+    const discountAmount = (total * safePercent) / 100;
+    const allowedExtra = Math.max(0, maxDiscountAmount - discountAmount);
+
+    if (summary.value.discount !== safePercent) {
+      summary.value.discount = safePercent;
+    }
+    if (summary.value.extraFlatDiscount !== Math.min(rawExtra, allowedExtra)) {
+      summary.value.extraFlatDiscount = Math.min(rawExtra, allowedExtra);
+    }
+    return;
+  }
+
+  const safeFlatDiscount = Math.min(rawDiscount, maxDiscountAmount);
+  const allowedExtra = Math.max(0, maxDiscountAmount - safeFlatDiscount);
+
+  if (summary.value.discount !== safeFlatDiscount) {
+    summary.value.discount = safeFlatDiscount;
+  }
+  if (summary.value.extraFlatDiscount !== Math.min(rawExtra, allowedExtra)) {
+    summary.value.extraFlatDiscount = Math.min(rawExtra, allowedExtra);
+  }
+};
+
 const updateSummary = () => {
   const total = items.value.reduce((sum, item) => sum + item.totalAmount, 0);
   summary.value.total = parseFloat(total.toFixed(2));
+  normalizeDiscountInputsByLimit();
 
   let discountAmount = 0;
 
@@ -1415,6 +1675,19 @@ const handleKeyDown = (event, fieldName) => {
     event.preventDefault();
     addItem();
   }
+};
+
+// Handle typing in the item name input: update search query and
+// auto-select the first matching item to make it easier to pick.
+const handleItemInput = (event) => {
+  searchQuery.value = event.target.value;
+  selectedIndex.value = -1;
+
+  nextTick(() => {
+    if (filteredItems.value && filteredItems.value.length > 0) {
+      selectedIndex.value = 0;
+    }
+  });
 };
 
 const validateNewPatientForm = () => {
@@ -1539,7 +1812,6 @@ const initializeEditMode = () => {
       changeAmt: parseFloat(props.editData.change_amt || 0),
       dueAmount: dueAmount,
       receivingAmt: receivingAmount,
-      takingAmt: parseFloat(props.editData.taking_amt || 0),
       returnAmt: parseFloat(props.editData.return_amt || 0),
       deliveryDate: props.editData.delivery_date || "",
       deliveryTime: props.editData.delivery_time || "",
@@ -1556,11 +1828,19 @@ const initializeEditMode = () => {
   }
 };
 
-const saveBill = () => {
+const saveBill = (backendInvoice = false) => {
   console.log('=== SAVE BILL DEBUG ===');
   console.log('isNewPatient:', isNewPatient.value);
   console.log('patientForm.patient_id:', patientForm.value.patient_id);
   console.log('patientSearchQuery:', patientSearchQuery.value);
+
+  // Defensive: if this function was used as an event handler without
+  // parentheses (e.g. @click="saveBill"), the click Event object may be
+  // passed as the first argument. Treat Event objects as falsy for our
+  // backendInvoice flag so Save & Print flow still opens the invoice.
+  if (backendInvoice && typeof backendInvoice === 'object' && backendInvoice instanceof Event) {
+    backendInvoice = false;
+  }
 
   if (items.value.length === 0) {
     displayWarning({ message: "Please add at least one item to the bill." });
@@ -1633,7 +1913,6 @@ const saveBill = () => {
     change_amt: summary.value.changeAmt || 0,
     due_amount: summary.value.dueAmount || 0,
     receiving_amt: summary.value.receivingAmt || 0,
-    taking_amt: summary.value.takingAmt || 0,
     return_amt: summary.value.returnAmt || 0,
 
     delivery_date: summary.value.deliveryDate || null,
@@ -1648,6 +1927,10 @@ const saveBill = () => {
 
     doctor_name: doctorSearchQuery.value.trim() || null,
   };
+
+  // Include billing date/time so backend can use it as the bill's created_at
+  formData.billing_date = billingDate.value || null;
+  formData.billing_time = billingTime.value || null;
 
   // FIX: Always include age data in the form
   formData.patient_age = ageString;
@@ -1716,25 +1999,76 @@ const saveBill = () => {
   console.log('Age being sent:', formData.patient_age);
   console.log('is_new_patient value being sent:', formData.is_new_patient);
 
+  // include flag when saving as backend invoice
+  if (backendInvoice) {
+    formData.backend_invoice = true;
+  }
+
+  // If this is Save & Print flow, open a blank window synchronously
+  // so popup blockers don't prevent the invoice from opening later.
+  let invoiceWindow = null;
+  if (!backendInvoice) {
+    try {
+      invoiceWindow = window.open('', '_blank');
+    } catch (e) {
+      invoiceWindow = null;
+    }
+  }
+  console.log('invoiceWindow opened (or null):', invoiceWindow);
+
   const form = useForm(formData);
 
-  const submitOptions = {
+    const submitOptions = {
     onSuccess: (response) => {
-      displayResponse(response);
       console.log('Save bill success:', response);
 
-      const successMessage = response?.props?.flash?.successMessage;
+      const flashSuccessMessage = response?.props?.flash?.successMessage;
       const billId = response?.props?.flash?.billId;
+      console.log('onSuccess: billId=', billId, 'backendInvoice=', backendInvoice, 'invoiceWindow=', invoiceWindow);
 
-      if (successMessage && billId) {
+      // Always show success popup on save actions.
+      successMessage(flashSuccessMessage || 'Billing saved successfully.');
+
+        if (billId) {
         if (!props.id) {
           resetAllForms();
         }
-        window.open(route("backend.download.invoice", { id: billId, module: 'billing' }), "_blank");
+
+        // Save button should store only; tab open is for Save & Print flow.
+        if (!backendInvoice) {
+          // If we opened a blank window earlier, navigate it to the invoice URL.
+          const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'billing' });
+          console.log('Preparing to open invoice URL:', invoiceUrl);
+          try {
+            if (invoiceWindow && !invoiceWindow.closed) {
+              console.log('Navigating pre-opened invoiceWindow to URL...');
+              try {
+                invoiceWindow.location.href = invoiceUrl;
+                try { invoiceWindow.focus(); } catch (e) { /* ignore focus errors */ }
+                console.log('Navigated invoiceWindow to URL successfully');
+              } catch (navErr) {
+                console.error('Navigation of invoiceWindow failed:', navErr);
+                window.open(invoiceUrl, '_blank');
+              }
+            } else {
+              console.log('invoiceWindow not available or closed; opening new tab');
+              window.open(invoiceUrl, '_blank');
+            }
+          } catch (e) {
+            // Fallback: open in a new tab if navigation fails
+            console.error('Failed to navigate/open invoice window:', e);
+            window.open(invoiceUrl, '_blank');
+          }
+        }
       }
     },
     onError: (errors) => {
       console.error('Save bill errors:', errors);
+      try {
+        if (invoiceWindow && !invoiceWindow.closed) invoiceWindow.close();
+      } catch (e) {
+        console.error('Failed to close invoiceWindow on error', e);
+      }
       
       if (errors.patient_name) {
         displayWarning({ message: errors.patient_name });
@@ -1761,6 +2095,7 @@ const saveBill = () => {
     },
     onFinish: () => {
       console.log('Save bill request finished');
+      invoiceWindow = null;
     }
   };
 
@@ -1795,7 +2130,6 @@ const resetAllForms = () => {
     changeAmt: 0.0,
     dueAmount: 0.0,
     receivingAmt: 0.0,
-    takingAmt: 0.0,
     returnAmt: 0.0,
     deliveryDate: "",
     deliveryTime: "",
@@ -1850,6 +2184,30 @@ const openAddBillButton = () => {
 onMounted(() => {
   if (props.id && props.editData) {
     initializeEditMode();
+    nextTick(() => {
+      deliveryDateTouched.value = !!summary.value.deliveryDate;
+    });
+  }
+
+  startDeliveryLiveClock();
+  if (!deliveryDateTouched.value) {
+    setCurrentDeliveryDateTime();
+  }
+
+  startBillingLiveClock();
+  if (!billingDateTouched.value) {
+    setCurrentBillingDateTime();
+  }
+});
+
+onUnmounted(() => {
+  if (deliveryLiveTimer) {
+    clearInterval(deliveryLiveTimer);
+    deliveryLiveTimer = null;
+  }
+  if (billingLiveTimer) {
+    clearInterval(billingLiveTimer);
+    billingLiveTimer = null;
   }
 });
 
@@ -1996,17 +2354,89 @@ const handleDoctorSearchInput = (event) => {
       <div class="bg-white rounded-lg shadow-lg dark:bg-slate-900 mb-4">
         <div class="mb-3">
           <div
-            class="flex justify-between items-center bg-[#053855] text-white px-3 py-2 text-xs font-semibold rounded-t-lg">
+            class="flex flex-wrap justify-between items-center bg-[#053855] text-white px-3 py-2 text-xs font-semibold rounded-t-lg gap-2">
             <div class="flex-1">ITEM DETAILS</div>
-            <div class="flex items-center space-x-2 mr-2">
-              <a :href="route('backend.billing.view')" target="_blank" @click="openAddBillButton"
+            <div class="flex flex-wrap items-center gap-2">
+                <div class="flex items-center gap-2 text-white">
+                  <span class="text-[11px] font-semibold">Billing Date &amp; Time</span>
+
+                  <!-- Display text normally; on hover show editable inputs -->
+                  <div class="relative" @mouseenter="billingEditing = true" @mouseleave="billingEditing = false">
+                    <template v-if="!billingEditing">
+                      <span class="text-[10px] text-white/80 px-2">{{ billingLiveText }}</span>
+                      <button @click.prevent="billingEditing = true" class="ml-1 text-white/60 hover:text-white text-xs" title="Edit">
+                        ✎
+                      </button>
+                    </template>
+                    <template v-else>
+                      <input
+                        type="date"
+                        v-model="billingDate"
+                        class="px-2 py-1 border border-white/30 rounded text-[11px] bg-white/10 focus:border-white focus:outline-none"
+                        ref="billingDateRef"
+                        @input="handleBillingDateTimeInput"
+                      />
+                      <input
+                        type="time"
+                        v-model="billingTime"
+                        step="1"
+                        class="px-2 py-1 border border-white/30 rounded text-[11px] bg-white/10 focus:border-white focus:outline-none ml-2"
+                        ref="billingTimeRef"
+                        @input="handleBillingDateTimeInput"
+                      />
+                    </template>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <div class="relative">
+                    <input
+                      v-model="prescriptionSearchId"
+                      ref="prescriptionSearchInputRef"
+                      type="text"
+                      class="px-2 py-1 border border-white/30 rounded text-[11px] bg-white/10 text-white placeholder-white/70 focus:border-white focus:outline-none"
+                      placeholder="Prescription ID"
+                      @input="handlePrescriptionInput"
+                      @focus="handlePrescriptionInput"
+                      @blur="handlePrescriptionBlur"
+                      @keydown.enter.prevent="searchPrescriptionCharge"
+                    />
+                    <div
+                      v-if="showPrescriptionSuggestions"
+                      class="absolute right-0 left-0 mt-1 z-20 bg-white text-slate-700 border border-slate-200 rounded shadow max-h-56 overflow-y-auto"
+                    >
+                      <button
+                        v-for="item in prescriptionSuggestions"
+                        :key="`${item.source}-${item.id}`"
+                        type="button"
+                        class="w-full text-left px-2 py-1.5 text-[11px] hover:bg-slate-100 border-b border-slate-100"
+                        @click="selectPrescriptionSuggestion(item)"
+                      >
+                        <span class="font-semibold">{{ item.label }}</span>
+                        <span class="text-slate-500"> | {{ item.patient_name || 'Unknown' }}</span>
+                      </button>
+                    </div>
+                    <div
+                      v-if="prescriptionSuggestionLoading"
+                      class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-white/70"
+                    >
+                      ...
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    class="px-2 py-1 rounded text-[11px] bg-emerald-500 hover:bg-emerald-600 text-white disabled:opacity-60"
+                    :disabled="prescriptionSearchLoading"
+                    @click="searchPrescriptionCharge"
+                  >
+                    {{ prescriptionSearchLoading ? 'Searching...' : 'Load' }}
+                  </button>
+                </div>
+              <a :href="route('backend.billing.view')" target="_blank"
                 class="flex items-center px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-xs transition-colors duration-200 shadow-sm"
                 title="Billing List">
                 Billing Add
               </a>
-            </div>
-            <div class="flex items-center space-x-2">
-              <a :href="route('backend.billing.list')" target="_blank" @click="openListBillButton"
+              <a :href="route('backend.billing.list')" target="_blank"
                 class="flex items-center px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-xs transition-colors duration-200 shadow-sm"
                 title="Billing List">
                 Billing List
@@ -2023,35 +2453,7 @@ const handleDoctorSearchInput = (event) => {
           </div>
           <div class="border border-gray-300 border-t-0 p-3 bg-gray-50 dark:bg-slate-800 dark:border-gray-600">
             <div class="flex items-center space-x-4 text-xs mb-3">
-                <!-- ====== Billing Date & Time (Real-Time + Editable) ====== -->
-<div class="grid grid-cols-1 lg:grid-cols-12 gap-2 mt-2">
-
-  <!-- Billing Date -->
-  <div class="lg:col-span-2">
-    <InputLabel value="Billing Date" class="text-xs mb-1" />
-    <input 
-      type="date"
-      v-model="billingDate"
-      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs
-             focus:border-blue-500 focus:outline-none
-             dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-    />
-  </div>
-
-  <!-- Billing Time -->
-  <div class="lg:col-span-2">
-    <InputLabel value="Billing Time" class="text-xs mb-1" />
-    <input 
-      type="time"
-      v-model="billingTime"
-      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs
-             focus:border-blue-500 focus:outline-none
-             dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-    />
-  </div>
-
-</div>
-              <span class="font-medium text-gray-700 dark:text-gray-300"><strong>UNIT:</strong> ToaMed.</span>
+              <span class="font-medium text-gray-700 dark:text-gray-300"><strong>UNIT:</strong> {{ unitCompanyName }}</span>
               <span class="font-medium text-gray-700 dark:text-gray-300"><strong>Counter:</strong> {{ authInfo?.department?.name ?? "" }}
               </span>
               <span class="font-medium text-gray-700 dark:text-gray-300"><strong>Sales Person:</strong> {{ authInfo?.admin?.name ?? "" }}
@@ -2071,7 +2473,7 @@ const handleDoctorSearchInput = (event) => {
               <div class="lg:col-span-2 relative">
                 <InputLabel for="itemName" value="Item Name" class="text-xs mb-1" />
                 <div class="relative">
-                  <input v-model="itemForm.itemName" @input="searchQuery = $event.target.value; selectedIndex = -1"
+                  <input v-model="itemForm.itemName" @input="handleItemInput($event)"
                     @keydown="handleKeyDown($event, 'itemName')" @focus="selectedIndex = -1" id="itemName" type="text"
                     class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     placeholder="Search items..." autocomplete="off" ref="itemNameInput" />
@@ -2425,7 +2827,7 @@ const handleDoctorSearchInput = (event) => {
                   </select>
                 </div>
                 <div class="flex">
-                  <input v-model="summary.discount" type="number" step="1" min="0" id="discount"
+                  <input v-model="summary.discount" type="number" step="1" min="0" :max="summary.discountType === 'percentage' ? maxBillingDiscountPercent : null" id="discount"
                     class="w-full px-2 py-1.5 border border-gray-300 rounded-l text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     ref="discountRef" @keydown="handleDiscountEnter" />
                   <span
@@ -2451,17 +2853,6 @@ const handleDoctorSearchInput = (event) => {
                     class="w-full px-2 py-1.5 border border-green-500 rounded-l text-xs bg-green-50 font-semibold dark:bg-green-900 dark:text-green-100" />
                   <span
                     class="px-2 py-1.5 bg-green-200 border-t border-b border-r border-green-500 rounded-r text-xs font-semibold dark:bg-green-700 dark:text-green-100">৳</span>
-                </div>
-              </div>
-              <div class="grid grid-cols-2 gap-2 items-center">
-                <InputLabel for="takingAmt" value="Taking Amount"
-                  class="text-xs font-semibold text-indigo-700 dark:text-indigo-400" />
-                <div class="flex">
-                  <input v-model="summary.takingAmt" type="number" step="0.01" min="0" id="takingAmt"
-                    class="w-full px-2 py-1.5 border border-indigo-500 rounded-l text-xs focus:border-indigo-700 focus:outline-none bg-indigo-50 dark:bg-indigo-900 dark:border-indigo-400 dark:text-indigo-100"
-                    placeholder="Amount taken from customer" ref="takingAmtRef" @keydown="handleTakingAmtEnter" />
-                  <span
-                    class="px-2 py-1.5 bg-indigo-200 border-t border-b border-r border-indigo-500 rounded-r text-xs font-semibold dark:bg-indigo-700 dark:text-indigo-100">৳</span>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2 items-center">
@@ -2518,7 +2909,9 @@ const handleDoctorSearchInput = (event) => {
                 <InputLabel for="deliveryDate" value="Delivery Date" class="text-xs" />
                 <input v-model="summary.deliveryDate" type="datetime-local" id="deliveryDate"
                   class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                  ref="deliveryDateRef" @keydown="handleDeliveryDateEnter" @click="setCurrentDeliveryDateTime" />
+                  ref="deliveryDateRef" @keydown="handleDeliveryDateEnter" @focus="ensureDeliveryDateTime"
+                  @input="handleDeliveryDateInput" />
+                <!-- delivery date display moved to invoice page -->
               </div>
               <div>
                 <InputLabel for="remarks" value="Remarks" class="text-xs mb-1" />
@@ -2619,10 +3012,15 @@ const handleDoctorSearchInput = (event) => {
                   class="px-4 py-2 text-gray-600 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded text-sm font-medium dark:text-gray-300 dark:bg-gray-700 dark:border-gray-600 dark:hover:bg-gray-600 dark:hover:text-gray-100 transition-colors">
                   Cancel
                 </button>
-                <button @click="saveBill"
+                <button @click="saveBill()"
                   class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium flex items-center space-x-2 transition-colors">
                   <span>💾</span>
                   <span>Save & Print Bill</span>
+                </button>
+                <button @click="saveBill(true)"
+                  class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-medium flex items-center space-x-2 transition-colors">
+                  <span>📥</span>
+                  <span>Save</span>
                 </button>
               </div>
             </div>
@@ -2727,21 +3125,22 @@ input:hover {
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
+  background: color-mix(in srgb, var(--app-theme-soft) 26%, #e2e8f0);
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 3px;
+  background: color-mix(in srgb, var(--app-theme-primary) 40%, #94a3b8);
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: color-mix(in srgb, var(--app-theme-primary) 56%, #64748b);
 }
 
 /* Dynamic height for item list */

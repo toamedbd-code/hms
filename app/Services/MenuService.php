@@ -4,7 +4,7 @@ namespace App\Services;
 
 use App\Models\Menu;
 
-class MenuRepository
+class MenuService
 {
     protected $model;
 

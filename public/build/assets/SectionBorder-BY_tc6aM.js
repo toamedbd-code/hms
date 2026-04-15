@@ -1,0 +1,1 @@
+import{_ as o,d as r,a as s,o as c}from"./app-1GlCAcAS.js";const t={},a={class:"hidden sm:block"};function d(n,e){return c(),r("div",a,[...e[0]||(e[0]=[s("div",{class:"py-8"},[s("div",{class:"border-t border-gray-200"})],-1)])])}const _=o(t,[["render",d]]);export{_ as S};

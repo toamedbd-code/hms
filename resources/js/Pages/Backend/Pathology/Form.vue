@@ -109,7 +109,7 @@ const handleTestSearchKeyDown = (rowIndex, event) => {
 
 const scrollToHighlighted = (rowIndex) => {
     nextTick(() => {
-        const dropdown = document.querySelector(`#dropdown_${rowIndex}`);
+        const dropdown = (typeof document !== 'undefined') ? document.querySelector(`#dropdown_${rowIndex}`) : null;
         const highlightedItem = dropdown?.querySelector('.highlighted');
         if (highlightedItem) {
             highlightedItem.scrollIntoView({ block: 'nearest' });
@@ -151,7 +151,7 @@ const selectTest = async (rowIndex, test) => {
 
     // Focus on report date field
     await nextTick();
-    const reportDateField = document.querySelector(`#reportDate_${rowIndex}`);
+    const reportDateField = (typeof document !== 'undefined') ? document.querySelector(`#reportDate_${rowIndex}`) : null;
     if (reportDateField) {
         reportDateField.focus();
     }
@@ -180,7 +180,7 @@ const handleReportDateEnter = async (rowIndex) => {
 // Focus on test field
 const focusTestField = async (rowIndex) => {
     await nextTick();
-    const testField = document.querySelector(`#testSearch_${rowIndex}`);
+    const testField = (typeof document !== 'undefined') ? document.querySelector(`#testSearch_${rowIndex}`) : null;
     if (testField) {
         testField.focus();
         testField.select();
@@ -446,6 +446,15 @@ const submit = () => {
     updateFormTests();
 
     const routeName = props.id ? route('backend.pathology.update', props.id) : route('backend.pathology.store');
+
+    // Open blank window synchronously to avoid popup blockers when navigating later
+    let invoiceWindow = null;
+    try {
+        invoiceWindow = window.open('', '_blank');
+    } catch (e) {
+        invoiceWindow = null;
+    }
+
     form.transform(data => ({
         ...data,
         patient_id: typeof data.patient_id === 'object' ? data.patient_id.id : data.patient_id,
@@ -463,8 +472,17 @@ const submit = () => {
                         const successMessage = response?.props?.flash?.successMessage;
                         const billId = response?.props?.flash?.billId;
 
-                        if (successMessage && billId) {
-                            window.open(route("backend.download.invoice", { id: billId, module: 'pathology' }), "_blank");
+                        if (billId) {
+                            const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'pathology' });
+                            try {
+                                if (invoiceWindow && !invoiceWindow.closed) {
+                                    invoiceWindow.location = invoiceUrl;
+                                } else {
+                                    window.open(invoiceUrl, '_blank');
+                                }
+                            } catch (e) {
+                                window.open(invoiceUrl, '_blank');
+                            }
                         }
                     }
                 });
@@ -477,8 +495,17 @@ const submit = () => {
                 const successMessage = response?.props?.flash?.successMessage;
                 const billId = response?.props?.flash?.billId;
 
-                if (successMessage && billId) {
-                    window.open(route("backend.download.invoice", { id: billId, module: 'pathology' }), "_blank");
+                if (billId) {
+                    const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'pathology' });
+                    try {
+                        if (invoiceWindow && !invoiceWindow.closed) {
+                            invoiceWindow.location = invoiceUrl;
+                        } else {
+                            window.open(invoiceUrl, '_blank');
+                        }
+                    } catch (e) {
+                        window.open(invoiceUrl, '_blank');
+                    }
                 }
             }
 

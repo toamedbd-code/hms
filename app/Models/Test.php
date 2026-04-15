@@ -18,6 +18,7 @@ class Test extends Model
         'test_short_name',
         'test_type',
         'test_category_id',
+        'test_sub_category_id',
         'pathology_sub_category',
         'method',
         'report_days',

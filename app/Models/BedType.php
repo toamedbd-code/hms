@@ -15,7 +15,13 @@ class BedType extends Authenticatable
 
     protected $table = 'bedtypes';
 
-    protected $fillable = ['name', 'status'];
+        protected $fillable = [
+        'name',
+        'room_rent_rate_per_day',
+        'bed_charge_rate_per_day',
+        'status',
+    ];
+
 
     protected static function boot()
     {

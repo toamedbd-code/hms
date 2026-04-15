@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Attendance;
 use App\Models\FaceEncoding;
 use App\Services\AttendanceDeviceService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 
 class FaceKioskAttendanceController extends Controller
@@ -48,15 +49,51 @@ class FaceKioskAttendanceController extends Controller
             return response()->json(['message' => 'employee_code or descriptor required'], 422);
         }
 
-        // Auto IN/OUT toggle (same logic as admin face attendance)
-        $now = now();
-        $openInExists = Attendance::where('employee_code', $employeeCode)
-            ->where('type', 'in')
-            ->whereDate('recorded_at', $now->toDateString())
-            ->whereNull('recorded_out')
-            ->exists();
+        $employeeCode = trim((string) $employeeCode);
+        if ($employeeCode === '') {
+            return response()->json(['message' => 'Invalid employee code'], 422);
+        }
 
-        $eventType = $openInExists ? 'out' : 'in';
+        // Auto IN/OUT toggle based on latest record for today.
+        $now = now();
+        $latestToday = Attendance::where('employee_code', $employeeCode)
+            ->whereDate('recorded_at', $now->toDateString())
+            ->orderByRaw('COALESCE(recorded_out, recorded_at) DESC')
+            ->orderByDesc('id')
+            ->first();
+
+        $cooldownSeconds = max((int) config('attendance.face_scan_cooldown_seconds', 10), 0);
+
+        if ($latestToday && $cooldownSeconds > 0) {
+            $lastAction = null;
+            $lastActionTs = null;
+
+            if ($latestToday->type === 'in' && empty($latestToday->recorded_out)) {
+                $lastAction = 'in';
+                $lastActionTs = Carbon::parse($latestToday->recorded_at);
+            } elseif ($latestToday->type === 'in' && !empty($latestToday->recorded_out)) {
+                $lastAction = 'out';
+                $lastActionTs = Carbon::parse($latestToday->recorded_out);
+            } elseif ($latestToday->type === 'out') {
+                $lastAction = 'out';
+                $lastActionTs = Carbon::parse($latestToday->recorded_out ?? $latestToday->recorded_at);
+            }
+
+            if ($lastAction && $lastActionTs && $lastActionTs->diffInSeconds($now) < $cooldownSeconds) {
+                return response()->json([
+                    'status' => 'success',
+                    'marked_as' => $lastAction,
+                    'employee_code' => $employeeCode,
+                    'attendance' => $latestToday,
+                    'message' => "{$lastAction} already marked. Wait {$cooldownSeconds} seconds.",
+                ], 200);
+            }
+        }
+
+        $eventType = 'in';
+        if ($latestToday && $latestToday->type === 'in' && empty($latestToday->recorded_out)) {
+            $eventType = 'out';
+        }
 
         /** @var AttendanceDeviceService $service */
         $service = app(AttendanceDeviceService::class);

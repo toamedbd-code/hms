@@ -16,7 +16,10 @@ class RoleSeeder extends Seeder
     public function run()
     {
         foreach ($this->datas() as $key => $value) {
-            Role::create($value);
+            Role::firstOrCreate(
+                ['name' => $value['name'], 'guard_name' => $value['guard_name']],
+                ['created_at' => $value['created_at'] ?? now()]
+            );
         }
     }
 

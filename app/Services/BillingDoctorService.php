@@ -46,9 +46,9 @@ class BillingDoctorService
 
         if (!empty($dataInfo)) {
 
+            // Use soft delete and set status to 'Inactive' (enum allows Active/Inactive)
             $dataInfo->deleted_at = date('Y-m-d H:i:s');
-
-            $dataInfo->status = 'Deleted';
+            $dataInfo->status = 'Inactive';
 
             return ($dataInfo->save());
         }

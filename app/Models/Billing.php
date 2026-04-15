@@ -42,6 +42,7 @@ class Billing extends Model
         'discount_type',
         'payable_amount',
         'paid_amt',
+        'invoice_amount',
         'change_amt',
         'receiving_amt',
         'due_amount',
@@ -100,10 +101,12 @@ class Billing extends Model
     public static function generateInvoiceNumber(): string
     {
         $year = Carbon::now()->year;
-        $prefix = "INV-{$year}-";
+        $billPrefix = web_setting_prefix('billing_bill_prefix', 'BILL');
+        $prefix = "{$billPrefix}-{$year}-";
 
         // Get the last invoice number for current year
-        $lastInvoice = self::where('invoice_number', 'like', $prefix . '%')
+        $lastInvoice = self::withTrashed()
+            ->where('invoice_number', 'like', $prefix . '%')
             ->orderBy('invoice_number', 'desc')
             ->first();
 
@@ -124,9 +127,11 @@ class Billing extends Model
     public static function generateBillNumber(): string
     {
         $year = Carbon::now()->year;
-        $prefix = "BILL-{$year}-";
+        $billPrefix = web_setting_prefix('billing_bill_prefix', 'BILL');
+        $prefix = "{$billPrefix}-{$year}-";
 
-        $lastBill = self::where('bill_number', 'like', $prefix . '%')
+        $lastBill = self::withTrashed()
+            ->where('bill_number', 'like', $prefix . '%')
             ->orderBy('bill_number', 'desc')
             ->first();
 
@@ -148,7 +153,8 @@ class Billing extends Model
         $year = Carbon::now()->year;
         $prefix = "CASE-{$year}-";
 
-        $lastCase = self::where('case_number', 'like', $prefix . '%')
+        $lastCase = self::withTrashed()
+            ->where('case_number', 'like', $prefix . '%')
             ->orderBy('case_number', 'desc')
             ->first();
 

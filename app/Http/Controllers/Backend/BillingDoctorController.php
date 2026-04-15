@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\BillingDoctorRequest;
 use Illuminate\Support\Facades\DB;
 use App\Services\BillingDoctorService;
+use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Schema;
@@ -74,13 +75,13 @@ class BillingDoctorController extends Controller
                 ];
             }
 
-            // if ($user->can('billing-doctor-list-edit')) {
-            //     $customData->links[] = [
-            //         'linkClass' => 'bg-yellow-400 text-black semi-bold',
-            //         'link' => route('backend.billingdoctor.edit',  $data->id),
-            //         'linkLabel' => getLinkLabel('Edit', null, null)
-            //     ];
-            // }
+            if ($user->can('billing-doctor-list-edit')) {
+                $customData->links[] = [
+                    'linkClass' => 'bg-yellow-400 text-black semi-bold',
+                    'link' => route('backend.billingdoctor.edit',  $data->id),
+                    'linkLabel' => getLinkLabel('Edit', null, null)
+                ];
+            }
 
             if ($user->can('billing-doctor-list-delete')) {
                 $customData->links[] = [
@@ -120,10 +121,7 @@ class BillingDoctorController extends Controller
             'Backend/BillingDoctor/Form',
             [
                 'pageTitle' => fn() => 'BillingDoctor Create',
-                'breadcrumbs' => fn() => [
-                    ['link' => null, 'title' => 'BillingDoctor Manage'],
-                    ['link' => route('backend.billingdoctor.create'), 'title' => 'BillingDoctor Create'],
-                ],
+                
             ]
         );
     }
@@ -150,7 +148,19 @@ class BillingDoctorController extends Controller
                 $message = 'BillingDoctor created successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'billingdoctors', $message);
 
+                // Log billing doctor creation
+                ActivityLogService::logCreate(
+                    module: 'BillingDoctor',
+                    recordId: $dataInfo->id,
+                    recordName: $dataInfo->name,
+                    data: $request->validated()
+                );
+
                 DB::commit();
+
+                if (($request->ajax() || $request->wantsJson()) && !$request->header('X-Inertia')) {
+                    return response()->json(['successMessage' => $message]);
+                }
 
                 return redirect()
                     ->back()
@@ -164,13 +174,15 @@ class BillingDoctorController extends Controller
                     ->with('errorMessage', $message);
             }
         } catch (Exception $err) {
-            //   dd($err);
             DB::rollBack();
             $this->storeSystemError('Backend', 'BillingDoctorController', 'store', substr($err->getMessage(), 0, 1000));
-            //dd($err);
+
+            $debugInfo =  config('app.debug') ? ' Details: ' . $err->getMessage() : '';
             DB::commit();
-            $message = "Server Errors Occur. Please Try Again.";
-            // dd($message);
+            $message = "Server Errors Occur. Please Try Again." . $debugInfo;
+            if (($request->ajax() || $request->wantsJson()) && !$request->header('X-Inertia')) {
+                return response()->json(['errorMessage' => $message], 500);
+            }
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
@@ -185,10 +197,7 @@ class BillingDoctorController extends Controller
             'Backend/BillingDoctor/Form',
             [
                 'pageTitle' => fn() => 'BillingDoctor Edit',
-                'breadcrumbs' => fn() => [
-                    ['link' => null, 'title' => 'BillingDoctor Manage'],
-                    ['link' => route('backend.billingdoctor.edit', $id), 'title' => 'BillingDoctor Edit'],
-                ],
+                
                 'billingdoctor' => fn() => $billingdoctor,
                 'id' => fn() => $id,
             ]
@@ -233,6 +242,10 @@ class BillingDoctorController extends Controller
 
                 DB::commit();
 
+                if (($request->ajax() || $request->wantsJson()) && !$request->header('X-Inertia')) {
+                    return response()->json(['successMessage' => $message]);
+                }
+
                 return redirect()
                     ->back()
                     ->with('successMessage', $message);
@@ -240,6 +253,9 @@ class BillingDoctorController extends Controller
                 DB::rollBack();
 
                 $message = "Failed To update billingdoctors.";
+                if (($request->ajax() || $request->wantsJson()) && !$request->header('X-Inertia')) {
+                    return response()->json(['errorMessage' => $message], 500);
+                }
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -247,8 +263,10 @@ class BillingDoctorController extends Controller
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'BillingDoctorController', 'update', substr($err->getMessage(), 0, 1000));
+
+            $debugInfo =  config('app.debug') ? ' Details: ' . $err->getMessage() : '';
             DB::commit();
-            $message = "Server Errors Occur. Please Try Again.";
+            $message = "Server Errors Occur. Please Try Again." . $debugInfo;
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
@@ -268,6 +286,10 @@ class BillingDoctorController extends Controller
 
                 DB::commit();
 
+                if ((request()->ajax() || request()->wantsJson()) && !request()->header('X-Inertia')) {
+                    return response()->json(['successMessage' => $message]);
+                }
+
                 return redirect()
                     ->back()
                     ->with('successMessage', $message);
@@ -275,6 +297,9 @@ class BillingDoctorController extends Controller
                 DB::rollBack();
 
                 $message = "Failed To Delete BillingDoctor.";
+                if ((request()->ajax() || request()->wantsJson()) && !request()->header('X-Inertia')) {
+                    return response()->json(['errorMessage' => $message], 500);
+                }
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -282,8 +307,10 @@ class BillingDoctorController extends Controller
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'BillingDoctorController', 'destroy', substr($err->getMessage(), 0, 1000));
+
+            $debugInfo =  config('app.debug') ? ' Details: ' . $err->getMessage() : '';
             DB::commit();
-            $message = "Server Errors Occur. Please Try Again.";
+            $message = "Server Errors Occur. Please Try Again." . $debugInfo;
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
@@ -318,8 +345,10 @@ class BillingDoctorController extends Controller
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'BillingDoctorController', 'changeStatus', substr($err->getMessage(), 0, 1000));
+
+            $debugInfo =  config('app.debug') ? ' Details: ' . $err->getMessage() : '';
             DB::commit();
-            $message = "Server Errors Occur. Please Try Again.";
+            $message = "Server Errors Occur. Please Try Again." . $debugInfo;
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);

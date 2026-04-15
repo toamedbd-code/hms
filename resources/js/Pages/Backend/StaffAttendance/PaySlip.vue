@@ -8,7 +8,11 @@ const props = defineProps({
     staffDetails: Object,
     grossSalary: Number,
     netSalary: Number,
-    attendanceInfo: Object
+    attendanceInfo: Object,
+    websetting: {
+        type: Object,
+        default: () => ({})
+    }
 });
 
 // Correct CSRF token from Inertia props
@@ -23,8 +27,8 @@ const monthNames = ["January", "February", "March", "April", "May", "June", "Jul
 const formattedPeriod = `${monthNames[previousMonth]} ${previousYear}`;
 
 const payslipData = ref({
-    companyName: 'Workzen Group',
-    location: 'Dhaka, Bangladesh',
+    companyName: props.websetting?.company_name || 'Hospital',
+    location: props.websetting?.address || 'N/A',
     period: formattedPeriod,
     payslipNumber: '1',
     paymentDate: new Date().toLocaleDateString(),

@@ -283,30 +283,52 @@ class DashboardService
             ->where('status', 'Active')
             ->whereHas('billing', function ($q) use ($dbRange) {
                 $q->whereBetween('created_at', $dbRange)
-                  ->where('payment_status', '!=', 'Pending');
+                  ->where('status', 'Active')
+                  ->where(function ($paymentQuery) {
+                      $paymentQuery->where('payment_status', '!=', 'Pending')
+                          ->orWhere('due_amount', '<=', 0)
+                          ->orWhere('paid_amt', '>', 0);
+                  });
             })->get();
 
         if ($billItems->isEmpty()) {
             return 0;
         }
 
-        // Get unique billing IDs
-        $billingIds = $billItems->pluck('billing_id')->unique();
-        $billings = Billing::whereIn('id', $billingIds)->get();
-
-        // Calculate discount from Billing records (includes extra_flat_discount)
-        $totalDiscount = $billings->sum(function ($billing) {
-            $discount = ($billing->discount_type == 'percentage'
-                ? ($billing->total * $billing->discount) / 100
-                : $billing->discount) + $billing->extra_flat_discount;
-            return max(0, $discount);
+        $pathologyTotalsByBilling = $billItems->groupBy('billing_id')->map(function ($items) {
+            return (float) $items->sum('total_amount');
         });
 
-        // Total amount from pathology items
-        $totalAmount = $billItems->sum('total_amount');
+        $billingIds = $pathologyTotalsByBilling->keys()->toArray();
+        $billings = Billing::whereIn('id', $billingIds)
+            ->get(['id', 'total', 'discount', 'discount_type', 'extra_flat_discount']);
 
-        // Net amount = Total - Discount
-        return max(0, $totalAmount - $totalDiscount);
+        $netPathology = 0.0;
+        foreach ($billings as $billing) {
+            $pathologyTotal = (float) ($pathologyTotalsByBilling[$billing->id] ?? 0);
+            if ($pathologyTotal <= 0) {
+                continue;
+            }
+
+            $billingDiscount = 0;
+            if ((float) $billing->discount > 0) {
+                if (($billing->discount_type ?? '') === 'percentage') {
+                    $billingDiscount = ((float) $billing->total * (float) $billing->discount) / 100;
+                } else {
+                    $billingDiscount = (float) $billing->discount;
+                }
+            }
+            $billingDiscount += max(0, (float) ($billing->extra_flat_discount ?? 0));
+
+            $allocatedDiscount = 0;
+            if ((float) $billing->total > 0) {
+                $allocatedDiscount = ($billingDiscount * $pathologyTotal) / (float) $billing->total;
+            }
+
+            $netPathology += max(0, $pathologyTotal - $allocatedDiscount);
+        }
+
+        return round($netPathology, 2);
     }
 
     // ✔ Radiology Income - Net Income After Discount (from Billing)
@@ -368,7 +390,9 @@ class DashboardService
     }
 
     // ✔ Pending Income (all outstanding dues)
-    // If date ranges are provided, include pharmacy unpaid portion for that range.
+    // Source of truth is current due fields on each module row.
+    // Billing due_amount is already adjusted during due-collection, so avoid
+    // subtracting DueCollection again or adding pharmacy pending again.
     public function countPendingIncome(array $dbRange = null, array $dateRange = null)
     {
         $totalDue = 0;
@@ -381,20 +405,13 @@ class DashboardService
             $billingQuery->whereBetween('created_at', $dbRange);
         }
 
-        $billings = $billingQuery->get(['id', 'due_amount']);
+        $billings = $billingQuery->get(['due_amount']);
         if ($billings->isNotEmpty()) {
-            $billingIds = $billings->pluck('id')->toArray();
-
-            // Sum of due_amounts from Billing records
             $billingTotalDue = $billings->sum(function ($b) {
                 return max(0, (float) ($b->due_amount ?? 0));
             });
 
-            // Subtract any DueCollection entries recorded against these billings
-            $dueCollectedForBillings = (float) DueCollection::whereIn('billing_id', $billingIds)->sum('collected_amount');
-
-            $effectiveBillingDue = max(0, $billingTotalDue - $dueCollectedForBillings);
-            $totalDue += $effectiveBillingDue;
+            $totalDue += max(0, $billingTotalDue);
         }
 
         // OPD patient balances (optionally limited to the provided date range)
@@ -412,52 +429,6 @@ class DashboardService
         $opdPatients = $opdQuery->get(['balance_amount']);
         foreach ($opdPatients as $opdPatient) {
             $totalDue += max(0, (float) $opdPatient->balance_amount);
-        }
-
-        // Pharmacy unpaid portion: net_amount - payment_amount for pharmacybills
-        // within the selected date range (if provided). This ensures the
-        // dashboard shows the collected part under Pharmacy Income and the
-        // unpaid remainder under Pending Income.
-        if (is_array($dateRange) && count($dateRange) === 2) {
-            // Find pharmacy bills in date range and map to Billing records
-            $pharmacyRows = PharmacyBill::query()
-                ->where('status', 'Active')
-                ->whereBetween('date', [
-                    $dateRange[0]->toDateString(),
-                    $dateRange[1]->toDateString(),
-                ])
-                ->get(['bill_no']);
-
-            $billNos = $pharmacyRows->pluck('bill_no')->filter()->unique()->values()->toArray();
-            if (!empty($billNos)) {
-                $billings = Billing::whereIn('bill_number', $billNos)
-                    ->where('status', 'Active')
-                    ->get(['id', 'total', 'discount', 'discount_type', 'extra_flat_discount']);
-
-                $billingIds = $billings->pluck('id')->toArray();
-
-                $paymentsSum = (float) \App\Models\Payment::whereIn('billing_id', $billingIds)->sum('amount');
-                $dueCollectionSum = (float) \App\Models\DueCollection::whereIn('billing_id', $billingIds)->sum('collected_amount');
-
-                $collected = $paymentsSum + $dueCollectionSum;
-
-                $billingNet = (float) $billings->sum(function ($billing) {
-                    $discountAmount = 0;
-                    if ($billing->discount > 0) {
-                        if (($billing->discount_type ?? '') === 'percentage') {
-                            $discountAmount = ($billing->total * $billing->discount) / 100;
-                        } else {
-                            $discountAmount = $billing->discount;
-                        }
-                    }
-                    $extraDiscount = max(0, (float) ($billing->extra_flat_discount ?? 0));
-                    $net = max(0, (float) $billing->total - $discountAmount - $extraDiscount);
-                    return round($net, 2);
-                });
-
-                $pharmacyPending = max(0, $billingNet - $collected);
-                $totalDue += $pharmacyPending;
-            }
         }
 
         return $totalDue;

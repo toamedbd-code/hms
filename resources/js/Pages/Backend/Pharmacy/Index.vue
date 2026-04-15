@@ -4,7 +4,7 @@
     import BackendLayout from '@/Layouts/BackendLayout.vue';
     import BaseTable from '@/Components/BaseTable.vue';
     import Pagination from '@/Components/Pagination.vue';
-    import { router } from '@inertiajs/vue3';
+    import { Link, router } from '@inertiajs/vue3';
 
     let props = defineProps({
         filters: Object,
@@ -26,6 +26,24 @@
 
             <div
                 class="w-full p-4 mt-3 duration-1000 ease-in-out bg-white rounded shadow-md shadow-gray-800/50 dark:bg-slate-900">
+
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <h1 class="text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
+                    <div class="flex items-center gap-2">
+                        <Link
+                            :href="route('backend.supplierpayment.index')"
+                            class="px-3 py-2 text-xs text-white bg-indigo-600 rounded hover:bg-indigo-700"
+                        >
+                            Supplier Payment List
+                        </Link>
+                        <Link
+                            :href="route('backend.supplierpayment.create')"
+                            class="px-3 py-2 text-xs text-white bg-emerald-600 rounded hover:bg-emerald-700"
+                        >
+                            Add Supplier Payment
+                        </Link>
+                    </div>
+                </div>
 
 
 

@@ -7,10 +7,12 @@ import { router } from '@inertiajs/vue3';
 
 let props = defineProps({
     filters: Object,
+    isWebsiteInbox: Boolean,
 });
 
 const filters = ref({
-
+    booking_source: props.filters?.booking_source ?? '',
+    name: props.filters?.name ?? '',
     numOfData: props.filters?.numOfData ?? 10,
 });
 
@@ -20,6 +22,14 @@ const applyFilter = () => {
 
 const goToAppoinmentAdd = () => {
     router.visit(route('backend.appoinment.create'));
+};
+
+const goToWebsiteInbox = () => {
+    router.visit(route('backend.appoinment.website-inbox'));
+};
+
+const goToAllAppointments = () => {
+    router.visit(route('backend.appoinment.index'));
 };
 
 </script>
@@ -48,6 +58,16 @@ const goToAppoinmentAdd = () => {
                                 </path>
                             </svg>
                             Appoinment Add
+                        </button>
+
+                        <button v-if="!isWebsiteInbox" @click="goToWebsiteInbox"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out bg-indigo-600 hover:bg-indigo-700">
+                            Website Inbox
+                        </button>
+
+                        <button v-else @click="goToAllAppointments"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out bg-slate-600 hover:bg-slate-700">
+                            All Appointments
                         </button>
                     </div>
                 </div>

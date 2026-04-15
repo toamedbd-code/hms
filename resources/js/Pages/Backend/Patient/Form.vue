@@ -5,7 +5,7 @@ import { router, useForm } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
-import { displayResponse, displayWarning } from '@/responseMessage.js';
+import { displayResponse, displayWarning, showToastIfNoFlash } from '@/responseMessage.js';
 import { parse, format, isValid, differenceInYears, differenceInMonths, differenceInDays, subYears, subMonths, subDays } from 'date-fns';
 
 const props = defineProps(['patient', 'id', 'tpas']);
@@ -188,7 +188,7 @@ const submit = () => {
                 ageMonths.value = '';
                 ageDays.value = '';
             }
-            displayResponse(response);
+            showToastIfNoFlash(response);
         },
         onError: (errorObject) => {
             displayWarning(errorObject);

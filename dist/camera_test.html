@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Camera test</title>
+  <style>body{font-family:Arial,Helvetica,sans-serif;padding:16px}video{max-width:100%;height:auto;background:#000}</style>
+</head>
+<body>
+  <h2>Camera test</h2>
+  <div id="msg">Starting...</div>
+  <video id="video" autoplay playsinline></video>
+  <script>
+    const msg = document.getElementById('msg');
+    const video = document.getElementById('video');
+    async function startCamera(){
+      if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+        msg.textContent = 'getUserMedia not supported in this browser.';
+        console.error('getUserMedia not supported');
+        return;
+      }
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        msg.textContent = 'Camera started. If you don\'t see video, check permissions.';
+        console.log('Camera stream started', stream);
+      }catch(err){
+        console.error('getUserMedia error:', err);
+        msg.textContent = `Error: ${err.name} - ${err.message}`;
+      }
+    }
+    startCamera();
+  </script>
+</body>
+</html>

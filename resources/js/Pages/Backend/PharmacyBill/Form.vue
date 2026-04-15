@@ -86,9 +86,36 @@ const form = useForm({
     net_amount: ensureNumber(props.pharmacybill?.net_amount, 0),
     payment_mode: props.pharmacybill?.payment_mode ?? 'Cash',
     payment_amount: ensureNumber(props.pharmacybill?.payment_amount, 0),
+    return_amount: ensureNumber(props.pharmacybill?.return_amount, 0),
     note: props.pharmacybill?.note ?? '',
     _method: props.id ? 'put' : 'post',
 });
+
+const overPaymentAmount = computed(() => {
+    const paymentAmount = ensureNumber(form.payment_amount, 0);
+    const netAmount = ensureNumber(form.net_amount, 0);
+    return Math.max(paymentAmount - netAmount, 0);
+});
+
+const shouldShowReturnAmount = computed(() => {
+    return form.payment_mode === 'Cash' && overPaymentAmount.value > 0;
+});
+
+watch(
+    () => [form.payment_mode, form.payment_amount, form.net_amount],
+    () => {
+        if (!shouldShowReturnAmount.value) {
+            form.return_amount = 0;
+            return;
+        }
+
+        const currentReturn = ensureNumber(form.return_amount, 0);
+        const maxReturn = overPaymentAmount.value;
+        if (currentReturn <= 0 || currentReturn > maxReturn) {
+            form.return_amount = maxReturn;
+        }
+    }
+);
 
 const getFilteredMedicines = (categoryName) => {
     if (!categoryName) return props.medicines;
@@ -197,7 +224,7 @@ const handleQuantityEnter = (rowIndex) => {
 
 const focusOnMedicineName = (rowIndex) => {
     nextTick(() => {
-        const medicineMultiselect = document.querySelector(`#medicine-multiselect-${rowIndex} input`);
+        const medicineMultiselect = (typeof document !== 'undefined') ? document.querySelector(`#medicine-multiselect-${rowIndex} input`) : null;
         if (medicineMultiselect) {
             medicineMultiselect.focus();
             medicineMultiselect.addEventListener('keydown', (e) => {
@@ -215,7 +242,7 @@ const focusOnMedicineName = (rowIndex) => {
 
 const focusOnQuantity = (rowIndex) => {
     nextTick(() => {
-        const quantityInput = document.querySelector(`#quantity-${rowIndex}`);
+        const quantityInput = (typeof document !== 'undefined') ? document.querySelector(`#quantity-${rowIndex}`) : null;
         if (quantityInput) {
             quantityInput.focus();
             quantityInput.select();
@@ -273,7 +300,12 @@ onMounted(() => {
     });
 });
 
-const submit = () => {
+const submit = (shouldPrint = false) => {
+    let printTab = null;
+    if (shouldPrint) {
+        printTab = window.open('about:blank', '_blank');
+    }
+
     form.products = medicineRows.value.map(row => ({
         productId: row.medicineName?.id || '',
         productName: row.medicineName?.medicine_name || '',
@@ -292,7 +324,28 @@ const submit = () => {
         route('backend.pharmacybill.store');
 
     form.post(routeName, {
-        onSuccess: (response) => {
+        onSuccess: (page) => {
+            const billId = page?.props?.flash?.billId;
+
+            if (shouldPrint) {
+                const printUrl = billId
+                    ? route('backend.download.invoice', { id: billId, module: 'pharmacy' })
+                    : null;
+
+                if (printUrl) {
+                    if (printTab) {
+                        printTab.location.href = printUrl;
+                    } else {
+                        window.open(printUrl, '_blank');
+                    }
+                } else {
+                    if (printTab) {
+                        printTab.close();
+                    }
+                    displayWarning({ message: 'Bill saved, but invoice ID was not returned. Please open invoice from Pharmacy Bill List.' });
+                }
+            }
+
             if (!props.id) {
                 form.reset();
                 medicineRows.value = [createMedicineRow()];
@@ -301,9 +354,12 @@ const submit = () => {
                 calculateTotal();
                 window.location.reload();
             }
-            displayResponse(response);
+            displayResponse(page);
         },
         onError: (errorObject) => {
+            if (printTab) {
+                printTab.close();
+            }
             displayWarning(errorObject);
         },
     });
@@ -340,6 +396,18 @@ const handlePatientCreated = (newPatient) => {
 const goToPharmacyBillList = () => {
     router.get(route('backend.pharmacybill.index'));
 };
+
+const goToProductReturn = () => {
+    const payload = {
+        return_type: 'customer',
+        patient_id: selectedPatient.value?.id || form.patient_id || undefined,
+        case_id: form.case_id || undefined,
+        source_bill_no: form.bill_no || undefined,
+        source_module: 'pharmacy_bill',
+    };
+
+    router.get(route('backend.productreturn.index'), payload);
+};
 </script>
 
 <template>
@@ -369,6 +437,15 @@ const goToPharmacyBillList = () => {
                 </div>
                 <div class="p-2 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button @click="goToProductReturn"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-emerald-400 to-emerald-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-emerald-500 hover:to-emerald-700">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M3 7.5h11.25M3 12h7.5m-7.5 4.5h11.25M16.5 7.5l4.5 4.5m0 0-4.5 4.5m4.5-4.5h-9" />
+                            </svg>
+                            Billing Product Return
+                        </button>
                         <button @click="goToPharmacyBillList"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-400 to-blue-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-blue-500 hover:to-blue-700 ml-2">
                             <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -570,6 +647,16 @@ const goToPharmacyBillList = () => {
                                 </div>
                             </div>
 
+                            <div class="flex justify-between items-center">
+                                <span class="dark:text-white">Extra Discount (Tk.)</span>
+                                <div class="flex items-center space-x-2">
+                                    <input v-model="form.extra_discount" type="number" step="0.01" min="0"
+                                        class="w-28 p-1 text-right border rounded dark:bg-gray-700 dark:text-white text-sm"
+                                        placeholder="0.00" />
+                                    <span class="dark:text-white">{{ ensureNumber(form.extra_discount, 0).toFixed(2) }}</span>
+                                </div>
+                            </div>
+
                             <div class="flex justify-between items-center border-t pt-2">
                                 <span class="font-semibold dark:text-white">Net Amount (Tk.)</span>
                                 <span class="text-xl font-bold text-green-600 dark:text-green-400">{{
@@ -593,14 +680,33 @@ const goToPharmacyBillList = () => {
                                     <input v-model="form.payment_amount" type="number" step="0.01"
                                         class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                 </div>
+
+                                <div v-if="shouldShowReturnAmount">
+                                    <InputLabel for="return_amount" value="Return Amount (Tk.)" />
+                                    <input v-model="form.return_amount" type="number" step="0.01" min="0"
+                                        :max="overPaymentAmount"
+                                        class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+
+                                    <div class="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                                        Return Preview: {{ ensureNumber(form.return_amount, 0).toFixed(2) }} Tk.
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div class="flex items-center justify-end mt-6 space-x-3">
-                    <button type="button" class="px-6 py-2 text-white bg-blue-600 rounded hover:bg-blue-700">💾 Save &
-                        Print</button>
+                    <button type="button"
+                        @click="submit(true)"
+                        class="inline-flex items-center px-6 py-2 font-semibold text-white rounded shadow-sm transition-colors"
+                        :class="form.processing ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'"
+                        :disabled="form.processing">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 9V4h12v5M6 18h12M8 14h8M6 9h12a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z" />
+                        </svg>
+                        {{ form.processing ? 'Saving...' : 'Save & Print' }}
+                    </button>
                     <PrimaryButton type="submit" class="px-6 py-2" :class="{ 'opacity-25': form.processing }"
                         :disabled="form.processing">
                         💾 {{ props.id ? 'Update' : 'Save' }}

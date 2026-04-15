@@ -10,13 +10,36 @@ import { displayResponse, displayWarning } from '@/responseMessage.js';
 
 const props = defineProps(['invoicedesign', 'id']);
 
+const normalizePreviewUrl = (value) => {
+    if (!value) return null;
+    const normalized = String(value).replace(/\\/g, '/').trim();
+    if (!normalized) return null;
+
+    if (normalized.startsWith('http://') || normalized.startsWith('https://') || normalized.startsWith('data:')) {
+        return normalized;
+    }
+
+    if (normalized.startsWith('/storage/')) return normalized.replace('/storage/storage/', '/storage/');
+    if (normalized.startsWith('storage/')) return `/${normalized}`.replace('/storage/storage/', '/storage/');
+    if (normalized.startsWith('public/storage/')) return `/${normalized.replace(/^public\//, '')}`;
+    if (normalized.startsWith('/public/storage/')) return normalized.replace('/public/storage/', '/storage/');
+
+    return `/storage/${normalized}`.replace('/storage/storage/', '/storage/');
+};
+
 const form = useForm({
     footer_content: props.invoicedesign?.footer_content ?? '',
     module: props.invoicedesign?.module ?? '',
     headerPhoto: null,
     footerPhoto: null,
-    headerPhotoPreview: props.invoicedesign?.header_photo_path ?? null,
-    footerPhotoPreview: props.invoicedesign?.footer_photo_path ?? null,
+    headerPhotoPreview: normalizePreviewUrl(
+        props.invoicedesign?.header_photo_url ?? props.invoicedesign?.header_photo_path
+    ),
+    footerPhotoPreview: normalizePreviewUrl(
+        props.invoicedesign?.footer_photo_url ?? props.invoicedesign?.footer_photo_path
+    ),
+    header_height: props.invoicedesign?.header_height ?? 115,
+    footer_height: props.invoicedesign?.footer_height ?? 70,
 
     _method: props.invoicedesign?.id ? 'put' : 'post',
 });
@@ -112,6 +135,7 @@ const goToInvoiceDesignList = () => {
                             <option value="pharmacy">Pharmacy</option>
                             <option value="appointment">Appointment</option>
                             <option value="billing">Billing</option>
+                            <option value="prescription">Prescription</option>
                         </select>
                         <InputError class="mt-1" :message="form.errors.module" />
                     </div>
@@ -123,7 +147,7 @@ const goToInvoiceDesignList = () => {
                         <!-- Preview above input -->
                         <div v-if="form.headerPhotoPreview" class="relative w-full mb-2">
                             <img :src="form.headerPhotoPreview" alt="Header preview"
-                                class="object-contain w-full h-32 border rounded-md" />
+                                class="object-fill w-full h-32 border rounded-md" />
                             <button type="button" @click="removePhoto('headerPhoto')"
                                 class="absolute p-1 text-white bg-red-500 rounded-full -top-2 -right-2 hover:bg-red-600">
                                 <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 20 20"
@@ -149,6 +173,21 @@ const goToInvoiceDesignList = () => {
                             class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:focus:ring-slate-500 dark:focus:border-slate-500"
                             placeholder="Enter Footer Contents"></textarea>
                         <InputError class="mt-1" :message="form.errors.footer_content" />
+                    </div>
+
+                    <!-- Header/Footer Height -->
+                    <div class="col-span-1 md:col-span-1">
+                        <InputLabel for="header_height" value="Header Height (px)" />
+                        <input id="header_height" type="number" min="0" max="1000" step="1" v-model.number="form.header_height"
+                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                        <InputError class="mt-1" :message="form.errors.header_height" />
+                    </div>
+
+                    <div class="col-span-1 md:col-span-1">
+                        <InputLabel for="footer_height" value="Footer Height (px)" />
+                        <input id="footer_height" type="number" min="0" max="1000" step="1" v-model.number="form.footer_height"
+                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                        <InputError class="mt-1" :message="form.errors.footer_height" />
                     </div>
 
                     <!-- Footer Photo -->

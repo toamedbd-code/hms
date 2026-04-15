@@ -165,6 +165,16 @@ class PatientController extends Controller
 
                 DB::commit();
 
+                // If this was a non-Inertia AJAX request, return JSON with the created
+                // patient so the frontend can select it. Do NOT return plain JSON for
+                // Inertia requests because Inertia expects a proper Inertia response.
+                if ($request->wantsJson() && !$request->header('X-Inertia')) {
+                    return response()->json([
+                        'patient' => $dataInfo,
+                        'successMessage' => $message,
+                    ]);
+                }
+
                 return redirect()
                     ->back()
                     ->with('successMessage', $message);
@@ -172,6 +182,10 @@ class PatientController extends Controller
                 DB::rollBack();
 
                 $message = "Failed To create Patient.";
+                if ($request->wantsJson() && !$request->header('X-Inertia')) {
+                    return response()->json(['errorMessage' => $message], 500);
+                }
+
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);

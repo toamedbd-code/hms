@@ -12,6 +12,8 @@ class VerifyCsrfToken extends Middleware
      * @var array<int, string>
      */
     protected $except = [
-        //
+        'test/attendance/face/register',
+        'test/attendance/face/mark',
+        'payment/bkash/webhook',
     ];
 }

@@ -10,7 +10,9 @@ class InvoiceDesignRequest extends FormRequest
     {
         $rules = [
             'footer_content' => 'nullable|string|max:2000',
-            'module' => 'required|in:opd,ipd,pathology,radiology,pharmacy,appointment,billing',
+            'module' => 'required|in:opd,ipd,pathology,radiology,pharmacy,appointment,billing,prescription',
+            'header_height' => 'nullable|integer|min:0|max:1000',
+            'footer_height' => 'nullable|integer|min:0|max:1000',
         ];
 
         // Common file rules
@@ -40,6 +42,12 @@ class InvoiceDesignRequest extends FormRequest
             'footer_content.required' => __('The footer content field is required.'),
             'footer_content.string' => __('The footer content must be a string.'),
             'footer_content.max' => __('The footer content may not be greater than :max characters.'),
+            'header_height.integer' => __('Header height must be an integer.'),
+            'header_height.min' => __('Header height must be at least :min.'),
+            'header_height.max' => __('Header height may not be greater than :max.'),
+            'footer_height.integer' => __('Footer height must be an integer.'),
+            'footer_height.min' => __('Footer height must be at least :min.'),
+            'footer_height.max' => __('Footer height may not be greater than :max.'),
             
             'headerPhoto.file' => __('The header image must be a file.'),
             'headerPhoto.mimes' => __('The header image must be a file of type: png, jpg, jpeg.'),

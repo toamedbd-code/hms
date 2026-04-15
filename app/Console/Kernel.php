@@ -13,9 +13,16 @@ class Kernel extends ConsoleKernel
      * @param  \Illuminate\Console\Scheduling\Schedule  $schedule
      * @return void
      */
-    protected function schedule(Schedule $schedule)
+        protected function schedule(Schedule $schedule)
     {
-        // $schedule->command('inspire')->hourly();
+        // Sync attendance every 5 minutes
+        $schedule->command('attendance:sync')->everyFiveMinutes()->withoutOverlapping();
+
+        // Sync biometric attendance records to staff attendance every 5 minutes
+        $schedule->command('attendance:sync-to-staff')->everyFiveMinutes()->withoutOverlapping();
+
+        // Sync Google/public + weekly holidays daily for payroll-ready Holiday status
+        $schedule->command('attendance:sync-holidays --with-weekly')->dailyAt('00:30')->withoutOverlapping();
     }
 
     /**
@@ -32,7 +39,12 @@ class Kernel extends ConsoleKernel
 
 
     protected $commands = [
-
         Commands\MakeService::class,
+        Commands\CheckPharmacyIncome::class,
+        Commands\CheckPendingIncome::class,
+        Commands\SyncAttendanceCommand::class,
+        Commands\SyncGoogleHolidaysCommand::class,
+        Commands\ExportHolidayAuditCommand::class,
+        Commands\SyncFeaturedDoctors::class,
     ];
 }

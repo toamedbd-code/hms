@@ -17,6 +17,10 @@ class MedicineInventory extends Authenticatable
 
     protected $guarded = [];
 
+    protected $casts = [
+        'expiry_date' => 'date',
+    ];
+
     protected static function boot()
     {
         parent::boot();
@@ -32,6 +36,11 @@ class MedicineInventory extends Authenticatable
     public function category()
     {
         return $this->belongsTo(MedicineCategory::class, 'medicine_category_id', 'id');
+    }
+
+    public function medicineCategory()
+    {
+        return $this->category();
     }
     
     public function supplier()

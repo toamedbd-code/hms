@@ -25,10 +25,11 @@ class BedTypeController extends Controller
 
         $this->middleware('auth:admin');
         $this->middleware('permission:bed-type-list');
-        $this->middleware('permission:bed-type-create', ['only' => ['create', 'store']]);
-        $this->middleware('permission:bed-type-edit', ['only' => ['edit', 'update']]);
-        $this->middleware('permission:bed-type-delete', ['only' => ['destroy']]);
-        $this->middleware('permission:bed-type-status', ['only' => ['changeStatus']]);
+        // PermissionSeeder generates permissions like: bed-type-list-create/edit/delete/status
+        $this->middleware('permission:bed-type-list-create', ['only' => ['create', 'store']]);
+        $this->middleware('permission:bed-type-list-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:bed-type-list-delete', ['only' => ['destroy']]);
+        $this->middleware('permission:bed-type-list-status', ['only' => ['changeStatus']]);
     }
 
 

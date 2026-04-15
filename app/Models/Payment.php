@@ -10,6 +10,8 @@ class Payment extends Model
     use HasFactory;
 
     protected $fillable = [
+        'ipd_patient_id',
+        'opd_patient_id',
         'billing_id',
         'amount',
         'payment_method',
@@ -18,6 +20,14 @@ class Payment extends Model
         'received_by',
         'payment_status',
         'status',
+        'provider',
+        'provider_payment_id',
+        'metadata',
+    ];
+
+    protected $casts = [
+        'metadata' => 'array',
+        'amount' => 'decimal:2',
     ];
 
     public function billing()

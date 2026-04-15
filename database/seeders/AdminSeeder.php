@@ -32,19 +32,16 @@ class AdminSeeder extends Seeder
             'updated_at' => now(),
         ]);
 
-        $adminRolePermissions = [
-            'Admin' => [
-                Permission::pluck('name'),
-            ]
-        ];
+        $allPermissions = Permission::pluck('name')->toArray();
 
         $admin->assignRole('Admin');
 
-        foreach ($adminRolePermissions as $role => $permissions) {
-            $roleInfo = Role::where('name', $role)->first();
-            if ($roleInfo) {
-                $roleInfo->syncPermissions($permissions);
-            }
+        $adminRole = Role::where('name', 'Admin')
+            ->where('guard_name', 'admin')
+            ->first();
+
+        if ($adminRole) {
+            $adminRole->syncPermissions($allPermissions);
         }
         
         $doctor = Admin::create([
@@ -63,20 +60,12 @@ class AdminSeeder extends Seeder
             'updated_at' => now(),
         ]);
 
-        $adminRolePermissions = [
-            'Admin' => [
-                Permission::pluck('name'),
-            ]
-        ];
-
         $doctor->assignRole('Doctor');
 
-        foreach ($adminRolePermissions as $role => $permissions) {
-            $roleInfo = Role::where('name', $role)->first();
-            if ($roleInfo) {
-                $roleInfo->syncPermissions($permissions);
-            }
-        }
+        // If you want doctors to have limited permissions, sync them here.
+        // Example:
+        // $doctorRole = Role::where('name', 'Doctor')->where('guard_name', 'admin')->first();
+        // $doctorRole?->syncPermissions(['opd-patient-list']);
     }
 
     protected function previousDatas()

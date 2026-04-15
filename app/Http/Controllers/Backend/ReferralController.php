@@ -12,9 +12,12 @@ use App\Services\ReferralService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
 use Exception;
+use Illuminate\Support\Facades\Gate;
+use Carbon\Carbon;
 
 class ReferralController extends Controller
 {
@@ -65,67 +68,92 @@ class ReferralController extends Controller
             });
         }
 
-        $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
+        $datas = $query->get();
 
-        $formatedDatas = $datas->map(function ($data, $index) {
+        $grouped = $datas->groupBy('payee_id');
+        $page = request()->get('page', 1);
+        $perPage = request()->numOfData ?? 10;
+        $offset = ($page - 1) * $perPage;
+
+        $formatedDatas = $grouped->values()->map(function ($items, $index) {
+            $first = $items->first();
             $customData = new \stdClass();
             $customData->index = $index + 1;
-            $customData->bill_number = $data->billing->bill_number ?? 'N/A';
-            $customData->payee_name = $data->payee->name ?? 'N/A';
-            $customData->payee_phone = $data->payee->phone ?? 'N/A';
-            $customData->date = $data->date->format('d-M-Y');
-            $customData->total_bill_amount = '৳' . number_format($data->total_bill_amount, 2);
-            $customData->commission_amount = '৳' . number_format($data->total_commission_amount, 2);
-            $customData->status = getStatusText($data->status);
+            $customData->payee_id = $first->payee_id;
+            $customData->payee_name = $first->payee->name ?? 'N/A';
+            $customData->payee_phone = $first->payee->phone ?? 'N/A';
+            $customData->bill_count = $items->count();
+            $billNumbers = $items->map(function ($item) {
+                return $item->billing->bill_number ?? null;
+            })->filter()->values();
+            $customData->bill_list = $billNumbers->isNotEmpty()
+                ? implode(', ', $billNumbers->all())
+                : 'N/A';
 
-            $user = auth('admin')->user();
+            $totalCommission = (float) $items->sum('total_commission_amount');
+            $paidAmount = (float) $items->sum('paid_amount');
+            $pendingAmount = max(0, $totalCommission - $paidAmount);
+            $actionId = $first->payee_id . '|' . number_format($pendingAmount, 2, '.', '');
 
-            
+            $customData->commission_amount = '৳' . number_format($totalCommission, 2);
+            $customData->paid_amount = '৳' . number_format($paidAmount, 2);
+            $customData->pending_amount = '৳' . number_format($pendingAmount, 2);
+
+            if ($pendingAmount <= 0) {
+                $customData->paid_status = 'Paid';
+            } elseif ($paidAmount > 0) {
+                $customData->paid_status = 'Partial Paid';
+            } else {
+                $customData->paid_status = 'Unpaid';
+            }
+
+            $customData->status = getStatusText('Active');
             $customData->hasLink = true;
-
             $customData->links = [];
-            
-            if ($user->can('referral-list-status-change')) {
+
+            if (Gate::allows('referral-list-edit')) {
                 $customData->links[] = [
-                    'linkClass' => 'semi-bold text-white statusChange ' . (($data->status == 'Active') ? "bg-gray-500" : "bg-green-500"),
-                    'link' => route('backend.referral.status.change', ['id' => $data->id, 'status' => $data->status == 'Active' ? 'Inactive' : 'Active']),
-                    'linkLabel' => getLinkLabel((($data->status == 'Active') ? "Inactive" : "Active"), null, null)
+                    'linkClass' => 'bg-blue-500 text-white semi-bold',
+                    'linkLabel' => getLinkLabel('Partial Paid', null, null),
+                    'link' => route('backend.referral.commission.payment.payee.form', $first->payee_id),
+                    'action_name' => 'commission-pay-partial',
+                    'action_id' => $actionId,
+                ];
+
+                $customData->links[] = [
+                    'linkClass' => 'bg-green-600 text-white semi-bold',
+                    'linkLabel' => getLinkLabel('Paid', null, null),
+                    'link' => route('backend.referral.commission.payment.payee.paid', $first->payee_id),
+                    'action_name' => 'commission-pay-full',
+                    'action_id' => $actionId,
                 ];
             }
 
-            if ($user->can('referral-list-edit')) {
-                $customData->links[] = [
-                    'linkClass' => 'bg-yellow-400 text-black semi-bold',
-                    'link' => route('backend.referral.edit', $data->id),
-                    'linkLabel' => getLinkLabel('Edit', null, null)
-                ];
-            }
-
-            if ($user->can('referral-list-delete')) {
-                $customData->links[] = [
-                    'linkClass' => 'deleteButton bg-red-500 text-white semi-bold',
-                    'link' => route('backend.referral.destroy', $data->id),
-                    'linkLabel' => getLinkLabel('Delete', null, null)
-                ];
-            }
-
+            $customData->links[] = [
+                'linkClass' => 'bg-slate-600 text-white semi-bold',
+                'linkLabel' => getLinkLabel('Print', null, null),
+                'link' => route('backend.referral.commission.payment.payee.print', $first->payee_id),
+                'target' => '_blank',
+            ];
 
             return $customData;
-        });
+        })->slice($offset, $perPage)->values();
 
-        return regeneratePagination($formatedDatas, $datas->total(), $datas->perPage(), $datas->currentPage());
+        return regeneratePagination($formatedDatas, $grouped->count(), $perPage, $page);
     }
 
     private function dataFields()
     {
         return [
-            ['fieldName' => 'index', 'class' => 'text-center'],
-            ['fieldName' => 'bill_number', 'class' => 'text-center'],
-            ['fieldName' => 'payee_name', 'class' => 'text-center'],
+            ['fieldName' => 'index', 'class' => 'text-center w-10'],
+            ['fieldName' => 'payee_name', 'class' => 'text-left w-72 whitespace-nowrap'],
             ['fieldName' => 'payee_phone', 'class' => 'text-center'],
-            ['fieldName' => 'date', 'class' => 'text-center'],
-            ['fieldName' => 'total_bill_amount', 'class' => 'text-center'],
+            ['fieldName' => 'bill_count', 'class' => 'text-center'],
+            ['fieldName' => 'bill_list', 'class' => 'text-left'],
             ['fieldName' => 'commission_amount', 'class' => 'text-center'],
+            ['fieldName' => 'paid_amount', 'class' => 'text-center'],
+            ['fieldName' => 'pending_amount', 'class' => 'text-center'],
+            ['fieldName' => 'paid_status', 'class' => 'text-center'],
             ['fieldName' => 'status', 'class' => 'text-center'],
         ];
     }
@@ -134,12 +162,14 @@ class ReferralController extends Controller
     {
         return [
             'Sl/No',
-            'Bill Number',
             'Payee Name',
             'Phone',
-            'Date',
-            'Bill Amount',
-            'Commission',
+            'Bill Count',
+            'Bill List',
+            'Commission Total',
+            'Paid',
+            'Pending',
+            'Paid Status',
             'Status',
             'Action',
         ];
@@ -406,6 +436,255 @@ class ReferralController extends Controller
             return redirect()
                 ->back()
                 ->with('errorMessage', 'Server error occurred. Please try again.');
+        }
+    }
+
+    public function commissionPayment(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'payment_type' => 'required|in:paid,partial',
+            'amount' => 'required_if:payment_type,partial|nullable|numeric|min:0.01',
+        ]);
+
+        DB::beginTransaction();
+
+        try {
+            Log::info('Referral commission payment requested', [
+                'referral_id' => $id,
+                'payment_type' => $validated['payment_type'],
+                'amount' => $validated['amount'] ?? null,
+            ]);
+
+            $referral = $this->referralService->recordCommissionPayment(
+                $id,
+                $validated['payment_type'],
+                $validated['amount'] ?? null
+            );
+
+            Log::info('Referral commission payment processed', [
+                'referral_id' => $referral->id,
+                'bill_number' => $referral->billing->bill_number ?? null,
+                'paid_amount' => $referral->paid_amount,
+                'paid_status' => $referral->paid_status,
+            ]);
+
+            $message = 'Commission payment updated. Paid: ৳' . number_format($referral->paid_amount, 2);
+            $this->storeAdminWorkLog($referral->id, 'referrals', $message);
+
+            DB::commit();
+
+            return redirect()
+                ->back()
+                ->with('successMessage', $message);
+        } catch (Exception $err) {
+            DB::rollBack();
+            $this->storeSystemError('Backend', 'ReferralController', 'payCommission', substr($err->getMessage(), 0, 1000));
+
+            return redirect()
+                ->back()
+                ->with('errorMessage', 'Failed to update commission payment.');
+        }
+    }
+
+    public function commissionPaymentPaid($id)
+    {
+        DB::beginTransaction();
+
+        try {
+            $referral = $this->referralService->recordCommissionPayment($id, 'paid');
+
+            $message = 'Commission payment updated. Paid: ৳' . number_format($referral->paid_amount, 2);
+            $this->storeAdminWorkLog($referral->id, 'referrals', $message);
+
+            DB::commit();
+
+            return redirect()
+                ->back()
+                ->with('successMessage', $message);
+        } catch (Exception $err) {
+            DB::rollBack();
+            $this->storeSystemError('Backend', 'ReferralController', 'commissionPaymentPaid', substr($err->getMessage(), 0, 1000));
+
+            return redirect()
+                ->back()
+                ->with('errorMessage', 'Failed to update commission payment.');
+        }
+    }
+
+    public function commissionPaymentForm($id)
+    {
+        $referral = $this->referralService->find($id);
+
+        if (!$referral) {
+            return redirect()
+                ->route('backend.referral.index')
+                ->with('errorMessage', 'Referral not found.');
+        }
+
+        $totalCommission = (float) $referral->total_commission_amount;
+        $paidAmount = (float) $referral->paid_amount;
+        $pendingAmount = max(0, $totalCommission - $paidAmount);
+
+        return view('backend.referral.commission_payment', [
+            'referral' => $referral,
+            'pendingAmount' => $pendingAmount,
+        ]);
+    }
+
+    public function commissionPaymentPayeePaid($payeeId)
+    {
+        DB::beginTransaction();
+
+        try {
+            $referrals = $this->referralService->recordCommissionPaymentByPayee($payeeId, 'paid');
+
+            if (!$referrals) {
+                DB::rollBack();
+                return redirect()
+                    ->back()
+                    ->with('errorMessage', 'Referral not found.');
+            }
+
+            $message = 'Commission payment updated for payee.';
+            $this->storeAdminWorkLog($payeeId, 'referrals', $message);
+
+            DB::commit();
+
+            return redirect()
+                ->back()
+                ->with('successMessage', $message);
+        } catch (Exception $err) {
+            DB::rollBack();
+            $this->storeSystemError('Backend', 'ReferralController', 'commissionPaymentPayeePaid', substr($err->getMessage(), 0, 1000));
+
+            return redirect()
+                ->back()
+                ->with('errorMessage', 'Failed to update commission payment.');
+        }
+    }
+
+    public function commissionPaymentPayeeForm($payeeId)
+    {
+        $referrals = $this->referralService->activeList()
+            ->where('payee_id', $payeeId)
+            ->get();
+
+        if ($referrals->isEmpty()) {
+            return redirect()
+                ->route('backend.referral.index')
+                ->with('errorMessage', 'Referral not found.');
+        }
+
+        $payee = $referrals->first()->payee;
+        $totalCommission = (float) $referrals->sum('total_commission_amount');
+        $paidAmount = (float) $referrals->sum('paid_amount');
+        $pendingAmount = max(0, $totalCommission - $paidAmount);
+
+        return view('backend.referral.commission_payment_payee', [
+            'payee' => $payee,
+            'pendingAmount' => $pendingAmount,
+            'totalCommission' => $totalCommission,
+            'paidAmount' => $paidAmount,
+        ]);
+    }
+
+    public function commissionPaymentPayeePrint($payeeId)
+    {
+        $referrals = $this->referralService->activeList()
+            ->where('payee_id', $payeeId)
+            ->get();
+
+        if ($referrals->isEmpty()) {
+            return redirect()
+                ->route('backend.referral.index')
+                ->with('errorMessage', 'Referral not found.');
+        }
+
+        $payee = $referrals->first()->payee;
+        $totalCommission = (float) $referrals->sum('total_commission_amount');
+        $paidAmount = (float) $referrals->sum('paid_amount');
+        $pendingAmount = max(0, $totalCommission - $paidAmount);
+        $billList = $referrals->map(function ($referral) {
+            return $referral->billing->bill_number ?? null;
+        })->filter()->unique()->values()->implode(', ');
+
+        $dateValues = $referrals->map(function ($referral) {
+            return $referral->date ?? null;
+        })->filter()->map(function ($date) {
+            return Carbon::parse($date);
+        })->values();
+
+        $billDateRange = 'N/A';
+        if ($dateValues->isNotEmpty()) {
+            $minDate = $dateValues->min();
+            $maxDate = $dateValues->max();
+            $billDateRange = $minDate->format('d-M-Y');
+            if ($maxDate->notEqualTo($minDate)) {
+                $billDateRange .= ' to ' . $maxDate->format('d-M-Y');
+            }
+        }
+
+        $billRows = $referrals->map(function ($referral) {
+            $totalCommission = (float) ($referral->total_commission_amount ?? 0);
+            $paidAmount = (float) ($referral->paid_amount ?? 0);
+            $pendingAmount = max(0, $totalCommission - $paidAmount);
+            return [
+                'bill_no' => $referral->billing->bill_number ?? 'N/A',
+                'date' => $referral->date ? Carbon::parse($referral->date)->format('d-M-Y') : 'N/A',
+                'commission' => $totalCommission,
+                'paid' => $paidAmount,
+                'pending' => $pendingAmount,
+            ];
+        })->values();
+
+        return view('backend.referral.commission_payment_payee_print', [
+            'payee' => $payee,
+            'pendingAmount' => $pendingAmount,
+            'totalCommission' => $totalCommission,
+            'paidAmount' => $paidAmount,
+            'billList' => $billList,
+            'billDateRange' => $billDateRange,
+            'billRows' => $billRows,
+        ]);
+    }
+
+    public function commissionPaymentPayee(Request $request, $payeeId)
+    {
+        $validated = $request->validate([
+            'amount' => 'required|numeric|min:0.01',
+        ]);
+
+        DB::beginTransaction();
+
+        try {
+            $referrals = $this->referralService->recordCommissionPaymentByPayee(
+                $payeeId,
+                'partial',
+                $validated['amount']
+            );
+
+            if (!$referrals) {
+                DB::rollBack();
+                return redirect()
+                    ->back()
+                    ->with('errorMessage', 'Referral not found.');
+            }
+
+            $message = 'Commission payment updated for payee.';
+            $this->storeAdminWorkLog($payeeId, 'referrals', $message);
+
+            DB::commit();
+
+            return redirect()
+                ->back()
+                ->with('successMessage', $message);
+        } catch (Exception $err) {
+            DB::rollBack();
+            $this->storeSystemError('Backend', 'ReferralController', 'commissionPaymentPayee', substr($err->getMessage(), 0, 1000));
+
+            return redirect()
+                ->back()
+                ->with('errorMessage', 'Failed to update commission payment.');
         }
     }
 

@@ -27,6 +27,35 @@ class PermissionSeeder extends Seeder
                 }
             }
         }
+
+        $webSettingPermission = Permission::firstOrCreate(
+            ['name' => 'websetting-add', 'guard_name' => 'admin']
+        );
+
+        Permission::firstOrCreate(
+            ['name' => 'cms-setting', 'guard_name' => 'admin'],
+            ['parent_id' => $webSettingPermission->id]
+        );
+
+        Permission::firstOrCreate(
+            ['name' => 'general-setting-add', 'guard_name' => 'admin'],
+            ['parent_id' => $webSettingPermission->id]
+        );
+
+        // Add requested setting prefixes under websetting
+        $prefixes = [
+            'setting',
+            'sms-setting',
+            'module-setting',
+            'order-setting',
+        ];
+
+        foreach ($prefixes as $p) {
+            Permission::firstOrCreate([
+                'name' => $p,
+                'guard_name' => 'admin',
+            ], ['parent_id' => $webSettingPermission->id]);
+        }
     }
 
     private function checkAndCreateExtraPermissions($menu)
@@ -53,6 +82,30 @@ class PermissionSeeder extends Seeder
             case 'pharmacy-bill-list':
                 $this->createPharmacyBillPermissions($menu);
                 break;
+            case 'medicine-inventory-add':
+                $this->createMedicineInventoryAddPermissions($menu);
+                break;
+            case 'supplier-payment-list':
+                $this->createSupplierPaymentPermissions($menu);
+                break;
+            case 'product-return-list':
+                $this->createProductReturnPermissions($menu);
+                break;
+            case 'stock-report-list':
+                $this->createStockReportPermissions($menu);
+                break;
+            case 'dashboard':
+                $this->createDashboardCardPermissions($menu);
+                break;
+            case 'frontoffice-list':
+                $this->createFrontOfficePermissions($menu);
+                break;
+            case 'birthdeathrecord-list':
+                $this->createBirthDeathRecordPermissions($menu);
+                break;
+            case 'certificate-list':
+                $this->createCertificatePermissions($menu);
+                break;
         }
     }
 
@@ -60,11 +113,15 @@ class PermissionSeeder extends Seeder
     private function storePermission($menu, $parentPermissionId = null)
     {
         if (!empty($menu->permission_name)) {
-            $permission = Permission::create([
-                'name' => $menu->permission_name,
-                'parent_id' => $parentPermissionId,
-                'guard_name' => 'admin',
-            ]);
+            $permission = Permission::firstOrCreate(
+                ['name' => $menu->permission_name, 'guard_name' => 'admin'],
+                ['parent_id' => $parentPermissionId]
+            );
+
+            if ($parentPermissionId && !$permission->parent_id) {
+                $permission->parent_id = $parentPermissionId;
+                $permission->save();
+            }
 
             $parentPermissionId = $permission->id;
         }
@@ -82,7 +139,7 @@ class PermissionSeeder extends Seeder
         if ($menu->childrens && $menu->childrens->isNotEmpty()) {
             foreach ($menu->childrens as $child) {
                 //skip menus
-                if (in_array($child->permission_name, ['pathology-list', 'radiology-list', 'pharmacy-bill-list', 'report-list', 'finance-report', 'websetting-add'])) {
+                if (in_array($child->permission_name, ['pathology-list', 'radiology-list', 'pharmacy-bill-list', 'report-list', 'finance-report', 'websetting-add', 'dashboard-setting', 'attendance-settings'])) {
                     continue;
                 }
 
@@ -127,51 +184,45 @@ class PermissionSeeder extends Seeder
 
     private function createBillingPermissions($billingMenu)
     {
-        $billingPermissions = ['billing-invoice', 'billing-edit', 'billing-delete'];
+        $billingPermissions = [
+            'billing-create',
+            'billing-invoice',
+            'billing-edit',
+            'billing-delete',
+            'billing-due-collect',
+        ];
 
         $billingPermission = Permission::where('name', 'billing')->first();
 
         if ($billingPermission) {
             foreach ($billingPermissions as $permissionName) {
-                Permission::create([
-                    'name' => $permissionName,
-                    'parent_id' => $billingPermission->id,
-                    'guard_name' => 'admin',
-                ]);
+                $this->createPermissionIfNotExists($permissionName, $billingPermission->id);
             }
         }
     }
 
     private function createAppointmentPermissions($appointmentMenu)
     {
-        $appointmentPermissions = ['appoinment-status', 'appoinment-create', 'appoinment-edit', 'appoinment-invoice'];
+        $appointmentPermissions = ['appoinment-status', 'appoinment-create', 'appoinment-edit', 'appoinment-invoice', 'website-inbox'];
 
         $appointmentPermission = Permission::where('name', 'appoinment-list')->first();
 
         if ($appointmentPermission) {
             foreach ($appointmentPermissions as $permissionName) {
-                Permission::create([
-                    'name' => $permissionName,
-                    'parent_id' => $appointmentPermission->id,
-                    'guard_name' => 'admin',
-                ]);
+                $this->createPermissionIfNotExists($permissionName, $appointmentPermission->id);
             }
         }
     }
 
     private function createOpdPatientPermissions($opdPatientMenu)
     {
-        $opdPatientPermissions = ['opd-patient-status', 'opd-patient-create', 'opd-patient-edit', 'opd-patient-invoice'];
+        $opdPatientPermissions = ['opd-patient-status', 'opd-patient-create', 'opd-patient-edit', 'opd-patient-invoice', 'doctor-portal'];
 
         $opdPatientPermission = Permission::where('name', 'opd-patient-list')->first();
 
         if ($opdPatientPermission) {
             foreach ($opdPatientPermissions as $permissionName) {
-                Permission::create([
-                    'name' => $permissionName,
-                    'parent_id' => $opdPatientPermission->id,
-                    'guard_name' => 'admin',
-                ]);
+                $this->createPermissionIfNotExists($permissionName, $opdPatientPermission->id);
             }
         }
     }
@@ -184,11 +235,7 @@ class PermissionSeeder extends Seeder
 
         if ($ipdPatientPermission) {
             foreach ($ipdPatientPermissions as $permissionName) {
-                Permission::create([
-                    'name' => $permissionName,
-                    'parent_id' => $ipdPatientPermission->id,
-                    'guard_name' => 'admin',
-                ]);
+                $this->createPermissionIfNotExists($permissionName, $ipdPatientPermission->id);
             }
         }
     }
@@ -201,11 +248,7 @@ class PermissionSeeder extends Seeder
 
         if ($pathologyPermission) {
             foreach ($pathologyPermissions as $permissionName) {
-                Permission::create([
-                    'name' => $permissionName,
-                    'parent_id' => $pathologyPermission->id,
-                    'guard_name' => 'admin',
-                ]);
+                $this->createPermissionIfNotExists($permissionName, $pathologyPermission->id);
             }
         }
     }
@@ -218,11 +261,7 @@ class PermissionSeeder extends Seeder
 
         if ($radiologyPermission) {
             foreach ($radiologyPermissions as $permissionName) {
-                Permission::create([
-                    'name' => $permissionName,
-                    'parent_id' => $radiologyPermission->id,
-                    'guard_name' => 'admin',
-                ]);
+                $this->createPermissionIfNotExists($permissionName, $radiologyPermission->id);
             }
         }
     }
@@ -235,11 +274,136 @@ class PermissionSeeder extends Seeder
 
         if ($pharmacyBillPermission) {
             foreach ($pharmacyBillPermissions as $permissionName) {
-                Permission::create([
-                    'name' => $permissionName,
-                    'parent_id' => $pharmacyBillPermission->id,
-                    'guard_name' => 'admin',
-                ]);
+                $this->createPermissionIfNotExists($permissionName, $pharmacyBillPermission->id);
+            }
+        }
+    }
+
+    private function createMedicineInventoryAddPermissions($menu)
+    {
+        $permissions = [
+            'medicine-inventory-add-status',
+            'medicine-inventory-add-create',
+            'medicine-inventory-add-edit',
+            'medicine-inventory-add-delete',
+        ];
+
+        $basePermission = Permission::where('name', 'medicine-inventory-add')->first();
+        if ($basePermission) {
+            foreach ($permissions as $permissionName) {
+                $this->createPermissionIfNotExists($permissionName, $basePermission->id);
+            }
+        }
+    }
+
+    private function createFrontOfficePermissions($menu)
+    {
+        $permissions = ['frontoffice-status', 'frontoffice-create', 'frontoffice-edit', 'frontoffice-delete'];
+        $basePermission = Permission::where('name', 'frontoffice-list')->first();
+
+        if ($basePermission) {
+            foreach ($permissions as $permissionName) {
+                $this->createPermissionIfNotExists($permissionName, $basePermission->id);
+            }
+        }
+    }
+
+    private function createBirthDeathRecordPermissions($menu)
+    {
+        $permissions = ['birthdeathrecord-status', 'birthdeathrecord-create', 'birthdeathrecord-edit', 'birthdeathrecord-delete'];
+        $basePermission = Permission::where('name', 'birthdeathrecord-list')->first();
+
+        if ($basePermission) {
+            foreach ($permissions as $permissionName) {
+                $this->createPermissionIfNotExists($permissionName, $basePermission->id);
+            }
+        }
+    }
+
+    private function createCertificatePermissions($menu)
+    {
+        $permissions = ['certificate-status', 'certificate-create', 'certificate-edit', 'certificate-delete'];
+        $basePermission = Permission::where('name', 'certificate-list')->first();
+
+        if ($basePermission) {
+            foreach ($permissions as $permissionName) {
+                $this->createPermissionIfNotExists($permissionName, $basePermission->id);
+            }
+        }
+    }
+
+    private function createSupplierPaymentPermissions($menu)
+    {
+        $permissions = [
+            'supplier-payment-list-status',
+            'supplier-payment-list-create',
+            'supplier-payment-list-edit',
+            'supplier-payment-list-delete',
+        ];
+
+        $basePermission = Permission::where('name', 'supplier-payment-list')->first();
+        if ($basePermission) {
+            foreach ($permissions as $permissionName) {
+                $this->createPermissionIfNotExists($permissionName, $basePermission->id);
+            }
+        }
+    }
+
+    private function createProductReturnPermissions($menu)
+    {
+        $permissions = [
+            'product-return-list-status',
+            'product-return-list-create',
+            'product-return-list-edit',
+            'product-return-list-delete',
+        ];
+
+        $basePermission = Permission::where('name', 'product-return-list')->first();
+        if ($basePermission) {
+            foreach ($permissions as $permissionName) {
+                $this->createPermissionIfNotExists($permissionName, $basePermission->id);
+            }
+        }
+    }
+
+    private function createStockReportPermissions($menu)
+    {
+        $permissions = [
+            'stock-report-list-status',
+            'stock-report-list-create',
+            'stock-report-list-edit',
+            'stock-report-list-delete',
+        ];
+
+        $basePermission = Permission::where('name', 'stock-report-list')->first();
+        if ($basePermission) {
+            foreach ($permissions as $permissionName) {
+                $this->createPermissionIfNotExists($permissionName, $basePermission->id);
+            }
+        }
+    }
+
+    private function createDashboardCardPermissions($menu)
+    {
+        $permissions = [
+            'dashboard-card-opd-income',
+            'dashboard-card-ipd-income',
+            'dashboard-card-pharmacy-income',
+            'dashboard-card-pathology-income',
+            'dashboard-card-radiology-income',
+            'dashboard-card-blood-bank-income',
+            'dashboard-card-expenses',
+            'dashboard-card-pending-income',
+            'dashboard-card-net-income',
+            'dashboard-card-total-discount',
+            'dashboard-card-expired-medicines',
+            'dashboard-card-expiring-medicines',
+        ];
+
+        $basePermission = Permission::where('name', 'dashboard')->first();
+        if ($basePermission) {
+            foreach ($permissions as $permissionName) {
+                $this->createPermissionIfNotExists($permissionName, $basePermission->id);
             }
         }
     }

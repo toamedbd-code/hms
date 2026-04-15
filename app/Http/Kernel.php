@@ -65,9 +65,15 @@ class Kernel extends HttpKernel
         'signed' => \App\Http\Middleware\ValidateSignature::class,
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
-        'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
+                'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
+
+        // Attendance kiosk (public) security
+        'kiosk.pin' => \App\Http\Middleware\EnsureKioskPin::class,
+        'patient.panel' => \App\Http\Middleware\EnsurePatientPanelEnabled::class,
+        'patient.auth' => \App\Http\Middleware\EnsurePatientAuthenticated::class,
         
         'AuthCheck' => Middleware\AuthCheck::class,
         'AdminAuth' => Middleware\AdminAuth::class,
+        'subscription.active' => \App\Http\Middleware\EnsureSubscriptionActive::class,
     ];
 }

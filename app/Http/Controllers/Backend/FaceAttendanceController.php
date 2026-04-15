@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
 use App\Models\Attendance;
 use App\Models\FaceEncoding;
 use App\Services\AttendanceDeviceService;
@@ -18,19 +19,11 @@ class FaceAttendanceController extends Controller
 
     public function index(Request $request)
     {
-        if ($redirect = $this->cameraLocalhostRedirect($request)) {
-            return $redirect;
-        }
-
         return view('backend.staffattendance.face');
     }
 
     public function registerIndex(Request $request)
     {
-        if ($redirect = $this->cameraLocalhostRedirect($request)) {
-            return $redirect;
-        }
-
         return view('backend.staffattendance.face_register');
     }
 
@@ -51,6 +44,26 @@ class FaceAttendanceController extends Controller
         $encoding->delete();
 
         return redirect()->back()->with('successMessage', 'Face encoding deleted successfully.');
+    }
+
+    public function registerEdit(int $id)
+    {
+        $encoding = FaceEncoding::findOrFail($id);
+        return view('backend.staffattendance.face_encoding_edit', compact('encoding'));
+    }
+
+    public function registerUpdate(Request $request, int $id)
+    {
+        $encoding = FaceEncoding::findOrFail($id);
+
+        $data = $request->validate([
+            'employee_code' => 'required|string|max:100',
+        ]);
+
+        $encoding->employee_code = trim((string) $data['employee_code']);
+        $encoding->save();
+
+        return redirect()->route('backend.attendance.face.encodings')->with('successMessage', 'Face encoding updated successfully.');
     }
 
     private function cameraLocalhostRedirect(Request $request)
@@ -144,16 +157,52 @@ class FaceAttendanceController extends Controller
             return response()->json(['message' => 'employee_code or descriptor required'], 422);
         }
 
-                // Auto IN/OUT toggle:
-        // If there is an open IN record today (recorded_out is null) => mark as OUT, else mark as IN.
-        $now = now();
-        $openInExists = Attendance::where('employee_code', $employeeCode)
-            ->where('type', 'in')
-            ->whereDate('recorded_at', $now->toDateString())
-            ->whereNull('recorded_out')
-            ->exists();
+        $employeeCode = trim((string) $employeeCode);
+        if ($employeeCode === '') {
+            return response()->json(['message' => 'Invalid employee code'], 422);
+        }
 
-        $eventType = $openInExists ? 'out' : 'in';
+        // Auto IN/OUT toggle based on the latest record for today.
+        // This avoids false OUT decisions when older stale open-IN rows exist.
+        $now = now();
+        $latestToday = Attendance::where('employee_code', $employeeCode)
+            ->whereDate('recorded_at', $now->toDateString())
+            ->orderByRaw('COALESCE(recorded_out, recorded_at) DESC')
+            ->orderByDesc('id')
+            ->first();
+
+        $cooldownSeconds = max((int) config('attendance.face_scan_cooldown_seconds', 10), 0);
+
+        if ($latestToday && $cooldownSeconds > 0) {
+            $lastAction = null;
+            $lastActionTs = null;
+
+            if ($latestToday->type === 'in' && empty($latestToday->recorded_out)) {
+                $lastAction = 'in';
+                $lastActionTs = Carbon::parse($latestToday->recorded_at);
+            } elseif ($latestToday->type === 'in' && !empty($latestToday->recorded_out)) {
+                $lastAction = 'out';
+                $lastActionTs = Carbon::parse($latestToday->recorded_out);
+            } elseif ($latestToday->type === 'out') {
+                $lastAction = 'out';
+                $lastActionTs = Carbon::parse($latestToday->recorded_out ?? $latestToday->recorded_at);
+            }
+
+            if ($lastAction && $lastActionTs && $lastActionTs->diffInSeconds($now) < $cooldownSeconds) {
+                return response()->json([
+                    'status' => 'success',
+                    'marked_as' => $lastAction,
+                    'employee_code' => $employeeCode,
+                    'attendance' => $latestToday,
+                    'message' => "{$lastAction} already marked. Wait {$cooldownSeconds} seconds.",
+                ], 200);
+            }
+        }
+
+        $eventType = 'in';
+        if ($latestToday && $latestToday->type === 'in' && empty($latestToday->recorded_out)) {
+            $eventType = 'out';
+        }
 
         /** @var AttendanceDeviceService $service */
         $service = app(AttendanceDeviceService::class);

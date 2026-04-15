@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
 use Exception;
+use App\Models\Bed;
+use App\Models\IpdPatient;
 
 class BedController extends Controller
 {
@@ -29,10 +31,11 @@ class BedController extends Controller
 
         $this->middleware('auth:admin');
         $this->middleware('permission:bed-list');
-        $this->middleware('permission:bed-create', ['only' => ['create', 'store']]);
-        $this->middleware('permission:bed-edit', ['only' => ['edit', 'update']]);
-        $this->middleware('permission:bed-delete', ['only' => ['destroy']]);
-        $this->middleware('permission:bed-status', ['only' => ['changeStatus']]);
+        // PermissionSeeder generates permissions like: bed-list-create/edit/delete/status
+        $this->middleware('permission:bed-list-create', ['only' => ['create', 'store']]);
+        $this->middleware('permission:bed-list-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:bed-list-delete', ['only' => ['destroy']]);
+        $this->middleware('permission:bed-list-status', ['only' => ['changeStatus']]);
     }
 
 
@@ -195,6 +198,43 @@ class BedController extends Controller
                 'bedGroups' => fn() => $this->bedGroupService->activeList()
             ]
         );
+    }
+
+    public function statusSnapshot()
+    {
+        $beds = Bed::query()
+            ->with(['bedGroup'])
+            ->orderBy('bed_group_id')
+            ->orderBy('name')
+            ->get();
+
+        $occupied = IpdPatient::query()
+            ->with(['patient'])
+            ->where('status', 'Active')
+            ->whereNotNull('bed_id')
+            ->get()
+            ->keyBy('bed_id');
+
+        $payload = $beds->map(function ($bed) use ($occupied) {
+            $activePatient = $occupied->get($bed->id);
+
+            $isAvailable = ($bed->status === 'Active') && !$activePatient;
+
+            return [
+                'id' => $bed->id,
+                'name' => $bed->name,
+                'bed_group_id' => $bed->bed_group_id,
+                'bed_group_name' => $bed->bedGroup?->name ?? '',
+                'status' => $bed->status,
+                'is_available' => $isAvailable,
+                'occupied_by' => $activePatient ? [
+                    'ipd_id' => $activePatient->id,
+                    'patient_name' => $activePatient->patient?->name ?? 'N/A',
+                ] : null,
+            ];
+        });
+
+        return response()->json($payload);
     }
 
     public function update(BedRequest $request, $id)

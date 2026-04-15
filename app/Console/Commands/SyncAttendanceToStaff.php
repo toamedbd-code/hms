@@ -55,23 +55,33 @@ class SyncAttendanceToStaff extends Command
                 continue;
             }
 
-            $firstIn = $records
+            $latestIn = $records
                 ->filter(fn($row) => strtolower((string) $row->type) === 'in')
-                ->sortBy('recorded_at')
+                ->sortByDesc('recorded_at')
                 ->first();
 
-            $lastOut = $records
-                ->filter(fn($row) => !empty($row->recorded_out))
-                ->sortByDesc('recorded_out')
+            $latestStandaloneOut = $records
+                ->filter(fn($row) => strtolower((string) $row->type) === 'out')
+                ->sortByDesc('recorded_at')
                 ->first();
 
-            if (!$firstIn && !$lastOut) {
+            if (!$latestIn && !$latestStandaloneOut) {
                 $skipped++;
                 continue;
             }
 
-            $inTs = $firstIn ? Carbon::parse($firstIn->recorded_at) : null;
-            $outTs = $lastOut ? Carbon::parse($lastOut->recorded_out) : null;
+            $inTs = null;
+            $outTs = null;
+
+            if ($latestIn) {
+                $inTs = Carbon::parse($latestIn->recorded_at);
+                if (!empty($latestIn->recorded_out)) {
+                    $outTs = Carbon::parse($latestIn->recorded_out);
+                }
+            } elseif ($latestStandaloneOut) {
+                $outTs = Carbon::parse($latestStandaloneOut->recorded_out ?? $latestStandaloneOut->recorded_at);
+            }
+
             $status = 'Present';
             if ($inTs && $this->isLate((int) $staff->id, (string) $employeeCode, $inTs)) {
                 $status = 'Late';

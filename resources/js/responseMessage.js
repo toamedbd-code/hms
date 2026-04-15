@@ -43,12 +43,44 @@ export const displayWarning = (errors) => {
 
 
 export const displayResponse = (response) => {
+    // Inertia responses include flash messages under props.flash
     if (response?.props?.flash?.successMessage) {
         successMessage(response.props.flash.successMessage);
-    } else if (response?.props?.flash?.errorMessage) {
+        return;
+    }
+
+    if (response?.props?.flash?.errorMessage) {
         errorMessage(response.props.flash.errorMessage);
-    } else {
-        errorMessage("Something went wrong. Please try again later.");
+        return;
+    }
+
+    // Non-Inertia plain JSON responses (e.g., { successMessage: '...' })
+    if (response?.successMessage) {
+        successMessage(response.successMessage);
+        return;
+    }
+
+    if (response?.errorMessage) {
+        errorMessage(response.errorMessage);
+        return;
+    }
+
+    // Axios-style responses may wrap data under `data`
+    if (response?.data?.successMessage) {
+        successMessage(response.data.successMessage);
+        return;
+    }
+
+    if (response?.data?.errorMessage) {
+        errorMessage(response.data.errorMessage);
+        return;
+    }
+};
+
+// Show toast only when there is no server-side flash message present.
+export const showToastIfNoFlash = (response) => {
+    if (!response?.props?.flash?.successMessage && !response?.props?.flash?.errorMessage) {
+        displayResponse(response);
     }
 };
 
@@ -121,7 +153,9 @@ export const deleteConfirmation = (url) => {
         if (result.isConfirmed) {
             try {
                 router.
-                    delete(url, {
+                    post(url, {
+                        _method: 'delete',
+                    }, {
                         onSuccess: (response) => {
                             displayResponse(response);
                         },

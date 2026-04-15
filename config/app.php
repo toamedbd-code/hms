@@ -19,6 +19,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Application Version
+    |--------------------------------------------------------------------------
+    |
+    | Centralized app version for release tracking. Keep this synced with
+    | package/composer version updates.
+    |
+    */
+
+    'version' => env('APP_VERSION', '2.0.0'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Environment
     |--------------------------------------------------------------------------
     |
@@ -57,6 +69,9 @@ return [
     'url' => env('APP_URL', 'http://localhost'),
 
     'asset_url' => env('ASSET_URL'),
+
+    // Shared fallback line used in invoice footers when company info is unavailable.
+    'invoice_footer_fallback_line' => env('INVOICE_FOOTER_FALLBACK_LINE', 'Powered By: www.toamedit.com Support: 01919-592638'),
 
     /*
     |--------------------------------------------------------------------------

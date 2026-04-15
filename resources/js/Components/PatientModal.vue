@@ -1,10 +1,11 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue';
 import { useForm } from '@inertiajs/vue3';
+import axios from 'axios';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
-import { displayResponse } from '@/responseMessage.js';
+import { displayResponse, showToastIfNoFlash } from '@/responseMessage.js';
 import { parse, format, isValid, differenceInYears, differenceInMonths, differenceInDays, subYears, subMonths, subDays } from 'date-fns';
 
 const props = defineProps(['isOpen']);
@@ -37,25 +38,55 @@ const closeModal = () => {
     emit('close');
 };
 
-const submit = () => {
+const submit = async () => {
     form.age = [
         ageYears.value ? `${ageYears.value} year${ageYears.value !== '1' ? 's' : ''}` : '',
         ageMonths.value ? `${ageMonths.value} month${ageMonths.value !== '1' ? 's' : ''}` : '',
         ageDays.value ? `${ageDays.value} day${ageDays.value !== '1' ? 's' : ''}` : ''
     ].filter(Boolean).join(' ');
 
-    form.post(route('backend.patient.store'), {
-        preserveScroll: true,
-        onSuccess: (response) => {
-            displayResponse(response);
-            form.reset();
-            ageYears.value = '';
-            ageMonths.value = '';
-            ageDays.value = '';
-            emit('patientCreated', response.props.patient);
-            closeModal();
+    form.processing = true;
+    form.clearErrors && form.clearErrors();
+
+    const payload = {
+        name: form.name,
+        gender: form.gender,
+        dob: form.dob,
+        blood_group: form.blood_group,
+        phone: form.phone,
+        email: form.email,
+        address: form.address,
+        remarks: form.remarks,
+        age: form.age,
+    };
+
+    try {
+        const res = await axios.post(route('backend.patient.store'), payload, {
+            headers: { Accept: 'application/json' }
+        });
+
+        const newPatient = res.data?.patient ?? null;
+        const successMsg = res.data?.successMessage ?? null;
+
+        if (successMsg) {
+            showToastIfNoFlash({ props: { flash: { successMessage: successMsg } } });
         }
-    });
+
+        form.reset();
+        ageYears.value = '';
+        ageMonths.value = '';
+        ageDays.value = '';
+        if (newPatient) emit('patientCreated', newPatient);
+        closeModal();
+    } catch (err) {
+        if (err.response && err.response.status === 422) {
+            form.errors = err.response.data.errors || {};
+        } else {
+            showToastIfNoFlash({ props: { flash: { errorMessage: err.response?.data?.errorMessage ?? 'Server error' } } });
+        }
+    } finally {
+        form.processing = false;
+    }
 };
 
 watch(() => props.isOpen, (newValue) => {

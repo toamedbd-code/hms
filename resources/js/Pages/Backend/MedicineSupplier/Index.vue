@@ -1,9 +1,9 @@
 <script setup>
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
-import { router } from '@inertiajs/vue3';
+import { router, usePage } from '@inertiajs/vue3';
 
 let props = defineProps({
     filters: Object,
@@ -20,6 +20,78 @@ const applyFilter = () => {
 
 const goToChargeAdd = () => {
     router.get(route('backend.medicinesupplier.create'));
+};
+
+const page = usePage();
+const rows = computed(() => page.props.datas?.data ?? []);
+
+const showCollectModal = ref(false);
+const isCollecting = ref(false);
+const collectForm = ref({
+    supplierId: null,
+    supplierName: '',
+    dueAmount: 0,
+    amount: '',
+});
+
+const closeCollectModal = (force = false) => {
+    if (isCollecting.value && !force) return;
+
+    showCollectModal.value = false;
+    collectForm.value = {
+        supplierId: null,
+        supplierName: '',
+        dueAmount: 0,
+        amount: '',
+    };
+};
+
+const openCollectModal = (row) => {
+    const due = Number(row?.purchase_due_amount_numeric ?? row?.purchase_due_amount ?? 0);
+    if (!row?.id || due <= 0) return;
+
+    collectForm.value = {
+        supplierId: row.id,
+        supplierName: row.name ?? 'N/A',
+        dueAmount: due,
+        amount: due,
+    };
+
+    showCollectModal.value = true;
+};
+
+const handleAction = (actionName, actionId) => {
+    if (actionName !== 'supplier-due-payment') return;
+    const row = rows.value.find((item) => Number(item.id) === Number(actionId));
+    openCollectModal(row);
+};
+
+const submitCollect = () => {
+    if (isCollecting.value) return;
+
+    const supplierId = Number(collectForm.value.supplierId || 0);
+    const dueAmount = Number(collectForm.value.dueAmount || 0);
+    const amount = Number(collectForm.value.amount || 0);
+
+    if (!supplierId) return;
+
+    if (!Number.isFinite(amount) || amount <= 0 || amount > dueAmount) {
+        window.alert('Invalid payment amount.');
+        return;
+    }
+
+    isCollecting.value = true;
+    router.post(route('backend.supplierpayment.pay-due-by-supplier', supplierId), {
+        amount,
+    }, {
+        preserveScroll: true,
+        onSuccess: () => {
+            closeCollectModal(true);
+        },
+        onFinish: () => {
+            isCollecting.value = false;
+        },
+    });
 };
 
 </script>
@@ -96,9 +168,72 @@ const goToChargeAdd = () => {
     </div>
 
     <div class="w-full my-3 overflow-x-auto">
-        <BaseTable />
+        <BaseTable @action="handleAction" :is-processing="isCollecting" />
     </div>
     <Pagination />
 </div>
+
+    <div v-if="showCollectModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div class="w-full max-w-md rounded-lg bg-white shadow-xl">
+            <div class="flex items-center justify-between border-b px-5 py-3">
+                <h3 class="text-base font-semibold text-gray-800">Supplier Due Payment</h3>
+                <button
+                    type="button"
+                    class="text-gray-500 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    :disabled="isCollecting"
+                    @click="closeCollectModal"
+                >
+                    ✕
+                </button>
+            </div>
+
+            <div class="px-5 py-4">
+                <table class="w-full text-sm text-gray-700">
+                    <tr>
+                        <td class="py-1 font-semibold">Supplier</td>
+                        <td class="py-1">{{ collectForm.supplierName }}</td>
+                    </tr>
+                    <tr>
+                        <td class="py-1 font-semibold">Due Amount</td>
+                        <td class="py-1 text-red-600 font-semibold">Tk {{ Number(collectForm.dueAmount || 0).toFixed(2) }}</td>
+                    </tr>
+                </table>
+
+                <div class="mt-4">
+                    <label class="mb-1 block text-sm font-semibold text-gray-700">Payment Amount</label>
+                    <input
+                        v-model="collectForm.amount"
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        :max="collectForm.dueAmount"
+                        :disabled="isCollecting"
+                        @keydown.enter.prevent="submitCollect"
+                        class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    >
+                    <p class="mt-1 text-xs text-gray-500">Max: Tk {{ Number(collectForm.dueAmount || 0).toFixed(2) }}</p>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 border-t px-5 py-3">
+                <button
+                    type="button"
+                    class="rounded-md bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                    :disabled="isCollecting"
+                    @click="closeCollectModal"
+                >
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                    :disabled="isCollecting"
+                    @click="submitCollect"
+                >
+                    {{ isCollecting ? 'Processing...' : 'Pay Due' }}
+                </button>
+            </div>
+        </div>
+    </div>
     </BackendLayout>
 </template>

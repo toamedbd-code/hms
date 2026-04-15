@@ -1,10 +1,10 @@
 
 <script setup>
-    import { ref } from "vue";
+    import { computed, ref } from "vue";
     import BackendLayout from '@/Layouts/BackendLayout.vue';
     import BaseTable from '@/Components/BaseTable.vue';
     import Pagination from '@/Components/Pagination.vue';
-    import { router } from '@inertiajs/vue3';
+    import { Link, router, usePage } from '@inertiajs/vue3';
 
     let props = defineProps({
         filters: Object,
@@ -18,6 +18,13 @@
     const applyFilter = () => {
         router.get(route('backend.certificate.index'), filters.value, { preserveState: true });
     };
+
+    const page = usePage();
+    const userPermissions = computed(() => {
+        const raw = page.props?.auth?.permissions ?? [];
+        return Array.isArray(raw) ? raw : [];
+    });
+    const canCreateCertificate = computed(() => userPermissions.value.includes('certificate-create'));
 
     </script>
 
@@ -55,6 +62,16 @@
                             <option value="150">show 150</option>
                             <option value="500">show 500</option>
                         </select>
+                    </div>
+
+                    <div class="min-w-28 text-right">
+                        <Link
+                            v-if="canCreateCertificate"
+                            :href="route('backend.certificate.create')"
+                            class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-green-600 rounded hover:bg-green-700"
+                        >
+                            Add
+                        </Link>
                     </div>
                 </div>
 

@@ -1,20 +1,22 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
-import { router, useForm, usePage } from '@inertiajs/vue3';
+import { router, useForm } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
-import AlertMessage from '@/Components/AlertMessage.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 
 const props = defineProps(['bedtype', 'id']);
 
 const form = useForm({
     name: props.bedtype?.name ?? '',
+    room_rent_rate_per_day: props.bedtype?.room_rent_rate_per_day ?? 0,
+    bed_charge_rate_per_day: props.bedtype?.bed_charge_rate_per_day ?? 0,
 
     _method: props.bedtype?.id ? 'put' : 'post',
 });
+
 
 const submit = () => {
     const routeName = props.id ? route('backend.bedtype.update', props.id) : route('backend.bedtype.store');
@@ -27,7 +29,8 @@ const submit = () => {
         onSuccess: (response) => {
             if (!props.id)
                 form.reset();
-            displayResponse(response);
+
+                displayResponse(response);
         },
         onError: (errorObject) => {
 
@@ -81,7 +84,24 @@ const goToBedTypeList = () => {
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
 
+                    <div class="col-span-1 md:col-span-1">
+                        <InputLabel for="room_rent_rate_per_day" value="Room Rent (Per Day)" />
+                        <input id="room_rent_rate_per_day"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            v-model="form.room_rent_rate_per_day" type="number" step="0.01" placeholder="0" />
+                        <InputError class="mt-2" :message="form.errors.room_rent_rate_per_day" />
+                    </div>
+
+                    <div class="col-span-1 md:col-span-1">
+                        <InputLabel for="bed_charge_rate_per_day" value="Bed Charge (Per Day)" />
+                        <input id="bed_charge_rate_per_day"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            v-model="form.bed_charge_rate_per_day" type="number" step="0.01" placeholder="0" />
+                        <InputError class="mt-2" :message="form.errors.bed_charge_rate_per_day" />
+                    </div>
+
                 </div>
+
                 <div class="flex items-center justify-end mt-4">
                     <PrimaryButton type="submit" class="ms-4" :class="{ 'opacity-25': form.processing }"
                         :disabled="form.processing">

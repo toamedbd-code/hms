@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, watch } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
@@ -15,6 +15,61 @@ const form = useForm({
     guard_name: props.permission?.guard_name ?? 'admin',
     parent_id: props.permission?.parent_id ?? '',
     _method: props.permission?.id ? 'put' : 'post',
+});
+
+const moduleOptions = [
+    { value: 'all', label: 'All Modules' },
+    { value: 'attendance', label: 'Attendance' },
+    { value: 'pathology', label: 'Pathology' },
+    { value: 'payroll', label: 'Payroll' },
+    { value: 'reporting', label: 'Reporting' },
+    { value: 'billing', label: 'Billing' },
+    { value: 'pharmacy', label: 'Pharmacy' },
+    { value: 'opd', label: 'OPD' },
+    { value: 'ipd', label: 'IPD' },
+    { value: 'website', label: 'Website' },
+    { value: 'other', label: 'Other' },
+];
+
+const inferPermissionModule = (permissionName) => {
+    const name = String(permissionName ?? '').toLowerCase();
+
+    if (/(attendance|leave|duty|roaster|salary|face)/.test(name)) return 'attendance';
+    if (/pathology/.test(name)) return 'pathology';
+    if (/(payroll|salary-sheet|payslip)/.test(name)) return 'payroll';
+    if (/(report|reporting|invoice|print)/.test(name)) return 'reporting';
+    if (/billing/.test(name)) return 'billing';
+    if (/(pharmacy|medicine|supplier)/.test(name)) return 'pharmacy';
+    if (/(opd|outpatient)/.test(name)) return 'opd';
+    if (/(ipd|inpatient)/.test(name)) return 'ipd';
+    if (/(website|cms)/.test(name)) return 'website';
+
+    return 'other';
+};
+
+const getParentPermissionName = () => {
+    if (!props.permission?.parent_id) return '';
+    const matched = (props.permissions ?? []).find((item) => Number(item.id) === Number(props.permission.parent_id));
+    return matched?.name ?? props.permission?.name ?? '';
+};
+
+const selectedModule = ref(inferPermissionModule(getParentPermissionName() || props.permission?.name || ''));
+
+const filteredParentPermissions = computed(() => {
+    const list = props.permissions ?? [];
+    if (selectedModule.value === 'all') {
+        return list;
+    }
+
+    return list.filter((permission) => inferPermissionModule(permission?.name) === selectedModule.value);
+});
+
+watch(filteredParentPermissions, (list) => {
+    if (!form.parent_id) return;
+    const exists = list.some((item) => Number(item.id) === Number(form.parent_id));
+    if (!exists) {
+        form.parent_id = '';
+    }
 });
 
 
@@ -76,12 +131,24 @@ const submit = () => {
                         <InputError class="mt-2" :message="form.errors.bn_name" />
                     </div>
                     <div class="col-span-1 md:col-span-2">
+                        <InputLabel for="permission_module" value="Module" />
+                        <select id="permission_module"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            v-model="selectedModule">
+                            <template v-for="module in moduleOptions" :key="module.value">
+                                <option :value="module.value">{{ module.label }}</option>
+                            </template>
+                        </select>
+                        <p class="mt-1 text-xs text-slate-500">Module select করলে Parent Permission list filter হবে।</p>
+                    </div>
+
+                    <div class="col-span-1 md:col-span-2">
                         <InputLabel for="parent_id" value="Parent Permission " />
                         <select id="parent_id"
                             class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.parent_id" placeholder="Select Permission">
                             <option value="">--Select Parent Permission--</option>
-                            <template v-for="permissionInfo in permissions">
+                            <template v-for="permissionInfo in filteredParentPermissions" :key="permissionInfo.id">
                                 <option :value="permissionInfo.id">{{ permissionInfo.name }}</option>
                             </template>
                         </select>

@@ -85,6 +85,7 @@ class AdminController extends Controller
             $customData->name = $data->name;
             $customData->email = $data->email;
             $customData->phone = $data->phone;
+            $customData->password = !empty($data->getRawOriginal('password')) ? 'Set' : 'Not Set';
             $customData->role_name = $data->role?->name;
             $customData->photo = '<img src="' . $data->photo . '" height="50" width="50"/>';
             $customData->address = $data->address;
@@ -136,6 +137,7 @@ class AdminController extends Controller
             ['fieldName' => 'name', 'class' => 'text-center'],
             ['fieldName' => 'email', 'class' => 'text-center'],
             ['fieldName' => 'phone', 'class' => 'text-center'],
+            ['fieldName' => 'password', 'class' => 'text-center'],
             ['fieldName' => 'address', 'class' => 'text-center'],
             ['fieldName' => 'role_name', 'class' => 'text-center'],
             ['fieldName' => 'status', 'class' => 'text-center'],
@@ -149,6 +151,7 @@ class AdminController extends Controller
             'Name',
             'Email',
             'Phone',
+            'Password',
             'Address',
             'Role Name',
             'Status',
@@ -264,7 +267,8 @@ class AdminController extends Controller
 
             return redirect()
                 ->back()
-                ->with('successMessage', $message);
+                ->with('successMessage', $message)
+                ->with('savedPassword', (string) ($data['password'] ?? ''));
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'AdminController', 'store', $err->getMessage());
@@ -288,7 +292,8 @@ class AdminController extends Controller
                 'designations' => fn() => $this->designationService->activeList(),
                 'departments' => fn() => $this->departmentService->activeList(),
                 'specialists' => fn() => $this->specialistService->activeList(),
-                'adminDetails' => fn() => $this->adminService->adminDetails($id)
+                'adminDetails' => fn() => $this->adminService->adminDetails($id),
+                'hasPassword' => fn() => !empty($user?->getRawOriginal('password')),
             ]
         );
     }
@@ -422,7 +427,8 @@ class AdminController extends Controller
 
             return redirect()
                 ->back()
-                ->with('successMessage', $message);
+                ->with('successMessage', $message)
+                ->with('savedPassword', isset($data['password']) ? (string) $data['password'] : '');
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'AdminController', 'update', $err->getMessage());

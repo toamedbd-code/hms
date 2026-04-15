@@ -80,6 +80,8 @@ use App\Http\Controllers\Backend\InvoiceDesignController;
 use App\Http\Controllers\Backend\LeaveTypeController;
 use App\Http\Controllers\Backend\ReportController;
 use App\Http\Controllers\Backend\WebSettingController;
+use App\Http\Controllers\Backend\ProfileController;
+use App\Http\Controllers\Backend\BkashSettingController;
 
 use App\Http\Controllers\Backend\PharmacyBillController;
 
@@ -100,6 +102,15 @@ use App\Http\Controllers\Backend\BillingDoctorController;
 use App\Http\Controllers\Backend\ChargeImportController;
 use App\Http\Controllers\Backend\FinanceReportController;
 use App\Http\Controllers\Backend\ActivityLogController;
+use App\Http\Controllers\Backend\PathologyMachineIntegrationLogController;
+use App\Http\Controllers\Backend\PharmacyStockReportController;
+use App\Http\Controllers\Backend\BulkSmsController;
+use App\Http\Controllers\PublicStorageController;
+use App\Http\Controllers\PatientPortal\PatientPortalController;
+use App\Http\Controllers\Frontend\HomeController;
+use App\Http\Controllers\Frontend\AssetController;
+use App\Http\Controllers\Frontend\DebugController;
+use App\Http\Controllers\Payment\BkashController;
 
 //don't remove this comment from route namespace
 
@@ -114,7 +125,52 @@ use App\Http\Controllers\Backend\ActivityLogController;
 |
 */
 
-Route::get('/', [LoginController::class, 'loginPage'])->name('home')->middleware('AuthCheck');
+Route::get('/', [HomeController::class, 'index'])->name('home');
+Route::get('/services', [HomeController::class, 'services'])->name('website.services');
+Route::get('/doctors', [HomeController::class, 'doctors'])->name('website.doctors');
+Route::get('/facilities', [HomeController::class, 'facilities'])->name('website.facilities');
+Route::get('/appointment', [HomeController::class, 'appointment'])->name('website.appointment');
+Route::get('/contact', [HomeController::class, 'contact'])->name('website.contact');
+
+// Serve storage files when symlink may be missing (fallback)
+Route::get('/storage/{path}', [AssetController::class, 'storage'])->where('path', '.*');
+
+// Debug route to inspect featured doctors image URLs
+Route::get('/debug/featured-doctors', [DebugController::class, 'featuredDoctors'])->name('debug.featured.doctors');
+
+// Debug route: render login page without AuthCheck middleware (for troubleshooting)
+Route::get('/dev/login', function () {
+    $enforce = (bool) env('SUBSCRIPTION_ENFORCE', true);
+    $sub = \App\Models\Subscription::getCurrent();
+    $active = $sub ? $sub->isActive() : false;
+    $setting = \App\Models\BkashSetting::first();
+
+    return \Inertia\Inertia::render('Login', [
+        'subscriptionEnforced' => $enforce,
+        'subscriptionActive' => $active,
+        'bkashEnabled' => $setting->is_enabled ?? false,
+        'bkashMonthlyAmount' => $setting->monthly_amount ?? 0,
+    ]);
+})->name('debug.login');
+
+// Debug route: create or enable a sandbox bKash setting for local tests
+Route::get('/dev/bkash-setup', function () {
+    $setting = \App\Models\BkashSetting::first();
+    if (! $setting) {
+        $setting = \App\Models\BkashSetting::create([
+            'is_enabled' => true,
+            'is_sandbox' => true,
+            'monthly_amount' => env('SUBSCRIPTION_MONTHLY_AMOUNT', 2000),
+        ]);
+    } else {
+        $setting->is_enabled = true;
+        $setting->is_sandbox = true;
+        $setting->monthly_amount = env('SUBSCRIPTION_MONTHLY_AMOUNT', 2000);
+        $setting->save();
+    }
+
+    return response()->json(['ok' => true, 'setting' => $setting]);
+})->name('debug.bkash.setup');
 
 // Test-only registration endpoint (no admin auth) for automated browser tests
 Route::post('/test/attendance/face/register', [FaceAttendanceController::class, 'registerStoreTest']);
@@ -140,18 +196,45 @@ Route::get('/cache-clear', function () {
     return redirect()->route('backend.dashboard');
 });
 
+Route::get('/favicon-dynamic.ico', [WebSettingController::class, 'favicon'])->name('favicon.dynamic');
+Route::get('/public-storage/{path}', [PublicStorageController::class, 'show'])
+    ->where('path', '.*')
+    ->name('public.storage.file');
+
 Route::group(['as' => 'auth.'], function () {
     Route::get('/login', [LoginController::class, 'loginPage'])->name('login2')->middleware('AuthCheck');
     Route::post('/login', [LoginController::class, 'login'])->name('login');
     Route::get('/logout', [LoginController::class, 'logout'])->name('logout');
 });
 
+// Public bKash endpoints for subscription renewal (used from login page)
+Route::get('payment/bkash/renew', [\App\Http\Controllers\Payment\BkashController::class, 'publicInitiate'])->name('payment.bkash.initiate.public');
+Route::get('payment/bkash/simulate-public/{payment}/approve', [\App\Http\Controllers\Payment\BkashController::class, 'publicSimulateApprove'])->name('payment.bkash.simulate.approve.public');
+
+Route::post('/website/appointment', [HomeController::class, 'storeAppointment'])
+    ->middleware('throttle:8,1')
+    ->name('website.appointment.store');
+
 Route::group(['middleware' => 'AdminAuth'], function () {
 
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
+    // bKash settings (admin)
+    Route::get('settings/payment/bkash', [BkashSettingController::class, 'index'])->name('settings.payment.bkash');
+    Route::post('settings/payment/bkash', [BkashSettingController::class, 'store'])->name('settings.payment.bkash.store');
+
+    // bKash payment endpoints (admin)
+    Route::post('payment/bkash/initiate', [\App\Http\Controllers\Payment\BkashController::class, 'initiate'])->name('payment.bkash.initiate');
+    Route::get('payment/bkash/simulate/{payment}/approve', [\App\Http\Controllers\Payment\BkashController::class, 'simulateApprove'])->name('payment.bkash.simulate.approve');
+    Route::post('payment/bkash/{payment}/mark-ready', [BkashController::class, 'markReady'])->name('payment.bkash.markReady');
+
     Route::get('/dashboard-setting', [DashboardSettingController::class, 'edit'])->name('dashboard-setting.edit');
     Route::post('/dashboard-setting', [DashboardSettingController::class, 'update'])->name('dashboard-setting.update');
+
+    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::get('/profile/photo', [ProfileController::class, 'photo'])->name('profile.photo');
+    Route::post('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::post('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password.update');
 
     Route::post('/symptom-types', [SymptomTypeController::class, 'store'])->name('symptom-types.store');
 
@@ -174,6 +257,9 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::resource('patient', PatientController::class);
     Route::get('patient/{id}/status/{status}/change', [PatientController::class, 'changeStatus'])->name('patient.status.change');
 
+    // Doctor portal (doctor-wise OPD list for prescribing)
+    Route::get('doctor-portal/opd', [OpdPatientController::class, 'doctorPortal'])->name('doctor.portal.opd');
+
 
     //for Tpa
     Route::resource('tpa', TpaController::class);
@@ -192,13 +278,17 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
     Route::get('/invoice/{id}', [BillingController::class, 'invoice'])->name('invoice');
     Route::get('/download-invoice', [InvoiceController::class, 'downloadInvoice'])->name('download.invoice');
+    Route::get('/download-report', [ReportingController::class, 'downloadReport'])->name('download.report');
     Route::get('/search/billing', [BillingController::class, 'searchShow'])->name('billing.search');
+    Route::get('/billing/prescriptions/suggest', [BillingController::class, 'searchPrescriptionSuggestions'])->name('billing.prescriptions.suggest');
+    Route::get('/billing/prescriptions/search', [BillingController::class, 'searchPrescription'])->name('billing.prescriptions.search');
 
     Route::get('/billing/doctors/search', [BillingController::class, 'searchDoctors'])->name('billing.doctors.search');
     Route::post('/billing/doctors/create', [BillingController::class, 'createBillingDoctor'])->name('billing.doctors.create');
 
     //for Appoinment
     Route::resource('appoinment', AppoinmentController::class);
+    Route::get('appoinment-website-inbox', [AppoinmentController::class, 'websiteInbox'])->name('appoinment.website-inbox');
     Route::get('appoinment/{id}/status/{status}/change', [AppoinmentController::class, 'changeStatus'])->name('appoinment.status.change');
     Route::post('/doctors', [AppoinmentController::class, 'doctorStore'])->name('doctors.store');
     Route::get('/download/appointment/invoice', [InvoiceController::class, 'downloadAppointmentInvoice'])->name('download.appointment.invoice');
@@ -270,7 +360,8 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
 
     //for Pharmacy
-    Route::resource('pharmacy', PharmacyController::class);
+    Route::get('pharmacy/stock-report', [PharmacyStockReportController::class, 'index'])->name('pharmacy.stock.report');
+    Route::resource('pharmacy', PharmacyController::class)->whereNumber('pharmacy');
     Route::get('pharmacy/{id}/status/{status}/change', [PharmacyController::class, 'changeStatus'])->name('pharmacy.status.change');
 
 
@@ -297,11 +388,13 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     //for FrontOffice
     Route::resource('frontoffice', FrontOfficeController::class);
     Route::get('frontoffice/{id}/status/{status}/change', [FrontOfficeController::class, 'changeStatus'])->name('frontoffice.status.change');
+    Route::post('frontoffice/import', [FrontOfficeController::class, 'import'])->name('frontoffice.import');
 
 
     //for BirthDeathRecord
     Route::resource('birthdeathrecord', BirthDeathRecordController::class);
     Route::get('birthdeathrecord/{id}/status/{status}/change', [BirthDeathRecordController::class, 'changeStatus'])->name('birthdeathrecord.status.change');
+    Route::get('birthdeathrecord/{id}/certificate/print', [BirthDeathRecordController::class, 'printCertificate'])->name('birthdeathrecord.certificate.print');
 
     //for DutyRoaster
     Route::resource('dutyroaster', DutyRoasterController::class);
@@ -351,6 +444,8 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('reporting/{billing}/edit', [ReportingController::class, 'edit'])->name('reporting.edit');
     Route::post('reporting/{billing}', [ReportingController::class, 'update'])->name('reporting.update');
     Route::post('reporting/item/{billItem}', [ReportingController::class, 'updateItem'])->name('reporting.item.update');
+    Route::get('reporting/item/{billItem}/file', [ReportingController::class, 'viewFile'])->name('reporting.item.file');
+    Route::post('reporting/item/{billItem}/import-text', [ReportingController::class, 'importStoredFileText'])->name('reporting.item.import-text');
     Route::get('reporting/print/{billItem}', [ReportingController::class, 'print'])->name('reporting.print');
 
     // for Report Delivery
@@ -504,6 +599,12 @@ Route::group(['middleware' => 'AdminAuth'], function () {
         'medicineinventory/search',
         [MedicineInventoryController::class, 'search']
     )->name('medicineinventory.search');
+
+    Route::get(
+        'medicineinventory/sample-csv',
+        [MedicineInventoryController::class, 'downloadSampleCsv']
+    )->name('medicineinventory.sample-csv');
+
     Route::resource(
         'medicineinventory',
         MedicineInventoryController::class
@@ -519,11 +620,6 @@ Route::group(['middleware' => 'AdminAuth'], function () {
         [MedicineInventoryController::class, 'importCsv']
     )->name('medicineinventory.import.csv');
 
-    Route::get(
-        'medicineinventory/sample-csv',
-        [MedicineInventoryController::class, 'downloadSampleCsv']
-    )->name('medicineinventory.sample-csv');
-
     // for MedicinePurchase
     Route::resource('medicinepurchase', \App\Http\Controllers\Backend\MedicinePurchaseController::class);
     Route::post('medicinepurchase/{medicinepurchase}/receive', [\App\Http\Controllers\Backend\MedicinePurchaseController::class, 'receiveItems'])->name('medicinepurchase.receive');
@@ -531,15 +627,30 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     // for SupplierPayment
     Route::resource('supplierpayment', \App\Http\Controllers\Backend\SupplierPaymentController::class);
     Route::post('supplierpayment/{supplierpayment}/partial', [\App\Http\Controllers\Backend\SupplierPaymentController::class, 'addPartialPayment'])->name('supplierpayment.partial');
+    Route::post('supplierpayment/pay-due-by-supplier/{supplier}', [\App\Http\Controllers\Backend\SupplierPaymentController::class, 'payDueBySupplier'])->name('supplierpayment.pay-due-by-supplier');
     Route::get('supplierpayment/report/stock-due', [\App\Http\Controllers\Backend\SupplierPaymentController::class, 'stockDueReport'])->name('supplierpayment.report.stock-due');
 
     // for ProductReturn
     Route::resource('productreturn', \App\Http\Controllers\Backend\ProductReturnController::class);
     Route::post('productreturn/{productreturn}/approve', [\App\Http\Controllers\Backend\ProductReturnController::class, 'approve'])->name('productreturn.approve');
     Route::post('productreturn/{productreturn}/process', [\App\Http\Controllers\Backend\ProductReturnController::class, 'process'])->name('productreturn.process');
+    Route::post('productreturn/{productreturn}/pay', [\App\Http\Controllers\Backend\ProductReturnController::class, 'pay'])->name('productreturn.pay');
 
     // for StockManagement
     Route::get('stock', [\App\Http\Controllers\Backend\StockManagementController::class, 'index'])->name('stock.index');
+    Route::get('stock/item/create', [\App\Http\Controllers\Backend\StockManagementController::class, 'createItem'])->name('stock.item.create');
+    Route::post('stock/item', [\App\Http\Controllers\Backend\StockManagementController::class, 'storeItem'])->name('stock.item.store');
+    Route::get('stock/requisitions', [\App\Http\Controllers\Backend\StockManagementController::class, 'requisitions'])->name('stock.requisitions');
+    Route::get('stock/requisition/create', [\App\Http\Controllers\Backend\StockManagementController::class, 'createRequisition'])->name('stock.requisition.create');
+    Route::post('stock/requisition', [\App\Http\Controllers\Backend\StockManagementController::class, 'storeRequisition'])->name('stock.requisition.store');
+    Route::post('stock/requisition/{id}/decision', [\App\Http\Controllers\Backend\StockManagementController::class, 'requisitionDecision'])->name('stock.requisition.decision');
+    Route::get('stock/requisition/{id}/print', [\App\Http\Controllers\Backend\StockManagementController::class, 'requisitionPrint'])->name('stock.requisition.print');
+    Route::get('stock/requisition/{id}/issue-slip', [\App\Http\Controllers\Backend\StockManagementController::class, 'requisitionIssueSlip'])->name('stock.requisition.issue-slip');
+    Route::get('stock/grns', [\App\Http\Controllers\Backend\StockManagementController::class, 'grns'])->name('stock.grns');
+    Route::get('stock/grn/create', [\App\Http\Controllers\Backend\StockManagementController::class, 'createGrn'])->name('stock.grn.create');
+    Route::post('stock/grn', [\App\Http\Controllers\Backend\StockManagementController::class, 'storeGrn'])->name('stock.grn.store');
+    Route::get('stock/grn/{id}/print', [\App\Http\Controllers\Backend\StockManagementController::class, 'grnPrint'])->name('stock.grn.print');
+    Route::get('stock/monthly-closing', [\App\Http\Controllers\Backend\StockManagementController::class, 'monthlyClosingReport'])->name('stock.monthly-closing');
     Route::get('stock/adjustments', [\App\Http\Controllers\Backend\StockManagementController::class, 'adjustments'])->name('stock.adjustments');
     Route::get('stock/adjustment/create', [\App\Http\Controllers\Backend\StockManagementController::class, 'createAdjustment'])->name('stock.adjustment.create');
     Route::post('stock/adjustment', [\App\Http\Controllers\Backend\StockManagementController::class, 'storeAdjustment'])->name('stock.adjustment.store');
@@ -565,9 +676,23 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('all-report', [ReportController::class, 'index'])->name('report.index');
     Route::get('/report/generate-pdf', [ReportController::class, 'generatePdf'])->name('report.generate-pdf');
 
-    // for WebSetting
-    Route::get('websetting-create', [WebSettingController::class, 'create'])->name('websetting.create');
-    Route::match(['get', 'post'], 'websetting-store', [WebSettingController::class, 'store'])->name('websetting.store');
+    // for General Setting (canonical URL)
+    Route::get('general-setting', [WebSettingController::class, 'create'])->name('websetting.create');
+    Route::get('general-setting/section/general', [WebSettingController::class, 'section'])->defaults('section', 'general')->name('websetting.section.general');
+    Route::get('general-setting/section/cms', [WebSettingController::class, 'section'])->defaults('section', 'cms')->name('websetting.section.cms');
+    Route::get('general-setting/section/prefix', [WebSettingController::class, 'section'])->defaults('section', 'prefix')->name('websetting.section.prefix');
+    Route::get('general-setting/section/sms', [WebSettingController::class, 'section'])->defaults('section', 'sms')->name('websetting.section.sms');
+    Route::get('general-setting/section/module', [WebSettingController::class, 'section'])->defaults('section', 'module')->name('websetting.section.module');
+    Route::get('general-setting/section/other', [WebSettingController::class, 'section'])->defaults('section', 'other')->name('websetting.section.other');
+    Route::match(['get', 'post'], 'general-setting-store', [WebSettingController::class, 'store'])->name('websetting.store');
+
+    // Bulk SMS
+    Route::get('bulk-sms', [BulkSmsController::class, 'index'])->name('bulk-sms.index');
+    Route::post('bulk-sms/send', [BulkSmsController::class, 'send'])->name('bulk-sms.send');
+
+    // legacy URLs kept for backward compatibility
+    Route::get('websetting-create', [WebSettingController::class, 'create']);
+    Route::match(['get', 'post'], 'websetting-store', [WebSettingController::class, 'store']);
 
     // for Report Settings
     Route::get('report-setting', [ReportSettingController::class, 'edit'])->name('report-setting.edit');
@@ -576,6 +701,7 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     //for PharmacyBill
     Route::resource('pharmacybill', PharmacyBillController::class);
     Route::get('pharmacybill/{id}/status/{status}/change', [PharmacyBillController::class, 'changeStatus'])->name('pharmacybill.status.change');
+    Route::get('pharmacybill/export/{format}', [PharmacyBillController::class, 'export'])->name('pharmacybill.export');
 
     // for StaffAttendance
     Route::resource('staffattendance', StaffAttendanceController::class);
@@ -594,7 +720,13 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::delete('attendance/face/encodings/{id}', [FaceAttendanceController::class, 'registerDelete'])->name('attendance.face.encodings.delete');
     Route::get('/backend/staffattendance/salary-sheet', [StaffAttendanceController::class, 'salarySheet'])->name('staffattendance.salary-sheet');
     Route::get('/backend/staffattendance/salary-sheet/print', [StaffAttendanceController::class, 'salarySheetPrint'])->name('staffattendance.salary-sheet.print');
+    Route::get('/backend/staffattendance/salary-sheet/pdf', [StaffAttendanceController::class, 'downloadSalarySheetPdf'])->name('staffattendance.salary-sheet.pdf');
+    Route::post('/backend/staffattendance/salary-sheet/lock', [StaffAttendanceController::class, 'lockSalarySheet'])->name('staffattendance.salary-sheet.lock');
+    Route::get('/backend/staffattendance/salary-sheet/breakdown-print', [StaffAttendanceController::class, 'salaryBreakdownPrint'])->name('staffattendance.salary-sheet.breakdown-print');
+    Route::get('/backend/staffattendance/salary-sheet/breakdown-pdf', [StaffAttendanceController::class, 'downloadBreakdownPdf'])->name('staffattendance.salary-sheet.breakdown-pdf');
+    Route::get('/backend/staffattendance/salary-sheet/holiday-audit', [StaffAttendanceController::class, 'downloadHolidayAudit'])->name('staffattendance.salary-sheet.holiday-audit');
     Route::post('/backend/staffattendance/salary-sheet/pay', [StaffAttendanceController::class, 'salaryPay'])->name('staffattendance.salary-sheet.pay');
+    Route::post('/backend/staffattendance/salary-sheet/settings/save', [StaffAttendanceController::class, 'saveSalarySheetSettings'])->name('staffattendance.salary-sheet.settings.save');
     Route::get('/backend/staffattendance/duty-roster', [\App\Http\Controllers\Backend\DutyRosterController::class, 'index'])->name('staffattendance.duty-roster');
     Route::get('/backend/staffattendance/duty-roster/print', [\App\Http\Controllers\Backend\DutyRosterController::class, 'print'])->name('staffattendance.duty-roster.print');
     Route::post('/backend/staffattendance/duty-roster', [\App\Http\Controllers\Backend\DutyRosterController::class, 'store'])->name('staffattendance.duty-roster.store');
@@ -658,6 +790,11 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('activity-logs/export', [ActivityLogController::class, 'export'])->name('activity-logs.export');
     Route::post('activity-logs/delete-old', [ActivityLogController::class, 'deleteOldLogs'])->name('activity-logs.delete-old');
 
+    // for pathology machine integration logs
+    Route::get('pathology-machine-logs', [PathologyMachineIntegrationLogController::class, 'index'])->name('pathology-machine-logs.index');
+    Route::get('pathology-machine-logs/export', [PathologyMachineIntegrationLogController::class, 'export'])->name('pathology-machine-logs.export');
+    Route::post('pathology-machine-logs/{log}/retry-simulate', [PathologyMachineIntegrationLogController::class, 'retrySimulate'])->name('pathology-machine-logs.retry-simulate');
+
 
 
     //Route::middleware(['auth:admin'])->group(function () {
@@ -676,4 +813,18 @@ Route::get('opd-due-collect/{id}', [DueCollectController::class, 'opdIndex'])
 
 Route::post('opd-due-collect/{id}', [DueCollectController::class, 'opdStore'])
     ->name('opd.due.collect.store');
+});
+
+// Patient Portal
+Route::middleware(['patient.panel'])->group(function () {
+    Route::get('patient-portal/login', [PatientPortalController::class, 'loginForm'])->name('patient.portal.login');
+    Route::post('patient-portal/login', [PatientPortalController::class, 'login'])->name('patient.portal.login.post');
+    Route::match(['get', 'post'], 'patient-portal/payment/callback', [PatientPortalController::class, 'paymentCallback'])->name('patient.portal.payment.callback');
+
+    Route::middleware(['patient.auth'])->group(function () {
+        Route::get('patient-portal/dashboard', [PatientPortalController::class, 'dashboard'])->name('patient.portal.dashboard');
+        Route::get('patient-portal/payment/{billing?}', [PatientPortalController::class, 'paymentGateway'])->name('patient.portal.payment');
+        Route::get('patient-portal/reports/billing/{billing}', [PatientPortalController::class, 'downloadBillingReport'])->name('patient.portal.report.download');
+        Route::post('patient-portal/logout', [PatientPortalController::class, 'logout'])->name('patient.portal.logout');
+    });
 });

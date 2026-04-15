@@ -13,7 +13,9 @@ use App\Models\BillItem;
 use App\Models\Expense;
 use App\Services\AdminService;
 use App\Services\BillingService;
+use App\Services\ActivityLogService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use App\Services\PathologyService;
 use App\Services\PatientService;
 use Inertia\Inertia;
@@ -77,10 +79,11 @@ class PathologyController extends Controller
             $billing = Billing::where('bill_number', $data->bill_no)->first();
 
             $user = auth('admin')->user();
+            $gate = Gate::forUser($user);
 
             $customData->links = [];
 
-            if ($user->can('pathology-edit')) {
+            if ($gate->allows('pathology-edit')) {
                 $customData->links[] = [
                     'linkClass' => 'bg-yellow-400 text-black semi-bold',
                     'link' => route('backend.pathology.edit', $data->id),
@@ -88,7 +91,7 @@ class PathologyController extends Controller
                 ];
             }
 
-            if ($user->can('pathology-invoice') && $billing) {
+            if ($gate->allows('pathology-invoice') && $billing) {
                 $customData->links[] = [
                     'linkClass' => 'bg-teal-500 text-white semi-bold',
                     'link' => route('backend.download.invoice', ['id' => $billing->id, 'module' => 'pathology']),
@@ -214,6 +217,20 @@ class PathologyController extends Controller
 
                 $message = 'Pathology created successfully';
                 $this->storeAdminWorkLog($pathologyInfo->id, 'pathologies', $message);
+                ActivityLogService::logCreate(
+                    'Pathology',
+                    $pathologyInfo->id,
+                    $pathologyInfo->bill_no ?? ($pathologyInfo->pathology_no ?? ('Pathology#' . $pathologyInfo->id)),
+                    [
+                        'pathology_no' => $pathologyInfo->pathology_no,
+                        'bill_no' => $pathologyInfo->bill_no,
+                        'case_id' => $pathologyInfo->case_id,
+                        'patient_id' => $pathologyInfo->patient_id,
+                        'doctor_id' => $pathologyInfo->doctor_id,
+                        'net_amount' => $pathologyInfo->net_amount,
+                        'payment_amount' => $pathologyInfo->payment_amount,
+                    ]
+                );
 
                 DB::commit();
 
@@ -359,6 +376,29 @@ class PathologyController extends Controller
 
                 $message = 'Pathology updated successfully';
                 $this->storeAdminWorkLog($pathologyInfo->id, 'pathologies', $message);
+                ActivityLogService::logUpdate(
+                    'Pathology',
+                    $pathologyInfo->id,
+                    $pathologyInfo->bill_no ?? ($pathologyInfo->pathology_no ?? ('Pathology#' . $pathologyInfo->id)),
+                    [
+                        'pathology_no' => $pathologyInfo->pathology_no,
+                        'bill_no' => $pathologyInfo->bill_no,
+                        'case_id' => $pathologyInfo->case_id,
+                        'patient_id' => $pathologyInfo->patient_id,
+                        'doctor_id' => $pathologyInfo->doctor_id,
+                        'net_amount' => $pathologyInfo->net_amount,
+                        'payment_amount' => $pathologyInfo->payment_amount,
+                    ],
+                    [
+                        'pathology_no' => $pathology?->pathology_no,
+                        'bill_no' => $pathology?->bill_no,
+                        'case_id' => $pathology?->case_id,
+                        'patient_id' => $pathology?->patient_id,
+                        'doctor_id' => $pathology?->doctor_id,
+                        'net_amount' => $pathology?->net_amount,
+                        'payment_amount' => $pathology?->payment_amount,
+                    ]
+                );
 
                 DB::commit();
 
@@ -407,6 +447,20 @@ class PathologyController extends Controller
 
                 $message = 'Pathology deleted successfully';
                 $this->storeAdminWorkLog($id, 'pathologies', $message);
+                ActivityLogService::logDelete(
+                    'Pathology',
+                    $id,
+                    $pathology->bill_no ?? ($pathology->pathology_no ?? ('Pathology#' . $id)),
+                    [
+                        'pathology_no' => $pathology->pathology_no,
+                        'bill_no' => $pathology->bill_no,
+                        'case_id' => $pathology->case_id,
+                        'patient_id' => $pathology->patient_id,
+                        'doctor_id' => $pathology->doctor_id,
+                        'net_amount' => $pathology->net_amount,
+                        'payment_amount' => $pathology->payment_amount,
+                    ]
+                );
 
                 DB::commit();
 
@@ -598,7 +652,8 @@ class PathologyController extends Controller
     private function generateInvoiceNumber()
     {
         $year = date('Y');
-        $lastInvoice = Billing::where('invoice_number', 'like', "INV-{$year}-%")
+        $prefix = web_setting_prefix('billing_bill_prefix', 'BILL');
+        $lastInvoice = Billing::where('invoice_number', 'like', "{$prefix}-{$year}-%")
             ->orderBy('invoice_number', 'desc')
             ->first();
 
@@ -609,15 +664,15 @@ class PathologyController extends Controller
             $newNumber = 1;
         }
 
-        return "INV-{$year}-" . str_pad($newNumber, 6, '0', STR_PAD_LEFT);
+        return "{$prefix}-{$year}-" . str_pad($newNumber, 6, '0', STR_PAD_LEFT);
     }
 
     private function generatePathologyNumber($lastPathology = null)
     {
-        $prefix = 'PATB';
+        $prefix = web_setting_prefix('pathology_bill_prefix', 'Bill');
 
         if ($lastPathology && $lastPathology->pathology_no) {
-            $lastNumber = (int) substr($lastPathology->pathology_no, strlen($prefix));
+            $lastNumber = (int) str_replace($prefix, '', (string) $lastPathology->pathology_no);
             $newNumber = $lastNumber + 1;
         } else {
             $newNumber = 1;
@@ -628,7 +683,7 @@ class PathologyController extends Controller
 
     private function generateBillNumber($lastBilling = null)
     {
-        $prefix = 'BILL';
+        $prefix = web_setting_prefix('billing_bill_prefix', 'BILL');
         $year = date('Ym');
 
         if ($lastBilling && $lastBilling->bill_number) {

@@ -5,6 +5,10 @@
     <meta charset="utf-8">
     <title>Appointment Invoice</title>
     <style>
+        @php
+            $__inv_header_h = (int) ($header_height ?? 115);
+            $__inv_footer_h = (int) ($footer_height ?? 70);
+        @endphp
         @page {
             margin: 0mm 0mm;
             size: A4;
@@ -60,14 +64,22 @@
 
         .header-image {
             width: 100%;
-            max-height: 80px;
+            max-height: {{ $__inv_header_h }}px;
             margin: 0;
             padding: 0;
             display: block;
+            object-fit: contain;
+            height: {{ $__inv_header_h }}px;
+        }
+
+        .header-placeholder {
+            width: 100%;
+            height: {{ $__inv_header_h }}px;
+            visibility: hidden;
         }
 
         .content {
-            margin-bottom: 60px;
+            margin-bottom: {{ $__inv_footer_h * 2 }}px;
             padding: 10px;
         }
 
@@ -161,10 +173,68 @@
 
         .footer-image {
             width: 100%;
-            max-height: 80px;
+            max-height: {{ $__inv_footer_h + 10 }}px;
             margin: 0;
             padding: 0;
             display: block;
+            object-fit: contain;
+            height: auto;
+        }
+
+        .footer-placeholder {
+            width: 100%;
+            height: {{ $__inv_footer_h }}px;
+            visibility: hidden;
+        }
+
+        .footer-content {
+            text-align: center;
+            padding: 0 10px;
+            margin: 0 0 5px;
+            font-size: inherit;
+        }
+
+        .footer-meta {
+            width: 100%;
+            padding: 0 10px 5px;
+            font-size: 11px;
+        }
+
+        @media print and (min-width: 149mm) {
+            .header-image,
+            .footer-image {
+                max-height: {{ $__inv_header_h }}px;
+            }
+
+            .header-placeholder,
+            .footer-placeholder {
+                height: {{ $__inv_footer_h }}px;
+            }
+
+            .content {
+                margin-bottom: {{ $__inv_footer_h * 2 }}px;
+            }
+        }
+
+        @media print and (max-width: 148mm), screen and (max-width: 148mm) {
+            body {
+                font-size: 11px;
+            }
+
+            .header-image,
+            .footer-image {
+                max-height: {{ min($__inv_header_h, 58) }}px;
+            }
+
+            .header-placeholder,
+            .footer-placeholder {
+                height: {{ min($__inv_footer_h, 58) }}px;
+            }
+
+            .content {
+                margin-bottom: {{ min($__inv_footer_h * 2, 64) }}px;
+                padding: 8px;
+            }
         }
 
         .barcode {
@@ -190,6 +260,8 @@
     <div class="header">
         @if(isset($header_image) && $header_image)
         <img src="{{ $header_image }}" class="header-image" alt="Clinic Header">
+        @else
+        <div class="header-placeholder"></div>
         @endif
     </div>
 
@@ -297,8 +369,35 @@
 
     <!-- Footer Section -->
     <div class="footer">
-        @if(isset($footer_image) && $footer_image)
-        <img src="{{ $footer_image }}" class="footer-image" alt="Clinic Footer">
+        @php
+            $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
+            $footerPrintedAt = trim((string) ($printed_at ?? ''));
+        @endphp
+        <div class="footer-meta">
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="text-align: left; padding-right: 12px;">
+                        {{ $footerFallbackLine }}
+                    </td>
+                    <td style="text-align: right; white-space: nowrap; padding-right: 60px;">
+                        @if($footerPrintedAt !== '')
+                        Printing Date: {{ $footerPrintedAt }}
+                        @endif
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        @if(!empty($footer_image))
+            @if(!empty($footer_content))
+                <div class="footer-content" style="position:relative; z-index:11;">{!! $footer_content !!}</div>
+            @endif
+            <img src="{{ $footer_image }}" class="footer-image" alt="Clinic Footer">
+        @else
+            <div class="footer-placeholder"></div>
+            @if(!empty($footer_content))
+                <div class="footer-content">{!! $footer_content !!}</div>
+            @endif
         @endif
     </div>
 </body>

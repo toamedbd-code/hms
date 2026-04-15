@@ -1,0 +1,30 @@
+[
+  {
+    "sessionId": "edec72bd-c9a6-447d-9ea8-15a3858576f4",
+    "title": "Hi Hello Homework Clarification",
+    "dateCreated": "1771519371109",
+    "workspaceDirectory": "file:///c%3A/laragon/www/Chiringa",
+    "messageCount": 1
+  },
+  {
+    "sessionId": "bb3a4dae-7552-4c74-884b-2d828648ccfc",
+    "title": "hi",
+    "dateCreated": "1771519856029",
+    "workspaceDirectory": "file:///c%3A/laragon/www/hms",
+    "messageCount": 42
+  },
+  {
+    "sessionId": "02044b99-f94b-4df0-a981-3b26d054b6b0",
+    "title": "After generating the cleanup report, implement only the items categorized as \"Safe to delete imme...",
+    "dateCreated": "1771582394527",
+    "workspaceDirectory": "file:///c%3A/laragon/www/hms",
+    "messageCount": 16
+  },
+  {
+    "sessionId": "0f5a3f60-2d2a-4b3c-a7e8-3c035270d94c",
+    "title": "hello",
+    "dateCreated": "1771594083243",
+    "workspaceDirectory": "file:///c%3A/laragon/www/hms",
+    "messageCount": 1
+  }
+]

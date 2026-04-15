@@ -2,7 +2,10 @@
 
 namespace App\Exceptions;
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
+use Illuminate\Session\TokenMismatchException;
+use Spatie\Permission\Exceptions\UnauthorizedException as SpatieUnauthorizedException;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Throwable;
 
@@ -52,8 +55,34 @@ class Handler extends ExceptionHandler
 
     public function render($request, Throwable $exception)
     {
+        if ($request->expectsJson() || $request->ajax()) {
+            if ($exception instanceof AuthenticationException) {
+                return response()->json([
+                    'message' => 'Session expired or unauthorized. Please login again.',
+                ], 401);
+            }
+
+            if ($exception instanceof TokenMismatchException) {
+                return response()->json([
+                    'message' => 'Session expired. Please refresh the page and try again.',
+                ], 419);
+            }
+
+            if ($exception instanceof SpatieUnauthorizedException) {
+                return response()->json([
+                    'message' => 'You do not have permission to perform this action.',
+                ], 403);
+            }
+        }
+
         if ($exception instanceof MethodNotAllowedHttpException) {
-            return response()->json(['error' => $request->method().' Method not allowed. POST Method Allowed only'], 405);
+            $message = $request->method() . ' Method not allowed for this action.';
+
+            if ($request->expectsJson() && !$request->header('X-Inertia')) {
+                return response()->json(['error' => $message], 405);
+            }
+
+            return redirect()->back()->with('errorMessage', $message);
         }
 
         return parent::render($request, $exception);

@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\Menu;
+use App\Models\WebSetting;
+use Illuminate\Support\Facades\Cache;
 
 function addDays($numOfDays, $date = null)
 {
@@ -84,7 +86,7 @@ function dayWithDate($date)
 }
 function getActiveMenuClass($routeName)
 {
-    return (url()->full() == route($routeName ?? '')) ? 'active' : '';
+    return (request()->fullUrl() == route($routeName ?? '')) ? 'active' : '';
 }
 
 function getYesNoBadge($status)
@@ -117,6 +119,12 @@ function getStatusText($status)
         return '<span class="px-2 py-1 text-xs font-semibold text-white bg-red-500 rounded-full">' . $status . '</span>';
     } elseif ($status == 'Pending') {
         return '<span class="px-2 py-1 text-xs font-semibold text-white bg-blue-500 rounded-full">' . $status . '</span>';
+    } elseif ($status == 'Paid') {
+        return '<span class="px-2 py-1 text-xs font-semibold text-white bg-green-600 rounded-full">' . $status . '</span>';
+    } elseif ($status == 'Partial') {
+        return '<span class="px-2 py-1 text-xs font-semibold text-white rounded-full bg-amber-500">' . $status . '</span>';
+    } elseif ($status == 'Due') {
+        return '<span class="px-2 py-1 text-xs font-semibold text-white bg-red-500 rounded-full">' . $status . '</span>';
     } elseif ($status == 'Approved') {
         return '<span class="px-2 py-1 text-xs font-semibold text-white bg-green-500 rounded-full">' . $status . '</span>';
     } elseif ($status == 'Rejected') {
@@ -229,11 +237,77 @@ function imageNotFound()
     return asset('/app-assets/images/no-image.png');
 }
 
+function publicStorageUrl($value)
+{
+    if (!is_string($value) || trim($value) === '') {
+        return null;
+    }
+
+    $value = trim(str_replace('\\', '/', $value));
+
+    if (
+        str_starts_with($value, 'http://')
+        || str_starts_with($value, 'https://')
+        || str_starts_with($value, 'data:')
+    ) {
+        return $value;
+    }
+
+    $normalized = ltrim($value, '/');
+
+    if (str_starts_with($normalized, 'public/storage/')) {
+        $normalized = substr($normalized, strlen('public/storage/'));
+    } elseif (str_starts_with($normalized, 'storage/')) {
+        $normalized = substr($normalized, strlen('storage/'));
+    }
+
+    if ($normalized === '') {
+        return null;
+    }
+
+    if (\Illuminate\Support\Facades\Storage::disk('public')->exists($normalized)) {
+        $publicStorageFile = public_path('storage/' . $normalized);
+
+        if (is_file($publicStorageFile)) {
+            return asset('storage/' . $normalized);
+        }
+
+        return route('backend.public.storage.file', ['path' => $normalized]);
+    }
+
+    return asset($normalized);
+}
+
 function getSideMenus($user)
 {
     if (!$user) {
         return [];
     }
+
+    // reload user roles/permissions to reflect recent changes
+    try {
+        $user = $user->fresh(['roles.permissions', 'permissions']);
+    } catch (\Throwable $e) {
+        // ignore and continue with provided user
+    }
+
+    $grantedPermissions = collect();
+    try {
+        $grantedPermissions = $user->getAllPermissions()->pluck('name')->filter()->values();
+    } catch (\Throwable $e) {
+        $grantedPermissions = collect();
+    }
+
+    $hasMenuPermission = function ($permissionName) use ($grantedPermissions) {
+        $permissionName = trim((string) $permissionName);
+
+        // If a menu has no explicit permission, don't block it here.
+        if ($permissionName === '') {
+            return true;
+        }
+
+        return $grantedPermissions->contains($permissionName);
+    };
 
     $menus = Menu::with('childrens')
         ->whereNull('parent_id')
@@ -242,19 +316,161 @@ function getSideMenus($user)
         ->orderBy('sorting', 'ASC')
         ->get();
 
-    return $menus->filter(function ($menu) use ($user) {
-        $hasPermission = $user->roles->flatMap->permissions->contains('name', $menu->permission_name);
+    $normalizeRoute = function ($route) {
+        $route = trim((string) $route);
 
-        if (!$hasPermission) {
+        $aliases = [
+            'backend.pharmacy.supplier.payment' => 'backend.supplierpayment.index',
+            'admin.attendance.devices' => 'backend.attendance.devices',
+        ];
+
+        return $aliases[$route] ?? $route;
+    };
+
+    return $menus->filter(function ($menu) use ($normalizeRoute, $hasMenuPermission) {
+        $menuHasPermission = $hasMenuPermission($menu->permission_name ?? null);
+
+        $menu->childrens = $menu->childrens->filter(function ($child) use ($hasMenuPermission) {
+            return $hasMenuPermission($child->permission_name ?? null);
+        })->reject(function ($child) {
+            $name = strtolower(trim((string) ($child->name ?? '')));
+
+            // Hard-remove requested menu labels regardless of language variations/casing.
+            $blockedNames = [
+                'পার্সেস প্রোডাক্ট',
+                'পারছেস প্রোডাক্ট',
+                'পারচেস প্রোডাক্ট',
+                'প্রোডাক্ট ডেলিভারি',
+                'product delivery',
+                'product add',
+            ];
+
+            return in_array($name, $blockedNames, true);
+        })->unique(function ($child) use ($normalizeRoute) {
+            $name = strtolower(trim((string) ($child->name ?? '')));
+            $route = $normalizeRoute($child->route ?? '');
+
+            // Keep only one Supplier Payment entry even if route aliases differ.
+            if (str_contains($name, 'supplier payment')) {
+                return 'name:supplier-payment';
+            }
+
+            return $route !== '' ? ('route:' . $route) : ('name:' . $name);
+        })->values();
+
+        $menuName = strtolower(trim((string) ($menu->name ?? '')));
+        $isPurchaseMenu = str_contains($menuName, 'purchase') || str_contains($menuName, 'পার্সেস') || str_contains($menuName, 'পারচেস');
+
+        if ($isPurchaseMenu) {
+            $hasAddMedicine = $menu->childrens->contains(function ($child) {
+                return strtolower(trim((string) ($child->name ?? ''))) === 'add medicine product';
+            });
+
+            $hasAddPurchase = $menu->childrens->contains(function ($child) {
+                return strtolower(trim((string) ($child->name ?? ''))) === 'add purchase product';
+            });
+
+            $menu->childrens = $menu->childrens->reject(function ($child) use ($hasAddMedicine, $hasAddPurchase) {
+                $name = strtolower(trim((string) ($child->name ?? '')));
+
+                if ($hasAddMedicine && $name === 'edit medicine product') {
+                    return true;
+                }
+
+                if ($hasAddPurchase && $name === 'edit purchase product') {
+                    return true;
+                }
+
+                return false;
+            })->values();
+        }
+
+        // hide parent menu if it has no permitted children and no route
+        $hasChildren = (is_array($menu->childrens) ? count($menu->childrens) : $menu->childrens->count()) > 0;
+        $route = trim((string) ($menu->route ?? ''));
+
+        // Parent route should not be clickable when its own permission is unselected.
+        if ($route !== '' && !$menuHasPermission) {
+            if (is_array($menu)) {
+                $menu['route'] = null;
+                $route = '';
+            } else {
+                $menu->route = null;
+                $route = '';
+            }
+        }
+
+        if (!$hasChildren && $route === '') {
             return false;
         }
 
-        $menu->childrens = $menu->childrens->filter(function ($child) use ($user) {
-            return $user->roles->flatMap->permissions->contains('name', $child->permission_name);
-        });
-
         return $menu;
+    })->unique(function ($menu) {
+        $route = trim((string) ($menu->route ?? ''));
+        return $route !== '' ? ('route:' . $route) : ('name:' . trim((string) ($menu->name ?? '')));
     })->values();
+}
+
+function web_setting_prefix(string $field, string $default = ''): string
+{
+    static $prefixCache = [];
+
+    if (array_key_exists($field, $prefixCache)) {
+        return $prefixCache[$field];
+    }
+
+    try {
+        $setting = get_cached_web_setting();
+        $value = trim((string) ($setting?->{$field} ?? ''));
+        $prefixCache[$field] = $value !== '' ? $value : $default;
+    } catch (\Throwable $th) {
+        $prefixCache[$field] = $default;
+    }
+
+    return $prefixCache[$field];
+}
+
+function web_setting_cache_key(): string
+{
+    return 'web_setting.active_or_latest';
+}
+
+function web_setting_cache_ttl_seconds(): int
+{
+    return max((int) config('cache.web_setting_ttl_seconds', 300), 10);
+}
+
+function get_cached_web_setting(bool $refresh = false): ?WebSetting
+{
+    $cacheKey = web_setting_cache_key();
+
+    if ($refresh) {
+        Cache::forget($cacheKey);
+    }
+
+    return Cache::remember($cacheKey, web_setting_cache_ttl_seconds(), function () {
+        $setting = WebSetting::query()
+            ->where('status', 'Active')
+            ->orderByDesc('id')
+            ->first();
+
+        if (!$setting) {
+            $setting = WebSetting::query()->orderByDesc('id')->first();
+        }
+
+        return $setting;
+    });
+}
+
+function forget_cached_web_setting(): void
+{
+    Cache::forget(web_setting_cache_key());
+}
+
+function prefixed_serial(string $prefixField, string $defaultPrefix, int|string $number, int $digits = 4): string
+{
+    $prefix = web_setting_prefix($prefixField, $defaultPrefix);
+    return $prefix . str_pad((string) $number, $digits, '0', STR_PAD_LEFT);
 }
 
 

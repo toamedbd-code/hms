@@ -78,7 +78,40 @@ trait SystemTrait
 
     public function imageUpload($image, $folder)
     {
-        $imageName = Str::slug(pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME)) . '-' . uniqid() . '.' . $image->getClientOriginalExtension();
+        $folder = trim((string) $folder, '/');
+        if ($folder === '') {
+            throw new \InvalidArgumentException('Upload folder is missing.');
+        }
+
+        if (!$image || !method_exists($image, 'isValid') || !$image->isValid()) {
+            throw new \InvalidArgumentException('Upload file is missing or invalid.');
+        }
+
+        if (method_exists($image, 'getSize') && (int) $image->getSize() <= 0) {
+            throw new \InvalidArgumentException('Upload file is empty.');
+        }
+
+        $realPath = method_exists($image, 'getRealPath') ? (string) $image->getRealPath() : '';
+        if ($realPath === '' || !is_readable($realPath)) {
+            throw new \InvalidArgumentException('Upload file path is missing.');
+        }
+
+        $originalName = (string) $image->getClientOriginalName();
+        $baseName = pathinfo($originalName, PATHINFO_FILENAME);
+        $baseSlug = Str::slug($baseName);
+        if ($baseSlug === '') {
+            $baseSlug = 'upload';
+        }
+
+        $extension = (string) $image->getClientOriginalExtension();
+        if ($extension === '') {
+            $extension = (string) $image->extension();
+        }
+        if ($extension === '') {
+            $extension = 'bin';
+        }
+
+        $imageName = $baseSlug . '-' . uniqid() . '.' . $extension;
 
         if (!Storage::disk('public')->exists($folder)) {
             Storage::disk('public')->makeDirectory($folder);
@@ -90,7 +123,40 @@ trait SystemTrait
     
     public function fileUpload($image, $folder)
     {
-        $imageName = Str::slug(pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME)) . '-' . uniqid() . '.' . $image->getClientOriginalExtension();
+        $folder = trim((string) $folder, '/');
+        if ($folder === '') {
+            throw new \InvalidArgumentException('Upload folder is missing.');
+        }
+
+        if (!$image || !method_exists($image, 'isValid') || !$image->isValid()) {
+            throw new \InvalidArgumentException('Upload file is missing or invalid.');
+        }
+
+        if (method_exists($image, 'getSize') && (int) $image->getSize() <= 0) {
+            throw new \InvalidArgumentException('Upload file is empty.');
+        }
+
+        $realPath = method_exists($image, 'getRealPath') ? (string) $image->getRealPath() : '';
+        if ($realPath === '' || !is_readable($realPath)) {
+            throw new \InvalidArgumentException('Upload file path is missing.');
+        }
+
+        $originalName = (string) $image->getClientOriginalName();
+        $baseName = pathinfo($originalName, PATHINFO_FILENAME);
+        $baseSlug = Str::slug($baseName);
+        if ($baseSlug === '') {
+            $baseSlug = 'upload';
+        }
+
+        $extension = (string) $image->getClientOriginalExtension();
+        if ($extension === '') {
+            $extension = (string) $image->extension();
+        }
+        if ($extension === '') {
+            $extension = 'bin';
+        }
+
+        $imageName = $baseSlug . '-' . uniqid() . '.' . $extension;
 
         if (!Storage::disk('public')->exists($folder)) {
             Storage::disk('public')->makeDirectory($folder);

@@ -14,8 +14,29 @@ class BirthDeathRecord extends Authenticatable
     protected $table = 'birthdeathrecords';
 
     protected $fillable = [
-                    'name',
-                ];
+        'name',
+        'child_name',
+        'patient_name',
+        'record_type',
+        'record_date',
+        'birth_date',
+        'death_date',
+        'weight',
+        'case_id',
+        'guardian_name',
+        'mother_name',
+        'father_name',
+        'gender',
+        'phone',
+        'address',
+        'report',
+        'photo',
+        'child_photo',
+        'mother_photo',
+        'father_photo',
+        'attachment',
+        'report_attachment',
+    ];
 
     protected static function boot()
     {
@@ -29,13 +50,8 @@ class BirthDeathRecord extends Authenticatable
         });
     }
 
-    public function getImageAttribute($value)
+    public function getPhotoAttribute($value)
     {
-        return (!is_null($value)) ? env('APP_URL') . '/public/storage/' . $value : null;
-    }
-
-    public function getFileAttribute($value)
-    {
-        return (!is_null($value)) ? env('APP_URL') . '/public/storage/' . $value : null;
+        return (!is_null($value) && $value !== '') ? env('APP_URL') . '/public/storage/' . ltrim($value, '/') : null;
     }
 }

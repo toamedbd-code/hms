@@ -5,6 +5,10 @@
     <meta charset="utf-8">
     <title>Medical Invoice</title>
     <style>
+        @php
+            $__inv_header_h = (int) ($header_height ?? 115);
+            $__inv_footer_h = (int) ($footer_height ?? 70);
+        @endphp
         * {
             margin: 0;
             padding: 0;
@@ -17,17 +21,10 @@
             padding: 0;
             font-size: 16px;
             line-height: 1.3;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
         }
 
         .invoice-container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
             width: 100%;
-            height: 100%;
         }
 
         /* Header Section */
@@ -35,7 +32,7 @@
             width: 100%;
             text-align: center;
             margin-bottom: 5px;
-            min-height: 100px;
+            height: {{ $__inv_header_h }}px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -43,23 +40,19 @@
 
         .header-placeholder {
             width: 100%;
-            height: 100px;
+            height: {{ $__inv_header_h }}px;
             visibility: hidden;
         }
 
         .header-image {
             width: 100%;
-            height: auto;
-            max-height: 130px;
-            object-fit: contain;
+            height: 100%;
+            object-fit: fill;
         }
 
         /* Content Section */
         .content-section {
-            flex: 1;
             padding: 0 15px;
-            display: flex;
-            flex-direction: column;
         }
 
         /* Title section with barcode */
@@ -69,14 +62,15 @@
         }
 
         .barcode-cell-left {
-            right: 0;
             width: 20%;
+            text-align: left;
+            vertical-align: top;
         }
 
         .barcode-cell-right {
-            right: 0;
-            text-align: right;
             width: 20%;
+            text-align: right;
+            vertical-align: top;
         }
 
         .title-cell-center {
@@ -226,7 +220,6 @@
             border: none;
             border-collapse: collapse;
             margin-top: 12px;
-            flex-grow: 1;
         }
 
         .bottom-section td {
@@ -303,41 +296,48 @@
             margin-top: 8px;
         }
 
-        /* Footer Section */
+        /* Footer Section (static like report print) */
         .footer-section {
-            position: fixed;
+            position: fixed; /* keep footer image fixed at bottom */
             bottom: 0;
             left: 0;
             right: 0;
             width: 100%;
             text-align: center;
             padding-bottom: 0px;
-            min-height: 70px;
+            min-height: {{ $__inv_footer_h }}px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: flex-end;
+            z-index: 10;
         }
 
         .footer-placeholder {
             width: 100%;
-            height: 70px;
+            height: {{ $__inv_footer_h }}px;
             visibility: hidden;
         }
 
         .footer-image {
             width: 100%;
             height: auto;
-            max-height: 80px;
+            max-height: {{ $__inv_footer_h + 10 }}px;
             object-fit: contain;
         }
 
         .footer-content {
-            margin-top: 4px;
+            position: fixed;
+            bottom: {{ (int) floor($__inv_footer_h / 2) }}px; /* sit centered vertically with footer image */
+            left: 0;
+            right: 0;
+            margin: 0 auto;
             font-size: 14px;
-            text-align: left;
+            text-align: center;
             padding: 0 20px;
             width: 100%;
+            z-index: 60; /* above footer image */
+            background: transparent;
         }
 
         .footer-date-time {
@@ -359,13 +359,21 @@
             }
 
             .content-section {
-                padding-bottom: 80px;
+                padding-bottom: {{ $__inv_footer_h * 2 }}px; /* reserve space for fixed footer */
             }
 
-            .footer-section {
+            .header-section,
+            .header-placeholder,
+            .header-image {
                 position: fixed;
-                bottom: 0;
+                top: 0;
+                left: 0;
+                right: 0;
+                width: 100%;
+                z-index: 50;
             }
+
+            .header-image { object-fit: cover; height: {{ $__inv_header_h }}px; }
 
             .header-placeholder,
             .footer-placeholder {
@@ -401,11 +409,11 @@
             }
 
             .header-section {
-                min-height: 100px;
+                height: {{ $__inv_header_h }}px;
             }
 
             .header-image {
-                max-height: 100px;
+                height: 100%;
             }
 
             .barcode-image {
@@ -415,7 +423,7 @@
 
             .content-section {
                 padding: 0 15px;
-                padding-bottom: 80px;
+                padding-bottom: {{ $__inv_footer_h * 2 }}px;
             }
 
             .items-table,
@@ -433,11 +441,11 @@
             }
 
             .footer-section {
-                min-height: 80px;
+                min-height: {{ $__inv_footer_h + 10 }}px;
             }
 
             .footer-image {
-                max-height: 80px;
+                max-height: {{ $__inv_footer_h + 10 }}px;
             }
 
             .footer-date-time {
@@ -456,11 +464,11 @@
             }
 
             .header-section {
-                min-height: 80px !important;
+                height: 72px !important;
             }
 
             .header-image {
-                max-height: 80px !important;
+                height: 100% !important;
             }
 
             .barcode-image {
@@ -488,11 +496,11 @@
             }
 
             .footer-section {
-                min-height: 70px !important;
+                min-height: {{ $__inv_footer_h }}px !important;
             }
 
             .footer-image {
-                max-height: 80px !important;
+                max-height: {{ $__inv_footer_h + 10 }}px !important;
             }
 
             .footer-content {
@@ -507,6 +515,7 @@
             .detail-label {
                 min-width: 70px;
             }
+            
         }
     </style>
 </head>
@@ -526,17 +535,13 @@
             <table class="title-section-table">
                 <tr>
                     <td class="barcode-cell-left">
-                        @if(strpos($barcode, 'data:image') === 0)
-                        <img src="{{ $barcode }}" alt="Barcode" class="barcode-image">
-                        @endif
+                        {!! DNS1D::getBarcodeHTML(isset($bill) ? $bill->bill_no : $bill_number, 'C128', 1, 30) !!}
                     </td>
                     <td class="title-cell-center">
                         <div class="receipt-title">MONEY RECEIPT</div>
                     </td>
                     <td class="barcode-cell-right">
-                        @if(strpos($barcode, 'data:image') === 0)
-                        <img src="{{ $barcode }}" alt="Barcode" class="barcode-image">
-                        @endif
+                        {!! DNS1D::getBarcodeHTML(isset($bill) ? $bill->bill_no : $bill_number, 'C128', 1, 30) !!}
                     </td>
                 </tr>
             </table>
@@ -602,105 +607,253 @@
                 </tbody>
             </table>
 
-            @php
-            use Carbon\Carbon;
-            @endphp
+@php
+use Carbon\Carbon;
 
-            @if ($delivery_date)
-            <div class="delivery-date">
-                Delivery Date & Time: {{ Carbon::parse($delivery_date)->format('d-m-Y, h:i A') }}
-            </div>
-            @endif
+$netPayable = (float) $net_payable;
 
-            <table class="bottom-section">
-                <tr>
-                    <td class="left-bottom">
-                        <div class="due-section">
-                           @if(!empty($remarks))
-    <div>
-        <strong>Remarks:</strong> {{ $remarks }}
-    </div>
+// Invoice time paid (original payment)
+$invoicePaid = isset($paid_at_invoice) ? (float) $paid_at_invoice : (float) ($billing->invoice_amount ?? 0);
+
+// Due history
+$dueCollections = $billing->dueCollections ?? collect();
+$dueCollectedTotal = $dueCollections->sum('collected_amount');
+
+// Payments (including any receipts recorded later)
+$payments = $billing->payments ?? collect();
+$paymentsTotal = $payments->sum('amount');
+
+// Prefer controller-provided aggregate if available, otherwise compute
+$totalPaid = isset($paid) ? (float) $paid : (float) ($paymentsTotal + $dueCollectedTotal);
+
+// Final due
+$finalDue = isset($due) ? max((float) $due, 0) : max($netPayable - $totalPaid, 0);
+
+$portalPatientId = (int) ($billing->patient_id ?? 0);
+$portalPhone = (string) ($billing->patient_mobile ?? ($billing->patient->phone ?? ''));
+$portalToken = '';
+if ($portalPatientId > 0) {
+    try {
+        if (!empty(config('app.key'))) {
+            $portalTokenPayload = [
+                'patient_id' => $portalPatientId,
+                'phone' => $portalPhone,
+                'billing_id' => (int) ($billing->id ?? 0),
+                'exp' => now()->addDays(30)->timestamp,
+            ];
+            $portalToken = encrypt(json_encode($portalTokenPayload));
+        }
+    } catch (\Throwable $e) {
+        // If encryption is unavailable, skip portal QR generation to keep invoice rendering stable.
+        $portalToken = '';
+    }
+}
+$portalLoginUrl = $portalToken !== ''
+    ? route('backend.patient.portal.login', ['token' => $portalToken])
+    : '';
+$portalQrCode = $portalLoginUrl !== ''
+    ? 'data:image/png;base64,' . (new \Milon\Barcode\DNS2D())->getBarcodePNG($portalLoginUrl, 'QRCODE', 5, 5)
+    : '';
+@endphp
+
+
+@if ($delivery_date)
+<div class="delivery-date">
+    Delivery Date & Time:
+    {{ Carbon::parse($delivery_date)->format('d-M-Y, h:i A') }}
+</div>
 @endif
-                            @if($due > 0)
-                            <div class="due-badge">DUE</div>
-                            @else
-                            <div class="paid-badge">PAID</div>
-                            @endif
-                            <div>Thank You</div>
-                        </div>
 
-                        <div class="prepared-by">
-                            <strong>Prepared By:</strong> {{ $prepared_by }}
-                        </div>
-                    </td>
 
-                    <td class="right-bottom">
-                        <table class="totals-table">
-                            <tr>
-                                <td class="label-col"><strong>Total Amount Tk.</strong></td>
-                                <td class="amount-col"><strong>{{ number_format($total_amount, 2) }}</strong></td>
-                            </tr>
-                            <tr>
-                                <td class="label-col">Vat Tk.</td>
-                                <td class="amount-col">{{ number_format($vat, 2) }}</td>
-                            </tr>
-                            @if ($discount_type == 'percentage')
-                            <tr>
-                                <td class="label-col">Discount ({{ number_format($discount, 2) }}%)</td>
-                                <td class="amount-col">{{ number_format(($total_amount * $discount / 100), 2) }}</td>
-                            </tr>
-                            @else
-                            <tr>
-                                <td class="label-col">Discount Tk.</td>
-                                <td class="amount-col">{{ number_format($discount, 2) }}</td>
-                            </tr>
-                            @endif
-                            @if ($extra_flat_discount != 0 )
-                            <tr>
-                                <td class="label-col">Extra Discount Tk.</td>
-                                <td class="amount-col">{{ number_format($extra_flat_discount, 2) }}</td>
-                            </tr>
-                            @endif
-                            <tr>
-                                <td class="label-col"><strong>Net Payable Tk</strong></td>
-                                <td class="amount-col"><strong>{{ number_format($net_payable, 2) }}</strong></td>
-                            </tr>
-                            <tr>
-                                <td class="label-col">Paid Tk.</td>
-                                <td class="amount-col">{{ number_format($paid, 2) }}</td>
-                            </tr>
-                            <tr>
-                                <td class="label-col"><strong>Due Tk.</strong></td>
-                                <td class="amount-col"><strong>{{ number_format($due, 2) }}</strong></td>
-                            </tr>
-                        </table>
+<table class="bottom-section">
+<tr>
+<td class="left-bottom">
 
-                        <div class="amount-words">
-                            {{ $amount_in_words }}
-                        </div>
-                    </td>
-                </tr>
-            </table>
+<div class="due-section">
+
+@if(!empty($remarks))
+<div>
+<strong>Remarks:</strong> {{ $remarks }}
+</div>
+@endif
+
+@if($finalDue > 0)
+<div class="due-badge">DUE</div>
+@else
+<div class="paid-badge">PAID</div>
+@endif
+
+<div>Thank You</div>
+
+</div>
+
+<div class="prepared-by">
+<strong>Prepared By:</strong> {{ $prepared_by }}
+</div>
+
+@if($portalQrCode !== '')
+<div style="margin-top:8px; text-align:left;">
+    <img src="{{ $portalQrCode }}" alt="Patient Portal QR" style="width:92px; height:92px; background:#fff;" />
+</div>
+@endif
+
+</td>
+
+
+<td class="right-bottom">
+
+<table class="totals-table">
+
+<tr>
+<td class="label-col"><strong>Total Amount Tk.</strong></td>
+<td class="amount-col">
+<strong>{{ number_format($total_amount, 2) }}</strong>
+</td>
+</tr>
+
+<tr>
+<td class="label-col">Vat Tk.</td>
+<td class="amount-col">{{ number_format($vat, 2) }}</td>
+</tr>
+
+@if ($discount_type == 'percentage')
+<tr>
+<td class="label-col">
+Discount ({{ number_format($discount, 2) }}%)
+</td>
+<td class="amount-col">
+{{ number_format(($total_amount * $discount / 100), 2) }}
+</td>
+</tr>
+@else
+<tr>
+<td class="label-col">Discount Tk.</td>
+<td class="amount-col">{{ number_format($discount, 2) }}</td>
+</tr>
+@endif
+
+
+@if ($extra_flat_discount != 0)
+<tr>
+<td class="label-col">Extra Discount Tk.</td>
+<td class="amount-col">
+{{ number_format($extra_flat_discount, 2) }}
+</td>
+</tr>
+@endif
+
+
+<tr>
+<td class="label-col"><strong>Net Payable Tk.</strong></td>
+<td class="amount-col">
+<strong>{{ number_format($netPayable,2) }}</strong>
+</td>
+</tr>
+
+
+<tr>
+<td class="label-col">Paid (Invoice Time)</td>
+<td class="amount-col">
+{{ number_format($invoicePaid,2) }}
+</td>
+</tr>
+
+
+{{-- Due Collect History --}}
+{{-- Payment history intentionally omitted from printed invoice --}}
+
+{{-- Due Collect History --}}
+@foreach($dueCollections as $dc)
+<tr>
+<td class="label-col" style="white-space: nowrap;">
+{{ \Carbon\Carbon::parse($dc->collected_at)->format('d-M-Y h:i A') }} - Due Collect
+</td>
+
+<td class="amount-col" style="text-align:right;">
+{{ number_format($dc->collected_amount, 2) }}
+</td>
+</tr>
+@endforeach
+
+
+<tr>
+<td class="label-col"><strong>Total Paid Tk.</strong></td>
+<td class="amount-col">
+<strong>{{ number_format($totalPaid,2) }}</strong>
+</td>
+</tr>
+
+@if (!empty($return_amount) && (float) $return_amount > 0)
+<tr>
+<td class="label-col"><strong>Return Amount Tk.</strong></td>
+<td class="amount-col">
+<strong>{{ number_format((float) $return_amount,2) }}</strong>
+</td>
+</tr>
+@endif
+
+<tr>
+<td class="label-col"><strong>Due Tk.</strong></td>
+<td class="amount-col">
+<strong>{{ number_format($finalDue,2) }}</strong>
+</td>
+</tr>
+
+</table>
+
+</td>
+</tr>
+</table>
+
         </div>
+<div style="
+    width:100%;
+    text-align:center;
+    white-space:nowrap;
+    display:block;
+    margin-top:5px;
+    font-weight:bold;
+">
+  {{ $amount_in_words }}
+</div>
 
         <!-- Footer Section -->
         <div class="footer-section">
-            @if($footer_content)
-            <div class="footer-content">
-                {!! $footer_content !!}
-            </div>
-            @endif
+            @php
+                $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
+                $footerPrintedAt = trim((string) ($printed_at ?? ''));
+            @endphp
 
-            <div class="footer-date-time">
-                Powered By: www.toamedit.com Support: 01919-592638 ...............................Printing 
-            Date: {{ now()->timezone('Asia/Dhaka')->format('d F, Y h:i a') }}
-                
-            </div>
+            @if(!empty($footer_image))
+                @if(!empty($footer_content))
+                    <div class="footer-content" style="position:relative; z-index:11;">{!! $footer_content !!}</div>
+                @endif
 
-            @if($footer_image)
-            <img src="{{ $footer_image }}" alt="Footer" class="footer-image">
+                @if($footerFallbackLine !== '' || $footerPrintedAt !== '')
+                <div class="footer-date-time">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="text-align: left; padding-right: 12px;">
+                                    {{ $footerFallbackLine }}
+                            </td>
+                            <td style="text-align: right; white-space: nowrap; padding-right: 40px;">
+                                @if($footerPrintedAt !== '')
+                                    Printing Date: {{ $footerPrintedAt }}
+                                @endif
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                @endif
+
+                <img src="{{ $footer_image }}" alt="Footer" class="footer-image">
             @else
-            <div class="footer-placeholder"></div>
+                <div class="footer-placeholder"></div>
+                @if(!empty($footer_content))
+                    <div class="footer-content">{!! $footer_content !!}</div>
+                @elseif($footerFallbackLine !== '')
+                    <div class="footer-content">{{ $footerFallbackLine }}@if(!empty($footerPrintedAt)) , Printing Date: {{ $footerPrintedAt }}@endif</div>
+                @endif
             @endif
         </div>
     </div>

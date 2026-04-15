@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, defineProps, defineEmits } from 'vue';
 import { useForm, router } from '@inertiajs/vue3';
-import { displayResponse, displayWarning } from '@/responseMessage.js';
+import { displayResponse, displayWarning, showToastIfNoFlash } from '@/responseMessage.js';
 
 // Import modal components (you'll need to import these in your actual component)
 import ChargeTypeModal from '@/Components/ChargeTypeModal.vue';
@@ -132,7 +132,7 @@ const handleChargeTypeCreated = (response) => {
         preserveScroll: true,
         onSuccess: (page) => {
             modalData.value.chargeTypes = page.props.chargeTypes || [];
-            displayResponse(response);
+            showToastIfNoFlash(response);
         }
     });
 };
@@ -144,7 +144,7 @@ const handleChargeCategoryCreated = (response) => {
         preserveScroll: true,
         onSuccess: (page) => {
             modalData.value.chargeCategories = page.props.chargeCategories || [];
-            displayResponse(response);
+            showToastIfNoFlash(response);
         }
     });
 };
@@ -156,7 +156,7 @@ const handleUnitTypeCreated = (response) => {
         preserveScroll: true,
         onSuccess: (page) => {
             modalData.value.chargeUnits = page.props.chargeUnits || [];
-            displayResponse(response);
+            showToastIfNoFlash(response);
         }
     });
 };
@@ -168,7 +168,7 @@ const handleTaxCategoryCreated = (response) => {
         preserveScroll: true,
         onSuccess: (page) => {
             modalData.value.taxCategories = page.props.taxCategories || [];
-            displayResponse(response);
+            showToastIfNoFlash(response);
         }
     });
 };

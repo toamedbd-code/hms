@@ -1,1 +1,0 @@
-import{o as a,c as o,w as t,a as c,u as e,j as r}from"./app-493394d2.js";const n="/build/assets/toamed-7357c87d.jpeg",_=["src"],m={__name:"AuthenticationCardLogo",setup(l){const s=n;return(i,u)=>(a(),o(e(r),{href:"/"},{default:t(()=>[c("img",{class:"w-32",src:e(s),alt:"logo"},null,8,_)]),_:1}))}};export{m as _};

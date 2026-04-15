@@ -53,7 +53,26 @@ class Admin extends Authenticatable
 
     public function getPhotoAttribute($value)
     {
-        return (!is_null($value)) ? env('APP_URL') . '/storage/' . $value : null;
+        if (empty($value)) {
+            return null;
+        }
+
+        $photo = (string) $value;
+
+        if (
+            str_starts_with($photo, 'http://')
+            || str_starts_with($photo, 'https://')
+            || str_starts_with($photo, 'data:')
+        ) {
+            return $photo;
+        }
+
+        if (str_starts_with($photo, '/')) {
+            return $photo;
+        }
+
+        // Resolve via app URL configuration without hardcoding APP_URL manually.
+        return asset('storage/' . ltrim($photo, '/'));
     }
 
     public function setPasswordAttribute($password)

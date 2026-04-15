@@ -26,6 +26,7 @@ use Mpdf\Output\Destination;
 use Milon\Barcode\DNS1D;
 use Milon\Barcode\DNS2D;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use ValueError;
 use Throwable;
 
@@ -41,6 +42,7 @@ class InvoiceController extends Controller
         'pathology',
         'radiology',
         'pharmacy',
+        'reporting',
     ];
 
     public function __construct(BillingService $billingService, MedicineInventoryService $medicineInventoryService, AdminService $adminService, PatientService $patientService, ReferralPersonService $referrerService, OpdPatientService $opdService, AppoinmentService $appoinmentService)
@@ -60,6 +62,14 @@ class InvoiceController extends Controller
         $request->merge([
             'module' => $request->input('module') ?: null,
         ]);
+
+        $requestedModule = (string) ($request->input('module') ?? '');
+        if ($requestedModule === 'reporting') {
+            return redirect()->route('backend.download.report', [
+                'id' => $request->input('id'),
+                'module' => 'reporting',
+            ]);
+        }
 
         $validated = $request->validate([
             'id' => ['required', 'integer', 'exists:billings,id'],
@@ -98,17 +108,19 @@ class InvoiceController extends Controller
         }
 
         $totals = $this->calculateFilteredTotals($billItems, $billing, $module);
-        $returnAmount = (float) ProductReturn::query()
+        $productReturnAmount = (float) ProductReturn::query()
             ->where('billing_id', $billing->id)
             ->whereIn('status', ['approved', 'processed'])
             ->sum('total_amount');
+        $cashReturnAmount = max(0, (float) ($billing->receiving_amt ?? 0) - (float) ($billing->invoice_amount ?? 0));
+        $returnAmount = $productReturnAmount + $cashReturnAmount;
         $adjustedDue = max(0, (float) $totals['due'] - $returnAmount);
 
         $data = [
             'billing' => $billing,
             'bill_number' => $billing->bill_number ?? '',
             'invoiceDateTime' => $invoiceDateTime,
-            'printed_at' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i a'),
+            'printed_at' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i:s a'),
             'patient_name' => $patient->name ?? 'N/A',
             'age' => $patient->age ?? 'N/A',
             'contact_no' => $billing->patient_mobile,
@@ -132,6 +144,8 @@ class InvoiceController extends Controller
             'header_image' => $designAssets['header_image'],
             'footer_image' => $designAssets['footer_image'],
             'footer_content' => $designAssets['footer_content'],
+            'header_height' => $designAssets['header_height'],
+            'footer_height' => $designAssets['footer_height'],
             'barcode' => $barcode,
             'module' => $module,
         ];
@@ -151,7 +165,52 @@ class InvoiceController extends Controller
             // Retry once with a core font and no dynamic footer HTML if font parsing fails.
             $fallbackData = $data;
             $fallbackData['footer_content'] = '';
-            $pdfOutput = $this->buildInvoicePdf($fallbackData, 'helvetica')->output();
+
+            try {
+                $pdfOutput = $this->buildInvoicePdf($fallbackData, 'helvetica')->output();
+            } catch (Throwable $fallbackException) {
+                Log::error('Invoice PDF fallback generation failed after ValueError.', [
+                    'billing_id' => $billing->id ?? null,
+                    'module' => $module,
+                    'error' => $fallbackException->getMessage(),
+                ]);
+
+                try {
+                    $renderedHtml = view('frontend.invoice.pdf', $fallbackData)->render();
+                    $sanitizedHtml = $this->sanitizeRenderedHtmlForPdf($renderedHtml);
+                    $pdfOutput = $this->buildInvoicePdfWithMpdfFromHtml($sanitizedHtml);
+                } catch (Throwable $mpdfException) {
+                    Log::error('Invoice PDF mPDF fallback failed after ValueError.', [
+                        'billing_id' => $billing->id ?? null,
+                        'module' => $module,
+                        'error' => $mpdfException->getMessage(),
+                    ]);
+
+                    $emergencyHtml = $this->buildEmergencyInvoiceHtml($fallbackData);
+                    $pdfOutput = $this->buildInvoicePdfFromHtml($emergencyHtml, 'helvetica')->output();
+                }
+            }
+        } catch (Throwable $pdfException) {
+            Log::error('Invoice PDF generation failed.', [
+                'billing_id' => $billing->id ?? null,
+                'module' => $module,
+                'error' => $pdfException->getMessage(),
+            ]);
+
+            try {
+                $renderedHtml = view('frontend.invoice.pdf', $data)->render();
+                $sanitizedHtml = $this->sanitizeRenderedHtmlForPdf($renderedHtml);
+                $pdfOutput = $this->buildInvoicePdfWithMpdfFromHtml($sanitizedHtml);
+            } catch (Throwable $mpdfException) {
+                Log::error('Invoice PDF mPDF fallback failed.', [
+                    'billing_id' => $billing->id ?? null,
+                    'module' => $module,
+                    'error' => $mpdfException->getMessage(),
+                ]);
+
+                $emergencyHtml = $this->buildEmergencyInvoiceHtml($data);
+                $pdfOutput = $this->buildInvoicePdfFromHtml($emergencyHtml, 'helvetica')->output();
+            }
         }
 
         return response($pdfOutput, 200, [
@@ -352,6 +411,8 @@ class InvoiceController extends Controller
             'header_image' => $this->storageInvoiceImageToDataUri($invoiceDesign?->header_photo_path),
             'footer_image' => $this->storageInvoiceImageToDataUri($invoiceDesign?->footer_photo_path),
             'footer_content' => $this->sanitizeHtmlForPdf((string) ($invoiceDesign?->footer_content ?? '')),
+            'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
+            'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
         ];
     }
 
@@ -442,6 +503,7 @@ class InvoiceController extends Controller
         $preparedBy = e((string) ($data['prepared_by'] ?? 'N/A'));
         $amountWords = e((string) ($data['amount_in_words'] ?? 'N/A'));
         $printedAt = e((string) ($data['printed_at'] ?? $data['invoiceDateTime'] ?? 'N/A'));
+        $fallbackFooterLine = e((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
         $headerImage = trim((string) ($data['header_image'] ?? ''));
         $footerImage = trim((string) ($data['footer_image'] ?? ''));
         $footerContent = (string) ($data['footer_content'] ?? '');
@@ -523,8 +585,10 @@ class InvoiceController extends Controller
         }
         .header-image {
             width: 100%;
-            max-height: 120px;
-            object-fit: contain;
+            height: 70px;
+            max-height: 70px;
+            object-fit: fill;
+            display: block;
         }
         .title-wrap { width: 100%; margin-bottom: 10px; }
         .title-wrap td { vertical-align: middle; }
@@ -631,8 +695,10 @@ class InvoiceController extends Controller
         .footer-right {
             display: table-cell;
             width: 50%;
+            box-sizing: border-box;
         }
-        .footer-right { text-align: right; }
+        .footer-left { padding-left: 10px; }
+        .footer-right { text-align: right; padding-right: 10px; white-space: nowrap; }
     </style>
 </head>
 <body>
@@ -703,7 +769,7 @@ class InvoiceController extends Controller
     <div class='footer'>
         {$footerImageBlock}
         {$footerContentBlock}
-        <div class='footer-left'>Powered By: www.toamedit.com Support: 01919-592638</div>
+        <div class='footer-left'>{$fallbackFooterLine}</div>
         <div class='footer-right'>Printing Date: {$printedAt}</div>
     </div>
     </div>
@@ -974,6 +1040,9 @@ class InvoiceController extends Controller
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
+            'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
+            'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
+            'printed_at' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i:s a'),
             'barcode' => $barcode,
             'clinic_address' => 'Daulatur Master Para, Daulatur Kushita Mobile: 01796-302512',
         ];
@@ -1042,6 +1111,9 @@ class InvoiceController extends Controller
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
+            'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
+            'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
+            'printed_at' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i:s a'),
         ];
 
         $pdf = Pdf::loadView('frontend.invoice.appointment-pdf', $data);
@@ -1376,7 +1448,7 @@ class InvoiceController extends Controller
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
             'barcode' => $barcode,
-            'printed_at' => now()->timezone('Asia/Dhaka')->format('d-M-Y h:i A'),
+            'printed_at' => now()->timezone('Asia/Dhaka')->format('d-M-Y h:i:s A'),
         ];
 
         $pdf = Pdf::loadView('frontend.invoice.ipd-pdf', $data)
@@ -1465,7 +1537,7 @@ class InvoiceController extends Controller
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
             'barcode' => $barcode,
-            'printed_at' => now()->timezone('Asia/Dhaka')->format('d-M-Y h:i A'),
+            'printed_at' => now()->timezone('Asia/Dhaka')->format('d-M-Y h:i:s A'),
         ];
 
         return view('frontend.invoice.ipd-pdf', $data);

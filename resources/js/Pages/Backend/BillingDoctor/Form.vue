@@ -17,18 +17,6 @@
         _method: props.billingdoctor?.id ? 'put' : 'post',
     });
 
-    const handlePhotoChange = (event) => {
-        const file = event.target.files[0];
-        form.photo = file;
-
-        // Display photo preview
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            form.photoPreview = e.target.result;
-        };
-        reader.readAsDataURL(file);
-    };
-
     const submit = () => {
         const routeName = props.id ? route('backend.billingdoctor.update', props.id) : route('backend.billingdoctor.store');
         form.transform(data => ({
@@ -36,14 +24,11 @@
             remember: '',
             isDirty: false,
         })).post(routeName, {
-
             onSuccess: (response) => {
-                if (!props.id)
-                    form.reset();
+                if (!props.id) form.reset();
                 displayResponse(response);
             },
             onError: (errorObject) => {
-
                 displayWarning(errorObject);
             },
         });
@@ -61,7 +46,12 @@
                     <div>
                         <h1 class="p-4 text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
                     </div>
-                    <div class="p-4 py-2">
+                    <div class="p-4 py-2 flex items-center space-x-2">
+                        <a :href="route('backend.billingdoctor.index')"
+                            class="px-3 py-1 text-sm font-medium text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors">BillingDoctor List</a>
+
+                        <button type="button" @click="router.back()"
+                            class="px-3 py-1 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors">Back</button>
                     </div>
                 </div>
 
@@ -70,23 +60,11 @@
                     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-4">
 
                         <div class="col-span-1 md:col-span-2">
-                            <InputLabel for="photo" value="Photo" />
-                            <div v-if="form.photoPreview">
-                                <img :src="form.photoPreview" alt="Photo Preview" class="max-w-xs mt-2" height="60"
-                                    width="60" />
-                            </div>
-                            <input id="photo" type="file" accept="image/*"
+                            <InputLabel for="name" value="Name" />
+                            <input id="name" name="name"
                                 class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
-                                @change="handlePhotoChange" />
-                            <InputError class="mt-2" :message="form.errors.photo" />
-                        </div>
-
-                        <div class="col-span-1 md:col-span-1">
-                            <InputLabel for="first_name" value="First Name" />
-                            <input id="first_name"
-                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
-                                v-model="form.first_name" type="text" placeholder="First Name" />
-                            <InputError class="mt-2" :message="form.errors.first_name" />
+                                v-model="form.name" type="text" placeholder="Name" />
+                            <InputError class="mt-2" :message="form.errors.name" />
                         </div>
 
                     </div>

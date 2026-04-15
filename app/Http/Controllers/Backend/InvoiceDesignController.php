@@ -10,6 +10,9 @@ use App\Services\InvoiceDesignService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
 use Exception;
@@ -54,7 +57,7 @@ class InvoiceDesignController extends Controller
 
         $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
 
-        $user = auth('admin')->user();
+        $user = auth('admin')->user() ?? auth()->user();
 
         $formatedDatas = $datas->map(function ($data, $index) use ($user) {
             $customData = new \stdClass();
@@ -67,7 +70,7 @@ class InvoiceDesignController extends Controller
 
             $customData->links = [];
 
-            if ($user->can('invoice-design-list-status')) {
+            if ($user && Gate::check('invoice-design-list-status')) {
                 $customData->links[] = [
                     'linkClass' => 'semi-bold text-white statusChange ' . (($data->status == 'Active') ? "bg-gray-500" : "bg-green-500"),
                     'link' => route('backend.invoicedesign.status.change', ['id' => $data->id, 'status' => $data->status == 'Active' ? 'Inactive' : 'Active']),
@@ -75,7 +78,7 @@ class InvoiceDesignController extends Controller
                 ];
             }
 
-            if ($user->can('invoice-design-list-edit')) {
+            if ($user && Gate::check('invoice-design-list-edit')) {
                 $customData->links[] = [
                     'linkClass' => 'bg-yellow-400 text-black semi-bold',
                     'link' => route('backend.invoicedesign.edit',  $data->id),
@@ -83,10 +86,10 @@ class InvoiceDesignController extends Controller
                 ];
             }
 
-            if ($user->can('invoice-design-list-delete')) {
+            if ($user && Gate::check('invoice-design-list-delete')) {
                 $customData->links[] = [
                     'linkClass' => 'deleteButton bg-red-500 text-white semi-bold',
-                    'link' => route('backend.invoicedesign.destroy', $data->id),
+                    'link' => route('backend.invoicedesign.delete', $data->id),
                     'linkLabel' => getLinkLabel('Delete', null, null)
                 ];
             }
@@ -138,26 +141,27 @@ class InvoiceDesignController extends Controller
         try {
             $data = $request->validated();
 
-            $existingDesign = InvoiceDesign::where('module', $data['module'])
-                ->whereNull('deleted_at')
-                ->first();
-
-            if ($existingDesign) {
-                DB::commit();
-                return redirect()
-                    ->back()
-                    ->with('errorMessage', 'This module design already exists.');
+            $headerPath = $this->uploadRequestImage(
+                $request,
+                ['headerPhoto', 'header_photo'],
+                ['headerPhotoPreview', 'header_photo_preview'],
+                'invoicedesigns'
+            );
+            if ($headerPath) {
+                $data['header_photo_path'] = $headerPath;
             }
 
-            if ($request->hasFile('headerPhoto')) {
-                $data['header_photo_path'] = $this->imageUpload($request->file('headerPhoto'), 'invoicedesigns');
+            $footerPath = $this->uploadRequestImage(
+                $request,
+                ['footerPhoto', 'footer_photo'],
+                ['footerPhotoPreview', 'footer_photo_preview'],
+                'invoicedesigns'
+            );
+            if ($footerPath) {
+                $data['footer_photo_path'] = $footerPath;
             }
 
-            if ($request->hasFile('footerPhoto')) {
-                $data['footer_photo_path'] = $this->imageUpload($request->file('footerPhoto'), 'invoicedesigns');
-            }
-
-            unset($data['headerPhoto'], $data['footerPhoto']);
+            unset($data['headerPhoto'], $data['header_photo'], $data['footerPhoto'], $data['footer_photo']);
 
             $dataInfo = $this->invoicedesignService->create($data);
 
@@ -180,8 +184,12 @@ class InvoiceDesignController extends Controller
             }
         } catch (Exception $err) {
             DB::rollBack();
+            Log::error('InvoiceDesign store failed', [
+                'message' => $err->getMessage(),
+                'file' => $err->getFile(),
+                'line' => $err->getLine(),
+            ]);
             $this->storeSystemError('Backend', 'InvoiceDesignController', 'store', substr($err->getMessage(), 0, 1000));
-            DB::commit();
             $message = "Server Errors Occur. Please Try Again.";
             return redirect()
                 ->back()
@@ -198,10 +206,12 @@ class InvoiceDesignController extends Controller
             'id' => $invoicedesign->id,
             'module' => $invoicedesign->module,
             'footer_content' => $invoicedesign->footer_content,
-            'header_photo_path' => $invoicedesign->header_photo_path ? $appUrl . '/storage/' . $invoicedesign->header_photo_path : null,
-            'footer_photo_path' => $invoicedesign->footer_photo_path ? $appUrl . '/storage/' . $invoicedesign->footer_photo_path : null,
+            'header_photo_path' => $invoicedesign->header_photo_path,
+            'footer_photo_path' => $invoicedesign->footer_photo_path,
             'header_photo_url' => $invoicedesign->header_photo_url,
             'footer_photo_url' => $invoicedesign->footer_photo_url,
+            'header_height' => $invoicedesign->header_height,
+            'footer_height' => $invoicedesign->footer_height,
             'status' => $invoicedesign->status,
         ] : null;
 
@@ -215,52 +225,40 @@ class InvoiceDesignController extends Controller
         );
     }
 
+    public function show($id)
+    {
+        return redirect()
+            ->route('backend.invoicedesign.index')
+            ->with('errorMessage', 'Direct view is not available. Please use Edit or Delete action.');
+    }
+
     public function update(InvoiceDesignRequest $request, $id)
     {
         DB::beginTransaction();
         try {
             $data = $request->validated();
-            $invoicedesign = $this->invoicedesignService->find($id);
 
-            $existingDesign = InvoiceDesign::where('module', $data['module'])
-                ->where('id', '!=', $id)
-                ->whereNull('deleted_at')
-                ->first();
-
-            if ($existingDesign) {
-                DB::commit();
-                return redirect()
-                    ->back()
-                    ->with('errorMessage', 'Another design already exists for this module.');
+            $headerPath = $this->uploadRequestImage(
+                $request,
+                ['headerPhoto', 'header_photo'],
+                ['headerPhotoPreview', 'header_photo_preview'],
+                'invoicedesigns'
+            );
+            if ($headerPath) {
+                $data['header_photo_path'] = $headerPath;
             }
 
-            if ($request->hasFile('headerPhoto')) {
-                $data['header_photo_path'] = $this->imageUpload($request->file('headerPhoto'), 'invoicedesigns');
-
-                if ($invoicedesign->header_photo_path) {
-                    $path = public_path('storage/' . $invoicedesign->header_photo_path);
-                    if (file_exists($path)) {
-                        unlink($path);
-                    }
-                }
-            } else {
-                $data['header_photo_path'] = $invoicedesign->header_photo_path;
+            $footerPath = $this->uploadRequestImage(
+                $request,
+                ['footerPhoto', 'footer_photo'],
+                ['footerPhotoPreview', 'footer_photo_preview'],
+                'invoicedesigns'
+            );
+            if ($footerPath) {
+                $data['footer_photo_path'] = $footerPath;
             }
 
-            if ($request->hasFile('footerPhoto')) {
-                $data['footer_photo_path'] = $this->imageUpload($request->file('footerPhoto'), 'invoicedesigns');
-
-                if ($invoicedesign->footer_photo_path) {
-                    $path = public_path('storage/' . $invoicedesign->footer_photo_path);
-                    if (file_exists($path)) {
-                        unlink($path);
-                    }
-                }
-            } else {
-                $data['footer_photo_path'] = $invoicedesign->footer_photo_path;
-            }
-
-            unset($data['headerPhoto'], $data['footerPhoto']);
+            unset($data['headerPhoto'], $data['header_photo'], $data['footerPhoto'], $data['footer_photo']);
 
             $dataInfo = $this->invoicedesignService->update($data, $id);
 
@@ -283,8 +281,12 @@ class InvoiceDesignController extends Controller
             }
         } catch (Exception $err) {
             DB::rollBack();
+            Log::error('InvoiceDesign update failed', [
+                'message' => $err->getMessage(),
+                'file' => $err->getFile(),
+                'line' => $err->getLine(),
+            ]);
             $this->storeSystemError('Backend', 'InvoiceDesignController', 'update', substr($err->getMessage(), 0, 1000));
-            DB::commit();
             $message = "Server Errors Occur. Please Try Again.";
             return redirect()
                 ->back()
@@ -298,6 +300,14 @@ class InvoiceDesignController extends Controller
 
         try {
             $invoicedesign = $this->invoicedesignService->find($id);
+
+            if (!$invoicedesign) {
+                DB::rollBack();
+
+                return redirect()
+                    ->back()
+                    ->with('errorMessage', 'InvoiceDesign not found.');
+            }
 
             // Delete associated files
             if ($invoicedesign->header_photo_path) {
@@ -334,7 +344,6 @@ class InvoiceDesignController extends Controller
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'InvoiceDesignController', 'destroy', substr($err->getMessage(), 0, 1000));
-            DB::commit();
             $message = "Server Errors Occur. Please Try Again.";
             return redirect()
                 ->back()
@@ -375,11 +384,150 @@ class InvoiceDesignController extends Controller
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'InvoiceDesignController', 'changeStatus', substr($err->getMessage(), 0, 1000));
-            DB::commit();
             $message = "Server Errors Occur. Please Try Again.";
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
         }
+    }
+
+    public function imageUpload($image, $folder)
+    {
+        $folder = trim((string) $folder, '/');
+        if ($folder === '') {
+            throw new \InvalidArgumentException('Upload folder is missing.');
+        }
+
+        if (!$image || !method_exists($image, 'isValid') || !$image->isValid()) {
+            throw new \InvalidArgumentException('Upload file is missing or invalid.');
+        }
+
+        if (method_exists($image, 'getSize') && (int) $image->getSize() <= 0) {
+            throw new \InvalidArgumentException('Upload file is empty.');
+        }
+
+        $realPath = method_exists($image, 'getRealPath') ? (string) $image->getRealPath() : '';
+        if ($realPath === '' && method_exists($image, 'getPathname')) {
+            $realPath = (string) $image->getPathname();
+        }
+
+        if ($realPath === '' || !is_readable($realPath)) {
+            throw new \InvalidArgumentException('Upload file path is missing.');
+        }
+
+        $originalName = (string) $image->getClientOriginalName();
+        $baseName = pathinfo($originalName, PATHINFO_FILENAME);
+        $baseSlug = Str::slug($baseName);
+        if ($baseSlug === '') {
+            $baseSlug = 'upload';
+        }
+
+        $extension = (string) $image->getClientOriginalExtension();
+        if ($extension === '') {
+            $extension = (string) $image->extension();
+        }
+        if ($extension === '') {
+            $extension = 'bin';
+        }
+
+        $imageName = $baseSlug . '-' . uniqid() . '.' . $extension;
+
+        if (!Storage::disk('public')->exists($folder)) {
+            Storage::disk('public')->makeDirectory($folder);
+        }
+
+        $stream = fopen($realPath, 'r');
+        if ($stream === false) {
+            throw new \RuntimeException('Failed to read upload file stream.');
+        }
+
+        try {
+            Storage::disk('public')->put($folder . '/' . $imageName, $stream);
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
+
+        return $folder . '/' . $imageName;
+    }
+
+    private function hasReadableUploadPath($file)
+    {
+        if (!$file || !method_exists($file, 'getRealPath')) {
+            return false;
+        }
+
+        $realPath = (string) $file->getRealPath();
+        return $realPath !== '' && is_readable($realPath);
+    }
+
+    private function uploadRequestImage(Request $request, array $fileKeys, array $previewKeys, string $folder): ?string
+    {
+        $file = null;
+
+        foreach ($fileKeys as $fileKey) {
+            if ($request->hasFile($fileKey)) {
+                $file = $request->file($fileKey);
+                if ($file) {
+                    break;
+                }
+            }
+        }
+
+        if (!$file) {
+            return null;
+        }
+
+        try {
+            return $this->imageUpload($file, $folder);
+        } catch (\Throwable $err) {
+            foreach ($previewKeys as $previewKey) {
+                $previewValue = (string) $request->input($previewKey, '');
+                $fallbackPath = $this->uploadBase64Preview($previewValue, $folder, (string) $file->getClientOriginalName());
+                if ($fallbackPath) {
+                    return $fallbackPath;
+                }
+            }
+
+            throw $err;
+        }
+    }
+
+    private function uploadBase64Preview(string $previewValue, string $folder, string $originalName = ''): ?string
+    {
+        if (!preg_match('/^data:image\/(\w+);base64,(.+)$/', $previewValue, $matches)) {
+            return null;
+        }
+
+        $binary = base64_decode($matches[2], true);
+        if ($binary === false) {
+            return null;
+        }
+
+        $mimeExt = strtolower((string) $matches[1]);
+        $extension = $mimeExt === 'jpeg' ? 'jpg' : $mimeExt;
+        if ($extension === '') {
+            $extension = 'bin';
+        }
+
+        $baseSlug = Str::slug(pathinfo($originalName, PATHINFO_FILENAME));
+        if ($baseSlug === '') {
+            $baseSlug = 'upload';
+        }
+
+        $folder = trim((string) $folder, '/');
+        if ($folder === '') {
+            return null;
+        }
+
+        if (!Storage::disk('public')->exists($folder)) {
+            Storage::disk('public')->makeDirectory($folder);
+        }
+
+        $imageName = $baseSlug . '-' . uniqid() . '.' . $extension;
+        Storage::disk('public')->put($folder . '/' . $imageName, $binary);
+
+        return $folder . '/' . $imageName;
     }
 }

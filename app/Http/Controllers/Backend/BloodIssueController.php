@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\BloodIssueRequest;
 use App\Services\AdminService;
+use App\Models\BloodComponentIssue;
+use App\Models\BloodIssue;
 use Illuminate\Support\Facades\DB;
 use App\Services\BloodIssueService;
 use App\Services\PatientService;
@@ -59,6 +61,7 @@ class BloodIssueController extends Controller
 
         $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
         
+        /** @var \Illuminate\Contracts\Auth\Access\Authorizable $user */
         $user = auth('admin')->user();
 
         $formatedDatas = $datas->map(function ($data, $index) use ($user) {
@@ -149,6 +152,11 @@ class BloodIssueController extends Controller
         try {
 
             $data = $request->validated();
+
+            if (empty($data['case_id'])) {
+                $nextSerial = max((int) BloodIssue::max('id'), (int) BloodComponentIssue::max('id')) + 1;
+                $data['case_id'] = prefixed_serial('blood_bank_bill_prefix', 'BLBB', $nextSerial, 6);
+            }
 
             $dataInfo = $this->bloodissueService->create($data);
 

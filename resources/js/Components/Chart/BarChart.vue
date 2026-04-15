@@ -26,17 +26,21 @@ export default {
                     'Pharmacy Income',
                     'Pathology Income',
                     'Radiology Income',
-                    'Pending Income'
+                    'Pending Income',
+                    'Expense',
+                    'Final Income'
                 ],
                 datasets: [{
-                    label: 'Income (Tk.)',
+                    label: 'Amount (Tk.)',
                     backgroundColor: [
                         '#10B981', // Green
                         '#3B82F6', // Blue
                         '#8B5CF6', // Purple
                         '#F59E0B', // Yellow
                         '#EF4444', // Red
-                        '#6B7280'  // Gray
+                        '#6B7280',  // Gray
+                        '#0F172A',  // Slate
+                        '#22C55E'   // Green
                     ],
                     borderColor: [
                         '#059669',
@@ -44,7 +48,9 @@ export default {
                         '#7C3AED',
                         '#D97706',
                         '#DC2626',
-                        '#4B5563'
+                        '#4B5563',
+                        '#0F172A',
+                        '#16A34A'
                     ],
                     borderWidth: 1,
                     data: [
@@ -53,7 +59,9 @@ export default {
                         this.dashboardData.pharmacyIncome || 0,
                         this.dashboardData.pathologyIncome || 0,
                         this.dashboardData.radiologyIncome || 0,
-                        this.dashboardData.pendingIncome || 0
+                        this.dashboardData.pendingIncome || 0,
+                        this.dashboardData.expenses || 0,
+                        this.dashboardData.netIncome || 0
                     ]
                 }]
             }
@@ -65,7 +73,7 @@ export default {
                 plugins: {
                     title: {
                         display: true,
-                        text: 'Hospital Income by Department',
+                        text: 'Hospital Income and Expense by Department',
                         font: {
                             size: 16,
                             weight: 'bold'

@@ -21,18 +21,90 @@ const selectionMode = ref('single');
 const filters = ref({
     dateFrom: props.filters?.dateFrom ?? '',
     dateTo: props.filters?.dateTo ?? '',
-    module: props.filters?.module ?? '',
+    module: props.filters?.module ?? 'all_module',
     singleDate: props.filters?.singleDate ?? '',
 });
 
 const modules = [
     { id: 'all_module', name: 'All Module' },
-    { id: 'pathology', name: 'Pathology' },
-    { id: 'radiology', name: 'Radiology' },
-    { id: 'medicine', name: 'Pharmacy' },
+    { id: 'billing', name: 'Billing' },
+    { id: 'pharmacy', name: 'Pharmacy' },
     { id: 'opd', name: 'OPD' },
     { id: 'ipd', name: 'IPD' },
 ];
+
+const getModuleDisplayName = (module) => {
+    if (!module) return 'N/A';
+
+    const normalized = String(module).toLowerCase();
+
+    if (normalized === 'opd' || normalized === 'ipd') {
+        return normalized.toUpperCase();
+    }
+
+    if (normalized === 'medicine') {
+        return 'Pharmacy';
+    }
+
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const formatMoney = (amount) => {
+    const value = Number(amount || 0);
+    return `৳${value.toLocaleString('en-BD', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })}`;
+};
+
+const moduleSummary = computed(() => {
+    const rows = props.reportData?.data || [];
+    const summary = rows.reduce((acc, row) => {
+        const moduleKey = String(row?.module || 'unknown').toLowerCase();
+        if (!acc[moduleKey]) {
+            acc[moduleKey] = {
+                module: moduleKey,
+                label: getModuleDisplayName(moduleKey),
+                records: 0,
+                revenue: 0,
+            };
+        }
+
+        acc[moduleKey].records += Number(row?.records || 0);
+        acc[moduleKey].revenue += Number(row?.revenue || 0);
+        return acc;
+    }, {});
+
+    return Object.values(summary).sort((a, b) => b.revenue - a.revenue);
+});
+
+const getReportRowDetails = (item) => {
+    const moduleKey = String(item?.module || '').toLowerCase();
+
+    if (moduleKey === 'opd') {
+        const patient = item?.patient_name || 'N/A';
+        const doctor = item?.doctor_name || 'N/A';
+        return `${patient} | Dr. ${doctor}`;
+    }
+
+    if (moduleKey === 'ipd') {
+        const patient = item?.patient_name || 'N/A';
+        const bed = item?.bed_number || 'N/A';
+        return `${patient} | Bed: ${bed}`;
+    }
+
+    if (moduleKey === 'billing') {
+        return `Bill No: ${item?.bill_no || 'N/A'}`;
+    }
+
+    if (moduleKey === 'pharmacy' || moduleKey === 'medicine') {
+        const itemName = item?.item_name || 'N/A';
+        const qty = item?.quantity ?? 'N/A';
+        return `${itemName} | Qty: ${qty}`;
+    }
+
+    return '-';
+};
 
 const dateRangeDisplay = computed(() => {
     if (selectionMode.value === 'single' && filters.value.singleDate) {
@@ -112,15 +184,21 @@ const downloadPdf = async () => {
             }
         });
 
-        const url = `${route('backend.report.generate-pdf')}?${params.toString()}`;
-        
-        window.location.href = url;
+        let url = `${route('backend.report.generate-pdf')}?${params.toString()}`;
+        if (params.toString().length > 0) {
+            url += '&inline=1';
+        } else {
+            url += 'inline=1';
+        }
+
+        window.open(url, '_blank');
 
     } catch (error) {
         console.error('Download error:', error);
         const form = document.createElement('form');
         form.method = 'GET';
         form.action = route('backend.report.generate-pdf');
+        form.target = '_blank';
         
         Object.keys(filterData).forEach(key => {
             if (filterData[key]) {
@@ -131,6 +209,13 @@ const downloadPdf = async () => {
                 form.appendChild(input);
             }
         });
+
+        // Request inline viewing in new tab
+        const inlineInput = document.createElement('input');
+        inlineInput.type = 'hidden';
+        inlineInput.name = 'inline';
+        inlineInput.value = '1';
+        form.appendChild(inlineInput);
 
         document.body.appendChild(form);
         form.submit();
@@ -146,7 +231,7 @@ const resetFilters = () => {
     filters.value = {
         dateFrom: '',
         dateTo: '',
-        module: '',
+        module: 'all_module',
         singleDate: ''
     };
     hasFiltered.value = false;
@@ -156,7 +241,7 @@ const resetFilters = () => {
     router.get(route('backend.report.index'), {
         dateFrom: '',
         dateTo: '',
-        module: '',
+        module: 'all_module',
         singleDate: ''
     }, {
         preserveState: true
@@ -550,7 +635,6 @@ onUnmounted(() => {
                             <label class="block text-sm font-medium text-gray-700 mb-1">Module</label>
                             <select v-model="filters.module"
                                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                                <option value="">Select Module</option>
                                 <option v-for="module in modules" :key="module.id" :value="module.id">
                                     {{ module.name }}
                                 </option>
@@ -625,7 +709,7 @@ onUnmounted(() => {
                                     </div>
                                     <div class="ml-4">
                                         <p class="text-sm font-medium text-green-600">Revenue</p>
-                                        <p class="text-2xl font-bold text-green-900">${{ (props.reportData.revenue || 0).toLocaleString() }}</p>
+                                        <p class="text-2xl font-bold text-green-900">{{ formatMoney(props.reportData.revenue || 0) }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -641,7 +725,7 @@ onUnmounted(() => {
                                     </div>
                                     <div class="ml-4">
                                         <p class="text-sm font-medium text-yellow-600">Average</p>
-                                        <p class="text-2xl font-bold text-yellow-900">${{ (props.reportData.average || 0).toLocaleString() }}</p>
+                                        <p class="text-2xl font-bold text-yellow-900">{{ formatMoney(props.reportData.average || 0) }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -661,6 +745,20 @@ onUnmounted(() => {
                                     </div>
                                 </div>
                             </div> -->
+                        </div>
+
+                        <div v-if="moduleSummary.length" class="mb-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                            <div
+                                v-for="item in moduleSummary"
+                                :key="item.module"
+                                class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3"
+                            >
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-semibold text-gray-700">{{ item.label }}</span>
+                                    <span class="text-xs text-gray-500">{{ item.records }} Records</span>
+                                </div>
+                                <div class="mt-1 text-sm font-bold text-gray-900">{{ formatMoney(item.revenue) }}</div>
+                            </div>
                         </div>
 
                         <!-- Data Table -->
@@ -683,6 +781,9 @@ onUnmounted(() => {
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Status
                                         </th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Details
+                                        </th>
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
@@ -693,21 +794,19 @@ onUnmounted(() => {
                                         <td class="px-6 py-4 whitespace-nowrap">
                                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
                                                 :class="{
-                                                    'bg-blue-100 text-blue-800': item.module === 'pathology',
-                                                    'bg-green-100 text-green-800': item.module === 'radiology',
-                                                    'bg-yellow-100 text-yellow-800': item.module === 'medicine',
+                                                    'bg-yellow-100 text-yellow-800': item.module === 'pharmacy' || item.module === 'medicine',
                                                     'bg-purple-100 text-purple-800': item.module === 'opd',
                                                     'bg-pink-100 text-pink-800': item.module === 'ipd',
                                                     'bg-gray-100 text-gray-800': !item.module
                                                 }">
-                                                {{ item.module ? item.module.charAt(0).toUpperCase() + item.module.slice(1) : 'N/A' }}
+                                                {{ getModuleDisplayName(item.module) }}
                                             </span>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                             {{ item.records || 0 }}
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            ${{ (item.revenue || 0).toLocaleString() }}
+                                            {{ formatMoney(item.revenue || 0) }}
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap">
                                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
@@ -719,6 +818,9 @@ onUnmounted(() => {
                                                 }">
                                                 {{ item.status ? item.status.charAt(0).toUpperCase() + item.status.slice(1) : 'N/A' }}
                                             </span>
+                                        </td>
+                                        <td class="px-6 py-4 text-sm text-gray-700">
+                                            {{ getReportRowDetails(item) }}
                                         </td>
                                     </tr>
                                 </tbody>
@@ -768,20 +870,20 @@ onUnmounted(() => {
 
 /* Custom scrollbar for table */
 .overflow-x-auto::-webkit-scrollbar {
-    height: 6px;
+    height: 10px;
 }
 
 .overflow-x-auto::-webkit-scrollbar-track {
-    background: #f1f5f9;
+    background: color-mix(in srgb, var(--app-theme-soft) 26%, #e2e8f0);
 }
 
 .overflow-x-auto::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 3px;
+    background: color-mix(in srgb, var(--app-theme-primary) 40%, #94a3b8);
+    border-radius: 8px;
 }
 
 .overflow-x-auto::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
+    background: color-mix(in srgb, var(--app-theme-primary) 56%, #64748b);
 }
 
 /* Animation for loading states */

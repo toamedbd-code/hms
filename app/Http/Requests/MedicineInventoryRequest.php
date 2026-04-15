@@ -20,6 +20,7 @@ class MedicineInventoryRequest extends FormRequest
                     'medicines.*.medicine_total_purchase_price' => 'required|numeric|min:0|regex:/^\d+(\.\d{1,2})?$/',
                     'medicines.*.medicine_total_selling_price' => 'required|numeric|min:0|regex:/^\d+(\.\d{1,2})?$/',
                     'medicines.*.medicine_quantity' => 'required|integer|min:1',
+                    'medicines.*.expiry_date' => 'nullable|date',
                     'medicines.*.remarks' => 'nullable|string|max:500',
                 ];
                 break;
@@ -34,6 +35,7 @@ class MedicineInventoryRequest extends FormRequest
                     'medicine_total_purchase_price' => 'required|numeric|min:0|regex:/^\d+(\.\d{1,2})?$/',
                     'medicine_total_selling_price' => 'required|numeric|min:0|regex:/^\d+(\.\d{1,2})?$/',
                     'medicine_quantity' => 'required|integer|min:1',
+                    'expiry_date' => 'nullable|date',
                     'remarks' => 'nullable|string|max:500',
                 ];
                 break;

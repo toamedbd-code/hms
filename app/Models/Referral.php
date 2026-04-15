@@ -14,6 +14,9 @@ class Referral extends Model
         'billing_id',
         'payee_id',
         'total_commission_amount',
+        'paid_amount',
+        'paid_status',
+        'last_paid_at',
         'category_commissions',
         'date',
         'total_bill_amount',
@@ -24,6 +27,8 @@ class Referral extends Model
     protected $casts = [
         'date' => 'date',
         'total_commission_amount' => 'decimal:2',
+        'paid_amount' => 'decimal:2',
+        'last_paid_at' => 'datetime',
         'total_bill_amount' => 'decimal:2',
         'category_commissions' => 'array',
     ];

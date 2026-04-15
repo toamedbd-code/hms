@@ -25,6 +25,7 @@ class IpdPatientRequest extends FormRequest
                     'casualty' => 'required',
                     'old_patient' => 'required',
                     'credit_limit' => 'nullable|numeric',
+                    'advance_amount' => 'nullable|numeric',
                     'reference' => 'nullable|string|max:255',
 
                     'bed_group_id' => 'required',

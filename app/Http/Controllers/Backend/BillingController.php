@@ -16,6 +16,8 @@ use App\Models\Payment;
 use App\Models\Radiology;
 use App\Models\Referral;
 use App\Models\Test;
+use App\Models\OpdPrescription;
+use App\Models\IpdPrescription;
 use App\Models\OpdPatient;
 use App\Models\IpdPatient;
 use App\Services\AdminService;
@@ -52,7 +54,7 @@ class BillingController extends Controller
 
         // Add permission middleware
         $this->middleware('permission:billing', ['only' => ['index']]);
-        $this->middleware('permission:billing-create', ['only' => ['create', 'billing', 'billingPage', 'store']]);
+        $this->middleware('permission:billing-create', ['only' => ['create', 'billing', 'billingPage', 'store', 'searchPrescription', 'searchPrescriptionSuggestions']]);
         $this->middleware('permission:billing-delete', ['only' => ['destroy']]);
         $this->middleware('permission:billing-edit', ['only' => ['edit', 'update']]);
     }
@@ -406,6 +408,7 @@ $customData->links = $links;
             $patientResult = $this->handlePatientData($data);
             $patientId = $patientResult['patient_id'];
             $data = $patientResult['processed_data'];
+            $data = array_merge($data, $this->normalizeBillingPaymentData($data));
 
             // Duplicate billing check (same patient same day). If billing_date provided
             // use that date for duplicate detection so bills can be created for other dates.
@@ -670,6 +673,147 @@ if ($existingBill) {
             });
 
         return response()->json($doctors);
+    }
+
+    public function searchPrescription(Request $request)
+    {
+        $validated = $request->validate([
+            'prescription_id' => 'required|string',
+        ]);
+
+        $prescriptionId = $this->parsePrescriptionId((string) $validated['prescription_id']);
+        if (!$prescriptionId) {
+            return response()->json([
+                'message' => 'Please provide a valid prescription id.',
+                'tests' => [],
+            ], 422);
+        }
+
+        $opdPrescription = OpdPrescription::query()
+            ->with(['items', 'opdPatient.patient'])
+            ->find($prescriptionId);
+
+        if ($opdPrescription) {
+            $testNames = collect($opdPrescription->items)
+                ->pluck('test_name')
+                ->map(fn ($name) => trim((string) $name))
+                ->filter(fn ($name) => $name !== '')
+                ->unique()
+                ->values();
+
+            return response()->json([
+                'source' => 'OPD',
+                'prescription_id' => $opdPrescription->id,
+                'patient' => [
+                    'id' => $opdPrescription->opdPatient?->patient?->id,
+                    'name' => $opdPrescription->opdPatient?->patient?->name,
+                    'phone' => $opdPrescription->opdPatient?->patient?->phone,
+                    'gender' => $opdPrescription->opdPatient?->patient?->gender,
+                    'dob' => $opdPrescription->opdPatient?->patient?->dob,
+                ],
+                'tests' => $testNames,
+            ]);
+        }
+
+        $ipdPrescription = IpdPrescription::query()
+            ->with(['tests', 'ipdPatient.patient'])
+            ->find($prescriptionId);
+
+        if ($ipdPrescription) {
+            $testNames = collect($ipdPrescription->tests)
+                ->pluck('test_name')
+                ->map(fn ($name) => trim((string) $name))
+                ->filter(fn ($name) => $name !== '')
+                ->unique()
+                ->values();
+
+            return response()->json([
+                'source' => 'IPD',
+                'prescription_id' => $ipdPrescription->id,
+                'patient' => [
+                    'id' => $ipdPrescription->ipdPatient?->patient?->id,
+                    'name' => $ipdPrescription->ipdPatient?->patient?->name,
+                    'phone' => $ipdPrescription->ipdPatient?->patient?->phone,
+                    'gender' => $ipdPrescription->ipdPatient?->patient?->gender,
+                    'dob' => $ipdPrescription->ipdPatient?->patient?->dob,
+                ],
+                'tests' => $testNames,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Prescription not found.',
+            'tests' => [],
+        ], 404);
+    }
+
+    public function searchPrescriptionSuggestions(Request $request)
+    {
+        $search = trim((string) $request->query('search', ''));
+
+        if ($search === '') {
+            return response()->json([]);
+        }
+
+        $normalizedSearch = preg_replace('/\D+/', '', $search) ?: $search;
+
+        $opd = OpdPrescription::query()
+            ->with(['opdPatient.patient'])
+            ->where('id', 'like', '%' . $normalizedSearch . '%')
+            ->latest('id')
+            ->limit(8)
+            ->get()
+            ->map(function ($prescription) {
+                return [
+                    'id' => $prescription->id,
+                    'source' => 'OPD',
+                    'patient_name' => $prescription->opdPatient?->patient?->name,
+                    'label' => 'OPD-' . $prescription->id,
+                ];
+            });
+
+        $ipd = IpdPrescription::query()
+            ->with(['ipdPatient.patient'])
+            ->where('id', 'like', '%' . $normalizedSearch . '%')
+            ->latest('id')
+            ->limit(8)
+            ->get()
+            ->map(function ($prescription) {
+                return [
+                    'id' => $prescription->id,
+                    'source' => 'IPD',
+                    'patient_name' => $prescription->ipdPatient?->patient?->name,
+                    'label' => 'IPD-' . $prescription->id,
+                ];
+            });
+
+        $suggestions = collect()
+            ->merge($opd)
+            ->merge($ipd)
+            ->sortByDesc('id')
+            ->take(12)
+            ->values();
+
+        return response()->json($suggestions);
+    }
+
+    private function parsePrescriptionId(string $rawInput): ?int
+    {
+        $rawInput = trim($rawInput);
+        if ($rawInput === '') {
+            return null;
+        }
+
+        if (ctype_digit($rawInput)) {
+            return max(1, (int) $rawInput);
+        }
+
+        if (preg_match('/(?:opd|ipd)?\s*[-_:#]?\s*0*(\d+)/i', $rawInput, $matches)) {
+            $id = (int) ($matches[1] ?? 0);
+            return $id > 0 ? $id : null;
+        }
+
+        return null;
     }
 
     private function handleDoctor($doctorName)
@@ -942,6 +1086,38 @@ if ($existingBill) {
         }
     }
 
+    private function normalizeBillingPaymentData(array $data): array
+    {
+        $payableAmount = max(0, (float) ($data['payable_amount'] ?? $data['total'] ?? 0));
+        $requestedPaid = max(0, (float) ($data['paid_amt'] ?? 0));
+
+        $receivingAmount = max(0, (float) ($data['receiving_amt'] ?? 0));
+        $requestedReturn = max(0, (float) ($data['return_amt'] ?? 0));
+
+        $effectivePaid = min($payableAmount, $requestedPaid);
+        $grossReceived = max($receivingAmount, $effectivePaid);
+        $maxReturn = max(0, $grossReceived - $effectivePaid);
+
+        $returnAmount = min($requestedReturn, $maxReturn);
+        if ($returnAmount <= 0 && $maxReturn > 0) {
+            $returnAmount = $maxReturn;
+        }
+
+        // Keep effective paid as source of truth for accounting.
+        $effectivePaid = max(0, min($payableAmount, $grossReceived - $returnAmount));
+        $dueAmount = max(0, round($payableAmount - $effectivePaid, 2));
+
+        return [
+            'payable_amount' => round($payableAmount, 2),
+            'paid_amt' => round($effectivePaid, 2),
+            'invoice_amount' => round($effectivePaid, 2),
+            'receiving_amt' => round($grossReceived, 2),
+            'change_amt' => round(max(0, (float) ($data['change_amt'] ?? 0)), 2),
+            'due_amount' => $dueAmount,
+            'return_amt' => round($returnAmount, 2),
+        ];
+    }
+
     private function determinePaymentStatus($paidAmount, $payableAmount, $total, $recevingAmount)
     {
         $paidAmount = floatval($paidAmount);
@@ -1170,6 +1346,7 @@ if ($existingBill) {
             $patientResult = $this->handlePatientData($data, $billing);
             $patientId = $patientResult['patient_id'];
             $data = $patientResult['processed_data'];
+            $data = array_merge($data, $this->normalizeBillingPaymentData($data));
 
             // Store old quantities for medicine inventory rollback
             $oldBillItems = BillItem::where('billing_id', $id)->get();
@@ -1199,6 +1376,7 @@ if ($existingBill) {
                 'discount_type' => $data['discount_type'] ?? 'percentage',
                 'payable_amount' => $data['payable_amount'] ?? $data['total'],
                 'paid_amt' => $data['paid_amt'],
+                'invoice_amount' => $data['paid_amt'],
                 'change_amt' => $data['change_amt'] ?? 0,
                 'due_amount' => $data['due_amount'] ?? 0,
                 'receiving_amt' => $data['receiving_amt'] ?? 0,
@@ -1517,8 +1695,9 @@ if ($existingBill) {
 
     private function generateInvoiceNumber($lastBilling = null)
     {
-        // Keep the existing compact format: INVYYYYMMxxxxx
-        return $this->nextSequentialBillingNumber('invoice_number', 'INV', 5);
+        $prefix = web_setting_prefix('billing_bill_prefix', 'BILL');
+        // Keep the existing compact format: PREFIXYYYYMMxxxxx
+        return $this->nextSequentialBillingNumber('invoice_number', $prefix, 5);
     }
 
     private function generateCaseNumber($lastBilling = null)

@@ -20,6 +20,8 @@ class InvoiceDesign extends Authenticatable
         'header_photo_path',
         'footer_photo_path',
         'module',
+        'header_height',
+        'footer_height',
         'status'
     ];
 
@@ -37,11 +39,11 @@ class InvoiceDesign extends Authenticatable
 
     public function getHeaderPhotoUrlAttribute()
     {
-        return $this->header_photo_path ? asset('storage/' . $this->header_photo_path) : null;
+        return publicStorageUrl($this->header_photo_path);
     }
 
     public function getFooterPhotoUrlAttribute()
     {
-        return $this->footer_photo_path ? asset('storage/' . $this->footer_photo_path) : null;
+        return publicStorageUrl($this->footer_photo_path);
     }
 }

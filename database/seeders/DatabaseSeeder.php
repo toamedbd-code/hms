@@ -25,8 +25,15 @@ class DatabaseSeeder extends Seeder
 
         $this->call([
             MenuSeeder::class,
+            SettingsMenuSyncSeeder::class,
+            QuickAccessMenuPermissionSyncSeeder::class,
+            StoreManagementMenuSeeder::class,
             RoleSeeder::class,
             PermissionSeeder::class,
+            PermissionFixSeeder::class,
+            MenuPermissionCoverageSeeder::class,
+            DutyRosterPermissionSeeder::class,
+            SalarySheetPermissionSeeder::class,
           
             CompanySeeder::class,
 
@@ -43,6 +50,8 @@ class DatabaseSeeder extends Seeder
             TestSeeder::class,
             MedicineSeeder::class,
             WebSettingSeeder::class,
+            AttendanceSeeder::class,
+                SalarySheetMenuSeeder::class,
           
         ]);
     }

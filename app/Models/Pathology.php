@@ -54,9 +54,10 @@ class Pathology extends Authenticatable
      */
     public static function generateBillNo()
     {
+        $prefix = web_setting_prefix('pathology_bill_prefix', 'Bill');
         $lastBill = self::orderBy('id', 'desc')->first();
-        $lastNumber = $lastBill ? (int) substr($lastBill->bill_no, 4) : 0;
-        return 'PATB' . str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
+        $lastNumber = $lastBill ? (int) str_replace($prefix, '', (string) $lastBill->bill_no) : 0;
+        return $prefix . str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
     }
 
     /**

@@ -8,8 +8,10 @@ use App\Services\FrontOfficeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
+use Carbon\Carbon;
 use Exception;
 
 class FrontOfficeController extends Controller
@@ -21,6 +23,12 @@ class FrontOfficeController extends Controller
     public function __construct(FrontOfficeService $frontofficeService)
     {
         $this->frontofficeService = $frontofficeService;
+        $this->middleware('auth:admin');
+        $this->middleware('permission:frontoffice-list', ['only' => ['index', 'show']]);
+        $this->middleware('permission:frontoffice-create', ['only' => ['create', 'store', 'import']]);
+        $this->middleware('permission:frontoffice-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:frontoffice-delete', ['only' => ['destroy']]);
+        $this->middleware('permission:frontoffice-status', ['only' => ['changeStatus']]);
     }
 
 
@@ -30,10 +38,10 @@ class FrontOfficeController extends Controller
         return Inertia::render(
             'Backend/FrontOffice/Index',
             [
-                'pageTitle' => fn () => 'FrontOffice List',
+                'pageTitle' => fn () => 'Visitor List',
                 'breadcrumbs' => fn () => [
-                    ['link' => null, 'title' => 'FrontOffice Manage'],
-                    ['link' => route('backend.frontoffice.index'), 'title' => 'FrontOffice List'],
+                    ['link' => null, 'title' => 'Visitor Manage'],
+                    ['link' => route('backend.frontoffice.index'), 'title' => 'Visitor List'],
                 ],
                 'tableHeaders' => fn () => $this->getTableHeaders(),
                 'dataFields' => fn () => $this->dataFields(),
@@ -55,9 +63,15 @@ class FrontOfficeController extends Controller
         $formatedDatas = $datas->map(function ($data, $index) {
             $customData = new \stdClass();
             $customData->index = $index + 1;
+            $customData->purpose = $data->purpose;
             $customData->name = $data->name;
-            $customData->photo = '<img src="' . $data->photo . '" height="50" width="50"/>';
+            $customData->visit_to = $data->visit_to;
+            $customData->phone = $data->phone;
+            $customData->date_in = $data->date_in;
+            $customData->time_in = $data->time_in;
+            $customData->time_out = $data->time_out;
             $customData->status = getStatusText($data->status);
+            $customData->status_text = $data->status;
 
             $customData->hasLink = true;
             $customData->links = [
@@ -88,8 +102,13 @@ class FrontOfficeController extends Controller
     {
         return [
             ['fieldName' => 'index', 'class' => 'text-center'],
-            ['fieldName' => 'photo', 'class' => 'text-center'],
+            ['fieldName' => 'purpose', 'class' => 'text-center'],
             ['fieldName' => 'name', 'class' => 'text-center'],
+            ['fieldName' => 'visit_to', 'class' => 'text-center'],
+            ['fieldName' => 'phone', 'class' => 'text-center'],
+            ['fieldName' => 'date_in', 'class' => 'text-center'],
+            ['fieldName' => 'time_in', 'class' => 'text-center'],
+            ['fieldName' => 'time_out', 'class' => 'text-center'],
             ['fieldName' => 'status', 'class' => 'text-center'],
         ];
     }
@@ -97,8 +116,13 @@ class FrontOfficeController extends Controller
     {
         return [
             'Sl/No',
-            'Photo',
+            'Purpose',
             'Name',
+            'Visit To',
+            'Phone Number',
+            'Date In',
+            'Time In',
+            'Time Out',
             'Status',
             'Action',
         ];
@@ -109,10 +133,10 @@ class FrontOfficeController extends Controller
         return Inertia::render(
             'Backend/FrontOffice/Form',
             [
-                'pageTitle' => fn () => 'FrontOffice Create',
+                'pageTitle' => fn () => 'Visitor Create',
                 'breadcrumbs' => fn () => [
-                    ['link' => null, 'title' => 'FrontOffice Manage'],
-                    ['link' => route('backend.frontoffice.create'), 'title' => 'FrontOffice Create'],
+                    ['link' => null, 'title' => 'Visitor Manage'],
+                    ['link' => route('backend.frontoffice.create'), 'title' => 'Visitor Create'],
                 ],
             ]
         );
@@ -127,11 +151,9 @@ class FrontOfficeController extends Controller
 
             $data = $request->validated();
 
-            if ($request->hasFile('image'))
-                $data['image'] = $this->imageUpload($request->file('image'), 'frontoffices');
-
-            if ($request->hasFile('file'))
-                $data['file'] = $this->fileUpload($request->file('file'), 'frontoffices');
+            if ($request->hasFile('photo')) {
+                $data['photo'] = $this->imageUpload($request->file('photo'), 'frontoffices');
+            }
 
 
             $dataInfo = $this->frontofficeService->create($data);
@@ -174,10 +196,10 @@ class FrontOfficeController extends Controller
         return Inertia::render(
             'Backend/FrontOffice/Form',
             [
-                'pageTitle' => fn () => 'FrontOffice Edit',
+                'pageTitle' => fn () => 'Visitor Edit',
                 'breadcrumbs' => fn () => [
-                    ['link' => null, 'title' => 'FrontOffice Manage'],
-                    ['link' => route('backend.frontoffice.edit', $id), 'title' => 'FrontOffice Edit'],
+                    ['link' => null, 'title' => 'Visitor Manage'],
+                    ['link' => route('backend.frontoffice.edit', $id), 'title' => 'Visitor Edit'],
                 ],
                 'frontoffice' => fn () => $frontoffice,
                 'id' => fn () => $id,
@@ -193,26 +215,10 @@ class FrontOfficeController extends Controller
             $data = $request->validated();
             $frontoffice = $this->frontofficeService->find($id);
 
-            if ($request->hasFile('image')) {
-                $data['image'] = $this->imageUpload($request->file('image'), 'frontoffices');
-                $path = strstr($frontoffice->image, 'storage/');
-                if (file_exists($path)) {
-                    unlink($path);
-                }
+            if ($request->hasFile('photo')) {
+                $data['photo'] = $this->imageUpload($request->file('photo'), 'frontoffices');
             } else {
-
-                $data['image'] = strstr($frontoffice->image ?? '', 'frontoffices');
-            }
-
-            if ($request->hasFile('file')) {
-                $data['file'] = $this->fileUpload($request->file('file'), 'frontoffices/');
-                $path = strstr($frontoffice->file, 'storage/');
-                if (file_exists($path)) {
-                    unlink($path);
-                }
-            } else {
-
-                $data['file'] = strstr($frontoffice->file ?? '', 'frontoffices/');
+                $data['photo'] = strstr((string) ($frontoffice->photo ?? ''), 'frontoffices');
             }
 
             $dataInfo = $this->frontofficeService->update($data, $id);
@@ -277,6 +283,111 @@ class FrontOfficeController extends Controller
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
+        }
+    }
+
+    public function import(Request $request)
+    {
+        $rows = $request->input('rows', []);
+
+        if (!is_array($rows) || empty($rows)) {
+            return redirect()
+                ->back()
+                ->with('errorMessage', 'No valid rows found in uploaded file.');
+        }
+
+        DB::beginTransaction();
+
+        try {
+            $createdCount = 0;
+            $skippedCount = 0;
+            $errorMessages = [];
+
+            foreach ($rows as $index => $row) {
+                $payload = [
+                    'name' => trim((string) ($row['name'] ?? '')),
+                    'purpose' => trim((string) ($row['purpose'] ?? '')),
+                    'visit_to' => trim((string) ($row['visit_to'] ?? '')),
+                    'phone' => trim((string) ($row['phone'] ?? '')),
+                    'date_in' => trim((string) ($row['date_in'] ?? '')),
+                    'time_in' => trim((string) ($row['time_in'] ?? '')),
+                    'time_out' => trim((string) ($row['time_out'] ?? '')),
+                ];
+
+                $validator = Validator::make($payload, [
+                    'name' => 'required|string|max:255',
+                    'purpose' => 'required|string|max:255',
+                    'visit_to' => 'required|string|max:255',
+                    'phone' => 'required|string|max:30',
+                    'date_in' => 'required',
+                    'time_in' => 'required',
+                    'time_out' => 'nullable',
+                ]);
+
+                if ($validator->fails()) {
+                    $skippedCount++;
+                    if (count($errorMessages) < 5) {
+                        $errorMessages[] = 'Row ' . ($index + 2) . ': ' . implode(', ', $validator->errors()->all());
+                    }
+                    continue;
+                }
+
+                try {
+                    $payload['date_in'] = Carbon::parse($payload['date_in'])->format('Y-m-d');
+                    $payload['time_in'] = Carbon::parse($payload['time_in'])->format('H:i');
+                    $payload['time_out'] = $payload['time_out'] !== ''
+                        ? Carbon::parse($payload['time_out'])->format('H:i')
+                        : null;
+
+                    $dataInfo = $this->frontofficeService->create($payload);
+
+                    if ($dataInfo) {
+                        $createdCount++;
+                    } else {
+                        $skippedCount++;
+                        if (count($errorMessages) < 5) {
+                            $errorMessages[] = 'Row ' . ($index + 2) . ': failed to create visitor.';
+                        }
+                    }
+                } catch (Exception $rowException) {
+                    $skippedCount++;
+                    if (count($errorMessages) < 5) {
+                        $errorMessages[] = 'Row ' . ($index + 2) . ': invalid date/time format.';
+                    }
+                }
+            }
+
+            if ($createdCount <= 0) {
+                DB::rollBack();
+
+                $message = 'Import failed. No rows were created.';
+                if (!empty($errorMessages)) {
+                    $message .= ' ' . implode(' | ', $errorMessages);
+                }
+
+                return redirect()
+                    ->back()
+                    ->with('errorMessage', $message);
+            }
+
+            DB::commit();
+
+            $message = 'Visitor import completed. Created: ' . $createdCount . ', Skipped: ' . $skippedCount . '.';
+            if (!empty($errorMessages)) {
+                $message .= ' Issues: ' . implode(' | ', $errorMessages);
+            }
+
+            return redirect()
+                ->back()
+                ->with('successMessage', $message);
+        } catch (Exception $err) {
+            DB::rollBack();
+            $this->storeSystemError('Backend', 'FrontOfficeController', 'import', substr($err->getMessage(), 0, 1000));
+            DB::commit();
+
+            return redirect()
+                ->back()
+                ->with('errorMessage', 'Server Errors Occur. Please Try Again.');
         }
     }
 

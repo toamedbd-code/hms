@@ -1,0 +1,60 @@
+{
+  "sessionId": "0f5a3f60-2d2a-4b3c-a7e8-3c035270d94c",
+  "title": "hello",
+  "workspaceDirectory": "file:///c%3A/laragon/www/hms",
+  "history": [
+    {
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ],
+        "id": "64eec491-068e-4419-8e74-3859d32f15d6"
+      },
+      "contextItems": [],
+      "editorState": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ]
+          }
+        ]
+      },
+      "appliedRules": []
+    },
+    {
+      "message": {
+        "id": "c62fa38d-518c-4730-b2a9-18bc7eff187f",
+        "role": "assistant",
+        "content": "Hello—what can I help you with today?",
+        "metadata": {
+          "responsesOutputItemIds": [
+            "msg_0ebe3d86601085a3006998615fd5e8819ab92965df0b00b51d"
+          ],
+          "responsesOutputItemId": "msg_0ebe3d86601085a3006998615fd5e8819ab92965df0b00b51d"
+        }
+      },
+      "contextItems": [],
+      "promptLogs": [
+        {
+          "modelTitle": "GPT-5.2",
+          "modelProvider": "openai",
+          "prompt": "<system>\n<important_rules>\n  You are in agent mode.\n\n  If you need to use multiple tools, you can call multiple read-only tools simultaneously.\n\n  Always include the language and file name in the info string when you write code blocks.\n  If you are editing \"src/main.py\" for example, your code block should start with '```python src/main.py'\n\n\nFor larger codeblocks (>20 lines), use brief language-appropriate placeholders for unmodified sections, e.g. '// ... existing code ...'\n\nHowever, only output codeblocks for suggestion and demonstration purposes, for example, when enumerating multiple hypothetical options. For implementing changes, use the edit tools.\n\n</important_rules>\n\n<user>\nhello\n\n",
+          "completion": "<assistant>\n\n\n<assistant>\nHello\n\n<assistant>\n—\n\n<assistant>\nwhat\n\n<assistant>\n can\n\n<assistant>\n I\n\n<assistant>\n help\n\n<assistant>\n you\n\n<assistant>\n with\n\n<assistant>\n today\n\n<assistant>\n?\n\n"
+        }
+      ],
+      "isGatheringContext": false
+    }
+  ],
+  "mode": "agent",
+  "chatModelTitle": "GPT-5.2"
+}

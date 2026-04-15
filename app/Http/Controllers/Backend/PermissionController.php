@@ -35,7 +35,7 @@ class PermissionController extends Controller
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
-                'filters' => request()->only(['numOfData', 'name']),
+                'filters' => request()->only(['numOfData', 'name', 'module']),
             ]
         );
     }
@@ -54,12 +54,18 @@ class PermissionController extends Controller
             });
         }
 
-        $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
+        if (request()->filled('module') && request()->module !== 'all') {
+            $this->applyModuleFilter($query, request()->module);
+        }
 
-        $formatedDatas = $datas->map(function ($data, $index) {
+        $datas = $query->paginate(request()->numOfData ?? 10);
+        $datas->appends(request()->query());
+
+        $formatedDatas = collect($datas->items())->map(function ($data, $index) {
             $customData = new \stdClass();
             $customData->index = $index + 1;
             $customData->permission_name = getPermissionName($data->name);
+            $customData->module_name = ucfirst($this->resolvePermissionModule($data->name));
             $customData->parent_permission = getPermissionName($data->parent?->name);
 
             $customData->hasLink = true;
@@ -87,6 +93,7 @@ class PermissionController extends Controller
         return [
             ['fieldName' => 'index', 'class' => 'text-center'],
             ['fieldName' => 'permission_name', 'class' => 'text-center'],
+            ['fieldName' => 'module_name', 'class' => 'text-center'],
             ['fieldName' => 'parent_permission', 'class' => 'text-center'],
         ];
     }
@@ -95,9 +102,95 @@ class PermissionController extends Controller
         return [
             'Sl/No',
             'Permission Name',
+            'Module',
             'Parent Permission Name',
             'Action'
         ];
+    }
+
+    private function resolvePermissionModule(?string $permissionName): string
+    {
+        $name = strtolower((string) $permissionName);
+
+        if (preg_match('/attendance|leave|duty|roaster|salary|face/', $name)) {
+            return 'attendance';
+        }
+
+        if (preg_match('/pathology/', $name)) {
+            return 'pathology';
+        }
+
+        if (preg_match('/payroll|salary-sheet|payslip/', $name)) {
+            return 'payroll';
+        }
+
+        if (preg_match('/report|reporting|invoice|print/', $name)) {
+            return 'reporting';
+        }
+
+        if (preg_match('/billing/', $name)) {
+            return 'billing';
+        }
+
+        if (preg_match('/stock|store/', $name)) {
+            return 'store';
+        }
+
+        if (preg_match('/pharmacy|medicine|supplier|inventory/', $name)) {
+            return 'pharmacy';
+        }
+
+        if (preg_match('/opd|outpatient/', $name)) {
+            return 'opd';
+        }
+
+        if (preg_match('/ipd|inpatient/', $name)) {
+            return 'ipd';
+        }
+
+        if (preg_match('/website|cms/', $name)) {
+            return 'website';
+        }
+
+        return 'other';
+    }
+
+    private function applyModuleFilter($query, string $module): void
+    {
+        $normalizedModule = strtolower(trim($module));
+        $patterns = [
+            'attendance' => ['attendance', 'leave', 'duty', 'roaster', 'salary', 'face'],
+            'pathology' => ['pathology'],
+            'payroll' => ['payroll', 'salary-sheet', 'payslip'],
+            'reporting' => ['report', 'reporting', 'invoice', 'print'],
+            'billing' => ['billing'],
+            'store' => ['stock', 'store'],
+            'pharmacy' => ['pharmacy', 'medicine', 'supplier', 'inventory'],
+            'opd' => ['opd', 'outpatient'],
+            'ipd' => ['ipd', 'inpatient'],
+            'website' => ['website', 'cms'],
+        ];
+
+        if ($normalizedModule === 'other') {
+            $allPatterns = collect($patterns)->flatten()->all();
+            $query->where(function ($q) use ($allPatterns) {
+                foreach ($allPatterns as $pattern) {
+                    $q->where('name', 'not like', '%' . $pattern . '%');
+                }
+            });
+            return;
+        }
+
+        $selectedPatterns = $patterns[$normalizedModule] ?? [];
+        if (empty($selectedPatterns)) {
+            return;
+        }
+
+        $query->where(function ($q) use ($selectedPatterns) {
+            foreach ($selectedPatterns as $pattern) {
+                $q->orWhere('name', 'like', '%' . $pattern . '%');
+            }
+        });
     }
 
 

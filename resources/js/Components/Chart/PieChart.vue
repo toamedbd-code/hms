@@ -27,7 +27,7 @@ export default {
   computed: {
     chartData() {
       return {
-        labels: ["OPD", "IPD", "Pharmacy", "Pathology", "Radiology", "Pending"],
+        labels: ["OPD", "IPD", "Pharmacy", "Pathology", "Radiology", "Pending", "Expense", "Final Income"],
         datasets: [
           {
             data: [
@@ -36,7 +36,9 @@ export default {
               this.dashboardData.pharmacyIncome || 0,
               this.dashboardData.pathologyIncome || 0,
               this.dashboardData.radiologyIncome || 0,
-              this.dashboardData.pendingIncome || 0
+              this.dashboardData.pendingIncome || 0,
+              this.dashboardData.expenses || 0,
+              this.dashboardData.netIncome || 0
             ],
 
             backgroundColor: [
@@ -45,7 +47,9 @@ export default {
               "#3B82F6",
               "#F59E0B",
               "#EF4444",
-              "#6B7280"
+              "#6B7280",
+              "#0F172A",
+              "#22C55E"
             ],
 
             borderWidth: 1

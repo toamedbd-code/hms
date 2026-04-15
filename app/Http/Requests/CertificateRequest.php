@@ -12,15 +12,23 @@ class CertificateRequest extends FormRequest
             case 'POST':
                 return [
                     'name' => 'required|string|max:255',
-                    'email' => 'required|email|unique:admins,email|max:255',
-                    'photo' => 'file|mimes:png,jpg,jpeg|max:25048',
+                    'certificate_type' => 'required|string|max:255',
+                    'issue_date' => 'required|date',
+                    'reference_no' => 'nullable|string|max:120',
+                    'email' => 'nullable|email|unique:certificates,email|max:255',
+                    'details' => 'nullable|string|max:2000',
+                    'photo' => 'nullable|file|mimes:png,jpg,jpeg|max:25048',
                 ];
                 break;
 
             case 'PUT':
                 return [
                     'name' => 'required|string|max:255',
-                    'email' => 'required|email|max:255|unique:admins,id,' . $this->id,
+                    'certificate_type' => 'required|string|max:255',
+                    'issue_date' => 'required|date',
+                    'reference_no' => 'nullable|string|max:120',
+                    'email' => 'nullable|email|max:255|unique:certificates,email,' . $this->id,
+                    'details' => 'nullable|string|max:2000',
                     'photo' => 'nullable|file|mimes:png,jpg,jpeg|max:25048',
                 ];
                 break;

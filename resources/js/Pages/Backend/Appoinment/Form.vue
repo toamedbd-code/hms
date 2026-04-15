@@ -1,7 +1,7 @@
 <script setup>
-import { ref, onMounted, nextTick, watch } from 'vue';
+import { ref, watch } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
-import { router, useForm, usePage } from '@inertiajs/vue3';
+import { router, useForm } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
@@ -43,9 +43,17 @@ const form = useForm({
 const isPatientModalOpen = ref(false);
 const patientsList = ref([...props.patients]);
 
-const getPatientName = (id) => {
-    const patient = patientsList.value.find(p => p.id === id);
-    return patient ? patient.name : '';
+const normalizeId = (value) => {
+    if (value && typeof value === 'object') {
+        return value.id ?? null;
+    }
+
+    return value ?? null;
+};
+
+const findById = (list, id) => {
+    if (!id) return null;
+    return list.find((item) => Number(item.id) === Number(id)) ?? null;
 };
 
 const openPatientModal = () => {
@@ -59,14 +67,16 @@ const closePatientModal = () => {
 const handlePatientCreated = (newPatient) => {
     closePatientModal();
 
-    router.reload({
-        only: ['patients'],
-        preserveScroll: true,
-        onSuccess: (page) => {
-            patientsList.value = [...page.props.patients];
-            form.patient_id = newPatient.id;
-        }
-    });
+    if (!newPatient) return;
+
+    const patientId = normalizeId(newPatient);
+    const existingPatient = findById(patientsList.value, patientId);
+
+    if (!existingPatient) {
+        patientsList.value = [...patientsList.value, newPatient];
+    }
+
+    form.patient_id = findById(patientsList.value, patientId) ?? '';
 };
 
 const isDoctorModalOpen = ref(false);
@@ -82,14 +92,22 @@ const closeDoctorModal = () => {
 
 const handleDoctorCreated = (newDoctor) => {
     closeDoctorModal();
-    router.reload({
-        only: ['doctors'],
-        preserveScroll: true,
-        onSuccess: (page) => {
-            doctorsList.value = [...page.props.doctors];
-            form.doctor_id = newDoctor.id;
-        }
-    });
+
+    if (!newDoctor) return;
+
+    const doctorId = normalizeId(newDoctor);
+    const existingDoctor = findById(doctorsList.value, doctorId);
+
+    if (!existingDoctor) {
+        doctorsList.value = [...doctorsList.value, newDoctor];
+    }
+
+    const selectedDoctor = findById(doctorsList.value, doctorId);
+    form.doctor_id = selectedDoctor ?? '';
+
+    if (selectedDoctor?.doctor_charge) {
+        form.doctor_fee = selectedDoctor.doctor_charge;
+    }
 };
 
 watch(() => form.doctor_id, (newDoctorId) => {

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
@@ -8,10 +8,30 @@ import PrimaryButton from '@/Components/PrimaryButton.vue';
 import AlertMessage from '@/Components/AlertMessage.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 import PatientModal from '@/Components/PatientModal.vue';
+import SymptomTypeModal from '@/Components/SymptomTypeModal.vue';
 import Multiselect from 'vue-multiselect';
 import 'vue-multiselect/dist/vue-multiselect.css';
+import eventBus from '@/eventBus.js';
 
-const props = defineProps(['ipdpatient', 'id', 'patients', 'doctors', 'bedGroups', 'beds']);
+const APP_TIMEZONE = 'Asia/Dhaka';
+
+const getCurrentDateTimeForInput = () => {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: APP_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(new Date());
+
+    const getPart = (type) => parts.find((part) => part.type === type)?.value ?? '';
+
+    return `${getPart('year')}-${getPart('month')}-${getPart('day')}T${getPart('hour')}:${getPart('minute')}`;
+};
+
+const props = defineProps(['ipdpatient', 'id', 'patients', 'doctors', 'bedGroups', 'beds', 'symptomTypes']);
 
 const form = useForm({
     patient_id: props.ipdpatient?.patient_id ?? '',
@@ -30,6 +50,7 @@ const form = useForm({
     casualty: props.ipdpatient?.casualty ?? 'no',
     old_patient: props.ipdpatient?.old_patient ?? 'no',
     credit_limit: props.ipdpatient?.credit_limit ?? '',
+    advance_amount: props.ipdpatient?.advance_amount ?? 0,
     reference: props.ipdpatient?.reference ?? '',
     bed_group_id: props.ipdpatient?.bed_group_id ?? '',
     bed_id: props.ipdpatient?.bed_id ?? '',
@@ -38,21 +59,45 @@ const form = useForm({
     _method: props.ipdpatient?.id ? 'put' : 'post',
 });
 
-const filteredBeds = ref(props.beds || []);
+const allBeds = computed(() => props.beds ?? []);
+const filteredBeds = ref(allBeds.value);
+const unavailableBedIds = ref(new Set());
 
 watch(() => form.bed_group_id, (newBedGroupId) => {
-    if (newBedGroupId) {
+    const beds = allBeds.value;
 
-        filteredBeds.value = props.beds.filter(bed => bed.bed_group_id == newBedGroupId);
+    if (newBedGroupId) {
+        filteredBeds.value = beds.filter(bed => bed.bed_group_id == newBedGroupId);
     } else {
         filteredBeds.value = [];
     }
+
     form.bed_id = 0;
 });
 
 if (props.ipdpatient?.bed_group_id) {
-    filteredBeds.value = props.beds.filter(bed => bed.bed_group_id == props.ipdpatient.bed_group_id);
+    filteredBeds.value = allBeds.value.filter(
+        bed => bed.bed_group_id == props.ipdpatient.bed_group_id
+    );
 }
+
+const isBedUnavailable = (bedId) => unavailableBedIds.value.has(Number(bedId));
+
+const loadBedAvailability = async () => {
+    if (props.id) return;
+    try {
+        const response = await fetch(route('backend.bed.status.snapshot'));
+        if (!response.ok) return;
+        const beds = await response.json();
+        const blocked = new Set(
+            beds.filter((bed) => !bed.is_available).map((bed) => Number(bed.id))
+        );
+        unavailableBedIds.value = blocked;
+    } catch (error) {
+        // ignore
+    }
+};
+
 
 const submit = () => {
     const routeName = props.id ? route('backend.ipdpatient.update', props.id) : route('backend.ipdpatient.store');
@@ -64,9 +109,29 @@ const submit = () => {
         isDirty: false,
     })).post(routeName, {
         onSuccess: (response) => {
-            if (!props.id)
-                form.reset();
-            displayResponse(response);
+            if (!props.id) form.reset();
+
+            // If the server returned a flash success message it will be
+            // displayed by the inline AlertMessage component. Avoid calling
+            // the global toast display to prevent duplicate notifications.
+            if (response?.props?.flash?.successMessage) return;
+
+            // Fallback: sometimes Inertia updates page props on redirect
+            // rather than returning the flash in the callback. Check page
+            // props and skip toast if there is a flash there.
+            try {
+                const page = usePage();
+                if (page.props.flash?.successMessage) return;
+            } catch (e) {
+                // ignore
+            }
+
+            // No server flash found — show the response if it contains one.
+            try {
+                displayResponse(response);
+            } catch (e) {
+                // ignore
+            }
         },
         onError: (errorObject) => {
             displayWarning(errorObject);
@@ -82,15 +147,54 @@ const saveAndPrint = () => {
 };
 
 const isPatientModalOpen = ref(false);
+const patientsList = ref([...(props.patients || [])]);
+const symptomTypes = ref([...(props.symptomTypes || [])]);
+const showSymptomTypeModal = ref(false);
 const openPatientModal = () => {
     isPatientModalOpen.value = true;
 };
 const closePatientModal = () => {
     isPatientModalOpen.value = false;
 };
+
+const openSymptomTypeModal = () => {
+    showSymptomTypeModal.value = true;
+};
+
+const closeSymptomTypeModal = () => {
+    showSymptomTypeModal.value = false;
+};
+
+const handleSymptomTypeCreated = (createdName) => {
+    if (createdName) {
+        form.symptom_type = createdName;
+    }
+
+    router.reload({
+        only: ['symptomTypes'],
+        preserveState: true,
+        preserveScroll: true,
+        onSuccess: (page) => {
+            symptomTypes.value = [...(page.props.symptomTypes || [])];
+        }
+    });
+};
+
+const normalizedSymptomTypes = computed(() => {
+    const types = [...symptomTypes.value];
+    const current = String(form.symptom_type || '').trim();
+
+    if (current && !types.some((type) => String(type.name) === current)) {
+        types.unshift({ id: `custom-${current}`, name: current });
+    }
+
+    return types;
+});
 const handlePatientCreated = (newPatient) => {
+    if (!newPatient) return;
+
     // Add the new patient to the list immediately
-    props.patients.push(newPatient);
+    patientsList.value.push(newPatient);
     form.patient_id = newPatient.id;
 
     // Reload the patients list
@@ -99,7 +203,7 @@ const handlePatientCreated = (newPatient) => {
         preserveState: true,
         preserveScroll: true,
         onSuccess: (page) => {
-            props.patients = [...page.props.patients];
+            patientsList.value = [...(page.props.patients || [])];
         }
     });
 };
@@ -145,6 +249,47 @@ const handleBlur = () => {
 // Initialize with first few patients
 onMounted(() => {
     filteredPatients.value = props.patients.slice(0, 10);
+    loadBedAvailability();
+});
+
+const handleBedSelected = async (bed) => {
+    if (props.id) return;
+    if (!bed?.id || !bed?.bed_group_id) return;
+    if (isBedUnavailable(bed.id)) return;
+
+    form.bed_group_id = bed.bed_group_id;
+    await nextTick();
+    form.bed_id = bed.id;
+};
+
+const handleBedSelectedEvent = (event) => {
+    const bed = event?.detail;
+    handleBedSelected(bed);
+};
+
+onMounted(() => {
+    eventBus.on('bedSelected', handleBedSelected);
+    window.addEventListener('ipd-bed-selected', handleBedSelectedEvent);
+    window.__ipdBedSelectReady = true;
+});
+
+onMounted(async () => {
+    if (props.id) return;
+    const params = new URLSearchParams(window.location.search);
+    const bedGroupId = params.get('bed_group_id');
+    const bedId = params.get('bed_id');
+
+    if (bedGroupId && bedId && !isBedUnavailable(bedId)) {
+        form.bed_group_id = bedGroupId;
+        await nextTick();
+        form.bed_id = bedId;
+    }
+});
+
+onBeforeUnmount(() => {
+    eventBus.off('bedSelected', handleBedSelected);
+    window.removeEventListener('ipd-bed-selected', handleBedSelectedEvent);
+    window.__ipdBedSelectReady = false;
 });
 
 // Keyboard navigation handler
@@ -192,14 +337,7 @@ watch(patientSearchQuery, (newValue) => {
 //select auto date time on click
 const handleAdmissionDateFocus = (event) => {
     if (!form.admission_date) {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        const hours = String(now.getHours()).padStart(2, '0');
-        const minutes = String(now.getMinutes()).padStart(2, '0');
-
-        form.admission_date = `${year}-${month}-${day}T${hours}:${minutes}`;
+        form.admission_date = getCurrentDateTimeForInput();
     }
 };
 
@@ -221,6 +359,8 @@ const handleDoctorSelect = (selectedDoctor) => {
     <!-- Patient Modal -->
     <PatientModal :isOpen="isPatientModalOpen" :tpas="props.tpas" @close="closePatientModal"
         @patientCreated="handlePatientCreated" />
+    <SymptomTypeModal :isOpen="showSymptomTypeModal" @close="closeSymptomTypeModal"
+        @symptomTypeCreated="handleSymptomTypeCreated" />
 
     <BackendLayout>
         <div class="w-full transition duration-1000 ease-in-out transform bg-white rounded-md">
@@ -234,8 +374,8 @@ const handleDoctorSelect = (selectedDoctor) => {
                     <div class="relative min-w-[280px]">
                         <div class="relative">
                             <div class="col-span-1">
-                                <Multiselect :modelValue="props.patients.find(p => p.id === form.patient_id)"
-                                    @update:modelValue="handlePatientSelect" :options="patients" :track-by="'id'"
+                                <Multiselect :modelValue="patientsList.find(p => p.id === form.patient_id)"
+                                    @update:modelValue="handlePatientSelect" :options="patientsList" :track-by="'id'"
                                     :label="'name'" placeholder="Search and select a patient"
                                     class="w-full text-sm rounded-md border border-slate-300" />
                                 <InputError class="mt-1" :message="form.errors.patient_id" />
@@ -277,15 +417,24 @@ const handleDoctorSelect = (selectedDoctor) => {
                         <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                             <div>
                                 <InputLabel for="symptom_type" value="Symptoms Type" />
-                                <select id="symptom_type" v-model="form.symptom_type"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
-                                    <option value="">Select</option>
-                                    <option value="fever">Fever</option>
-                                    <option value="cough">Cough</option>
-                                    <option value="headache">Headache</option>
-                                    <option value="body_pain">Body Pain</option>
-                                    <option value="other">Other</option>
-                                </select>
+                                <div class="flex items-center space-x-2">
+                                    <select id="symptom_type" v-model="form.symptom_type"
+                                        class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                        <option value="">Select</option>
+                                        <option v-for="type in normalizedSymptomTypes" :key="type.id" :value="type.name">
+                                            {{ type.name }}
+                                        </option>
+                                    </select>
+                                    <button type="button" @click="openSymptomTypeModal"
+                                        class="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                                        title="Add Symptoms Type">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                            stroke-width="2">
+                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                        </svg>
+                                    </button>
+                                </div>
                                 <InputError class="mt-1" :message="form.errors.symptom_type" />
                             </div>
 
@@ -384,6 +533,12 @@ const handleDoctorSelect = (selectedDoctor) => {
                                 <InputError class="mt-1" :message="form.errors.credit_limit" />
                             </div>
                             <div>
+                                <InputLabel for="advance_amount" value="Advance Amount (Tk)" />
+                                <input id="advance_amount" v-model="form.advance_amount" type="number" step="0.01"
+                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300" placeholder="0.00" />
+                                <InputError class="mt-1" :message="form.errors.advance_amount" />
+                            </div>
+                            <div>
                                 <InputLabel for="reference" value="Reference" />
                                 <input id="reference" v-model="form.reference" type="text"
                                     class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
@@ -424,8 +579,9 @@ const handleDoctorSelect = (selectedDoctor) => {
                                     class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                     required :disabled="!form.bed_group_id">
                                     <option value="">Select Bed</option>
-                                    <option v-for="bed in filteredBeds" :key="bed.id" :value="bed.id">
-                                        {{ bed.name }}
+                                    <option v-for="bed in filteredBeds" :key="bed.id" :value="bed.id"
+                                        :disabled="isBedUnavailable(bed.id)">
+                                        {{ bed.name }}{{ isBedUnavailable(bed.id) ? ' (Occupied)' : '' }}
                                     </option>
                                 </select>
                                 <InputError class="mt-1" :message="form.errors.bed_id" />

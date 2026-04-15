@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
@@ -30,6 +30,41 @@ const showParameterModal = ref(false);
 
 // Create a reactive copy of categories for updates
 const categories = ref([...props.testCategories]);
+const charges = ref([...(props.charges || [])]);
+const testParameters = ref([...(props.testParameters || [])]);
+
+// Listen for global parameter-created events (dispatched by ChargeParameterModal)
+const handleGlobalParameterCreated = (e) => {
+    const payload = e?.detail || {};
+    console.log('parameter-created event received in PathologyTest Form', payload);
+    // If payload has id/name, push into local list and update UI
+    if (payload && (payload.id || payload.name)) {
+        // Avoid duplicates
+        const exists = testParameters.value.some(p => String(p.id) === String(payload.id));
+        if (!exists) {
+            testParameters.value.push(payload);
+        }
+    }
+};
+
+onMounted(() => {
+    window.addEventListener('parameter-created', handleGlobalParameterCreated);
+    window.addEventListener('testParameters-updated', () => {
+        console.log('testParameters-updated event received — reloading testParameters');
+        router.reload({
+            only: ['testParameters'],
+            preserveState: true,
+            preserveScroll: true,
+            onSuccess: (page) => {
+                testParameters.value = [...(page.props.testParameters || [])];
+            }
+        });
+    });
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('parameter-created', handleGlobalParameterCreated);
+});
 
 const form = useForm({
     category_type: props.pathologytest?.category_type ?? '',
@@ -102,6 +137,14 @@ watch(() => form.test_category_id, (newCategoryId) => {
     form.test_sub_category_id = '';
 });
 
+watch(() => props.charges, (newCharges) => {
+    charges.value = [...(newCharges || [])];
+});
+
+watch(() => props.testParameters, (newParameters) => {
+    testParameters.value = [...(newParameters || [])];
+});
+
 // Watch for test name changes to auto-generate short name and type
 watch(() => form.test_name, (newTestName) => {
     if (newTestName && !props.pathologytest?.id) {
@@ -115,6 +158,44 @@ watch(() => form.test_name, (newTestName) => {
         form.test_type = '';
     }
 });
+
+// Keep charge name and parameter names in sync with test name when creating a new test
+watch(() => form.test_name, (newTestName) => {
+    // only auto-fill when creating (not editing existing test) to avoid overwriting saved data
+    if (!props.pathologytest?.id) {
+        form.charge_name = newTestName || '';
+
+        // Update any parameter rows that don't already reference an existing parameter
+        form.parameters = form.parameters.map(p => {
+            if (!p.test_parameter_id) {
+                return {
+                    ...p,
+                    name: newTestName || '',
+                };
+            }
+            return p;
+        });
+    }
+});
+
+// Recalculate amount when standard_charge or tax change
+const recalcAmount = () => {
+    const standard = parseFloat(form.standard_charge) || 0;
+    const taxPercentage = parseFloat(form.tax) || 0;
+    if (standard > 0) {
+        if (taxPercentage > 0) {
+            const taxAmount = (standard * taxPercentage) / 100;
+            form.amount = (standard + taxAmount).toFixed(2);
+        } else {
+            form.amount = standard.toFixed(2);
+        }
+    } else {
+        form.amount = '';
+    }
+};
+
+watch(() => form.standard_charge, recalcAmount);
+watch(() => form.tax, recalcAmount);
 
 // Modal functions
 const openCategoryModal = () => {
@@ -146,6 +227,82 @@ const addParameter = () => {
     });
 };
 
+// CSV import for parameters: expected columns (header optional): name,referance_from,referance_to,unit
+const handleParamCsvUpload = (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const text = e.target.result;
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length);
+        if (!lines.length) {
+            alert('CSV is empty');
+            return;
+        }
+
+        // detect header
+        const first = lines[0];
+        const sep = first.includes(',') ? ',' : '\t';
+        const firstCols = first.split(sep).map(c => c.trim().toLowerCase());
+        const hasHeader = ['name','referance_from','referance_to','unit'].some(h => firstCols.includes(h));
+        const rows = hasHeader ? lines.slice(1) : lines;
+
+        let imported = 0;
+        rows.forEach(line => {
+            const cols = line.split(sep).map(c => c.trim());
+            // map by header if present, otherwise positional
+            let name = '';
+            let referFrom = '';
+            let referTo = '';
+            let unitVal = '';
+
+            if (hasHeader) {
+                const header = firstCols;
+                const map = {};
+                header.forEach((h, i) => map[h] = cols[i] || '');
+                name = map.name || '';
+                referFrom = map.referance_from || map.reference_from || '';
+                referTo = map.referance_to || '';
+                unitVal = map.unit || '';
+            } else {
+                name = cols[0] || '';
+                referFrom = cols[1] || '';
+                referTo = cols[2] || '';
+                unitVal = cols[3] || '';
+            }
+
+            if (!name) return; // skip empty
+
+            // find unit id by name (case-insensitive) or numeric id
+            let unitId = '';
+            if (unitVal) {
+                const asNumber = Number(unitVal);
+                if (!Number.isNaN(asNumber) && asNumber > 0) {
+                    unitId = asNumber;
+                } else {
+                    const found = (props.pathologyUnits || []).find(u => (u.name||'').toLowerCase() === unitVal.toLowerCase());
+                    if (found) unitId = found.id;
+                }
+            }
+
+            form.parameters.push({
+                test_parameter_id: '',
+                referance_from: referFrom,
+                referance_to: referTo,
+                pathology_unit_id: unitId,
+                name: name
+            });
+            imported++;
+        });
+
+        alert(`${imported} parameter(s) imported from CSV.`);
+        // reset file input
+        event.target.value = null;
+    };
+    reader.readAsText(file);
+};
+
 const removeParameter = (index) => {
     if (form.parameters.length > 1) {
         form.parameters.splice(index, 1);
@@ -154,7 +311,7 @@ const removeParameter = (index) => {
 
 const onParameterSelect = (index, parameterId) => {
     if (parameterId) {
-        const selectedParameter = props.testParameters.find(param => param.id == parameterId);
+        const selectedParameter = testParameters.value.find(param => param.id == parameterId);
         if (selectedParameter) {
             form.parameters[index].test_parameter_id = parameterId;
             form.parameters[index].name = selectedParameter.name;
@@ -172,7 +329,7 @@ const onParameterSelect = (index, parameterId) => {
 
 const onChargeSelect = (chargeId) => {
     if (chargeId) {
-        const selectedCharge = props.charges.find(charge => charge.id == chargeId);
+        const selectedCharge = charges.value.find(charge => charge.id == chargeId);
         if (selectedCharge) {
             form.charge_name = selectedCharge.name;
             form.tax = selectedCharge.tax;
@@ -208,13 +365,28 @@ const closeChargeModal = () => {
 };
 
 const handleChargeCreated = (response) => {
-    // Reload charges after creating a new one
+    const previousChargeIds = new Set((charges.value || []).map(charge => String(charge.id)));
+
+    // Reload charges and testParameters after creating a new charge
     router.reload({
-        only: ['charges'],
+        only: ['charges', 'testParameters'],
         preserveState: true,
         preserveScroll: true,
         onSuccess: (page) => {
-            // The charges will be automatically updated via props
+            const latestCharges = page.props.charges || [];
+            charges.value = [...latestCharges];
+
+            const latestParameters = page.props.testParameters || [];
+            testParameters.value = [...latestParameters];
+
+            const createdCharge = latestCharges.find(charge => !previousChargeIds.has(String(charge.id)))
+                || latestCharges[latestCharges.length - 1];
+
+            if (createdCharge) {
+                form.charge_id = createdCharge.id;
+                onChargeSelect(createdCharge.id);
+            }
+
             displayResponse(response);
         }
     });
@@ -230,13 +402,37 @@ const closeParameterModal = () => {
 };
 
 const handleParameterCreated = (response) => {
+    const previousParameterIds = new Set((testParameters.value || []).map(param => String(param.id)));
+
     // Reload parameters after creating a new one
     router.reload({
         only: ['testParameters'],
         preserveState: true,
         preserveScroll: true,
         onSuccess: (page) => {
-            // The testParameters will be automatically updated via props
+            const latestParameters = page.props.testParameters || [];
+            testParameters.value = [...latestParameters];
+
+            const createdParameter = latestParameters.find(param => !previousParameterIds.has(String(param.id)))
+                || latestParameters[latestParameters.length - 1];
+
+            if (createdParameter) {
+                let targetIndex = form.parameters.findIndex(param => !param.test_parameter_id);
+
+                if (targetIndex === -1) {
+                    form.parameters.push({
+                        test_parameter_id: '',
+                        referance_from: '',
+                        referance_to: '',
+                        pathology_unit_id: '',
+                        name: ''
+                    });
+                    targetIndex = form.parameters.length - 1;
+                }
+
+                onParameterSelect(targetIndex, createdParameter.id);
+            }
+
             displayResponse(response);
         }
     });
@@ -390,7 +586,7 @@ const goToTestList = () => {
                             <select id="charge_id" v-model="form.charge_id" class="form-input flex-1"
                                 @change="onChargeSelect(form.charge_id)">
                                 <option value="">Select Charge</option>
-                                <option v-for="charge in props.charges" :key="charge.id" :value="charge.id">
+                                <option v-for="charge in charges" :key="charge.id" :value="charge.id">
                                     {{ charge.name }}
                                 </option>
                             </select>
@@ -407,40 +603,36 @@ const goToTestList = () => {
                         <InputError :message="form.errors.charge_id" />
 
                         <!-- Debug info for charges -->
-                        <small v-if="!props.charges?.length" class="text-red-500">
+                        <small v-if="!charges?.length" class="text-red-500">
                             No charges available. Check if charges prop is passed correctly.
                         </small>
                     </div>
 
-                    <!-- Charge Name (Auto-populated and disabled) -->
+                    <!-- Charge Name (Auto-populated but editable) -->
                     <div>
                         <InputLabel for="charge_name" value="Charge Name" />
-                        <input id="charge_name" v-model="form.charge_name" type="text" class="form-input disabled-input"
-                            :disabled="!!form.charge_id" readonly />
+                        <input id="charge_name" v-model="form.charge_name" type="text" class="form-input" />
                         <InputError :message="form.errors.charge_name" />
                     </div>
 
-                    <!-- Tax (Auto-populated and disabled) -->
+                    <!-- Tax (Auto-populated but editable) -->
                     <div>
                         <InputLabel for="tax" value="Tax %" />
-                        <input id="tax" v-model="form.tax" type="text" class="form-input disabled-input"
-                            :disabled="!!form.charge_id" readonly />
+                        <input id="tax" v-model="form.tax" type="text" class="form-input" />
                         <InputError :message="form.errors.tax" />
                     </div>
 
-                    <!-- Standard Charge (Auto-populated and disabled) -->
+                    <!-- Standard Charge (Auto-populated but editable) -->
                     <div>
                         <InputLabel for="standard_charge" value="Standard Charge" />
-                        <input id="standard_charge" v-model="form.standard_charge" type="number" step="0.01"
-                            class="form-input disabled-input" :disabled="!!form.charge_id" readonly />
+                        <input id="standard_charge" v-model="form.standard_charge" type="number" step="0.01" class="form-input" />
                         <InputError :message="form.errors.standard_charge" />
                     </div>
 
-                    <!-- Amount (Auto-populated and disabled) -->
+                    <!-- Amount (Auto-populated but editable) -->
                     <div>
                         <InputLabel for="amount" value="Total Amount" />
-                        <input id="amount" v-model="form.amount" type="number" step="0.01"
-                            class="form-input disabled-input" :disabled="!!form.charge_id" readonly />
+                        <input id="amount" v-model="form.amount" type="number" step="0.01" class="form-input" />
                         <InputError :message="form.errors.amount" />
                     </div>
                 </div>
@@ -449,14 +641,16 @@ const goToTestList = () => {
                 <div class="mt-8">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300">Test Parameters</h3>
-                        <button type="button" @click="openParameterModal"
-                            class="px-4 py-2 text-sm text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500">
-                            Add New Parameter
-                        </button>
+                                        <div class="flex items-center space-x-2">
+                                            <button type="button" @click="openParameterModal"
+                                                class="px-4 py-2 text-sm text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500">
+                                                Add New Parameter
+                                            </button>
+                                        </div>
                     </div>
 
                     <!-- Debug info for parameters -->
-                    <small v-if="!props.testParameters?.length" class="text-red-500 block mb-4">
+                    <small v-if="!testParameters?.length" class="text-red-500 block mb-4">
                         No test parameters available. Check if testParameters prop is passed correctly.
                     </small>
 
@@ -467,27 +661,11 @@ const goToTestList = () => {
                     <div v-for="(parameter, index) in form.parameters" :key="index"
                         class="grid grid-cols-1 gap-3 mb-4 p-4 border border-gray-200 rounded-lg sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
 
-                        <!-- Parameter Name -->
-                        <div class="lg:col-span-2">
-                            <InputLabel :for="`test_parameter_id_${index}`" value="Parameter Name" />
-                            <select :id="`test_parameter_id_${index}`" class="form-input"
-                                v-model="form.parameters[index].test_parameter_id"
-                                @change="onParameterSelect(index, form.parameters[index].test_parameter_id)">
-                                <option value="">-- Select Parameter --</option>
-                                <option v-for="data in props.testParameters" :key="data.id" :value="data.id">
-                                    {{ data.name }}
-                                </option>
-                            </select>
-                            <InputError :message="form.errors[`parameters.${index}.test_parameter_id`]" />
-                        </div>
-
                         <!-- Reference From -->
                         <div>
                             <InputLabel :for="`reference_from_${index}`" value="Reference From" />
                             <input :id="`reference_from_${index}`" v-model="form.parameters[index].referance_from"
-                                type="text" class="form-input"
-                                :class="{ 'bg-gray-100 dark:bg-gray-600': form.parameters[index].test_parameter_id }"
-                                :disabled="!!form.parameters[index].test_parameter_id" placeholder="e.g., 12.0" />
+                                type="text" class="form-input" placeholder="e.g., 12.0" />
                             <InputError :message="form.errors[`parameters.${index}.referance_from`]" />
                         </div>
 
@@ -495,9 +673,7 @@ const goToTestList = () => {
                         <div>
                             <InputLabel :for="`reference_to_${index}`" value="Reference To" />
                             <input :id="`reference_to_${index}`" v-model="form.parameters[index].referance_to"
-                                type="text" class="form-input"
-                                :class="{ 'bg-gray-100 dark:bg-gray-600': form.parameters[index].test_parameter_id }"
-                                :disabled="!!form.parameters[index].test_parameter_id" placeholder="e.g., 16.0" />
+                                type="text" class="form-input" placeholder="e.g., 16.0" />
                             <InputError :message="form.errors[`parameters.${index}.referance_to`]" />
                         </div>
 
@@ -535,6 +711,25 @@ const goToTestList = () => {
                                 </svg>
                             </button>
                         </div>
+
+                        <!-- Parameter Name (show text input when no existing parameter selected) -->
+                        <div class="lg:col-span-2">
+                            <InputLabel :for="`test_parameter_id_${index}`" value="Parameter Name" />
+                            <template v-if="form.parameters[index].test_parameter_id">
+                                <select :id="`test_parameter_id_${index}`" class="form-input"
+                                    v-model="form.parameters[index].test_parameter_id"
+                                    @change="onParameterSelect(index, form.parameters[index].test_parameter_id)">
+                                    <option value="">-- Select Parameter --</option>
+                                    <option v-for="data in testParameters" :key="data.id" :value="data.id">
+                                        {{ data.name }}
+                                    </option>
+                                </select>
+                            </template>
+                            <template v-else>
+                                <input :id="`test_parameter_name_${index}`" v-model="form.parameters[index].name" type="text" class="form-input" />
+                            </template>
+                            <InputError :message="form.errors[`parameters.${index}.test_parameter_id`]" />
+                        </div>
                     </div>
 
                     <!-- Show message if no parameters -->
@@ -560,7 +755,7 @@ const goToTestList = () => {
             :taxCategories="props.taxCategories || []" @close="closeChargeModal" @created="handleChargeCreated" />
 
         <ChargeParameterModal :show="showParameterModal" :units="props.pathologyUnits"
-            :existing-parameters="props.testParameters" @close="closeParameterModal"
+            :existing-parameters="testParameters" @close="closeParameterModal"
             @parameter-created="handleParameterCreated" />
 
     </BackendLayout>
@@ -569,9 +764,5 @@ const goToTestList = () => {
 <style scoped>
 .form-input {
     @apply block w-full p-2 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600;
-}
-
-.disabled-input {
-    @apply bg-gray-100 dark:bg-gray-600 cursor-not-allowed;
 }
 </style>

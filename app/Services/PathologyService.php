@@ -86,9 +86,12 @@ class PathologyService
             ->orderBy('id', 'DESC')
             ->first();
 
-        $number = $latest ? (int) str_replace('PATB', '', $latest->bill_no) + 1 : 1;
-        
-        return 'PATB' . $number;
+        $prefix = web_setting_prefix('pathology_bill_prefix', 'Bill');
+        $lastBillNo = (string) ($latest?->bill_no ?? '');
+        $numberPart = str_replace($prefix, '', $lastBillNo);
+        $number = is_numeric($numberPart) ? ((int) $numberPart + 1) : 1;
+
+        return $prefix . $number;
     }
 
 }

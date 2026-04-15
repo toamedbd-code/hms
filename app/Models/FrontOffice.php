@@ -14,8 +14,15 @@ class FrontOffice extends Authenticatable
     protected $table = 'frontoffices';
 
     protected $fillable = [
-                    'name',
-                ];
+        'name',
+        'phone',
+        'purpose',
+        'visit_to',
+        'date_in',
+        'time_in',
+        'time_out',
+        'photo',
+    ];
 
     protected static function boot()
     {
@@ -29,13 +36,8 @@ class FrontOffice extends Authenticatable
         });
     }
 
-    public function getImageAttribute($value)
+    public function getPhotoAttribute($value)
     {
-        return (!is_null($value)) ? env('APP_URL') . '/public/storage/' . $value : null;
-    }
-
-    public function getFileAttribute($value)
-    {
-        return (!is_null($value)) ? env('APP_URL') . '/public/storage/' . $value : null;
+        return (!is_null($value) && $value !== '') ? env('APP_URL') . '/public/storage/' . ltrim($value, '/') : null;
     }
 }

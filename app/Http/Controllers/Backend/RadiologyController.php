@@ -12,7 +12,9 @@ use App\Models\BillItem;
 use App\Models\Expense;
 use App\Services\AdminService;
 use App\Services\BillingService;
+use App\Services\ActivityLogService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use App\Services\RadiologyService;
 use App\Services\PatientService;
 use Inertia\Inertia;
@@ -80,10 +82,11 @@ class RadiologyController extends Controller
             $billing = Billing::where('bill_number', $data->bill_no)->first();
 
             $user = auth('admin')->user();
+            $gate = Gate::forUser($user);
 
             $customData->links = [];
 
-            if ($user->can('radiology-edit')) {
+            if ($gate->allows('radiology-edit')) {
                 $customData->links[] = [
                     'linkClass' => 'bg-yellow-400 text-black semi-bold',
                     'link' => route('backend.radiology.edit', $data->id),
@@ -91,7 +94,7 @@ class RadiologyController extends Controller
                 ];
             }
 
-            if ($user->can('radiology-invoice') && $billing) {
+            if ($gate->allows('radiology-invoice') && $billing) {
                 $customData->links[] = [
                     'linkClass' => 'bg-teal-500 text-white semi-bold',
                     'link' => route('backend.download.invoice', ['id' => $billing->id, 'module' => 'radiology']),
@@ -225,6 +228,20 @@ class RadiologyController extends Controller
 
                 $message = 'Radiology created successfully';
                 $this->storeAdminWorkLog($radiology->id, 'radiologies', $message);
+                ActivityLogService::logCreate(
+                    'Radiology',
+                    $radiology->id,
+                    $radiology->bill_no ?? ($radiology->radiology_no ?? ('Radiology#' . $radiology->id)),
+                    [
+                        'radiology_no' => $radiology->radiology_no,
+                        'bill_no' => $radiology->bill_no,
+                        'case_id' => $radiology->case_id,
+                        'patient_id' => $radiology->patient_id,
+                        'doctor_id' => $radiology->referral_doctor_id,
+                        'net_amount' => $radiology->net_amount,
+                        'payment_amount' => $radiology->payment_amount,
+                    ]
+                );
 
                 DB::commit();
 
@@ -308,6 +325,16 @@ class RadiologyController extends Controller
                 return redirect()->back()->with('errorMessage', 'Radiology record not found.');
             }
 
+            $oldRadiologyData = [
+                'radiology_no' => $radiology->radiology_no,
+                'bill_no' => $radiology->bill_no,
+                'case_id' => $radiology->case_id,
+                'patient_id' => $radiology->patient_id,
+                'doctor_id' => $radiology->referral_doctor_id,
+                'net_amount' => $radiology->net_amount,
+                'payment_amount' => $radiology->payment_amount,
+            ];
+
             // Update radiology record
             $updateData = [
                 'patient_id' => $data['patient_id'],
@@ -344,6 +371,29 @@ class RadiologyController extends Controller
 
             $message = 'Radiology updated successfully';
             $this->storeAdminWorkLog($radiology->id, 'radiologies', $message);
+            ActivityLogService::logUpdate(
+                'Radiology',
+                $radiology->id,
+                $radiology->bill_no ?? ($radiology->radiology_no ?? ('Radiology#' . $radiology->id)),
+                [
+                    'radiology_no' => $radiology->radiology_no,
+                    'bill_no' => $radiology->bill_no,
+                    'case_id' => $radiology->case_id,
+                    'patient_id' => $radiology->patient_id,
+                    'doctor_id' => $radiology->referral_doctor_id,
+                    'net_amount' => $radiology->net_amount,
+                    'payment_amount' => $radiology->payment_amount,
+                ],
+                [
+                    'radiology_no' => $oldRadiologyData['radiology_no'],
+                    'bill_no' => $oldRadiologyData['bill_no'],
+                    'case_id' => $oldRadiologyData['case_id'],
+                    'patient_id' => $oldRadiologyData['patient_id'],
+                    'doctor_id' => $oldRadiologyData['doctor_id'],
+                    'net_amount' => $oldRadiologyData['net_amount'],
+                    'payment_amount' => $oldRadiologyData['payment_amount'],
+                ]
+            );
 
             DB::commit();
 
@@ -385,6 +435,20 @@ class RadiologyController extends Controller
 
                 $message = 'Radiology deleted successfully';
                 $this->storeAdminWorkLog($id, 'radiologies', $message);
+                ActivityLogService::logDelete(
+                    'Radiology',
+                    $id,
+                    $radiology->bill_no ?? ($radiology->radiology_no ?? ('Radiology#' . $id)),
+                    [
+                        'radiology_no' => $radiology->radiology_no,
+                        'bill_no' => $radiology->bill_no,
+                        'case_id' => $radiology->case_id,
+                        'patient_id' => $radiology->patient_id,
+                        'doctor_id' => $radiology->referral_doctor_id,
+                        'net_amount' => $radiology->net_amount,
+                        'payment_amount' => $radiology->payment_amount,
+                    ]
+                );
 
                 DB::commit();
 
@@ -589,7 +653,8 @@ class RadiologyController extends Controller
     private function generateInvoiceNumber()
     {
         $year = date('Y');
-        $lastInvoice = Billing::where('invoice_number', 'like', "INV-{$year}-%")
+        $prefix = web_setting_prefix('billing_bill_prefix', 'BILL');
+        $lastInvoice = Billing::where('invoice_number', 'like', "{$prefix}-{$year}-%")
             ->orderBy('invoice_number', 'desc')
             ->first();
 
@@ -600,7 +665,7 @@ class RadiologyController extends Controller
             $newNumber = 1;
         }
 
-        return "INV-{$year}-" . str_pad($newNumber, 6, '0', STR_PAD_LEFT);
+        return "{$prefix}-{$year}-" . str_pad($newNumber, 6, '0', STR_PAD_LEFT);
     }
 
     private function generateRadiologyNumber($lastRadiology = null)
@@ -620,7 +685,7 @@ class RadiologyController extends Controller
 
     private function generateBillNumber($lastBilling = null)
     {
-        $prefix = 'BILL';
+        $prefix = web_setting_prefix('billing_bill_prefix', 'BILL');
         $year = date('Ym');
 
         if ($lastBilling && $lastBilling->bill_number) {

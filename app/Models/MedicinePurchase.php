@@ -13,6 +13,7 @@ class MedicinePurchase extends Model
         'supplier_id',
         'purchase_number',
         'purchase_date',
+        'invoice_number',
         'total_amount',
         'paid_amount',
         'due_amount',

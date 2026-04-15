@@ -13,14 +13,21 @@ class PurchaseItem extends Model
         'medicine_purchase_id',
         'medicine_category_id',
         'medicine_name',
+        'batch_no',
+        'expiry_date',
         'quantity',
         'unit_purchase_price',
+        'unit_selling_price',
+        'discount',
         'total_purchase_price',
         'received_quantity',
     ];
 
     protected $casts = [
+        'expiry_date' => 'date',
         'unit_purchase_price' => 'decimal:2',
+        'unit_selling_price' => 'decimal:2',
+        'discount' => 'decimal:2',
         'total_purchase_price' => 'decimal:2',
     ];
 

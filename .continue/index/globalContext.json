@@ -1,0 +1,22 @@
+{
+  "lastSelectedProfileForWorkspace": {
+    "file:///c%3A/laragon/www/hms:::personal": "local",
+    "file:///c%3A/laragon/www/Chiringa:::personal": "local"
+  },
+  "lastSelectedOrgIdForWorkspace": {
+    "file:///c%3A/laragon/www/hms": "personal",
+    "file:///c%3A/laragon/www/Chiringa": "personal"
+  },
+  "selectedModelsByProfileId": {
+    "local": {
+      "chat": "GPT-5.2",
+      "edit": "GPT-5.2",
+      "apply": "GPT-5.2",
+      "embed": "Transformers.js (Built-In)",
+      "autocomplete": null,
+      "rerank": null,
+      "summarize": null,
+      "subagent": null
+    }
+  }
+}

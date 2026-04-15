@@ -1,22 +1,24 @@
 {
     "name": "laravel/laravel",
+    "version": "2.0.0",
     "type": "project",
     "description": "The Laravel Framework.",
     "keywords": ["framework", "laravel"],
     "license": "MIT",
     "require": {
-        "php": "^8.0.2",
+        "php": "^8.2",
         "barryvdh/laravel-dompdf": "^3.1",
         "guzzlehttp/guzzle": "^7.2",
-        "inertiajs/inertia-laravel": "^0.6.8",
-        "laravel/framework": "^9.19",
-        "laravel/jetstream": "^3.0",
-        "laravel/sanctum": "^3.0",
-        "laravel/tinker": "^2.7",
+        "inertiajs/inertia-laravel": "^3.0",
+        "laravel/framework": "^12.0",
+        "laravel/jetstream": "^5.5",
+        "laravel/sanctum": "^4.0",
+        "laravel/tinker": "^3.0",
         "milon/barcode": "^12.0",
         "mpdf/mpdf": "^8.2",
+        "rats/zkteco": "^002.0",
         "spatie/laravel-permission": "^6.21",
-        "tightenco/ziggy": "^1.0"
+        "tightenco/ziggy": "^2.0"
     },
     "require-dev": {
         "barryvdh/laravel-debugbar": "^3.9",
@@ -24,9 +26,9 @@
         "laravel/pint": "^1.0",
         "laravel/sail": "^1.0.1",
         "mockery/mockery": "^1.4.4",
-        "nunomaduro/collision": "^6.1",
-        "phpunit/phpunit": "^9.5.10",
-        "spatie/laravel-ignition": "^1.0"
+        "nunomaduro/collision": "^8.0",
+        "phpunit/phpunit": "^11.0",
+        "spatie/laravel-ignition": "^2.0"
     },
     "autoload": {
         "psr-4": {

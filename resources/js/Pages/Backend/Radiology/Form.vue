@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
@@ -12,6 +12,71 @@ import Multiselect from 'vue-multiselect';
 import 'vue-multiselect/dist/vue-multiselect.css';
 
 const props = defineProps(['radiology', 'id', 'radiologyTests', 'patients', 'doctors', 'radiologyNo', 'billNo', 'lastCaseId']);
+
+// Local reactive copy of radiology tests so we can update UI immediately
+const radiologyTestsList = ref([...(props.radiologyTests || [])]);
+
+// Keep local copy in sync if parent props change
+watch(() => props.radiologyTests, (val) => {
+    radiologyTestsList.value = [...(val || [])];
+});
+
+// Handler to be called when a new radiology test is created via a modal
+const handleTestCreated = (response) => {
+    const prevIds = (radiologyTestsList.value || []).map(t => t.id);
+
+    router.reload({
+        only: ['radiologyTests'],
+        preserveState: true,
+        preserveScroll: true,
+        onSuccess: (page) => {
+            radiologyTestsList.value = [...(page.props.radiologyTests || [])];
+
+            const created = radiologyTestsList.value.find(t => !prevIds.includes(t.id));
+            if (created) {
+                // If there's an existing focused/last test row, populate it; otherwise populate last row
+                const targetIndex = testRows.value.length - 1;
+                // Prevent duplicate selection
+                if (!isTestAlreadySelected(created.id, testRows.value[targetIndex].id)) {
+                    handleDropdownClick(targetIndex, created);
+                }
+            }
+        }
+    });
+};
+
+// Handle global event when a radiology test is created from a modal
+const handleRadiologyTestCreated = (evt) => {
+    try {
+        const prevIds = (radiologyTestsList.value || []).map(t => t.id);
+
+        router.reload({
+            only: ['radiologyTests'],
+            preserveState: true,
+            preserveScroll: true,
+            onSuccess: (page) => {
+                radiologyTestsList.value = [...(page.props.radiologyTests || [])];
+
+                const created = radiologyTestsList.value.find(t => !prevIds.includes(t.id));
+                if (created) {
+                    const targetIndex = testRows.value.length - 1;
+                    if (targetIndex >= 0 && !isTestAlreadySelected(created.id, testRows.value[targetIndex].id)) {
+                        handleDropdownClick(targetIndex, created);
+                    }
+                }
+            }
+        });
+    } catch (e) {
+        console.error('handleRadiologyTestCreated error', e);
+    }
+};
+
+// When server-side list updated, refresh local list
+const handleRadiologyTestsUpdated = () => {
+    router.reload({ only: ['radiologyTests'], preserveState: true, preserveScroll: true, onSuccess: (page) => {
+        radiologyTestsList.value = [...(page.props.radiologyTests || [])];
+    }});
+};
 
 // Search functionality
 const searchQueries = ref({});
@@ -90,6 +155,20 @@ onMounted(() => {
         showDropdowns.value[test.id] = false;
         selectedTestIndex.value[test.id] = -1;
     });
+
+    // Global event listeners so newly-created tests/charges appear immediately
+    window.addEventListener('radiologyTest-created', handleRadiologyTestCreated);
+    window.addEventListener('radiologyTests-updated', handleRadiologyTestsUpdated);
+    // Also listen to generic events (fallbacks)
+    window.addEventListener('test-created', handleRadiologyTestCreated);
+    window.addEventListener('tests-updated', handleRadiologyTestsUpdated);
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener('radiologyTest-created', handleRadiologyTestCreated);
+    window.removeEventListener('radiologyTests-updated', handleRadiologyTestsUpdated);
+    window.removeEventListener('test-created', handleRadiologyTestCreated);
+    window.removeEventListener('tests-updated', handleRadiologyTestsUpdated);
 });
 
 // Modal state for patient creation
@@ -125,10 +204,10 @@ const isTestAlreadySelected = (testId, currentTestRowId) => {
 
 // Test search functionality
 const getFilteredTests = (testId) => {
-    const query = searchQueries.value[testId]?.toLowerCase() || '';
-    if (!query) return props.radiologyTests || [];
+    const query = searchQueries.value[test.id]?.toLowerCase() || '';
+    if (!query) return radiologyTestsList.value || [];
 
-    return (props.radiologyTests || []).filter(test =>
+    return (radiologyTestsList.value || []).filter(test =>
         test.test_name.toLowerCase().includes(query) ||
         test.test_short_name?.toLowerCase().includes(query)
     );
@@ -226,7 +305,7 @@ const scrollToSelectedOption = (testId) => {
     const selectedIndex = selectedTestIndex.value[testId];
     if (selectedIndex >= 0) {
         setTimeout(() => {
-            const dropdownElement = document.querySelector(`[data-dropdown-id="${testId}"]`);
+            const dropdownElement = (typeof document !== 'undefined') ? document.querySelector(`[data-dropdown-id="${testId}"]`) : null;
             const selectedOption = dropdownElement?.querySelector(`[data-option-index="${selectedIndex}"]`);
             if (selectedOption && dropdownElement) {
                 const optionTop = selectedOption.offsetTop;
@@ -275,7 +354,9 @@ const handleDropdownClick = (index, selectedTest) => {
 
     // Jump to report date field
     setTimeout(() => {
-        document.getElementById(`reportDate_${index}`)?.focus();
+        if (typeof document !== 'undefined') {
+            document.getElementById(`reportDate_${index}`)?.focus();
+        }
     }, 100);
 };
 
@@ -383,6 +464,37 @@ const addTest = () => {
     }, 100);
 };
 
+// CSV import for tests: expected CSV columns: test_name,amount,tax,report_days (optional)
+const handleTestsCsvUpload = (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const text = e.target.result;
+        const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+        for (let i = 0; i < lines.length; i++) {
+            const cols = lines[i].split(',').map(c => c.trim());
+            if (cols.length === 0) continue;
+
+            const row = createTestRow();
+            row.test_name = cols[0] || '';
+            row.amount = parseFloat(cols[1] || '0') || 0;
+            row.tax = parseFloat(cols[2] || '0') || 0;
+            row.reportDays = cols[3] ? parseInt(cols[3]) : '';
+
+            // Add to rows and initialize state
+            testRows.value.push(row);
+            searchQueries.value[row.id] = row.test_name;
+            showDropdowns.value[row.id] = false;
+            selectedTestIndex.value[row.id] = -1;
+        }
+        // clear file input
+        event.target.value = '';
+    };
+    reader.readAsText(file);
+};
+
 const removeTest = (testId) => {
     if (testRows.value.length > 1) {
         testRows.value = testRows.value.filter(row => row.id !== testId);
@@ -429,6 +541,14 @@ const submit = () => {
         net_amount: netAmount.value,
     };
 
+    // Open blank window synchronously to avoid popup blockers when navigating later
+    let invoiceWindow = null;
+    try {
+        invoiceWindow = window.open('', '_blank');
+    } catch (e) {
+        invoiceWindow = null;
+    }
+
     form.transform(() => ({
         ...formData,
         patient_id: typeof formData.patient_id === 'object' ? formData.patient_id.id : formData.patient_id,
@@ -442,8 +562,17 @@ const submit = () => {
                         const successMessage = response?.props?.flash?.successMessage;
                         const billId = response?.props?.flash?.billId;
 
-                        if (successMessage && billId) {
-                            window.open(route("backend.download.invoice", { id: billId, module: 'radiology' }), "_blank");
+                        if (billId) {
+                            const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'radiology' });
+                            try {
+                                if (invoiceWindow && !invoiceWindow.closed) {
+                                    invoiceWindow.location = invoiceUrl;
+                                } else {
+                                    window.open(invoiceUrl, '_blank');
+                                }
+                            } catch (e) {
+                                window.open(invoiceUrl, '_blank');
+                            }
                         }
                     }
                 });
@@ -457,8 +586,17 @@ const submit = () => {
                 const successMessage = response?.props?.flash?.successMessage;
                 const billId = response?.props?.flash?.billId;
 
-                if (successMessage && billId) {
-                    window.open(route("backend.download.invoice", { id: billId, module: 'radiology' }), "_blank");
+                if (billId) {
+                    const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'radiology' });
+                    try {
+                        if (invoiceWindow && !invoiceWindow.closed) {
+                            invoiceWindow.location = invoiceUrl;
+                        } else {
+                            window.open(invoiceUrl, '_blank');
+                        }
+                    } catch (e) {
+                        window.open(invoiceUrl, '_blank');
+                    }
                 }
             }
             displayResponse(response);
@@ -628,6 +766,10 @@ const goToRadiologyList = () => {
                         class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700">
                         <span class="mr-1">+</span> Add Test
                     </button>
+                    <label class="ml-4 inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded cursor-pointer">
+                        Import CSV
+                        <input type="file" accept=".csv" @change="handleTestsCsvUpload" style="display:none" />
+                    </label>
                 </div>
 
                 <!-- Doctor, Note and Summary Section -->

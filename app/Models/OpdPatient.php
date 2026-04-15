@@ -48,4 +48,19 @@ class OpdPatient extends Authenticatable
     {
         return $this->belongsTo(Admin::class, 'consultant_doctor_id', 'id');
     }
+
+    public function prescriptions()
+    {
+        return $this->hasMany(OpdPrescription::class, 'opd_patient_id');
+    }
+
+    public function latestPrescription()
+    {
+        return $this->hasOne(OpdPrescription::class, 'opd_patient_id')->latestOfMany();
+    }
+
+    public function investigationItems()
+    {
+        return $this->hasMany(Investigation::class, 'opd_patient_id');
+    }
 }

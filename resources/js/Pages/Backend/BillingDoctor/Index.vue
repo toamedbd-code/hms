@@ -30,6 +30,12 @@ const applyFilter = () => {
                 <div>
                     <h1 class="p-4 text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
                 </div>
+                <div class="p-4">
+                    <a :href="route('backend.billingdoctor.create')"
+                        class="px-4 py-2 text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors duration-200">
+                        Create / Add Doctor
+                    </a>
+                </div>
             </div>
             <div
                 class="flex justify-between w-full p-2 py-3 space-x-2 text-gray-700 rounded-md bg-slate-300 shadow-gray-800/50 dark:bg-gray-700 dark:text-gray-200">

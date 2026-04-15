@@ -14,8 +14,14 @@ class Certificate extends Authenticatable
     protected $table = 'certificates';
 
     protected $fillable = [
-                    'name',
-                ];
+        'name',
+        'certificate_type',
+        'issue_date',
+        'reference_no',
+        'email',
+        'details',
+        'photo',
+    ];
 
     protected static function boot()
     {
@@ -29,13 +35,8 @@ class Certificate extends Authenticatable
         });
     }
 
-    public function getImageAttribute($value)
+    public function getPhotoAttribute($value)
     {
-        return (!is_null($value)) ? env('APP_URL') . '/public/storage/' . $value : null;
-    }
-
-    public function getFileAttribute($value)
-    {
-        return (!is_null($value)) ? env('APP_URL') . '/public/storage/' . $value : null;
+        return (!is_null($value) && $value !== '') ? env('APP_URL') . '/public/storage/' . ltrim($value, '/') : null;
     }
 }

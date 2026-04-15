@@ -6,12 +6,31 @@ import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import AlertMessage from '@/Components/AlertMessage.vue';
-import { displayResponse, displayWarning } from '@/responseMessage.js';
+import { displayResponse, displayWarning, showToastIfNoFlash } from '@/responseMessage.js';
 import PatientModal from '@/Components/PatientModal.vue';
+import SymptomTypeModal from '@/Components/SymptomTypeModal.vue';
 import Multiselect from 'vue-multiselect';
 import 'vue-multiselect/dist/vue-multiselect.css';
 
-const props = defineProps(['opdpatient', 'id', 'patients', 'doctors', 'chargeTypes', 'charges']);
+const APP_TIMEZONE = 'Asia/Dhaka';
+
+const getCurrentDateTimeForInput = () => {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: APP_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(new Date());
+
+    const getPart = (type) => parts.find((part) => part.type === type)?.value ?? '';
+
+    return `${getPart('year')}-${getPart('month')}-${getPart('day')}T${getPart('hour')}:${getPart('minute')}`;
+};
+
+const props = defineProps(['opdpatient', 'id', 'patients', 'doctors', 'chargeTypes', 'charges', 'symptomTypes']);
 
 const form = useForm({
     patient_id: props.opdpatient?.patient_id ? { id: props.opdpatient.patient_id, name: props.opdpatient.patient?.name } :'',
@@ -23,9 +42,14 @@ const form = useForm({
     symptom_description: props.opdpatient?.symptom_description ?? '',
     note: props.opdpatient?.note ?? '',
     allergies: props.opdpatient?.allergies ?? '',
+    nibp: props.opdpatient?.nibp ?? '',
 
     // Right side fields
-    appointment_date: props.opdpatient?.appointment_date ?? '',
+    appointment_date: props.opdpatient?.appointment_date
+        ? (String(props.opdpatient.appointment_date).includes('T')
+            ? String(props.opdpatient.appointment_date)
+            : `${props.opdpatient.appointment_date}T00:00`)
+        : '',
     case: props.opdpatient?.case ?? '',
     casualty: props.opdpatient?.casualty ?? 'no',
     old_patient: props.opdpatient?.old_patient ?? 'no',
@@ -96,8 +120,13 @@ watch([() => form.applied_charge, () => form.tax, () => form.discount], () => {
 const submit = () => {
     const routeName = props.id ? route('backend.opdpatient.update', props.id) : route('backend.opdpatient.store');
 
+    const normalizedAppointmentDate = form.appointment_date
+        ? String(form.appointment_date).split('T')[0]
+        : '';
+
     form.transform(data => ({
         ...data,
+        appointment_date: normalizedAppointmentDate,
         patient_id: data.patient_id?.id || data.patient_id,
         consultant_doctor_id: data.consultant_doctor_id?.id || data.consultant_doctor_id,
         remember: '',
@@ -110,11 +139,13 @@ const submit = () => {
             const successMessage = response?.props?.flash?.successMessage;
             const billId = response?.props?.flash?.billId;
 
-            if (successMessage && billId) {
+            if (billId) {
                 window.open(route("backend.download.opd.bill", { id: billId, module: 'opd' }), "_blank");
-
             }
-            displayResponse(response);
+
+            // Show toast only when server did not set a flash (to avoid duplicates
+            // when the page already renders an inline AlertMessage from flash props).
+            showToastIfNoFlash(response);
         },
         onError: (errorObject) => {
             displayWarning(errorObject);
@@ -130,7 +161,9 @@ const saveAndPrint = () => {
 };
 
 const isPatientModalOpen = ref(false);
-const patientsList = ref([...props.patients]);
+const patientsList = ref([...(props.patients || [])]);
+const symptomTypes = ref([...(props.symptomTypes || [])]);
+const showSymptomTypeModal = ref(false);
 
 const openPatientModal = () => {
     isPatientModalOpen.value = true;
@@ -140,16 +173,52 @@ const closePatientModal = () => {
     isPatientModalOpen.value = false;
 };
 
+const openSymptomTypeModal = () => {
+    showSymptomTypeModal.value = true;
+};
+
+const closeSymptomTypeModal = () => {
+    showSymptomTypeModal.value = false;
+};
+
+const handleSymptomTypeCreated = (createdName) => {
+    if (createdName) {
+        form.symptom_type = createdName;
+    }
+
+    router.reload({
+        only: ['symptomTypes'],
+        preserveState: true,
+        preserveScroll: true,
+        onSuccess: (page) => {
+            symptomTypes.value = [...(page.props.symptomTypes || [])];
+        }
+    });
+};
+
+const normalizedSymptomTypes = computed(() => {
+    const types = [...symptomTypes.value];
+    const current = String(form.symptom_type || '').trim();
+
+    if (current && !types.some((type) => String(type.name) === current)) {
+        types.unshift({ id: `custom-${current}`, name: current });
+    }
+
+    return types;
+});
+
 const handlePatientCreated = (newPatient) => {
+    if (!newPatient) return;
+
     patientsList.value.push(newPatient);
-    form.patient_id = newPatient.id;
+    form.patient_id = { id: newPatient.id, name: newPatient.name };
 
     router.reload({
         only: ['patients'],
         preserveState: true,
         preserveScroll: true,
         onSuccess: (page) => {
-            patientsList.value = [...page.props.patients];
+            patientsList.value = [...(page.props.patients || [])];
         }
     });
 };
@@ -158,12 +227,22 @@ const goToOpdList = () => {
     router.visit(route('backend.opdpatient.index'));
 };
 
+const setCurrentAppointmentDateTime = () => {
+    if (form.appointment_date) {
+        return;
+    }
+
+    form.appointment_date = getCurrentDateTimeForInput();
+};
+
 </script>
 
 <template>
     <!-- Patient Modal -->
     <PatientModal :isOpen="isPatientModalOpen" :tpas="props.tpas" @close="closePatientModal"
         @patientCreated="handlePatientCreated" />
+    <SymptomTypeModal :isOpen="showSymptomTypeModal" @close="closeSymptomTypeModal"
+        @symptomTypeCreated="handleSymptomTypeCreated" />
     <BackendLayout>
         <div class="w-full transition duration-1000 ease-in-out transform bg-white rounded-md">
 
@@ -176,7 +255,7 @@ const goToOpdList = () => {
                     <div class="relative min-w-[280px]">
                         <div class="relative">
                             <div class="col-span-1">
-                                <Multiselect v-model="form.patient_id" :options="patients" :track-by="'id'"
+                                <Multiselect v-model="form.patient_id" :options="patientsList" :track-by="'id'"
                                     :label="'name'" placeholder="Search and select a patient"
                                     class="w-full text-sm h-[30px] rounded-md border border-slate-300" />
                                 <InputError class="mt-1" :message="form.errors.patient_id" />
@@ -217,15 +296,24 @@ const goToOpdList = () => {
                         <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                             <div>
                                 <InputLabel for="symptom_type" value="Symptoms Type" />
-                                <select id="symptom_type" v-model="form.symptom_type"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 focus:border-indigo-300">
-                                    <option value="">Select</option>
-                                    <option value="fever">Fever</option>
-                                    <option value="cough">Cough</option>
-                                    <option value="headache">Headache</option>
-                                    <option value="body_pain">Body Pain</option>
-                                    <option value="other">Other</option>
-                                </select>
+                                <div class="flex items-center space-x-2">
+                                    <select id="symptom_type" v-model="form.symptom_type"
+                                        class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 focus:border-indigo-300">
+                                        <option value="">Select</option>
+                                        <option v-for="type in normalizedSymptomTypes" :key="type.id" :value="type.name">
+                                            {{ type.name }}
+                                        </option>
+                                    </select>
+                                    <button type="button" @click="openSymptomTypeModal"
+                                        class="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                                        title="Add Symptoms Type">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                            stroke-width="2">
+                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                        </svg>
+                                    </button>
+                                </div>
                                 <InputError class="mt-1" :message="form.errors.symptom_type" />
                             </div>
 
@@ -264,6 +352,14 @@ const goToOpdList = () => {
                                 placeholder="List any known allergies"></textarea>
                             <InputError class="mt-1" :message="form.errors.allergies" />
                         </div>
+
+                        <div>
+                            <InputLabel for="nibp" value="NIBP" />
+                            <input id="nibp" v-model="form.nibp" type="text"
+                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 focus:border-indigo-300"
+                                placeholder="e.g. 120/80" />
+                            <InputError class="mt-1" :message="form.errors.nibp" />
+                        </div>
                     </div>
 
                     <!-- Right Column -->
@@ -271,8 +367,8 @@ const goToOpdList = () => {
                         <!-- Appointment Date & Case -->
                         <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                             <div>
-                                <InputLabel for="appointment_date" value="Appointment Date" class="required" />
-                                <input id="appointment_date" v-model="form.appointment_date" type="date"
+                                <InputLabel for="appointment_date" value="Appointment Date & Time"><span class="text-red-500">*</span></InputLabel>
+                                <input id="appointment_date" v-model="form.appointment_date" type="datetime-local" @click="setCurrentAppointmentDateTime"
                                     class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 focus:border-indigo-300"
                                     required />
                                 <InputError class="mt-1" :message="form.errors.appointment_date" />

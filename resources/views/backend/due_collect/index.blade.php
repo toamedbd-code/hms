@@ -32,8 +32,10 @@
                     </tr>
                 </table>
 
-                <form method="POST" action="{{ url('due-collect/'.$billing->id) }}">
+                <form id="dueCollectForm" method="POST" action="{{ url('due-collect/'.$billing->id) }}">
                     @csrf
+
+                    <input type="hidden" name="return_to" value="{{ $returnTo ?? '' }}">
 
                     <div class="mb-3">
                         <label class="form-label fw-bold">Pay Amount</label>
@@ -41,24 +43,39 @@
     type="number"
     name="amount"
     class="form-control"
-    min="1"
+    min="0.01"
     max="{{ $billing->due_amount }}"
+    step="0.01"
     required
 >
 
                     </div>
 
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-success">
+                        <button id="collectDueBtn" type="submit" class="btn btn-success">
                             💰 Collect Due
                         </button>
 
-                        <a href="{{ url()->previous() }}" class="btn btn-secondary">
+                        <a href="{{ $returnTo ?? url()->previous() }}" class="btn btn-secondary">
                             ⬅ Back
                         </a>
                     </div>
 
                 </form>
+
+                <script>
+                    (function () {
+                        const form = document.getElementById('dueCollectForm');
+                        const button = document.getElementById('collectDueBtn');
+
+                        if (!form || !button) return;
+
+                        form.addEventListener('submit', function () {
+                            button.disabled = true;
+                            button.innerText = 'Collecting...';
+                        });
+                    })();
+                </script>
 
             </div>
         </div>

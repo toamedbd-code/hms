@@ -88,6 +88,11 @@ const goToAttendanceAdd = () => {
                 </div>
             </div>
 
+            <div class="mb-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-emerald-600 text-white mr-2">Auto Synced</span>
+                Face/Device attendance events automatically update IN time and OUT time for this list.
+            </div>
+
             <div
                 class="flex justify-between w-full p-2 py-3 space-x-2 text-gray-700 rounded-md bg-slate-300">
                 <div class="grid w-full grid-cols-1 gap-2 md:grid-cols-5">

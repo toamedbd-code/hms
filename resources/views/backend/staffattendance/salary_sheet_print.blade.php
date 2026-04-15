@@ -101,6 +101,12 @@
             background: #f9fafb;
         }
 
+        .warn-cell {
+            background: #fee2e2;
+            color: #b91c1c;
+            font-weight: 700;
+        }
+
         .footer {
             margin-top: 14px;
             display: flex;
@@ -163,7 +169,25 @@
     </style>
 </head>
 <body>
-    <div class="print-actions">
+    @php
+        $minutesToHms = static function ($value): string {
+            $numeric = is_numeric($value) ? (float) $value : 0.0;
+            $totalSeconds = (int) max(round($numeric * 60), 0);
+            $hours = intdiv($totalSeconds, 3600);
+            $minutes = intdiv($totalSeconds % 3600, 60);
+            $seconds = $totalSeconds % 60;
+
+            return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
+        };
+
+        $isPdf = (bool) ($isPdf ?? false);
+        $lateHighlightLimit = (int) ($lateHighlightLimit ?? 3);
+        $unpaidHighlightLimit = (int) ($unpaidHighlightLimit ?? 2);
+        $waiveShortLate = (bool) ($waiveShortLate ?? false);
+        $shortLateLimitMinutes = (int) ($shortLateLimitMinutes ?? 15);
+    @endphp
+
+    <div class="print-actions" @if($isPdf) style="display:none;" @endif>
         <button type="button" class="btn btn-print" onclick="window.print()">Print</button>
         <button type="button" class="btn btn-close" onclick="window.close()">Close</button>
     </div>
@@ -186,6 +210,23 @@
             <div>Overtime Multiplier: {{ number_format((float) ($overtimeMultiplier ?? 1), 2) }}x</div>
         </div>
 
+        <div class="meta" style="margin-top: 0;">
+            <div>Late Grace Days: {{ (int) ($lateGraceDays ?? 3) }}</div>
+            <div>Late Deduction Rate: {{ number_format((float) ($lateDeductionRate ?? 0), 2) }}</div>
+        </div>
+
+        <div class="meta" style="margin-top: 0;">
+            <div>Short Late Waiver: {{ $waiveShortLate ? 'ON' : 'OFF' }}</div>
+            <div>Waiver Limit: {{ $shortLateLimitMinutes }} min</div>
+        </div>
+
+        @if(!empty($lockState['is_locked']))
+            <div class="meta" style="margin-top: 0; color:#b91c1c; font-weight:700;">
+                <div>Salary Sheet Status: LOCKED</div>
+                <div>Locked At: {{ $lockState['locked_at'] ?? '-' }}</div>
+            </div>
+        @endif
+
         <table>
             <thead>
                 <tr>
@@ -198,9 +239,17 @@
                     <th>Workable Days</th>
                     <th>Paid Days</th>
                     <th>Late Days</th>
+                    <th>Late (Deduction)</th>
+                    <th>Late (HH:MM:SS)</th>
+                    <th>Short Late Waived</th>
+                    <th>OT (HH:MM:SS)</th>
                     <th>Unpaid Days</th>
+                    <th>Hourly Rate</th>
+                    <th>Late Deduction (Hr)</th>
+                    <th>OT Bonus (Hr)</th>
                     <th>Biometric Deduction</th>
                     <th>Late Fee</th>
+                    <th>Late Policy Deduction</th>
                     <th>Overtime Bonus</th>
                     <th>Advance Paid</th>
                     <th>Total Deduction</th>
@@ -218,10 +267,18 @@
                         <td class="money">{{ number_format((float) ($row['basic_salary'] ?? 0), 2) }}</td>
                         <td>{{ $row['workable_days'] }}</td>
                         <td>{{ $row['paid_days'] }}</td>
-                        <td>{{ $row['late'] }}</td>
-                        <td>{{ $row['unpaid_days'] }}</td>
+                        <td class="{{ (int) ($row['late'] ?? 0) > $lateHighlightLimit ? 'warn-cell' : '' }}">{{ $row['late'] }}</td>
+                        <td>{{ (int) ($row['late_for_deduction'] ?? 0) }}</td>
+                        <td>{{ $minutesToHms($row['late_minutes'] ?? 0) }}</td>
+                        <td>{{ $minutesToHms($row['waived_short_late_minutes'] ?? 0) }}</td>
+                        <td>{{ $minutesToHms($row['overtime_minutes'] ?? 0) }}</td>
+                        <td class="{{ (int) ($row['unpaid_days'] ?? 0) > $unpaidHighlightLimit ? 'warn-cell' : '' }}">{{ $row['unpaid_days'] }}</td>
+                        <td class="money">{{ number_format((float) ($row['hourly_rate'] ?? 0), 2) }}</td>
+                        <td class="money">{{ number_format((float) ($row['late_deduction_hourly'] ?? 0), 2) }}</td>
+                        <td class="money">{{ number_format((float) ($row['overtime_bonus_hourly'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($row['biometric_deduction'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($row['late_fee'] ?? 0), 2) }}</td>
+                        <td class="money">{{ number_format((float) ($row['late_policy_deduction'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($row['overtime_bonus'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($row['advance_paid'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($row['deduction'] ?? 0), 2) }}</td>
@@ -229,7 +286,7 @@
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="16">No salary data found for {{ $monthLabel }}.</td>
+                        <td colspan="24">No salary data found for {{ $monthLabel }}.</td>
                     </tr>
                 @endforelse
             </tbody>
@@ -238,8 +295,20 @@
                     <tr>
                         <td colspan="5">Grand Total</td>
                         <td class="money">{{ number_format((float) ($totals['basic_salary'] ?? 0), 2) }}</td>
-                        <td colspan="4"></td>
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                        <td>{{ $minutesToHms($totals['late_minutes'] ?? 0) }}</td>
+                        <td>{{ $minutesToHms($totals['waived_short_late_minutes'] ?? 0) }}</td>
+                        <td>{{ $minutesToHms($totals['overtime_minutes'] ?? 0) }}</td>
+                        <td></td>
+                        <td></td>
+                        <td class="money">{{ number_format((float) ($totals['late_deduction_hourly'] ?? 0), 2) }}</td>
+                        <td class="money">{{ number_format((float) ($totals['overtime_bonus_hourly'] ?? 0), 2) }}</td>
+                        <td class="money">{{ number_format((float) ($totals['biometric_deduction'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($totals['late_fee'] ?? 0), 2) }}</td>
+                        <td class="money">{{ number_format((float) ($totals['late_policy_deduction'] ?? 0), 2) }}</td>
                         <td class="money">{{ number_format((float) ($totals['overtime_bonus'] ?? 0), 2) }}</td>
                         <td></td>
                         <td class="money">{{ number_format((float) ($totals['deduction'] ?? 0), 2) }}</td>
@@ -255,12 +324,14 @@
         </div>
     </div>
 
-    <script>
-        window.addEventListener('load', function () {
-            setTimeout(function () {
-                window.print();
-            }, 200);
-        });
-    </script>
+    @unless($isPdf)
+        <script>
+            window.addEventListener('load', function () {
+                setTimeout(function () {
+                    window.print();
+                }, 200);
+            });
+        </script>
+    @endunless
 </body>
 </html>

@@ -86,8 +86,31 @@ const submit = () => {
         onSuccess: (response) => {
             form.reset();
             displayResponse(response);
-            emit('parameter-created', response);
-            emit('close');
+
+            // Reload authoritative testParameters from server and notify parent/components
+            router.reload({
+                only: ['testParameters'],
+                preserveState: true,
+                preserveScroll: true,
+                onSuccess: (page) => {
+                    const latest = page.props.testParameters || [];
+                    const created = latest.length ? latest[latest.length - 1] : (response.props?.flash?.data || response.data || {});
+
+                    // Emit original response for existing listeners
+                    emit('parameter-created', response);
+
+                    // Dispatch global events with created parameter payload
+                    try {
+                        window.dispatchEvent(new CustomEvent('parameter-created', { detail: created }));
+                        window.dispatchEvent(new CustomEvent('testParameters-updated'));
+                    } catch (e) {
+                        // ignore if window not available
+                    }
+
+                    // Close modal
+                    emit('close');
+                }
+            });
         },
         onError: (errors) => {
             displayWarning(errors);

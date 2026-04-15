@@ -9,6 +9,7 @@ let props = defineProps({
 });
 const filters = ref({
     name: props.filters.name ?? '',
+    module: props.filters.module ?? 'all',
     numOfData: props.filters.numOfData ?? 10,
 });
 
@@ -30,12 +31,30 @@ const applyFilter = () => {
                 class="flex justify-between w-full p-2 py-3 space-x-2 text-gray-700 rounded-md shadow-md bg-slate-300 shadow-gray-800/50 dark:bg-gray-700 dark:text-gray-200">
 
                 <div class="grid w-full grid-cols-1 gap-2 md:grid-cols-5">
-                    
+
                     <div class="flex space-x-2">
                         <div class="w-full">
                             <input id="name" v-model="filters.name"
                                 class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 type="text" placeholder="Permission Name" @input="applyFilter" />
+                        </div>
+
+                        <div class="w-full">
+                            <select v-model="filters.module" @change="applyFilter"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                <option value="all">All Modules</option>
+                                <option value="attendance">Attendance</option>
+                                <option value="pathology">Pathology</option>
+                                <option value="payroll">Payroll</option>
+                                <option value="reporting">Reporting</option>
+                                <option value="billing">Billing</option>
+                                <option value="store">Store</option>
+                                <option value="pharmacy">Pharmacy</option>
+                                <option value="opd">OPD</option>
+                                <option value="ipd">IPD</option>
+                                <option value="website">Website</option>
+                                <option value="other">Other</option>
+                            </select>
                         </div>
 
                         <div class="block min-w-24 md:hidden">

@@ -103,6 +103,13 @@ class ExpenseController extends Controller
                 }
             }
 
+            $customData->links[] = [
+                'linkClass' => 'bg-slate-600 text-white semi-bold',
+                'link' => route('backend.expense.print', $data->id),
+                'linkLabel' => getLinkLabel('Print', null, null),
+                'target' => '_blank',
+            ];
+
             return $customData;
         });
 
@@ -259,6 +266,15 @@ class ExpenseController extends Controller
                 ->back()
                 ->with('errorMessage', $message);
         }
+    }
+
+    public function print($id)
+    {
+        $expense = $this->expenseService->find($id);
+
+        return view('backend.expense.print', [
+            'expense' => $expense,
+        ]);
     }
 
     public function destroy($id)

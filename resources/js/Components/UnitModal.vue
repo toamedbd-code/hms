@@ -6,7 +6,7 @@ import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import Modal from '@/Components/Modal.vue';
-import { displayResponse, displayWarning } from '@/responseMessage.js';
+import { displayResponse, displayWarning, showToastIfNoFlash } from '@/responseMessage.js';
 
 const props = defineProps({
     show: Boolean,
@@ -46,7 +46,7 @@ const submit = () => {
     form.post(route('backend.pathologyunit.store'), {
         onSuccess: (response) => {
             form.reset();
-            displayResponse(response);
+            showToastIfNoFlash(response);
             emit('unit-created', response);
             emit('close');
         },

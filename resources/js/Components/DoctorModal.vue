@@ -1,8 +1,9 @@
 <script setup>
 import { useForm } from '@inertiajs/vue3';
+import axios from 'axios';
 import InputLabel from '@/Components/InputLabel.vue';
 import InputError from '@/Components/InputError.vue';
-import { displayResponse } from '@/responseMessage.js';
+import { showToastIfNoFlash } from '@/responseMessage.js';
 
 const props = defineProps({
     isOpen: Boolean,
@@ -29,16 +30,45 @@ const close = () => {
     emit('close');
 };
 
-const submitForm = () => {
-    form.post(route('backend.doctors.store'), {
-        preserveScroll: true,
-        onSuccess: (response) => {
-            displayResponse(response);
-            form.reset();
-            emit('doctorCreated', response.props.doctor);
-            close();
+const submitForm = async () => {
+    form.processing = true;
+    form.clearErrors && form.clearErrors();
+
+    try {
+        const payload = {
+            name: form.name,
+            email: form.email,
+            phone: form.phone,
+            gender: form.gender,
+            doctor_charge: form.doctor_charge,
+            designation_id: form.designation_id,
+            department_id: form.department_id,
+            specialist_id: form.specialist_id,
+        };
+
+        const response = await axios.post(route('backend.doctors.store'), payload, {
+            headers: { Accept: 'application/json' },
+        });
+
+        const newDoctor = response.data?.doctor ?? null;
+        const successMessage = response.data?.successMessage ?? null;
+
+        if (successMessage) {
+            showToastIfNoFlash({ props: { flash: { successMessage } } });
         }
-    });
+
+        form.reset();
+        emit('doctorCreated', newDoctor);
+        close();
+    } catch (error) {
+        if (error.response?.status === 422) {
+            form.errors = error.response.data.errors || {};
+        } else {
+            showToastIfNoFlash({ props: { flash: { errorMessage: error.response?.data?.errorMessage ?? 'Server error' } } });
+        }
+    } finally {
+        form.processing = false;
+    }
 };
 </script>
 

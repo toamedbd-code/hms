@@ -44,10 +44,15 @@ const selectedReport = ref(props.reportType || 'daily-transaction');
 const dateFrom = ref(props.dateFrom || '');
 const dateTo = ref(props.dateTo || '');
 const isLoading = ref(false);
+const pdfOpening = ref(false);
 
 const reports = [
     { id: 'daily-transaction', label: 'Daily Transaction Report' },
     { id: 'all-transaction', label: 'All Transaction Report' },
+    { id: 'pharmacy-transaction', label: 'Pharmacy Transaction Report' },
+    { id: 'appointment-transaction', label: 'Appointment Transaction Report' },
+    { id: 'opd-transaction', label: 'OPD Transaction Report' },
+    { id: 'ipd-transaction', label: 'IPD Transaction Report' },
     { id: 'income', label: 'Income Report' },
     { id: 'expense', label: 'Expense Report' },
     { id: 'referral', label: 'Referral Report' },
@@ -107,51 +112,71 @@ const getCurrentDateTime = () => {
     return `${day}/${month}/${year} ${hours}:${minutes}`;
 };
 
-// Fixed PDF Download Function
+// Open PDF in a new tab like the report generator flow
 const downloadPDF = async () => {
-    if (!hasReportData.value) {
-        alert('No data available to download');
+    if (!dateFrom.value || !dateTo.value) {
+        alert('Please select both date from and date to');
         return;
     }
+
+    // Prevent double-open when user clicks multiple times quickly
+    if (pdfOpening.value) return;
+    pdfOpening.value = true;
 
     isLoading.value = true;
 
     try {
-        const params = new URLSearchParams({
+        const url = route('backend.finance.report.pdf', {
             report_type: selectedReport.value,
             date_from: dateFrom.value,
             date_to: dateTo.value,
         });
 
-        const response = await fetch(`/finance/report/download-pdf?${params}`, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/pdf',
-                'X-Requested-With': 'XMLHttpRequest',
-            },
-        });
+        // Open a single blank window synchronously (user-initiated) so repeated clicks won't open multiple tabs.
+        const win = window.open('', '_blank');
 
-        if (!response.ok) {
-            throw new Error('Failed to download PDF');
+        // Fetch the PDF as a blob and navigate the opened window to the blob URL.
+        const resp = await fetch(url, { credentials: 'include', headers: { Accept: 'application/pdf' } });
+        if (!resp.ok) throw new Error('PDF fetch failed');
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        try {
+            if (win) {
+                try {
+                    win.location.href = blobUrl;
+                    try { win.opener = null; } catch (e) { /* ignore */ }
+                } catch (e) {
+                    // Some browsers block setting location on windows opened with empty URL; fallback to anchor click targeting _blank
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }
+            } else {
+                // If window.open was blocked, fallback to anchor click
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.target = '_blank';
+                a.rel = 'noopener';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        } finally {
+            // Revoke blob URL after some time
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
         }
-
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-
-        const fileName = `${selectedReport.value}_report_${dateFrom.value}_to_${dateTo.value}.pdf`;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-
     } catch (error) {
-        console.error('Error downloading PDF:', error);
-        alert('Error downloading PDF. Please try again.');
+        console.error('Error opening PDF:', error);
+        alert('Error opening PDF. Please try again.');
     } finally {
         isLoading.value = false;
+        // Release the guard after a short delay to avoid accidental double-opens
+        setTimeout(() => { pdfOpening.value = false; }, 800);
     }
 };
 
@@ -401,7 +426,11 @@ const showFooterTotals = computed(() => {
 const getFooterColumnSpan = computed(() => {
     const spans = {
         'daily-transaction': 2,
-        'all-transaction': 6,
+        'all-transaction': 2,
+        'pharmacy-transaction': 6,
+        'appointment-transaction': 6,
+        'opd-transaction': 6,
+        'ipd-transaction': 6,
         'income': 2,
         'expense': 3,
         'referral': 4,
@@ -422,7 +451,7 @@ const getFooterColumnSpan = computed(() => {
 
             <!-- Report Options Grid -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <button v-for="report in reports" :key="report.id" @click="selectReport(report.id)" :class="[
+                <button type="button" v-for="report in reports" :key="report.id" @click="selectReport(report.id)" :class="[
                     'flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-3 rounded-lg text-left transition-all duration-200 text-sm sm:text-base',
                     selectedReport === report.id
                         ? 'bg-blue-100 text-blue-900 shadow-sm'
@@ -449,7 +478,7 @@ const getFooterColumnSpan = computed(() => {
                         <!-- Download Buttons -->
                         <!-- Download Buttons -->
                         <div v-if="hasReportData" class="flex gap-2">
-                            <button @click="downloadPDF" :disabled="isLoading"
+                            <button type="button" @click.prevent="downloadPDF" :disabled="isLoading"
                                 class="flex items-center gap-2 px-3 sm:px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -457,7 +486,7 @@ const getFooterColumnSpan = computed(() => {
                                 </svg>
                                 {{ isLoading ? 'Generating PDF...' : 'PDF' }}
                             </button>
-                            <button @click="downloadExcelWithRawData"
+                            <button type="button" @click="downloadExcelWithRawData"
                                 class="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm font-medium">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -494,7 +523,7 @@ const getFooterColumnSpan = computed(() => {
 
                         <!-- Search Button -->
                         <div class="flex items-end">
-                            <button @click="handleSearch"
+                            <button type="button" @click="handleSearch"
                                 class="w-full lg:w-auto flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 bg-gray-700 hover:bg-gray-800 text-white font-medium rounded-lg transition-colors duration-200 shadow-sm text-sm sm:text-base disabled:opacity-50 disabled:cursor-not-allowed"
                                 :disabled="!dateFrom || !dateTo">
                                 <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor"
@@ -560,156 +589,196 @@ const getFooterColumnSpan = computed(() => {
                                 </tbody>
 
                                 <!-- Table Footer with Totals -->
-                                <tfoot v-if="showFooterTotals" class="bg-gray-800">
+                                <tfoot v-if="showFooterTotals" class="finance-total-footer">
                                     <tr>
-                                        <td :colspan="getFooterColumnSpan"
-                                            class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white">
-                                            GRAND TOTAL
+                                        <td :colspan="getFooterColumnSpan" class="finance-total-label">
+                                            Grand Total
                                         </td>
 
                                         <!-- Daily Transaction Footer -->
                                         <template v-if="reportType === 'daily-transaction'">
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-center">
+                                            <td class="finance-total-cell text-center">
                                                 {{ footerTotals.total_transactions || 0 }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_amount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_discount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.amount_after_discount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.cash_amount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.non_cash_amount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_commission || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_paid || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_due || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_due_collected || 0) }}
                                             </td>
                                         </template>
 
-                                        <!-- All Transaction Footer -->
+                                        <!-- All Transaction Footer (same structure as Daily) -->
                                         <template v-else-if="reportType === 'all-transaction'">
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-center">
+                                                {{ footerTotals.total_transactions || 0 }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_amount || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_discount || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.amount_after_discount || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.cash_amount || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.non_cash_amount || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_commission || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_paid || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_due || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_due_collected || 0) }}
+                                            </td>
+                                        </template>
+
+                                        <!-- Appointment / OPD / IPD Transaction Footer -->
+                                        <template v-else-if="['appointment-transaction', 'opd-transaction', 'ipd-transaction'].includes(reportType)">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.discount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.payable_amount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.paid_amt || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.due_amount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-center">
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_due_collected || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-center">
+                                                —
+                                            </td>
+                                        </template>
+
+                                        <!-- Pharmacy Transaction Footer -->
+                                        <template v-else-if="reportType === 'pharmacy-transaction'">
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.discount || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.payable_amount || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.paid_amt || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.due_amount || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_due_collected || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-center">
                                                 —
                                             </td>
                                         </template>
 
                                         <!-- Income Footer -->
                                         <template v-else-if="reportType === 'income'">
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-center">
+                                            <td class="finance-total-cell text-center">
                                                 {{ footerTotals.total_bills || 0 }}
                                             </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white">
+                                            <td class="finance-total-cell">
                                                 —
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_bill || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_discount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_income || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.net_income || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_due_collected || 0) }}
                                             </td>
                                         </template>
 
                                         <!-- Expense Footer -->
                                         <template v-else-if="reportType === 'expense'">
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-center">
+                                            <td class="finance-total-cell text-center">
                                                 {{ footerTotals.total_transactions || 0 }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_expense || 0) }}
                                             </td>
                                         </template>
 
                                         <!-- Referral Footer -->
                                         <template v-else-if="reportType === 'referral'">
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_bill_amount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_commission || 0) }}
                                             </td>
                                         </template>
 
                                         <!-- Pending Transaction Footer -->
                                         <template v-else-if="reportType === 'pending-transaction'">
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.discount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.payable_amount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.paid_amt || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-right">
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.due_amount || 0) }}
                                             </td>
-                                            <td
-                                                class="px-4 py-3 whitespace-nowrap text-sm font-semibold text-white text-center">
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_due_collected || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-center">
                                                 —
                                             </td>
                                         </template>
@@ -763,5 +832,29 @@ const getFooterColumnSpan = computed(() => {
 #report-table th {
     background-color: #f9fafb;
     font-weight: 600;
+}
+
+.finance-total-footer {
+    background: linear-gradient(90deg, #0f172a 0%, #1f2937 50%, #0f172a 100%);
+}
+
+.finance-total-label {
+    padding: 0.9rem 1rem;
+    white-space: nowrap;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fef3c7;
+    border-top: 2px solid #334155;
+}
+
+.finance-total-cell {
+    padding: 0.9rem 1rem;
+    white-space: nowrap;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #f8fafc;
+    border-top: 2px solid #334155;
 }
 </style>

@@ -25,9 +25,10 @@ class FloorController extends Controller
 
         $this->middleware('auth:admin');
         $this->middleware('permission:floor-list');
-        $this->middleware('permission:floor-create', ['only' => ['create', 'store']]);
-        $this->middleware('permission:floor-edit', ['only' => ['edit', 'update']]);
-        $this->middleware('permission:floor-delete', ['only' => ['destroy']]);
+        // PermissionSeeder generates permissions like: floor-list-create/edit/delete/status
+        $this->middleware('permission:floor-list-create', ['only' => ['create', 'store']]);
+        $this->middleware('permission:floor-list-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:floor-list-delete', ['only' => ['destroy']]);
         $this->middleware('permission:floor-list-status', ['only' => ['changeStatus']]);
     }
 

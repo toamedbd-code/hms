@@ -32,7 +32,7 @@ class AttendanceDeviceService
     {
         // Expected payload: ['device_id'=>'...', 'employee_code'=>'E123', 'type'=>'in'|'out', 'timestamp'=>'2026-03-11T13:00:00']
         // Optional: 'source' => 'device'|'webcam'|..., 'meta' => array
-        $employeeCode = $payload['employee_code'] ?? null;
+        $employeeCode = isset($payload['employee_code']) ? trim((string) $payload['employee_code']) : null;
         $type = strtolower((string) ($payload['type'] ?? 'in'));
         $ts = $payload['timestamp'] ?? now()->toDateTimeString();
         $deviceIdentifier = $payload['device_id'] ?? $payload['identifier'] ?? null;
@@ -78,7 +78,37 @@ class AttendanceDeviceService
                 ->first();
 
             if (!$inRecord) {
-                // No prior in: create standalone out record
+                // For webcam flows, repeated OUT snapshots can arrive for the same day.
+                // Update latest same-day closed IN row instead of creating a new duplicate cycle.
+                if (in_array((string) $source, ['webcam', 'webcam-kiosk'], true)) {
+                    $latestClosedIn = Attendance::where('employee_code', $employeeCode)
+                        ->where('type', 'in')
+                        ->whereDate('recorded_at', $outTs->toDateString())
+                        ->whereNotNull('recorded_out')
+                        ->orderByDesc('recorded_out')
+                        ->first();
+
+                    if ($latestClosedIn) {
+                        $this->applyAttendanceOutUpdate($latestClosedIn, $outTs, $device ? $device->id : null);
+                        $this->syncLegacyStaffAttendance($employeeCode, 'out', $outTs);
+                        return true;
+                    }
+
+                    // No same-day closed IN row yet; start a fresh IN cycle.
+                    $model = Attendance::create([
+                        'employee_code' => $employeeCode,
+                        'type' => 'in',
+                        'recorded_at' => $ts,
+                        'device_id' => $device ? $device->id : null,
+                        'source' => $source,
+                        'meta' => $meta,
+                    ]);
+
+                    $this->syncLegacyStaffAttendance($employeeCode, 'in', Carbon::parse($ts));
+                    return (bool) $model;
+                }
+
+                // Device-originated out without prior in: keep standalone out for audit compatibility.
                 $model = Attendance::create([
                     'employee_code' => $employeeCode,
                     'type' => 'out',
@@ -93,79 +123,7 @@ class AttendanceDeviceService
                 return (bool) $model;
             }
 
-            $inTs = Carbon::parse($inRecord->recorded_at);
-            $durationMinutes = max(0, $outTs->diffInMinutes($inTs));
-
-            $staff = $this->resolveAdminFromEmployeeCode((string) $employeeCode);
-            $resolvedStaffId = $staff?->id;
-
-            // Check roster first, then shift override
-            $roster = null;
-            if (!empty($resolvedStaffId)) {
-                $roster = DutyRoster::where('date', $inTs->toDateString())
-                    ->where('staff_id', $resolvedStaffId)
-                    ->first();
-            }
-
-            $shift = null;
-            if (!$roster && !empty($employeeCode)) {
-                $shift = AttendanceShift::where('employee_code', $employeeCode)
-                    ->where(function ($q) use ($inTs) {
-                        $q->whereNull('effective_from')->orWhere('effective_from', '<=', $inTs->toDateString());
-                    })
-                    ->where(function ($q) use ($inTs) {
-                        $q->whereNull('effective_to')->orWhere('effective_to', '>=', $inTs->toDateString());
-                    })->orderByDesc('id')->first();
-            }
-
-            if ($roster && $roster->start_time) {
-                $scheduledStart = Carbon::createFromFormat('H:i', $roster->start_time);
-                $scheduledEnd = Carbon::createFromFormat('H:i', $roster->end_time);
-            } elseif ($shift && $shift->start_time) {
-                $scheduledStart = Carbon::createFromFormat('H:i', $shift->start_time);
-                $scheduledEnd = Carbon::createFromFormat('H:i', $shift->end_time);
-            } else {
-                $scheduledStart = Carbon::createFromFormat('H:i', config('attendance.scheduled_start'));
-                $scheduledEnd = Carbon::createFromFormat('H:i', config('attendance.scheduled_end'));
-            }
-
-            $scheduledStart = $scheduledStart->setDate($inTs->year, $inTs->month, $inTs->day);
-            $scheduledEnd = $scheduledEnd->setDate($inTs->year, $inTs->month, $inTs->day);
-
-            $lateMinutes = 0;
-            if ($inTs->greaterThan($scheduledStart)) {
-                $lateMinutes = $inTs->diffInMinutes($scheduledStart);
-            }
-
-            $overtimeMinutes = 0;
-            if ($outTs->greaterThan($scheduledEnd)) {
-                $overtimeMinutes = $outTs->diffInMinutes($scheduledEnd);
-            }
-
-            $lateThreshold = (int) config('attendance.late_threshold_minutes', 60);
-            $overtimeThreshold = (int) config('attendance.overtime_threshold_minutes', 60);
-
-            $deduction = 0.0;
-            if ($lateMinutes >= $lateThreshold) {
-                $deductionHours = (int) floor($lateMinutes / 60);
-                $deduction = $deductionHours * (float) config('attendance.late_deduction_per_hour', 0);
-            }
-
-            $overtimeAmount = 0.0;
-            if ($overtimeMinutes >= $overtimeThreshold) {
-                $overtimeHours = (int) floor($overtimeMinutes / 60);
-                $overtimeAmount = $overtimeHours * (float) config('attendance.overtime_rate_per_hour', 0);
-            }
-
-            $inRecord->update([
-                'recorded_out' => $outTs->toDateTimeString(),
-                'duration_minutes' => $durationMinutes,
-                'late_minutes' => $lateMinutes,
-                'overtime_minutes' => $overtimeMinutes,
-                'deduction_amount' => $deduction,
-                'overtime_amount' => $overtimeAmount,
-                'device_id' => $device ? $device->id : $inRecord->device_id,
-            ]);
+            $this->applyAttendanceOutUpdate($inRecord, $outTs, $device ? $device->id : null);
 
             $this->syncLegacyStaffAttendance($employeeCode, 'out', $outTs);
 
@@ -174,6 +132,98 @@ class AttendanceDeviceService
 
         logger()->info('Attendance event', $payload);
         return true;
+    }
+
+    private function applyAttendanceOutUpdate(Attendance $inRecord, Carbon $outTs, ?int $deviceId = null): void
+    {
+        $employeeCode = (string) ($inRecord->employee_code ?? '');
+        $inTs = Carbon::parse($inRecord->recorded_at);
+        $durationMinutes = max(0, $outTs->diffInMinutes($inTs));
+
+        $metrics = $this->buildAttendanceOutMetrics($employeeCode, $inTs, $outTs);
+
+        $inRecord->update([
+            'recorded_out' => $outTs->toDateTimeString(),
+            'duration_minutes' => $durationMinutes,
+            'late_minutes' => $metrics['late_minutes'],
+            'overtime_minutes' => $metrics['overtime_minutes'],
+            'deduction_amount' => $metrics['deduction'],
+            'overtime_amount' => $metrics['overtime_amount'],
+            'device_id' => $deviceId ?: $inRecord->device_id,
+        ]);
+    }
+
+    private function buildAttendanceOutMetrics(string $employeeCode, Carbon $inTs, Carbon $outTs): array
+    {
+        $staff = $this->resolveAdminFromEmployeeCode($employeeCode);
+        $resolvedStaffId = $staff?->id;
+
+        // Check roster first, then shift override.
+        $roster = null;
+        if (!empty($resolvedStaffId)) {
+            $roster = DutyRoster::where('date', $inTs->toDateString())
+                ->where('staff_id', $resolvedStaffId)
+                ->first();
+        }
+
+        $shift = null;
+        if (!$roster && !empty($employeeCode)) {
+            $shift = AttendanceShift::where('employee_code', $employeeCode)
+                ->where(function ($q) use ($inTs) {
+                    $q->whereNull('effective_from')->orWhere('effective_from', '<=', $inTs->toDateString());
+                })
+                ->where(function ($q) use ($inTs) {
+                    $q->whereNull('effective_to')->orWhere('effective_to', '>=', $inTs->toDateString());
+                })
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        if ($roster && $roster->start_time) {
+            $scheduledStart = $this->parseShiftTimeOrDefault((string) $roster->start_time, $inTs, (string) config('attendance.scheduled_start', '09:00'));
+            $scheduledEnd = $this->parseShiftTimeOrDefault((string) $roster->end_time, $inTs, (string) config('attendance.scheduled_end', '17:00'));
+        } elseif ($shift && $shift->start_time) {
+            $scheduledStart = $this->parseShiftTimeOrDefault((string) $shift->start_time, $inTs, (string) config('attendance.scheduled_start', '09:00'));
+            $scheduledEnd = $this->parseShiftTimeOrDefault((string) $shift->end_time, $inTs, (string) config('attendance.scheduled_end', '17:00'));
+        } else {
+            $scheduledStart = $this->parseShiftTimeOrDefault((string) config('attendance.scheduled_start', '09:00'), $inTs, '09:00');
+            $scheduledEnd = $this->parseShiftTimeOrDefault((string) config('attendance.scheduled_end', '17:00'), $inTs, '17:00');
+        }
+
+        $scheduledStart = $scheduledStart->setDate($inTs->year, $inTs->month, $inTs->day);
+        $scheduledEnd = $scheduledEnd->setDate($inTs->year, $inTs->month, $inTs->day);
+
+        $lateMinutes = 0;
+        if ($inTs->greaterThan($scheduledStart)) {
+            $lateMinutes = $inTs->diffInMinutes($scheduledStart);
+        }
+
+        $overtimeMinutes = 0;
+        if ($outTs->greaterThan($scheduledEnd)) {
+            $overtimeMinutes = $outTs->diffInMinutes($scheduledEnd);
+        }
+
+        $lateThreshold = (int) config('attendance.late_threshold_minutes', 60);
+        $overtimeThreshold = (int) config('attendance.overtime_threshold_minutes', 60);
+
+        $deduction = 0.0;
+        if ($lateMinutes >= $lateThreshold) {
+            $deductionHours = (int) floor($lateMinutes / 60);
+            $deduction = $deductionHours * (float) config('attendance.late_deduction_per_hour', 0);
+        }
+
+        $overtimeAmount = 0.0;
+        if ($overtimeMinutes >= $overtimeThreshold) {
+            $overtimeHours = (int) floor($overtimeMinutes / 60);
+            $overtimeAmount = $overtimeHours * (float) config('attendance.overtime_rate_per_hour', 0);
+        }
+
+        return [
+            'late_minutes' => $lateMinutes,
+            'overtime_minutes' => $overtimeMinutes,
+            'deduction' => $deduction,
+            'overtime_amount' => $overtimeAmount,
+        ];
     }
 
     private function syncLegacyStaffAttendance(string $employeeCode, string $eventType, Carbon $eventTs): void
@@ -201,7 +251,13 @@ class AttendanceDeviceService
 
         if ($eventType === 'in') {
             $existingIn = $this->parseStoredTime($record->in_time, $attendanceDate);
-            if (!$existingIn || $eventTs->lt($existingIn)) {
+            $existingOut = $this->parseStoredTime($record->out_time, $attendanceDate);
+
+            // If user checks in again after an existing OUT, start a new IN/OUT cycle for the day.
+            if ($existingOut && $eventTs->gt($existingOut)) {
+                $record->in_time = $eventTs->format('H:i:s');
+                $record->out_time = null;
+            } elseif (!$existingIn || $eventTs->lt($existingIn)) {
                 $record->in_time = $eventTs->format('H:i:s');
             }
 
@@ -249,7 +305,7 @@ class AttendanceDeviceService
 
     private function deriveAttendanceStatus(int $adminId, string $employeeCode, Carbon $inTs): string
     {
-        $scheduledStart = Carbon::createFromFormat('H:i', config('attendance.scheduled_start'));
+        $scheduledStart = $this->parseShiftTimeOrDefault((string) config('attendance.scheduled_start', '09:00'), $inTs, '09:00');
 
         $roster = DutyRoster::where('date', $inTs->toDateString())
             ->where('staff_id', $adminId)
@@ -295,6 +351,21 @@ class AttendanceDeviceService
         }
 
         return null;
+    }
+
+    private function parseShiftTimeOrDefault(string $value, Carbon $date, string $fallback = '09:00'): Carbon
+    {
+        $parsed = $this->parseShiftTime($value, $date);
+        if ($parsed) {
+            return $parsed;
+        }
+
+        $fallbackParsed = $this->parseShiftTime($fallback, $date);
+        if ($fallbackParsed) {
+            return $fallbackParsed;
+        }
+
+        return Carbon::copy($date)->setTime(0, 0, 0);
     }
 
     private function parseStoredTime(mixed $value, string $date): ?Carbon

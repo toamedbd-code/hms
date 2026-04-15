@@ -15,12 +15,7 @@
                         <h3>Bulk Import Charges</h3>
                     </div>
                     <div class="card-body">
-                        <!-- Success Message -->
-                        @if(session()->has('success'))
-                            <div class="alert alert-success">
-                                {{ session('success') }}
-                            </div>
-                        @endif
+                        <!-- Success Message removed (toast-only) -->
 
                         <!-- Import Errors -->
                         @if(session()->has('import_errors'))

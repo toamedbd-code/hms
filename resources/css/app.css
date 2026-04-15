@@ -2,12 +2,297 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --app-theme-primary: #64748b;
+  --app-theme-soft: #f1f5f9;
+  --app-theme-contrast: #334155;
+  --app-theme-surface: #ffffff;
+  --app-theme-primary-rgb: 100 116 139;
+  --app-theme-border: #d1d5db;
+  --app-theme-muted-surface: #f8fafc;
+}
+
+body {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--app-theme-surface) 84%, white) 0%,
+    color-mix(in srgb, var(--app-theme-soft) 48%, #f8fafc) 100%
+  );
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 85% 12%, rgb(var(--app-theme-primary-rgb) / 0.12) 0%, transparent 38%),
+    radial-gradient(circle at 12% 88%, rgb(var(--app-theme-primary-rgb) / 0.09) 0%, transparent 34%);
+  z-index: -1;
+}
+
+#app,
+#app > div {
+  background: transparent;
+}
+
+a {
+  color: var(--app-theme-primary);
+}
+
+a:hover {
+  color: var(--app-theme-contrast);
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible {
+  border-color: var(--app-theme-primary) !important;
+  box-shadow: 0 0 0 1px var(--app-theme-primary) !important;
+}
+
+::selection {
+  background: var(--app-theme-soft);
+  color: var(--app-theme-contrast);
+}
+
 .sweet-alert {
   @apply bg-white p-4 rounded-lg shadow-lg;
 }
 
 .list-focus:focus {
-  outline: 2px solid #3b82f6;
-  /* Tailwind's blue-500 */
+  outline: 2px solid var(--app-theme-primary);
   outline-offset: 2px;
+}
+
+.bg-blue-50,
+.bg-blue-50\/40,
+.bg-blue-100 {
+  background-color: color-mix(in srgb, var(--app-theme-soft) 90%, white) !important;
+}
+
+.bg-blue-500,
+.bg-blue-600,
+.bg-violet-600 {
+  background-color: var(--app-theme-primary) !important;
+}
+
+.text-blue-500,
+.text-blue-600,
+.text-blue-700,
+.text-violet-600,
+.text-violet-700 {
+  color: var(--app-theme-primary) !important;
+}
+
+.text-blue-800,
+.text-blue-900,
+.text-violet-800,
+.text-violet-900 {
+  color: var(--app-theme-contrast) !important;
+}
+
+.border-blue-200,
+.border-blue-500,
+.border-blue-600,
+.border-violet-200,
+.border-violet-600 {
+  border-color: color-mix(in srgb, var(--app-theme-primary) 82%, white) !important;
+}
+
+.ring-blue-500,
+.focus\:ring-blue-500:focus,
+.focus\:border-blue-500:focus {
+  --tw-ring-color: rgb(var(--app-theme-primary-rgb) / 0.38) !important;
+  border-color: var(--app-theme-primary) !important;
+}
+
+.hover\:bg-blue-50:hover,
+.hover\:bg-blue-100:hover,
+.hover\:bg-blue-50\/40:hover,
+.hover\:bg-violet-50:hover {
+  background-color: color-mix(in srgb, var(--app-theme-soft) 68%, white) !important;
+}
+
+.hover\:text-blue-600:hover,
+.hover\:text-blue-700:hover,
+.hover\:text-violet-700:hover {
+  color: var(--app-theme-primary) !important;
+}
+
+.bg-gray-50,
+.bg-gray-100,
+.bg-slate-100,
+.bg-slate-200,
+.bg-slate-300 {
+  background-color: var(--app-theme-muted-surface) !important;
+}
+
+.border-gray-200,
+.border-gray-300,
+.border-slate-200,
+.border-slate-300 {
+  border-color: var(--app-theme-border) !important;
+}
+
+.text-gray-500,
+.text-gray-600,
+.text-gray-700,
+.text-gray-800 {
+  color: color-mix(in srgb, var(--app-theme-contrast) 68%, #334155) !important;
+}
+
+.shadow,
+.shadow-sm,
+.shadow-md,
+.shadow-lg {
+  box-shadow:
+    0 1px 2px rgb(var(--app-theme-primary-rgb) / 0.08),
+    0 8px 22px rgb(var(--app-theme-primary-rgb) / 0.09) !important;
+}
+
+.bg-white {
+  background-color: color-mix(in srgb, var(--app-theme-surface) 90%, white) !important;
+}
+
+/* Vivid skin polish: make the whole UI feel themed, not only active accents */
+.rounded-md,
+.rounded-lg {
+  border-color: color-mix(in srgb, var(--app-theme-primary) 18%, #cbd5e1);
+}
+
+.bg-white,
+.dark\:bg-slate-900,
+.dark\:bg-gray-800 {
+  border: 1px solid color-mix(in srgb, var(--app-theme-primary) 16%, #cbd5e1);
+}
+
+.bg-white {
+  box-shadow:
+    0 1px 2px rgb(var(--app-theme-primary-rgb) / 0.10),
+    0 10px 26px rgb(var(--app-theme-primary-rgb) / 0.12) !important;
+}
+
+/* Theme-aware replacement for old hardcoded blue gradients on action buttons */
+button[style*="linear-gradient(to right, #3b82f6, #60a5fa)"],
+button[style*="linear-gradient(to right, #2563eb, #3b82f6)"] {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--app-theme-primary) 92%, #0f172a) 0%,
+    color-mix(in srgb, var(--app-theme-primary) 70%, white) 100%
+  ) !important;
+  color: #ffffff !important;
+  border: 1px solid color-mix(in srgb, var(--app-theme-primary) 75%, #0f172a) !important;
+}
+
+button[style*="linear-gradient(to right, #3b82f6, #60a5fa)"]:hover,
+button[style*="linear-gradient(to right, #2563eb, #3b82f6)"]:hover {
+  filter: saturate(1.15) brightness(0.98);
+}
+
+/* Stronger themed focus ring for form-heavy pages */
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgb(var(--app-theme-primary-rgb) / 0.24),
+    0 0 0 4px rgb(var(--app-theme-primary-rgb) / 0.10) !important;
+}
+
+/* Make page sections feel coated by current theme */
+.app-shell-surface,
+.app-content-surface {
+  box-shadow: inset 0 0 0 1px rgb(var(--app-theme-primary-rgb) / 0.06);
+}
+
+.theme-red {
+  --app-theme-muted-surface: color-mix(in srgb, var(--app-theme-soft) 42%, #fff7f7);
+}
+
+.theme-blue {
+  --app-theme-muted-surface: color-mix(in srgb, var(--app-theme-soft) 44%, #f5f9ff);
+}
+
+.theme-amber {
+  --app-theme-muted-surface: color-mix(in srgb, var(--app-theme-soft) 46%, #fffdf4);
+}
+
+.theme-default {
+  --app-theme-muted-surface: #f8fafc;
+  --app-theme-border: #d1d5db;
+  --app-theme-primary: #475569;
+  --app-theme-soft: #f1f5f9;
+  --app-theme-contrast: #334155;
+  --app-theme-surface: #ffffff;
+  --app-theme-primary-rgb: 71 85 105;
+}
+
+.theme-default body {
+  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.theme-default body::before {
+  background: none;
+}
+
+.theme-default a,
+.theme-default .text-blue-500,
+.theme-default .text-blue-600,
+.theme-default .text-blue-700,
+.theme-default .text-violet-600,
+.theme-default .text-violet-700 {
+  color: #334155 !important;
+}
+
+.theme-default .bg-blue-50,
+.theme-default .bg-blue-50\/40,
+.theme-default .bg-blue-100,
+.theme-default .bg-violet-50 {
+  background-color: #f1f5f9 !important;
+}
+
+.theme-default .border-blue-200,
+.theme-default .border-blue-500,
+.theme-default .border-blue-600,
+.theme-default .border-violet-200,
+.theme-default .border-violet-600 {
+  border-color: #cbd5e1 !important;
+}
+
+.theme-default button[style*="linear-gradient(to right, #3b82f6, #60a5fa)"],
+.theme-default button[style*="linear-gradient(to right, #2563eb, #3b82f6)"] {
+  background: linear-gradient(90deg, #475569 0%, #64748b 100%) !important;
+  border-color: #475569 !important;
+}
+
+.theme-red body {
+  background: linear-gradient(140deg, #fff1f2 0%, #fff7ed 48%, #ffffff 100%);
+}
+
+.theme-blue body {
+  background: linear-gradient(140deg, #eff6ff 0%, #eef2ff 52%, #f8fbff 100%);
+}
+
+.theme-amber body {
+  background: linear-gradient(140deg, #fffbeb 0%, #fff7ed 50%, #fffdf5 100%);
+}
+
+.theme-red body::before {
+  background:
+    radial-gradient(circle at 82% 14%, rgb(220 38 38 / 0.16) 0%, transparent 42%),
+    radial-gradient(circle at 12% 86%, rgb(190 18 60 / 0.10) 0%, transparent 36%);
+}
+
+.theme-blue body::before {
+  background:
+    radial-gradient(circle at 82% 14%, rgb(29 78 216 / 0.16) 0%, transparent 42%),
+    radial-gradient(circle at 12% 86%, rgb(37 99 235 / 0.10) 0%, transparent 36%);
+}
+
+.theme-amber body::before {
+  background:
+    radial-gradient(circle at 82% 14%, rgb(217 119 6 / 0.16) 0%, transparent 42%),
+    radial-gradient(circle at 12% 86%, rgb(202 138 4 / 0.11) 0%, transparent 36%);
 }

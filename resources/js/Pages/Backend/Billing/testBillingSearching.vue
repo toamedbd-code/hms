@@ -1142,15 +1142,31 @@ const saveBill = () => {
   }
   console.log('Complete Form Data:', formData);
   const form = useForm(formData);
+  // Open blank window synchronously to avoid popup blockers when navigating later
+  let invoiceWindow = null;
+  try {
+    invoiceWindow = window.open('', '_blank');
+  } catch (e) {
+    invoiceWindow = null;
+  }
   if (props.id) {
     form.put(route("backend.billing.update", props.id), {
       onSuccess: (response) => {
         displayResponse(response);
         const successMessage = response?.props?.flash?.successMessage;
         const billId = response?.props?.flash?.billId;
-        if (successMessage && billId) {
+        if (billId) {
           resetAllForms();
-          window.open(route("backend.download.invoice", { id: billId, module: 'billing' }), "_blank");
+          const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'billing' });
+          try {
+            if (invoiceWindow && !invoiceWindow.closed) {
+              invoiceWindow.location = invoiceUrl;
+            } else {
+              window.open(invoiceUrl, '_blank');
+            }
+          } catch (e) {
+            window.open(invoiceUrl, '_blank');
+          }
         }
       },
       onError: (errorObject) => {
@@ -1165,7 +1181,7 @@ const saveBill = () => {
         displayResponse(response);
         const successMessage = response?.props?.flash?.successMessage;
         const billId = response?.props?.flash?.billId;
-        if (successMessage && billId) {
+        if (billId) {
           // for download pdf
           /* const link = document.createElement("a");
           link.href = route("backend.download.invoice", billId);
@@ -1174,7 +1190,16 @@ const saveBill = () => {
           document.body.removeChild(link); */
           // for view pdf in new tab
           resetAllForms();
-          window.open(route("backend.download.invoice", { id: billId, module: 'billing' }), "_blank");
+          const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'billing' });
+          try {
+            if (invoiceWindow && !invoiceWindow.closed) {
+              invoiceWindow.location = invoiceUrl;
+            } else {
+              window.open(invoiceUrl, '_blank');
+            }
+          } catch (e) {
+            window.open(invoiceUrl, '_blank');
+          }
         }
       },
       onError: (errorObject) => {
@@ -1942,18 +1967,19 @@ input:hover {
 }
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
+  background: color-mix(in srgb, var(--app-theme-soft) 26%, #e2e8f0);
+  border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 3px;
+  background: color-mix(in srgb, var(--app-theme-primary) 40%, #94a3b8);
+  border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: color-mix(in srgb, var(--app-theme-primary) 56%, #64748b);
 }
 /* Dynamic height for item list */
 .max-h-custom {

@@ -4,18 +4,40 @@ import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { router } from '@inertiajs/vue3';
+import { debounce } from 'lodash';
 
 let props = defineProps({
     filters: Object,
+    isDoctorPortal: Boolean,
+    canSelectDoctor: Boolean,
+    doctors: Array,
 });
 
 const filters = ref({
-
+    name: props.filters?.name ?? '',
     numOfData: props.filters?.numOfData ?? 10,
+    doctor_id: props.filters?.doctor_id ?? '',
 });
 
 const applyFilter = () => {
-    router.get(route('backend.opdpatient.index'), filters.value, { preserveState: true });
+    const routeName = props.isDoctorPortal ? 'backend.doctor.portal.opd' : 'backend.opdpatient.index';
+    const payload = { ...filters.value };
+    payload.name = String(payload.name ?? '').trim();
+
+    if (!props.isDoctorPortal) {
+        delete payload.doctor_id;
+    }
+
+    router.get(route(routeName), payload, { preserveState: true, preserveScroll: true, replace: true });
+};
+
+const applyFilterDebounced = debounce(() => {
+    applyFilter();
+}, 300);
+
+const clearFilters = () => {
+    filters.value.name = '';
+    applyFilter();
 };
 
 const goToOpdAdd = () => {
@@ -35,7 +57,7 @@ const goToOpdAdd = () => {
                     <h1 class="p-4 text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
                 </div>
 
-                <div class="p-4 py-2 flex items-center space-x-2">
+                <div v-if="!props.isDoctorPortal" class="p-4 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
                         <button @click="goToOpdAdd"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out"
@@ -55,14 +77,30 @@ const goToOpdAdd = () => {
             <div
                 class="flex justify-between w-full p-2 py-3 space-x-2 text-gray-700 rounded-md bg-slate-300 shadow-gray-800/50 dark:bg-gray-700 dark:text-gray-200">
 
-                <div class="grid w-full grid-cols-1 gap-2 md:grid-cols-5">
+                <div class="grid w-full grid-cols-1 gap-2 md:grid-cols-12">
 
-                    <div class="flex space-x-2">
+                    <div class="flex items-center gap-2 md:col-span-8">
                         <div class="w-full">
                             <input id="name" v-model="filters.name"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
-                                type="text" placeholder="Name" @input="applyFilter" />
+                                type="text" placeholder="Patient Name" @input="applyFilterDebounced" />
                         </div>
+
+                        <button
+                            type="button"
+                            class="min-w-[78px] px-3 py-2 text-xs font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700"
+                            @click="applyFilter"
+                        >
+                            Search
+                        </button>
+
+                        <button
+                            type="button"
+                            class="min-w-[70px] px-3 py-2 text-xs font-semibold text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 dark:text-gray-200 dark:bg-slate-600 dark:hover:bg-slate-500"
+                            @click="clearFilters"
+                        >
+                            Clear
+                        </button>
 
                         <div class="block min-w-24 md:hidden">
                             <select v-model="filters.numOfData" @change="applyFilter"
@@ -76,6 +114,16 @@ const goToOpdAdd = () => {
                                 <option value="500">Show 500</option>
                             </select>
                         </div>
+                    </div>
+
+                    <div v-if="props.isDoctorPortal && props.canSelectDoctor" class="w-full md:col-span-4">
+                        <select v-model="filters.doctor_id" @change="applyFilter"
+                            class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            <option value="">Select Doctor</option>
+                            <option v-for="doctor in props.doctors || []" :key="doctor.id" :value="doctor.id">
+                                {{ doctor.name }}
+                            </option>
+                        </select>
                     </div>
                 </div>
 

@@ -5,6 +5,10 @@
     <meta charset="utf-8">
     <title>OPD Invoice</title>
     <style>
+        @php
+            $__inv_header_h = (int) ($header_height ?? 115);
+            $__inv_footer_h = (int) ($footer_height ?? 70);
+        @endphp
         @page {
             margin: 0mm 0mm;
         }
@@ -42,38 +46,49 @@
 
         .header-image {
             width: 100%;
-            max-height: 80px;
+            max-height: {{ $__inv_header_h }}px;
             margin: 0;
             padding: 0;
             display: block;
+            object-fit: cover;
+            height: {{ $__inv_header_h }}px;
+        }
+
+        .header-placeholder {
+            height: {{ $__inv_header_h }}px;
+            width: 100%;
         }
 
         /* Patient Info Two Column Layout */
         .patient-info {
             margin-bottom: 10px;
-            padding: 10px;
+            padding: 4px 10px 10px;
             width: 100%;
         }
 
-        .patient-info table {
+        .patient-info-table {
             width: 100%;
             border-collapse: collapse;
         }
 
-        .patient-info td {
+        .patient-info-table td {
             vertical-align: top;
-            padding: 2px 10px 2px 0;
-            width: 50%;
+            padding: 2px 0;
         }
 
-        .info-label {
+        .patient-info-table .label {
             font-weight: bold;
-            display: inline-block;
-            min-width: 120px;
+            width: 16%;
+            white-space: nowrap;
         }
 
-        .info-value {
-            display: inline-block;
+        .patient-info-table .colon {
+            width: 2%;
+            text-align: center;
+        }
+
+        .patient-info-table .value {
+            width: 32%;
         }
 
         /* Payment Table */
@@ -109,17 +124,32 @@
             margin-top: 10px;
             padding: 10px;
             float: right;
-            width: 40%;
+            width: 50%;
         }
 
         .summary-table {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
         }
 
         .summary-table td {
             padding: 3px 5px;
             border-bottom: 1px solid #ddd;
+        }
+
+        .summary-table td:first-child {
+            width: 72%;
+            white-space: nowrap;
+        }
+
+        .summary-table .amount-col {
+            width: 28%;
+            white-space: nowrap;
+        }
+
+        .summary-table .due-collect-label {
+            white-space: nowrap;
         }
 
         .summary-table .total-row td {
@@ -133,17 +163,61 @@
             border-top: 1px solid #000;
         }
 
+        @media print {
+            body {
+                padding-top: {{ $__inv_header_h + 10 }}px; /* reserve space for fixed header */
+                padding-bottom: {{ $__inv_footer_h * 2 }}px; /* reserve space for fixed footer */
+            }
+
+            .header-image,
+            .header-placeholder {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                width: 100%;
+                z-index: 50;
+            }
+
+            .footer-image,
+            .footer-placeholder,
+            .footer {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                width: 100%;
+                max-height: {{ $__inv_footer_h + 10 }}px;
+                object-fit: contain;
+                z-index: 10;
+            }
+
+            .footer-content {
+                position: fixed;
+                bottom: {{ (int) floor($__inv_footer_h / 2) }}px; /* sit centered with footer image */
+                left: 0;
+                right: 0;
+                width: 100%;
+                text-align: center;
+                z-index: 60; /* ensure content is above footer image */
+                border-top: none !important; /* remove border */
+                padding-top: 0;
+                background: transparent;
+            }
+        }
+
         .clearfix {
             clear: both;
         }
 
         .footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
+            position: static;
+            bottom: auto;
+            left: auto;
+            right: auto;
             padding: 0;
             margin: 0;
+            width: 100%;
         }
 
         .footer p {
@@ -155,10 +229,30 @@
 
         .footer-image {
             width: 100%;
-            max-height: 80px;
+            max-height: {{ $__inv_footer_h + 10 }}px;
             margin: 0;
             padding: 0;
             display: block;
+            object-fit: contain;
+            height: auto;
+        }
+
+        .footer-placeholder {
+            height: {{ $__inv_footer_h }}px;
+            width: 100%;
+        }
+
+        .footer-content {
+            text-align: center;
+            padding: 0 10px;
+            margin: 0 0 5px;
+            font-size: inherit;
+        }
+
+        .footer-meta {
+            width: 100%;
+            padding: 0 10px 5px;
+            font-size: 11px;
         }
 
         /* Paper size classes for manual control */
@@ -169,64 +263,96 @@
         .paper-a5 {
             font-size: 11px !important;
         }
+
+        @media print and (min-width: 149mm) {
+            .header-image {
+                max-height: {{ $__inv_header_h }}px;
+            }
+
+            .footer-image {
+                max-height: {{ $__inv_footer_h + 10 }}px;
+            }
+
+            .header-placeholder {
+                height: {{ $__inv_header_h }}px;
+            }
+
+            .footer-placeholder {
+                height: {{ $__inv_footer_h }}px;
+            }
+        }
+
+        @media print and (max-width: 148mm), screen and (max-width: 148mm) {
+            .header-image,
+            .footer-image {
+                max-height: {{ min($__inv_header_h, 58) }}px;
+            }
+
+            .header-placeholder,
+            .footer-placeholder {
+                height: {{ min($__inv_footer_h, 58) }}px;
+            }
+        }
     </style>
 </head>
 
 <body>
     <!-- Header Section -->
-    @if($header_image)
     <div class="header">
+        @if($header_image)
         <img src="{{ $header_image }}" class="header-image" alt="Clinic Header">
+        @else
+        <div class="header-placeholder"></div>
+        @endif
     </div>
-    @endif
 
     <!-- Patient Information Section - Two Column Layout -->
     <div class="patient-info">
-        <table>
+        <table class="patient-info-table">
             <tr>
-                <td>
-                    <div><span class="info-label">OPD ID:</span> <span class="info-value">{{ $opd_id }}</span></div>
-                </td>
-                <td>
-                    <div><span class="info-label">OPD Checkin ID:</span> <span class="info-value">{{ $opd_checkin_id }}</span></div>
-                </td>
+                <td class="label">OPD ID</td>
+                <td class="colon">:</td>
+                <td class="value">{{ $opd_id }}</td>
+                <td class="label">OPD Checkin ID</td>
+                <td class="colon">:</td>
+                <td class="value">{{ $opd_checkin_id }}</td>
             </tr>
             <tr>
-                <td>
-                    <div><span class="info-label">Patient Name:</span> <span class="info-value">{{ $patient_name ?? '' }}</span></div>
-                </td>
-                <td>
-                    <div><span class="info-label">Date:</span> <span class="info-value">{{ $appointment_date ?? '' }}</span></div>
-                </td>
+                <td class="label">Patient Name</td>
+                <td class="colon">:</td>
+                <td class="value">{{ $patient_name ?? '' }}</td>
+                <td class="label">Date</td>
+                <td class="colon">:</td>
+                <td class="value">{{ $appointment_date ?? '' }}</td>
             </tr>
             <tr>
-                <td>
-                    <div><span class="info-label">Blood Group:</span> <span class="info-value">{{ $blood_group ?? '-' }}</span></div>
-                </td>
-                <td>
-                    <div><span class="info-label">Age:</span> <span class="info-value">{{ $age ?? '' }}</span></div>
-                </td>
+                <td class="label">Blood Group</td>
+                <td class="colon">:</td>
+                <td class="value">{{ $blood_group ?? '-' }}</td>
+                <td class="label">Age</td>
+                <td class="colon">:</td>
+                <td class="value">{{ $age ?? '' }}</td>
             </tr>
             <tr>
-                <td>
-                    <div><span class="info-label">Address:</span> <span class="info-value">{{ $address ?? '-' }}</span></div>
-                </td>
-                <td>
-                    <div><span class="info-label">Gender:</span> <span class="info-value">{{ $gender ?? '' }}</span></div>
-                </td>
+                <td class="label">Address</td>
+                <td class="colon">:</td>
+                <td class="value">{{ $address ?? '-' }}</td>
+                <td class="label">Gender</td>
+                <td class="colon">:</td>
+                <td class="value">{{ $gender ?? '' }}</td>
             </tr>
             <tr>
-                <td>
-                    <div><span class="info-label">Consultant Doctor:</span> <span class="info-value">{{ $consultant_doctor ?? '' }}</span></div>
-                </td>
-                <td>
-                    <div><span class="info-label">Known Allergies:</span> <span class="info-value">{{ $known_allergies ?? '-' }}</span></div>
-                </td>
+                <td class="label">Consultant Doctor</td>
+                <td class="colon">:</td>
+                <td class="value">{{ $consultant_doctor ?? '' }}</td>
+                <td class="label">Known Allergies</td>
+                <td class="colon">:</td>
+                <td class="value">{{ $known_allergies ?? '-' }}</td>
             </tr>
             <tr>
-                <td colspan="2">
-                    <div><span class="info-label"></span> <span class="info-value">{{ $consultant_qualification }}</span></div>
-                </td>
+                <td class="label">Consultant Qualification</td>
+                <td class="colon">:</td>
+                <td class="value" colspan="4">{{ $consultant_qualification ?? '-' }}</td>
             </tr>
         </table>
     </div>
@@ -273,11 +399,23 @@
                     <td class="amount-col">Tk {{ number_format($total_amount, 2) }}</td>
                 </tr>
                 <tr>
-                    <td>Paid Amount</td>
-                    <td class="amount-col">Tk {{ number_format($paid_amount, 2) }}</td>
+                    <td>Paid (Invoice Time)</td>
+                    <td class="amount-col">Tk {{ number_format($invoice_time_paid_amount ?? $paid_amount, 2) }}</td>
+                </tr>
+                @foreach(($opd_due_collections ?? []) as $dueCollection)
+                <tr>
+                    <td class="due-collect-label">
+                        {{ \Carbon\Carbon::parse($dueCollection->collected_at)->format('d-M-Y h:i A') }} - Due Collect
+                    </td>
+                    <td class="amount-col">Tk {{ number_format((float) $dueCollection->collected_amount, 2) }}</td>
+                </tr>
+                @endforeach
+                <tr>
+                    <td><strong>Total Paid Amount</strong></td>
+                    <td class="amount-col"><strong>Tk {{ number_format($paid_amount, 2) }}</strong></td>
                 </tr>
                 <tr class="balance-row">
-                    <td>Balance Amount</td>
+                    <td>Due Amount</td>
                     <td class="amount-col">Tk {{ number_format($balance_amount, 2) }}</td>
                 </tr>
             </table>
@@ -286,11 +424,61 @@
         <div class="clearfix"></div>
     </div>
 
+    @php
+        $portalToken = '';
+        if (!empty($patient_id)) {
+            $portalTokenPayload = [
+                'patient_id' => (int) $patient_id,
+                'phone' => (string) ($patient_phone ?? ''),
+                'exp' => now()->addDays(30)->timestamp,
+            ];
+            $portalToken = encrypt(json_encode($portalTokenPayload));
+        }
+        $portalLoginUrl = $portalToken !== ''
+            ? route('backend.patient.portal.login', ['token' => $portalToken])
+            : '';
+        $portalQrCode = $portalLoginUrl !== ''
+            ? 'data:image/png;base64,' . (new \Milon\Barcode\DNS2D())->getBarcodePNG($portalLoginUrl, 'QRCODE', 5, 5)
+            : '';
+    @endphp
+
+    @if($portalQrCode !== '')
+    <div style="margin: 8px 0 10px; text-align:center;">
+        <img src="{{ $portalQrCode }}" alt="Patient Portal QR" style="width:92px; height:92px; background:#fff;" />
+    </div>
+    @endif
+
     <!-- Footer Section -->
     <div class="footer">
-        <p>Address: {{ $clinic_address }}</p>
-        @if($footer_image)
-        <img src="{{ $footer_image }}" class="footer-image" alt="Clinic Footer">
+        @php
+            $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
+            $footerPrintedAt = trim((string) ($printed_at ?? ''));
+        @endphp
+        <div class="footer-meta">
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="text-align: left; padding-right: 12px;">
+                        {{ $footerFallbackLine }}
+                    </td>
+                    <td style="text-align: right; white-space: nowrap; padding-right: 60px;">
+                        @if($footerPrintedAt !== '')
+                        Printing Date: {{ $footerPrintedAt }}
+                        @endif
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        @if(!empty($footer_image))
+                @if(!empty($footer_content))
+                    <div class="footer-content" style="position:fixed; bottom:{{ (int) floor($__inv_footer_h / 2) + 18 }}px; left:0; right:0; width:100%; text-align:center; z-index:60; border-top:none !important; padding-top:0; background:transparent;">{!! $footer_content !!}</div>
+            @endif
+            <img src="{{ $footer_image }}" class="footer-image" alt="Clinic Footer">
+        @else
+            <div class="footer-placeholder"></div>
+            @if(!empty($footer_content))
+                <div class="footer-content">{!! $footer_content !!}</div>
+            @endif
         @endif
     </div>
 </body>
