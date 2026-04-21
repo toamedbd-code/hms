@@ -89,6 +89,7 @@ use App\Http\Controllers\Backend\ReportController;
 use App\Http\Controllers\Backend\WebSettingController;
 use App\Http\Controllers\Backend\ProfileController;
 use App\Http\Controllers\Backend\BkashSettingController;
+use App\Http\Controllers\Backend\PayslipController;
 
 use App\Http\Controllers\Backend\PharmacyBillController;
 
@@ -342,6 +343,9 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
     // Employee admin UI (Inertia)
     Route::resource('employee', EmployeeController::class);
+
+    // Payslip download (PDF/HTML preview)
+    Route::get('payslip/{payslip}/download', [PayslipController::class, 'download'])->name('payslip.download');
 
 
     //for Billing
