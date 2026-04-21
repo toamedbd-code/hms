@@ -37,6 +37,11 @@ Route::group(['prefix' => 'v1', 'as' => 'v1.'], function () {
 
         // HR: Employee API
         Route::apiResource('employees', \App\Http\Controllers\Api\V1\EmployeeController::class);
+        // HR: Attendance API
+        Route::apiResource('attendances', \App\Http\Controllers\Api\V1\AttendanceController::class);
+
+        // HR: Payroll run
+        Route::post('payroll/run', [\App\Http\Controllers\Api\V1\PayrollController::class, 'run'])->name('payroll.run');
 
         Route::get('ipd-admissions/{ipdpatient}/prescription', [IpdPrescriptionController::class, 'show'])
             ->name('ipd-admissions.prescription.show');
