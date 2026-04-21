@@ -5,12 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>IPD Prescription</title>
     <style>
+        @if(!empty($banglaFontUrl))
         @font-face {
             font-family: 'NotoSansBengali';
-            src: url('{{ $banglaFontPath }}') format('truetype');
+            src: url('{{ $banglaFontUrl }}') format('truetype');
             font-style: normal;
             font-weight: 400;
         }
+        @endif
 
         @page { size: A4; margin: 0; }
 
@@ -66,7 +68,7 @@
         }
 
         .footer-section {
-            position: static;
+            position: fixed;
             width: 100%;
             text-align: center;
             padding-left: 0;
@@ -364,16 +366,11 @@
             .footer-img { max-height: var(--report-footer-height, 70px); object-fit: contain; z-index: 10; }
 
             .footer-content {
-                position: fixed;
-                bottom: calc(var(--report-footer-height, 70px) / 2);
-                left: 0;
-                right: 0;
-                margin: 0 auto;
-                font-size: 14px;
                 text-align: center;
-                padding: 0 12px;
                 width: 100%;
-                z-index: 60; /* above footer image */
+                font-size: 14px;
+                padding: 0 12px;
+                margin: 0;
                 background: transparent;
             }
 
@@ -407,11 +404,7 @@
 
     <div class="sheet">
         <div class="content-section">
-        @if (!empty($headerImage))
-            <img src="{{ $headerImage }}" class="header-img fixed" alt="Header">
-        @else
-            <div class="header-placeholder fixed"></div>
-        @endif
+        @include('prints.partials._header')
 
         <div class="id-row">
             <div style="width:25%; display:inline-block; vertical-align:middle; text-align:left;">
@@ -561,7 +554,7 @@
         </div>
 
         <div class="footer-row">
-            <div style="font-size:11px;">Printed: {{ $printedAt ?? 'N/A' }}</div>
+            <div style="font-size:11px;">Printed: <span class="print-datetime">{{ $printedAt ?? '' }}</span></div>
             <div class="sign-wrap">
                 <div class="sign-row">
                     <span class="sign-box seal-box">
@@ -601,28 +594,63 @@
         </div>
     </div>
 
-    <div class="footer-section">
-        @if (!empty($footerContent))
-            <div class="footer-content">{!! $footerContent !!}</div>
-        @elseif(!empty($footerFallbackLine))
-            <div class="footer-content">{{ $footerFallbackLine }}@if(!empty($printedAt)) , Printing Date: {{ $printedAt }}@endif</div>
-        @endif
-
-        @if (!empty($footerImage))
-            <img src="{{ $footerImage }}" class="footer-img" alt="Footer">
-        @else
-            <div class="footer-placeholder"></div>
-        @endif
-    </div>
+    @include('prints.partials._footer')
 </body>
 
 @if (empty($forPdf) || !$forPdf)
 <script>
+    function _formatPrintDate(d) {
+        try {
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const pad = (n) => (n < 10 ? '0'+n : n);
+            const dd = pad(d.getDate());
+            const mon = months[d.getMonth()];
+            const yyyy = d.getFullYear();
+            let hrs = d.getHours();
+            const mins = pad(d.getMinutes());
+            const ampm = hrs >= 12 ? 'PM' : 'AM';
+            hrs = hrs % 12; hrs = hrs ? hrs : 12;
+            const hh = pad(hrs);
+            return `${dd}-${mon}-${yyyy} ${hh}:${mins} ${ampm}`;
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function _injectCurrentPrintDate() {
+        try {
+            const nowStr = _formatPrintDate(new Date());
+            document.querySelectorAll('.print-datetime').forEach(el => { el.textContent = nowStr; });
+        } catch (e) {
+            // ignore
+        }
+    }
+
     window.addEventListener('load', function () {
+        // allow more time for large/base64 images to render before print
         setTimeout(function () {
+            _injectCurrentPrintDate();
             window.print();
-        }, 180);
+        }, 800);
     });
+
+    if (window.matchMedia) {
+        try {
+            const mql = window.matchMedia('print');
+            if (typeof mql.addListener === 'function') {
+                mql.addListener(function (m) { if (m.matches) _injectCurrentPrintDate(); });
+            } else if (typeof mql.addEventListener === 'function') {
+                mql.addEventListener('change', function (ev) { if (ev.matches) _injectCurrentPrintDate(); });
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    if (typeof window.onbeforeprint === 'function') {
+        const prev = window.onbeforeprint;
+        window.onbeforeprint = function () { _injectCurrentPrintDate(); try { prev(); } catch (e) {} };
+    } else {
+        window.onbeforeprint = _injectCurrentPrintDate;
+    }
 </script>
 @endif
 

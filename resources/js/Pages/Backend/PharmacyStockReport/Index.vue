@@ -111,13 +111,23 @@ const printReport = () => {
     </html>
   `;
 
-  const printWindow = window.open('', '_blank', 'width=1100,height=750');
+  const features = 'noopener,noreferrer,width=1100,height=750,left=200,top=200,resizable,scrollbars';
+  const printWindow = (() => {
+    try {
+      // open a plain new tab (no popup feature string)
+      const w = window.open('', '_blank');
+      try { if (w) w.opener = null; } catch (e) { /* ignore */ }
+      return w;
+    } catch (e) {
+      return null;
+    }
+  })();
   if (!printWindow) return;
   printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
-  printWindow.focus();
-  printWindow.print();
+  try { printWindow.focus(); } catch (e) { /* ignore */ }
+  try { printWindow.print(); } catch (e) { /* ignore */ }
 };
 
 const exportExcel = () => {

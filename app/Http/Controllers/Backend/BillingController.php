@@ -28,6 +28,7 @@ use App\Services\IpdDischargeBillingService;
 use App\Services\MedicineInventoryService;
 use App\Services\PatientService;
 use App\Services\ReferralPersonService;
+use App\Services\LedgerService;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -41,14 +42,16 @@ class BillingController extends Controller
     use SystemTrait;
 
     protected $billingService, $medicineInventoryService, $adminService, $patientService, $referrerService;
+    protected $ledgerService;
 
-    public function __construct(BillingService $billingService, MedicineInventoryService $medicineInventoryService, AdminService $adminService, PatientService $patientService, ReferralPersonService $referrerService)
+    public function __construct(BillingService $billingService, MedicineInventoryService $medicineInventoryService, AdminService $adminService, PatientService $patientService, ReferralPersonService $referrerService, LedgerService $ledgerService)
     {
         $this->billingService = $billingService;
         $this->medicineInventoryService = $medicineInventoryService;
         $this->adminService = $adminService;
         $this->patientService = $patientService;
         $this->referrerService = $referrerService;
+        $this->ledgerService = $ledgerService;
 
         $this->middleware('auth:admin');
 
@@ -618,7 +621,31 @@ if ($existingBill) {
                 $this->createPharmacyBillRecord($billing, $medicineItems, $data);
             }
 
-                        $message = 'Billing created successfully with Bill No: ' . ($billing->bill_number ?? ''); 
+            // Record ledger postings: split payable into paid (cash/bank) and due (AR)
+            try {
+                $paidAmount = (float) ($billing->paid_amt ?? 0);
+                $dueAmount = (float) ($billing->due_amount ?? 0);
+                $createdBy = auth('admin')->user()->id ?? null;
+                $refType = 'Billing';
+                $refId = $billing->id;
+                $date = $billing->created_at ? $billing->created_at->toDateString() : now()->toDateString();
+
+                if ($paidAmount > 0) {
+                    $counterAccount = 'CASH';
+                    if (!empty($data['pay_mode']) && strtolower($data['pay_mode']) !== 'cash') {
+                        $counterAccount = \App\Models\Account::where('code', 'BANK')->exists() ? 'BANK' : 'CASH';
+                    }
+                    $this->ledgerService->recordIncome('DIAG_INC', $counterAccount, $paidAmount, 'Billing paid amount for ' . ($billing->bill_number ?? $billing->id), $date, $refType, $refId, $createdBy);
+                }
+
+                if ($dueAmount > 0) {
+                    $this->ledgerService->recordIncome('DIAG_INC', 'AR', $dueAmount, 'Billing due amount for ' . ($billing->bill_number ?? $billing->id), $date, $refType, $refId, $createdBy);
+                }
+            } catch (\Exception $e) {
+                $this->storeSystemError('Backend', 'BillingController', 'store->ledger', substr($e->getMessage(), 0, 1000));
+            }
+
+            $message = 'Billing created successfully with Bill No: ' . ($billing->bill_number ?? ''); 
 
             $this->storeAdminWorkLog($billing->id, 'billings', $message);
                         ActivityLogService::logCreate(

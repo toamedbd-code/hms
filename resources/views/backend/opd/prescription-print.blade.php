@@ -6,12 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>OPD Prescription</title>
     <style>
+        @if(!empty($banglaFontUrl))
         @font-face {
             font-family: 'NotoSansBengali';
-            src: url('{{ $banglaFontPath }}') format('truetype');
+            src: url('{{ $banglaFontUrl }}') format('truetype');
             font-style: normal;
             font-weight: 400;
         }
+        @endif
 
         @page { size: A4; margin: 0; }
 
@@ -261,23 +263,46 @@
         }
 
         .footer-section {
-            position: static;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
             width: 100%;
+            height: var(--report-footer-height, 70px);
             text-align: center;
             padding-left: 0;
             padding-right: 0;
-            min-height: var(--report-footer-height, 70px);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: flex-end;
+            display: block;
+            overflow: visible;
+            z-index: 10;
         }
 
         .footer-placeholder { width: 100%; height: var(--report-footer-height, 70px); visibility: hidden; }
 
-        .footer-image { width: 100%; height: auto; max-height: var(--report-footer-height, 70px); object-fit: contain; display: block; z-index: 10; }
+        .footer-image {
+            position: absolute;
+            inset: 0; /* fill the footer-section */
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1; /* keep image below content */
+            display: block;
+        }
 
-        .footer-content { text-align: center; width: 100%; font-size:11px; color: #334155; z-index: 60; }
+        .footer-content {
+            position: absolute;
+            inset: 0; /* center within footer */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            width: 100%;
+            font-size: 11px;
+            color: #334155;
+            padding: 6px 12px;
+            z-index: 9999; /* ensure content is above the image */
+            background: transparent;
+        }
 
         .header-image,
         .footer-image {
@@ -504,6 +529,8 @@
             .sheet {
                 border: 0;
                 padding: calc(var(--report-header-height, 115px) + 12px) 12.7mm calc(var(--report-footer-height, 70px) + 12px) 12.7mm; /* reserve space for fixed header/footer */
+                min-height: calc(297mm - var(--report-header-height, 115px) - var(--report-footer-height, 70px));
+                box-sizing: border-box;
             }
 
             .id-barcode-table {
@@ -579,25 +606,28 @@
             .header-image { height: var(--report-header-height, 115px); object-fit: cover; }
 
             /* Fixed footer at bottom of page in print */
-            .footer-section { position: fixed; bottom: 0; left: 0; right: 0; width: 100%; z-index: 10; }
+            .footer-section { position: fixed; bottom: 0; left: 0; right: 0; width: 100%; height: var(--report-footer-height, 70px); z-index: 10; }
 
-            .footer-image { max-height: var(--report-footer-height, 70px); object-fit: contain; z-index: 10; }
+            .footer-section .footer-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
 
-            .footer-content {
-                position: fixed;
-                bottom: calc(var(--report-footer-height, 70px) / 2);
-                left: 0;
-                right: 0;
-                margin: 0 auto;
+            .footer-section .footer-content {
+                position: absolute;
+                inset: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 font-size: 14px;
                 text-align: center;
-                padding: 0 12px;
+                padding: 6px 12px;
                 width: 100%;
-                z-index: 60; /* above footer image */
+                z-index: 9999 !important; /* force content above footer image */
                 background: transparent;
             }
 
-            .content-section { padding-bottom: calc(var(--report-footer-height, 70px) * 2); }
+            .content-section { padding-bottom: calc(var(--report-footer-height, 70px) + 40px); }
+
+            /* Ensure page-sized layout for A4 */
+            html, body { height: 297mm; }
 
             /* hide placeholders in print */
             .header-placeholder.fixed-header,
@@ -614,7 +644,7 @@
 
 @php
     $__ws = function_exists('get_cached_web_setting') ? get_cached_web_setting() : null;
-    $__attendance = is_array($__ws?->attendance_device_options) ? $__ws->attendance_device_options : (is_string($__ws?->attendance_device_options) && trim($__ws->attendance_device_options) !== '' ? json_decode($__ws->attendance_device_options, true) : []);
+    $__attendance = is_array($__ws?->attendance_device_options) ? $__ws->attendance_device_options : (is_string($__ws?->attendance_device_options) && trim($__ws?->attendance_device_options) !== '' ? json_decode($__ws?->attendance_device_options, true) : []);
     $__layout = is_array($__attendance) ? data_get($__attendance, 'reporting.layout', []) : [];
     $reportHeaderHeight = max((int) ($header_height ?? $__layout['header_height'] ?? 115), 0);
     $reportFooterHeight = max((int) ($footer_height ?? $__layout['footer_height'] ?? 70), 0);
@@ -629,12 +659,7 @@
 
     <div class="sheet">
         <div class="content-section">
-        @if (!empty($headerImage))
-            <img src="{{ $headerImage }}" class="header-image fixed-header" alt="Header">
-            <div class="divider"></div>
-        @else
-            <div class="header-placeholder fixed-header"></div>
-        @endif
+        @includeIf('prints.partials._header')
 
         @if (!empty($forPdf) && $forPdf)
             <table class="id-barcode-table">
@@ -855,28 +880,7 @@
         </div>
     </div>
 
-    <div class="footer-section">
-        @php
-            $invoiceFooterFallback = trim((string) ($invoiceFooterFallback ?? config('app.invoice_footer_fallback_line', '')));
-        @endphp
-
-        @if (!empty($footerImage))
-            @if (!empty($footerContent))
-                <div class="footer-content">{!! $footerContent !!}</div>
-            @elseif(!empty($invoiceFooterFallback))
-                <div class="footer-content">{{ $invoiceFooterFallback }}@if(!empty($printedAt)) , Printing Date: {{ $printedAt }}@endif</div>
-            @endif
-            <img src="{{ $footerImage }}" class="footer-image" alt="Footer">
-        @else
-            @if (!empty($footerContent))
-                <div class="footer-content">{!! $footerContent !!}</div>
-            @elseif(!empty($invoiceFooterFallback))
-                <div class="footer-content">{{ $invoiceFooterFallback }}@if(!empty($printedAt)) , Printing Date: {{ $printedAt }}@endif</div>
-            @else
-                <div class="footer-placeholder"></div>
-            @endif
-        @endif
-    </div>
+    @include('prints.partials._footer')
 </body>
 
 @if (empty($forPdf) || !$forPdf)

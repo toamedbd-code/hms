@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\Permission;
 use Illuminate\Database\Seeder;
 use App\Models\Menu;
+use Spatie\Permission\Models\Role;
 
 class PermissionSeeder extends Seeder
 {
@@ -55,6 +56,36 @@ class PermissionSeeder extends Seeder
                 'name' => $p,
                 'guard_name' => 'admin',
             ], ['parent_id' => $webSettingPermission->id]);
+        }
+
+        // Ensure Account Management permissions exist (parent + common children)
+        $accountPerm = Permission::firstOrCreate(
+            ['name' => 'account-management', 'guard_name' => 'admin']
+        );
+
+        Permission::firstOrCreate(
+            ['name' => 'chart-of-accounts', 'guard_name' => 'admin'],
+            ['parent_id' => $accountPerm->id]
+        );
+
+        Permission::firstOrCreate(
+            ['name' => 'ledger', 'guard_name' => 'admin'],
+            ['parent_id' => $accountPerm->id]
+        );
+
+        Permission::firstOrCreate(
+            ['name' => 'account-balances', 'guard_name' => 'admin'],
+            ['parent_id' => $accountPerm->id]
+        );
+
+        // Clear Spatie permission cache so newly created permissions are visible
+        app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
+
+        // Ensure Admin role has all permissions created by this seeder
+        $adminRole = Role::where('name', 'Admin')->where('guard_name', 'admin')->first();
+        if ($adminRole) {
+            $allPermissions = Permission::pluck('name')->toArray();
+            $adminRole->syncPermissions($allPermissions);
         }
     }
 

@@ -140,7 +140,8 @@ const submit = () => {
             const billId = response?.props?.flash?.billId;
 
             if (billId) {
-                window.open(route("backend.download.opd.bill", { id: billId, module: 'opd' }), "_blank");
+                const url = route("backend.download.opd.bill", { id: billId, module: 'opd' });
+                try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
             }
 
             // Show toast only when server did not set a flash (to avoid duplicates

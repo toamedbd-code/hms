@@ -5,7 +5,7 @@
     $signatureMarginLeft = max((int) ($signatureMarginLeft ?? 96), 0);
     $pageMarginTop = max((int) ($pageMarginTop ?? 0), 0);
     $barcodeValue = (string) ($billing->bill_number ?? ('BILL-' . ($billing->id ?? '')));
-    $barcodePng = DNS1D::getBarcodePNG($barcodeValue, 'C128', 1.8, 36);
+    $barcodePng = DNS1D::getBarcodePNG($barcodeValue, 'C128', 1.8, 52);
     $barcodeDataUri = 'data:image/png;base64,' . $barcodePng;
     $isUltrasonogramReport = (bool) ($isUltrasonogramReport ?? false);
     $fullPageMarker = '[[FULL_PAGE]]';
@@ -31,11 +31,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Report Print</title>
     <style>
+        :root {
+            --report-header-height: {{ $reportHeaderHeight ?? 115 }}px;
+            --report-footer-height: {{ $reportFooterHeight ?? 70 }}px;
+            --report-page-top-margin: {{ $pageMarginTop ?? 0 }}px;
+        }
         * { box-sizing: border-box; }
         @page { size: A4; margin: 0; }
         body { font-family: Arial, sans-serif; color: #111827; margin: 0; padding: 0; font-size: 16px; line-height: 1.3; }
         .title { font-size: 18px; font-weight: bold; }
-        .report-title { font-size: 20px; font-weight: bold; font-family: Verdana, Geneva, Tahoma, sans-serif; margin: 0; letter-spacing: 2px; }
+        .report-title { font-size: 22px; font-weight: 800; font-family: 'Arial Black', 'Impact', sans-serif; margin: 0; letter-spacing: 6px; text-transform: uppercase; display: inline-block; background: #fff; padding: 0 8px; position: relative; z-index: 11; }
         .meta { font-size: 12px; color: #6b7280; margin-top: 4px; }
         .section { margin-top: 16px; }
         .label { font-weight: 600; }
@@ -47,19 +52,52 @@
             margin-top: var(--report-page-top-margin, 0px);
             text-align: center;
             margin-bottom: 5px;
-            height: var(--report-header-height, 115px);
+            /* prefer min-height to avoid collapsing when CSS vars resolve to 0 */
+            min-height: calc(var(--report-header-height, 115px) + 2mm);
+            height: auto;
             display: flex;
             align-items: center;
             justify-content: center;
+            overflow: visible !important;
         }
-        .header-placeholder { width: 100%; height: var(--report-header-height, 115px); visibility: hidden; }
-        .header-image { width: 100%; height: 100%; object-fit: fill; display: block; }
+        .header-placeholder { width: 100%; height: calc(var(--report-header-height, 115px) + 2mm); visibility: hidden; }
+        .header-image { width: 100%; height: auto; object-fit: contain; display: block; visibility: visible !important; -webkit-print-color-adjust: exact !important; }
+        .header-banner-image { width: 100%; height: auto; max-height: calc(var(--report-header-height, 115px) + 2mm); object-fit: contain; display: block; visibility: visible !important; -webkit-print-color-adjust: exact !important; }
+        .header-banner-image { width: 100%; height: auto; object-fit: contain; display: block; }
         .patient-details-table td { font-size: 12px; }
-        .title-section-table { width: 100%; margin-bottom: 12px; }
+        .patient-details-table .label-cell { font-weight:600; width: 14%; }
+        .patient-details-table .sep-cell { width:2%; }
+        .patient-details-table .value-cell { width: 30%; }
+                .title-section-table { width: 100%; margin-bottom: 12px; }
         .barcode-cell-left { width: 20%; text-align: left; vertical-align: top; }
         .barcode-cell-right { width: 20%; text-align: right; vertical-align: top; }
         .title-cell-center { width: 60%; text-align: center; }
-        .barcode-image { width: 150px; height: 34px; display: block; }
+                .barcode-image { height: 25px; width: 120px; max-width: 120px; display: block; object-fit: contain; margin: 0 auto; }
+                .receipt-title { font-size: 20px; font-weight: bold; font-family: Verdana, Geneva, Tahoma, sans-serif; margin: 0; letter-spacing: 2px; }
+          .barcode-small { height: 60px; width: auto; display:inline-block; vertical-align: middle; }
+
+          /* Header layout: map to table columns (S/N+TestName = 50%, Result = 25%, Range = 25%)
+              Place left barcode at right edge of left gutter and right barcode at left edge of right gutter */
+        .header-left { flex: 0 0 20%; max-width: 20%; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; padding-right:6mm; padding-top:6px; position:relative; overflow:visible; z-index:1; }
+        .header-center { flex: 0 0 60%; max-width: 60%; display:flex; align-items:center; justify-content:center; text-align:center; padding: 0 6mm; margin-top: -6px; white-space: nowrap; overflow: visible; text-overflow: ellipsis; position:relative; z-index:11; }
+        .header-center .report-title { display:block; line-height:1; }
+        .header-right { flex: 0 0 20%; max-width: 20%; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; padding-left:6mm; padding-top:6px; position:relative; overflow:visible; z-index:1; }
+
+        .barcode-caption { font-size: 12px; text-align: center; margin-top: 4px; color: #111827; }
+        .barcode-caption .label { font-weight: 600; display:block; font-size:11px; color:#374151; }
+        .barcode-caption .value { display:block; font-size:12px; color:#111827; }
+
+        /* Table cell helpers for single-line alignment */
+        .sn-cell { text-align: center; padding-right: 6px; vertical-align: middle; }
+        .testname-cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
+        .result-cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; vertical-align: middle; line-height: 1.1; }
+        .range-cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; text-align: center; }
+        .result-cell > * { margin: 0; padding: 0; display: inline; }
+
+        /* Electrolyte layout - three lines with minimal gap */
+        .electrolyte-container { display:flex; flex-direction:column; gap:4px; }
+        .electrolyte-list { display:flex; flex-direction:column; gap:2px; }
+        .ele-item { display:block; margin:0; padding:0; font-size:13px; }
         .content-section {
             width: 100%;
             padding-left: 15px;
@@ -67,7 +105,7 @@
             padding-bottom: 110px;
         }
         .footer-section {
-            position: static;
+            position: fixed;
             width: 100%;
             padding-left: 0;
             padding-right: 0;
@@ -141,8 +179,8 @@
 
         /* Paper-size locking to keep report print identical across printers */
         @media print and (min-width: 149mm) {
-            .header-section { height: 1.2in; }
-            .header-placeholder { height: 1.2in; }
+            .header-section { height: calc(var(--report-header-height, 115px) + 2mm); }
+            .header-placeholder { height: calc(var(--report-header-height, 115px) + 2mm); }
             .header-image { height: 100%; }
             .footer-placeholder { height: 70px; }
             .footer-image { max-height: 80px; }
@@ -229,41 +267,45 @@
                 right: 0;
             }
             .ultra-layout .content-section { padding-bottom: 56px; }
-            .ultra-layout .signature-row {
-                margin-top: 12px;
-                margin-bottom: 8px;
-                page-break-inside: avoid;
-                break-inside: avoid;
-            }
-            .ultra-layout .ultra-report-body {
-                min-height: 0;
-            }
         }
-    </style>
-</head>
-<body class="{{ $isUltrasonogramReport ? 'ultra-layout' : '' }}" style="--report-left-margin: {{ $signatureMarginLeft }}px; --signature-top-margin: {{ $signatureMarginTop }}px; --report-page-top-margin: {{ $pageMarginTop }}px; --report-header-height: {{ $reportHeaderHeight ?? 115 }}px; --report-footer-height: {{ $reportFooterHeight ?? 70 }}px;">
-    <div class="header-section">
-        @if(!empty($header_image))
-            <img src="{{ $header_image }}" alt="Header" class="header-image">
-        @else
-            <div class="header-placeholder"></div>
-        @endif
-    </div>
+        </style>
 
-    <div class="content-section">
-    <table class="title-section-table">
-        <tr>
-            <td class="barcode-cell-left">
-                <img src="{{ $barcodeDataUri }}" alt="Barcode Left" class="barcode-image">
-            </td>
-            <td class="title-cell-center">
-                <div class="report-title">{{ strtoupper((string) ($reportTitle ?? 'Test Report')) }}</div>
-            </td>
-            <td class="barcode-cell-right">
-                <img src="{{ $barcodeDataUri }}" alt="Barcode Right" class="barcode-image" style="margin-left:auto;">
-            </td>
-        </tr>
-    </table>
+    <div class="content-section" @if(empty($hasHeader)) style="margin-top:var(--report-page-top-margin);" @endif>
+        @if(!empty($hasHeader) && $hasHeader)
+            @includeIf('prints.partials._header', ['header_image' => $header_image ?? null, 'printed_at' => $reportDateTime ?? null])
+
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:-6px;margin-bottom:8px;padding:0 20px;">
+                <div class="header-left">
+                    <img src="{{ $barcodeDataUri }}" alt="Barcode Left" class="barcode-image" />
+                </div>
+                <div class="header-center">
+                    <div class="receipt-title">{{ strtoupper((string) ($reportTitle ?? 'Test Report')) }}</div>
+                    @if(!empty($headerHtml))
+                        <div class="meta" style="margin-top:4px; font-size:12px;">{!! $headerHtml !!}</div>
+                    @endif
+                </div>
+                <div class="header-right">
+                    <img src="{{ $barcodeDataUri }}" alt="Barcode Right" class="barcode-image" />
+                </div>
+            </div>
+        @else
+            {{-- Header disabled: compact billing header with barcode --}}
+            <div class="title-section-table" style="margin-bottom:10px;">
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:0 20px;">
+                    <div class="barcode-cell-left">
+                        <img src="{{ $barcodeDataUri }}" alt="Barcode Left" class="barcode-image" />
+                    </div>
+
+                    <div class="title-cell-center">
+                        <div class="receipt-title">{{ strtoupper((string) ($reportTitle ?? 'Test Report')) }}</div>
+                    </div>
+
+                    <div class="barcode-cell-right">
+                        <img src="{{ $barcodeDataUri }}" alt="Barcode Right" class="barcode-image" />
+                    </div>
+                </div>
+            </div>
+        @endif
     <table class="patient-details-table" style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
         <tr>
             <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Bill No</td>
@@ -271,7 +313,7 @@
             <td style="width: 28%; vertical-align: top; padding: 2px 0;">{{ $billing->bill_number ?? 'N/A' }}</td>
             <td style="width: 20%; vertical-align: top; padding: 2px 0; font-weight: bold;">Date & Time</td>
             <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
-            <td style="width: 28%; vertical-align: top; padding: 2px 0;">{{ $reportDateTime }}</td>
+            <td style="width: 28%; vertical-align: top; padding: 2px 0;"><span class="report-datetime">{{ $reportDateTime }}</span></td>
         </tr>
         <tr>
             <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Name</td>
@@ -307,18 +349,46 @@
             <table style="width:100%; border-collapse: collapse; font-size: 12px;">
                 <thead>
                     <tr>
-                        <th style="border:1px solid #e5e7eb; padding:6px; text-align:left;">Test Name</th>
-                        <th style="border:1px solid #e5e7eb; padding:6px; text-align:left;">Result</th>
-                        <th style="border:1px solid #e5e7eb; padding:6px; text-align:left;">Normal Range</th>
+                        <th class="sn-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; width:6%;">S/N</th>
+                            <th class="testname-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:left; width:44%;">Test Name</th>
+                            <th class="result-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; width:25%;">Result</th>
+                            <th class="range-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; width:25%;">Normal Range</th>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach($items as $item)
-                        <tr>
-                            <td style="border:1px solid #e5e7eb; padding:6px;">{{ $item->item_name ?? 'N/A' }}</td>
-                            <td style="border:1px solid #e5e7eb; padding:6px; white-space: pre-wrap;">{{ $item->report_note ?? '' }}</td>
-                            <td style="border:1px solid #e5e7eb; padding:6px;">{{ $item->report_range ?? '' }}</td>
-                        </tr>
+                        @php
+                            $params = (!empty($item->printed_parameter_rows) && is_array($item->printed_parameter_rows)) ? $item->printed_parameter_rows : [];
+                        @endphp
+
+                        @if(count($params) > 0)
+                            @foreach($params as $index => $pr)
+                                @php
+                                    $rHtml = $pr['result_html'] ?? '';
+                                    $pos = strpos($rHtml, ':');
+                                    if ($pos !== false) {
+                                        $nHtml = trim(substr($rHtml, 0, $pos));
+                                        $vHtml = trim(substr($rHtml, $pos + 1));
+                                    } else {
+                                        $nHtml = '';
+                                        $vHtml = $rHtml;
+                                    }
+                                @endphp
+                                <tr>
+                                    <td class="sn-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{{ $index + 1 }}</td>
+                                    <td class="testname-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{!! $nHtml !== '' ? $nHtml : e($item->item_name ?? 'N/A') !!}</td>
+                                    <td class="result-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{!! $vHtml !!}</td>
+                                    <td class="range-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{!! $pr['normal_range'] ?? '-' !!}</td>
+                                </tr>
+                            @endforeach
+                        @else
+                            <tr>
+                                <td class="sn-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">1</td>
+                                <td class="testname-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{{ $item->item_name ?? 'N/A' }}</td>
+                                <td class="result-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{!! nl2br(e($item->report_note ?? '')) !!}</td>
+                                <td class="range-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{{ $item->report_range ?? '' }}</td>
+                            </tr>
+                        @endif
                     @endforeach
                 </tbody>
             </table>
@@ -380,30 +450,8 @@
             @endif
     </div>
 
-    <div class="footer-placeholder"></div>
-    </div>
-
-    <div class="footer-section">
-        @php
-            $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', ''));
-            $footerPrintedAt = trim((string) ($reportDateTime ?? ''));
-        @endphp
-
-        @if(!empty($footer_image))
-            @if(!empty($footer_content))
-                <div class="footer-content">{!! $footer_content !!}</div>
-            @elseif(!empty($footerFallbackLine))
-                <div class="footer-content">{{ $footerFallbackLine }}@if(!empty($footerPrintedAt)), Printing Date: {{ $footerPrintedAt }}@endif</div>
-            @endif
-            <img src="{{ $footer_image }}" alt="Footer" class="footer-image">
-        @else
-            @if(!empty($footer_content))
-                <div class="footer-content">{!! $footer_content !!}</div>
-            @elseif(!empty($footerFallbackLine))
-                <div class="footer-content">{{ $footerFallbackLine }}@if(!empty($footerPrintedAt)), Printing Date: {{ $footerPrintedAt }}@endif</div>
-            @else
-                <div class="footer-placeholder"></div>
-            @endif
+        @if(!empty($hasFooter) && $hasFooter)
+            @includeIf('prints.partials._footer')
         @endif
     </div>
 
@@ -411,11 +459,83 @@
 
 @if (empty($isPdf) || !$isPdf)
 <script>
+    // Format JS date to match server format like: 19-Apr-2026 03:45 PM
+    function _formatPrintDate(d) {
+        try {
+            const pad = (n) => (n < 10 ? '0' + n : n);
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const dd = pad(d.getDate());
+            const mon = months[d.getMonth()];
+            const yyyy = d.getFullYear();
+            let hrs = d.getHours();
+            const mins = pad(d.getMinutes());
+            const ampm = hrs >= 12 ? 'PM' : 'AM';
+            hrs = hrs % 12; hrs = hrs ? hrs : 12; // convert 0 -> 12
+            const hh = pad(hrs);
+            return `${dd}-${mon}-${yyyy} ${hh}:${mins} ${ampm}`;
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function _injectCurrentPrintDate() {
+        try {
+            const nowStr = _formatPrintDate(new Date());
+            // Keep the report's original Date & Time (server-provided) intact.
+            // Only update the footer's printing timestamp so it reflects
+            // the actual print time when the user clicks Print.
+            document.querySelectorAll('.print-datetime').forEach(el => { el.textContent = nowStr; });
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    // On load, inject current datetime then trigger print after images load
     window.addEventListener('load', function () {
         setTimeout(function () {
-            window.print();
-        }, 180);
+            _injectCurrentPrintDate();
+            // Wait for images (footer/header) to load before triggering print.
+            const imgs = Array.from(document.images || []);
+            const pending = imgs.filter(i => !i.complete);
+            if (pending.length === 0) {
+                window.print();
+                return;
+            }
+            // Fallback: print after 2s in case some images never load.
+            const fallback = setTimeout(() => {
+                window.print();
+            }, 2000);
+            Promise.all(pending.map(img => new Promise((resolve) => {
+                img.addEventListener('load', resolve, { once: true });
+                img.addEventListener('error', resolve, { once: true });
+            }))).then(() => {
+                clearTimeout(fallback);
+                window.print();
+            }).catch(() => {
+                clearTimeout(fallback);
+                window.print();
+            });
+        }, 250);
     });
+
+    // Also ensure datetime is updated before a manual print (browser print dialog)
+    if (window.matchMedia) {
+        try {
+            const mql = window.matchMedia('print');
+            if (typeof mql.addListener === 'function') {
+                mql.addListener(function (m) { if (m.matches) _injectCurrentPrintDate(); });
+            } else if (typeof mql.addEventListener === 'function') {
+                mql.addEventListener('change', function (ev) { if (ev.matches) _injectCurrentPrintDate(); });
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    if (typeof window.onbeforeprint === 'function') {
+        const prev = window.onbeforeprint;
+        window.onbeforeprint = function () { _injectCurrentPrintDate(); try { prev(); } catch (e) {} };
+    } else {
+        window.onbeforeprint = _injectCurrentPrintDate;
+    }
 </script>
 @endif
 

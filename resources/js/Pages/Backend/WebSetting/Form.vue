@@ -498,6 +498,9 @@ const form = useForm({
     address: props.websetting?.address ?? props.websetting?.report_title ?? 'Mirpur, Dhaka.',
     phone: props.websetting?.phone ?? '01919592638',
     email: props.websetting?.email ?? 'toamedbd@gmail.com',
+    login_banner: props.websetting?.login_banner ?? (page.props?.loginTexts?.banner ?? 'Hospital Management Suite'),
+    login_title: props.websetting?.login_title ?? (page.props?.loginTexts?.title ?? 'Welcome Back.'),
+    login_subtitle: props.websetting?.login_subtitle ?? (page.props?.loginTexts?.subtitle ?? 'Continue with your secure account and manage all operations with confidence.'),
     logo: null,
     icon: null,
     language: props.websetting?.language ?? 'English',
@@ -1052,6 +1055,27 @@ onBeforeUnmount(() => {
                             <input id="email" v-model="form.email" type="email" placeholder="toamedbd@gmail.com"
                                 class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 focus:border-indigo-300" />
                             <InputError class="mt-2" :message="form.errors.email" />
+                        </div>
+
+                        <div>
+                            <InputLabel for="login_banner" value="Login Banner (small uppercase)" />
+                            <input id="login_banner" v-model="form.login_banner" type="text" placeholder="Hospital Management Suite"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 focus:border-indigo-300" />
+                            <InputError class="mt-2" :message="form.errors.login_banner" />
+                        </div>
+
+                        <div>
+                            <InputLabel for="login_title" value="Login Title (large)" />
+                            <input id="login_title" v-model="form.login_title" type="text" placeholder="Welcome Back."
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 focus:border-indigo-300" />
+                            <InputError class="mt-2" :message="form.errors.login_title" />
+                        </div>
+
+                        <div class="md:col-span-3">
+                            <InputLabel for="login_subtitle" value="Login Subtitle (paragraph)" />
+                            <input id="login_subtitle" v-model="form.login_subtitle" type="text" placeholder="Continue with your secure account..."
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 focus:border-indigo-300" />
+                            <InputError class="mt-2" :message="form.errors.login_subtitle" />
                         </div>
                     </div>
                 </div>

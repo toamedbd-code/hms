@@ -113,7 +113,7 @@ const printRoster = () => {
   if (dateFromFilter.value) params.append('date_from', dateFromFilter.value);
   if (dateToFilter.value) params.append('date_to', dateToFilter.value);
   const url = `/backend/staffattendance/duty-roster/print?${params.toString()}`;
-  window.open(url, '_blank');
+  try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
 };
 </script>
 

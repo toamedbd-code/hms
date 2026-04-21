@@ -7,11 +7,13 @@ use App\Models\BillItem;
 use App\Models\Billing;
 use App\Models\InvoiceDesign;
 use App\Models\PathologyTestParameter;
+use App\Models\BillItemParameterResult;
 use App\Models\RadiologyTest;
 use App\Models\Test;
 use App\Models\WebSetting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 
@@ -152,6 +154,35 @@ class ReportingController extends Controller
             // Fallback AI-style range suggestion by test name/category when a predefined range is absent.
             if (empty($defaultRange)) {
                 $defaultRange = $this->suggestNormalRangeByTestName($item);
+            }
+
+            // Attach parameter definitions for pathology tests so frontend can render per-parameter inputs.
+            if ($item->category === 'Pathology' && !empty($item->item_id)) {
+                $params = PathologyTestParameter::query()
+                    ->where('pathology_test_id', $item->item_id)
+                    ->with(['pathologyUnit:id,name', 'testParameter:id,name'])
+                    ->orderBy('id')
+                    ->get()
+                    ->map(function ($p) {
+                        return [
+                            'id' => $p->id,
+                            'name' => trim((string) ($p->name ?? data_get($p, 'testParameter.name') ?? '')),
+                            'reference_from' => trim((string) ($p->reference_from ?? '')),
+                            'reference_to' => trim((string) ($p->reference_to ?? '')),
+                            'unit' => trim((string) (data_get($p, 'pathologyUnit.name') ?? '')),
+                        ];
+                    })->values();
+
+                $item->parameters = $params->toArray();
+
+                // load any previously saved parameter results for this bill item
+                $existing = BillItemParameterResult::query()
+                    ->where('bill_item_id', $item->id)
+                    ->whereIn('pathology_test_parameter_id', $params->pluck('id')->all())
+                    ->pluck('value', 'pathology_test_parameter_id')
+                    ->toArray();
+
+                $item->saved_parameter_values = $existing;
             }
 
             $item->default_report_range = $defaultRange;
@@ -486,6 +517,8 @@ class ReportingController extends Controller
             'report_note' => ['nullable', 'string'],
             'report_range' => ['nullable', 'string', 'max:255'],
             'report_file' => $this->reportFileValidationRules(),
+            'parameter_values' => ['array'],
+            'parameter_values.*' => ['nullable', 'string'],
         ]);
 
         if (!in_array($billItem->category, $allowedCategories, true)) {
@@ -511,11 +544,36 @@ class ReportingController extends Controller
         }
         $billItem->save();
 
+        // Persist structured parameter results (if provided)
+        $parameterValues = $request->input('parameter_values', []);
+        if (is_array($parameterValues)) {
+            BillItemParameterResult::where('bill_item_id', $billItem->id)->delete();
+            foreach ($parameterValues as $paramId => $val) {
+                $val = trim((string) ($val ?? ''));
+                if ($val === '') continue;
+                $param = PathologyTestParameter::with('pathologyUnit', 'testParameter')->find($paramId);
+                BillItemParameterResult::create([
+                    'bill_item_id' => $billItem->id,
+                    'pathology_test_parameter_id' => $paramId,
+                    'name' => $param ? trim((string) ($param->name ?? data_get($param, 'testParameter.name') ?? '')) : null,
+                    'value' => $val,
+                    'unit' => $param ? trim((string) data_get($param, 'pathologyUnit.name') ?? '') : null,
+                ]);
+            }
+        }
+
         return back()->with('success', 'Report saved successfully.');
     }
 
     public function print(BillItem $billItem)
     {
+        // Debug trace: record entry to help diagnose blank/500 print pages.
+        try {
+            Log::info('ReportingController::print called', ['bill_item_id' => $billItem->id ?? null, 'category' => $billItem->category ?? null]);
+        } catch (\Throwable $e) {
+            // ignore logging failures
+        }
+
         $allowedCategories = $this->resolveDepartmentCategories();
 
         if (!in_array($billItem->category, $allowedCategories, true)) {
@@ -526,6 +584,15 @@ class ReportingController extends Controller
         if (empty($billItem->reported_at)) {
             return redirect()->route('backend.reporting.index')
                 ->with('warning', 'Report is not ready for print.');
+        }
+
+        // Disable debugbar for print rendering to avoid injected JS errors
+        if (app()->bound('debugbar')) {
+            try {
+                app('debugbar')->disable();
+            } catch (\Throwable $e) {
+                // ignore if debugbar cannot be disabled
+            }
         }
 
         $billItem->load('billing.patient', 'collectedBy', 'reportedBy.details.designation');
@@ -619,13 +686,11 @@ class ReportingController extends Controller
         // respect admin option to show/hide header & footer for reporting
         $showHeaderFooter = data_get($attendanceOptions, 'reporting.show_header_footer', true);
         if (!$showHeaderFooter) {
+            // When header/footer display is disabled in settings, keep footer
+            // variables intact so a footer image or content can still render.
             $headerImageBase64 = '';
-            $footerImageBase64 = '';
             $headerHtml = '';
-            $footerContent = '';
-            $footerHtml = '';
             $hasHeader = false;
-            $hasFooter = false;
         }
 
         // apply page bottom margin if provided (already set above)
@@ -690,16 +755,34 @@ class ReportingController extends Controller
         if ($isSingleItemCategory || $isCbc) {
             $items = collect([$billItem]);
         } else {
-            $allItems = BillItem::query()
+            // Build base query for pathology items in the same billing
+            $allItemsQuery = BillItem::query()
                 ->where('billing_id', $billItem->billing_id)
                 ->where('category', 'Pathology')
                 ->whereNotNull('reported_at')
                 ->where(function ($query) {
                     $query->whereNull('item_name')
                         ->orWhereRaw("LOWER(item_name) NOT LIKE '%cbc%'");
-                })
-                ->orderBy('id')
-                ->get();
+                });
+
+            // If the primary bill item references a test, try to limit the group
+            // to the same pathology test category to avoid mixing Biochemistry/Electrolyte sets.
+            if (!empty($billItem->item_id)) {
+                $primaryTest = Test::query()->find($billItem->item_id);
+                $primaryCategoryId = $primaryTest?->test_category_id ?? null;
+                if (!empty($primaryCategoryId)) {
+                    $relatedTestIds = Test::query()
+                        ->where('test_category_id', $primaryCategoryId)
+                        ->pluck('id')
+                        ->all();
+
+                    if (!empty($relatedTestIds)) {
+                        $allItemsQuery->whereIn('item_id', $relatedTestIds);
+                    }
+                }
+            }
+
+            $allItems = $allItemsQuery->orderBy('id')->get();
 
             $chunks = $allItems->chunk(4);
             $items = $chunks->first(function ($chunk) use ($billItem) {
@@ -710,7 +793,120 @@ class ReportingController extends Controller
         $reportTitle = $this->resolveReportTitle($billItem);
         $isUltrasonogramReport = $this->isUltrasonogramBillItem($billItem, $reportTitle);
 
-        return view('backend.reporting.print', [
+        // If structured parameter results exist for items, prefer them for printing
+        foreach ($items as $it) {
+            $results = BillItemParameterResult::query()->where('bill_item_id', $it->id)->orderBy('id')->get();
+            if ($results->isNotEmpty()) {
+                $plainLines = [];
+                $printRows = [];
+
+                foreach ($results as $r) {
+                    $param = null;
+                    if (!empty($r->pathology_test_parameter_id)) {
+                        $param = PathologyTestParameter::query()->find($r->pathology_test_parameter_id);
+                    }
+
+                    $name = trim((string) ($r->name ?? '')) ?: trim((string) data_get($r, 'pathologyTestParameter.name') ?? '');
+                    $unit = trim((string) ($r->unit ?? ''));
+                    $val = trim((string) ($r->value ?? ''));
+
+                    $displayValue = $val . ($unit !== '' ? ' ' . $unit : '');
+
+                    // Build normal range string from parameter definition when available
+                    $from = $param ? trim((string) ($param->reference_from ?? '')) : '';
+                    $to = $param ? trim((string) ($param->reference_to ?? '')) : '';
+                    $paramUnit = $param ? trim((string) data_get($param, 'pathologyUnit.name') ?? '') : '';
+
+                    if ($from !== '' && $to !== '') {
+                        $rangeStr = $from . ' - ' . $to;
+                    } elseif ($from !== '') {
+                        $rangeStr = $from;
+                    } elseif ($to !== '') {
+                        $rangeStr = $to;
+                    } else {
+                        $rangeStr = '';
+                    }
+
+                    if ($paramUnit !== '') {
+                        $rangeStr = $rangeStr !== '' ? $rangeStr . ' ' . $paramUnit : $paramUnit;
+                    } elseif ($unit !== '') {
+                        $rangeStr = $rangeStr !== '' ? $rangeStr . ' ' . $unit : $unit;
+                    }
+
+                    // numeric comparison to detect out-of-range
+                    $valNum = $this->parseNumeric($val);
+                    $fromNum = $this->parseNumeric($from);
+                    $toNum = $this->parseNumeric($to);
+
+                    // Only mark as out-of-range when a numeric value exists and
+                    // it falls strictly outside the provided bounds. Handle
+                    // situations where only one bound is provided and where
+                    // bounds may be reversed (ensure min/max semantics).
+                    $isOut = false;
+                    if ($valNum !== null) {
+                        if ($fromNum !== null && $toNum !== null) {
+                            $low = min($fromNum, $toNum);
+                            $high = max($fromNum, $toNum);
+                            if ($valNum < $low || $valNum > $high) {
+                                $isOut = true;
+                            }
+                        } elseif ($fromNum !== null) {
+                            if ($valNum < $fromNum) {
+                                $isOut = true;
+                            }
+                        } elseif ($toNum !== null) {
+                            if ($valNum > $toNum) {
+                                $isOut = true;
+                            }
+                        }
+                    }
+
+                    $escapedName = e($name);
+                    $escapedDisplayValue = e($displayValue);
+
+                    $resultHtmlLine = $escapedName === ''
+                        ? ($isOut ? '<strong>' . $escapedDisplayValue . '</strong>' : $escapedDisplayValue)
+                        : ($escapedName . ': ' . ($isOut ? '<strong>' . $escapedDisplayValue . '</strong>' : $escapedDisplayValue));
+
+                    $plainLines[] = ($name === '' ? $displayValue : ($name . ': ' . $displayValue));
+                    $printRows[] = [
+                        'result_html' => $resultHtmlLine,
+                        'normal_range' => $rangeStr,
+                    ];
+                }
+
+                $it->report_note = implode("\n", $plainLines);
+                $it->printed_parameter_rows = $printRows;
+            }
+        }
+
+        try {
+            Log::info('ReportingController::print prepared view', ['primary_id' => $billItem->id ?? null, 'items_count' => isset($items) ? (is_countable($items) ? count($items) : $items->count()) : 0]);
+        } catch (\Throwable $e) {
+            // ignore
+        }
+
+        try {
+            Log::info('ReportingController::print footer debug', [
+                'footer_image_base64_empty' => ($footerImageBase64 ?? '') === '',
+                'footer_content_empty' => ($footerContent ?? '') === '',
+                'footer_html_empty' => ($footerHtml ?? '') === '',
+                'hasFooter' => $hasFooter ?? false,
+                'showHeaderFooter' => $showHeaderFooter ?? true,
+                'invoice_footer_photo_path' => $invoiceDesign?->footer_photo_path ?? null,
+                'invoice_footer_content_preview' => substr((string) ($invoiceDesign?->footer_content ?? ''), 0, 200),
+                'settings_report_footer_preview' => substr((string) ($settings?->report_footer_html ?? ''), 0, 200),
+                'footer_image_preview' => substr((string) ($footerImageBase64 ?? ''), 0, 120),
+                'footer_image_length' => is_string($footerImageBase64) ? strlen($footerImageBase64) : null,
+                'header_image_preview' => substr((string) ($headerImageBase64 ?? ''), 0, 120),
+                'header_image_length' => is_string($headerImageBase64) ? strlen($headerImageBase64) : null,
+            ]);
+        } catch (\Throwable $_) {
+            // ignore logging failures
+        }
+
+        try {
+            return view('backend.reporting.print', [
             'items' => $items,
             'primaryItem' => $billItem,
             'reportTitle' => $reportTitle,
@@ -722,6 +918,8 @@ class ReportingController extends Controller
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $footerContent,
+            'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
+            'invoiceDesign' => $invoiceDesign,
             'hasHeader' => $hasHeader,
             'hasFooter' => $hasFooter,
             'reportDateTime' => $reportDateTime,
@@ -746,7 +944,23 @@ class ReportingController extends Controller
             // raw values for blade logic (empty string when not set)
             'pathologistNameRaw' => $pathologistName,
             'pathologistDesignationRaw' => $pathologistDesignation,
-        ]);
+            // legacy template expects `$websetting` in some branches; provide it
+            'websetting' => $settings,
+            ]);
+        } catch (\Throwable $e) {
+            try {
+                Log::error('ReportingController::print view render failed', [
+                    'message' => $e->getMessage(),
+                    'bill_item_id' => $billItem->id ?? null,
+                    'billing_id' => $billing->id ?? null,
+                    'trace' => $e->getTraceAsString(),
+                ]);
+            } catch (\Throwable $_) {
+                // ignore logging failures
+            }
+
+            throw $e;
+        }
     }
 
     public function downloadReport(Request $request)
@@ -937,6 +1151,20 @@ class ReportingController extends Controller
         }
 
         return ['Pathology', 'Radiology', 'Ultrasonogram', 'Ultrasonography', 'ECG'];
+    }
+
+    private function parseNumeric(?string $s): ?float
+    {
+        if ($s === null) return null;
+        $s = trim((string) $s);
+        if ($s === '') return null;
+        // remove commas for thousands
+        $s = str_replace(',', '', $s);
+        // find the first numeric occurrence (integer or float)
+        if (preg_match('/-?\d+(?:\.\d+)?/', $s, $m)) {
+            return (float) $m[0];
+        }
+        return null;
     }
 
     private function resolvePublicStorageImageDataUri(?string $path): string

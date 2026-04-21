@@ -155,11 +155,7 @@
 
 <body>
     <div class="page">
-        @if (!empty($headerImage))
-            <img src="{{ $headerImage }}" class="header-image" alt="Header">
-        @else
-            <div class="header-placeholder"></div>
-        @endif
+        @includeIf('prints.partials._header')
 
         <div class="header">
             <div>
@@ -244,17 +240,7 @@
             $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', ''));
         @endphp
 
-        @if (!empty($footerContent))
-            <div class="footer-content" style="position:relative; z-index:11; text-align:center;">{!! $footerContent !!}</div>
-        @elseif(!empty($footerFallbackLine))
-            <div class="footer-content" style="position:relative; z-index:11; text-align:center;">{{ $footerFallbackLine }}</div>
-        @endif
-
-        @if (!empty($footerImage))
-            <img src="{{ $footerImage }}" class="footer-image fixed" alt="Footer">
-        @else
-            <div class="footer-placeholder fixed"></div>
-        @endif
+        @include('prints.partials._footer', ['footer_image' => $footerImage ?? null, 'footer_content' => $footerContent ?? ($footerFallbackLine ?: null)])
     </div>
 </body>
 

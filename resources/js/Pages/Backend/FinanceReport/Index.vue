@@ -132,8 +132,18 @@ const downloadPDF = async () => {
             date_to: dateTo.value,
         });
 
-        // Open a single blank window synchronously (user-initiated) so repeated clicks won't open multiple tabs.
-        const win = window.open('', '_blank');
+        // Open a single blank tab synchronously (user-initiated) so repeated clicks won't open multiple tabs.
+        const features = 'noopener,noreferrer,width=1000,height=800,left=200,top=200,resizable,scrollbars';
+        const win = (() => {
+            try {
+                // open a plain new tab (no popup feature string)
+                const w = window.open('', '_blank');
+                try { if (w) w.opener = null; } catch (e) { /* ignore */ }
+                return w;
+            } catch (e) {
+                return null;
+            }
+        })();
 
         // Fetch the PDF as a blob and navigate the opened window to the blob URL.
         const resp = await fetch(url, { credentials: 'include', headers: { Accept: 'application/pdf' } });

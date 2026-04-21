@@ -259,11 +259,7 @@
                 ?: $resolveInlineImage($header_image_path ?? '')
                 ?: $resolveInlineImage($header_image_url ?? '');
         @endphp
-        @if($headerSrc)
-        <img src="{{ $headerSrc }}" class="header-image" alt="Clinic Header">
-        @else
-        <div class="header-placeholder"></div>
-        @endif
+        @includeIf('prints.partials._header', ['header_image' => $headerSrc ?? $header_image ?? null, 'printed_at' => $appointment_date ?? null])
     </div>
 
     <!-- Patient Information Section - Two Column Layout -->
@@ -385,25 +381,12 @@
     </div>
 
     <!-- Footer Section -->
-    <div class="footer">
-            @php
-                $footerSrc = $resolveInlineImage($footer_image ?? '')
-                    ?: $resolveInlineImage($footer_image_path ?? '')
-                    ?: $resolveInlineImage($footer_image_url ?? '');
-            @endphp
-
-            @if($footerSrc)
-                @if(!empty($footer_content))
-                    <div class="footer-content" style="position:relative; z-index:11;">{!! $footer_content !!}</div>
-                @endif
-                <img src="{{ $footerSrc }}" class="footer-image" alt="Clinic Footer">
-            @else
-                <div class="footer-placeholder"></div>
-                @if(!empty($footer_content))
-                    <div class="footer-content">{!! $footer_content !!}</div>
-                @endif
-            @endif
-    </div>
+    @php
+        $footerSrc = $resolveInlineImage($footer_image ?? '')
+            ?: $resolveInlineImage($footer_image_path ?? '')
+            ?: $resolveInlineImage($footer_image_url ?? '');
+    @endphp
+    @include('prints.partials._footer', ['footer_image' => $footerSrc, 'footer_content' => $footer_content ?? null])
 </body>
 
 </html>

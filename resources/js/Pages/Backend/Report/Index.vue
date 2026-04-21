@@ -191,7 +191,7 @@ const downloadPdf = async () => {
             url += 'inline=1';
         }
 
-        window.open(url, '_blank');
+        try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
 
     } catch (error) {
         console.error('Download error:', error);

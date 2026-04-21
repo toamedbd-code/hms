@@ -301,20 +301,87 @@ function getSideMenus($user)
     $hasMenuPermission = function ($permissionName) use ($grantedPermissions) {
         $permissionName = trim((string) $permissionName);
 
-        // If a menu has no explicit permission, don't block it here.
+        // Treat empty permission as not granted — visibility should be
+        // determined by whether permitted children exist. This prevents
+        // menus with no explicit permission from appearing for users who
+        // don't actually hold any relevant permissions.
         if ($permissionName === '') {
-            return true;
+            return false;
         }
 
         return $grantedPermissions->contains($permissionName);
     };
 
-    $menus = Menu::with('childrens')
+    $menus = Menu::with(['childrens' => function ($q) {
+            $q->whereNull('deleted_at')
+                ->where('status', 'Active')
+                ->orderBy('sorting', 'ASC')
+                ->orderBy('id', 'ASC');
+        }])
         ->whereNull('parent_id')
         ->whereNull('deleted_at')
         ->where('status', 'Active')
+        // order by sorting then id to ensure deterministic parent ordering
+        // (id keeps original insertion order so Dashboard remains first)
         ->orderBy('sorting', 'ASC')
+        ->orderBy('id', 'ASC')
         ->get();
+
+        // If the current user is a developer, return all parent menus and their
+        // children unfiltered so a developer always sees everything.
+        try {
+            if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+                    // Remove any InvoiceDesign-related menus from the sidebar
+                    $blockedSubstrings = ['invoicedesign', 'invoice design'];
+
+                    $devMenus = $menus->map(function ($menu) use ($blockedSubstrings) {
+                        $arr = is_array($menu) ? $menu : $menu->toArray();
+
+                        if (isset($arr['childrens']) && is_array($arr['childrens'])) {
+                            usort($arr['childrens'], function ($a, $b) {
+                                $sa = isset($a['sorting']) ? (int) $a['sorting'] : 0;
+                                $sb = isset($b['sorting']) ? (int) $b['sorting'] : 0;
+                                if ($sa !== $sb) return $sa - $sb;
+                                $ida = isset($a['id']) ? (int) $a['id'] : 0;
+                                $idb = isset($b['id']) ? (int) $b['id'] : 0;
+                                return $ida - $idb;
+                            });
+
+                            // Filter out invoice-design children by name or route substring
+                            $arr['childrens'] = array_values(array_filter($arr['childrens'], function ($child) use ($blockedSubstrings) {
+                                $cname = strtolower(trim((string) ($child['name'] ?? '')));
+                                $croute = strtolower(trim((string) ($child['route'] ?? '')));
+                                foreach ($blockedSubstrings as $s) {
+                                    if ($s !== '' && (strpos($cname, $s) !== false || strpos($croute, $s) !== false)) {
+                                        return false;
+                                    }
+                                }
+                                return true;
+                            }));
+                        }
+
+                        return $arr;
+                    })->sortBy(function ($m) {
+                        $sorting = (int) ($m['sorting'] ?? 0);
+                        $id = (int) ($m['id'] ?? 0);
+                        return sprintf('%05d-%010d', $sorting, $id);
+                    })->values();
+
+                    // Also drop any top-level menus that reference invoice-design
+                    $devMenus = $devMenus->reject(function ($m) use ($blockedSubstrings) {
+                        $name = is_array($m) ? strtolower(trim((string) ($m['name'] ?? ''))) : strtolower(trim((string) ($m->name ?? '')));
+                        $route = is_array($m) ? strtolower(trim((string) ($m['route'] ?? ''))) : strtolower(trim((string) ($m->route ?? '')));
+                        foreach ($blockedSubstrings as $s) {
+                            if ($s !== '' && (strpos($name, $s) !== false || strpos($route, $s) !== false)) return true;
+                        }
+                        return false;
+                    })->values();
+
+                    return $devMenus;
+                }
+        } catch (\Throwable $e) {
+            // ignore and fall back to normal permission/module filtering below
+        }
 
     $normalizeRoute = function ($route) {
         $route = trim((string) $route);
@@ -327,7 +394,7 @@ function getSideMenus($user)
         return $aliases[$route] ?? $route;
     };
 
-    return $menus->filter(function ($menu) use ($normalizeRoute, $hasMenuPermission) {
+    $result = $menus->filter(function ($menu) use ($normalizeRoute, $hasMenuPermission) {
         $menuHasPermission = $hasMenuPermission($menu->permission_name ?? null);
 
         $menu->childrens = $menu->childrens->filter(function ($child) use ($hasMenuPermission) {
@@ -356,6 +423,18 @@ function getSideMenus($user)
             }
 
             return $route !== '' ? ('route:' . $route) : ('name:' . $name);
+        })->sortBy(function ($child) {
+            $sorting = 0;
+            $id = 0;
+            if (is_array($child)) {
+                $sorting = (int) ($child['sorting'] ?? 0);
+                $id = (int) ($child['id'] ?? 0);
+            } else {
+                $sorting = (int) ($child->sorting ?? 0);
+                $id = (int) ($child->id ?? 0);
+            }
+
+            return sprintf('%05d-%010d', $sorting, $id);
         })->values();
 
         $menuName = strtolower(trim((string) ($menu->name ?? '')));
@@ -400,7 +479,9 @@ function getSideMenus($user)
             }
         }
 
-        if (!$hasChildren && $route === '') {
+        // If there are no permitted children and no route, hide the parent only
+        // when the current user also doesn't have the parent's permission.
+        if (!$hasChildren && $route === '' && !$menuHasPermission) {
             return false;
         }
 
@@ -409,6 +490,160 @@ function getSideMenus($user)
         $route = trim((string) ($menu->route ?? ''));
         return $route !== '' ? ('route:' . $route) : ('name:' . trim((string) ($menu->name ?? '')));
     })->values();
+
+    // Temporary safety: ensure Account Management parent menu appears for admins
+    // when either the admin has the parent permission or at least one child
+    // permission is granted. This helps in cases where Inertia props or
+    // permission snapshots don't reach the client immediately.
+    try {
+        $accountName = 'Account Management';
+        $already = $result->first(function ($m) use ($accountName) {
+            $name = is_array($m) ? ($m['name'] ?? '') : ($m->name ?? '');
+            return trim(strtolower((string) $name)) === trim(strtolower($accountName));
+        });
+
+        if (!$already) {
+            $accountMenuModel = Menu::with('childrens')->where('name', $accountName)->first();
+            if ($accountMenuModel) {
+                $menuArr = $accountMenuModel->toArray();
+                $children = collect($menuArr['childrens'] ?? [])->filter(function ($child) use ($hasMenuPermission) {
+                    return $hasMenuPermission($child['permission_name'] ?? null);
+                })->sortBy(function ($child) {
+                    $sorting = (int) ($child['sorting'] ?? 0);
+                    $id = (int) ($child['id'] ?? 0);
+                    return sprintf('%05d-%010d', $sorting, $id);
+                })->values()->toArray();
+
+                $menuArr['childrens'] = $children;
+
+                $hasParentPermission = $hasMenuPermission($menuArr['permission_name'] ?? null);
+                $hasAnyChildPerm = count($children) > 0;
+
+                if ($hasParentPermission || $hasAnyChildPerm) {
+                    $result->push($menuArr);
+                }
+            }
+        }
+    } catch (\Throwable $e) {
+        // ignore temporary override failures
+    }
+
+    // If the current user is a developer, skip module filtering and show all menus
+    try {
+        if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+            return $result->values();
+        }
+    } catch (\Throwable $e) {
+        // ignore failures; fall back to module filtering below
+    }
+
+    // Filter menus by assigned modules (if menus have module_slug set)
+    try {
+        try {
+            $userModuleSlugs = $user->modules()->pluck('slug')->map(function ($s) {
+                return trim(strtolower((string) $s));
+            })->filter()->values();
+        } catch (\Throwable $e) {
+            $userModuleSlugs = collect();
+        }
+
+        $result = $result->filter(function ($menu) use ($userModuleSlugs) {
+            $menuModule = '';
+            if (is_array($menu)) {
+                $menuModule = trim(strtolower((string) ($menu['module_slug'] ?? '')));
+            } else {
+                $menuModule = trim(strtolower((string) ($menu->module_slug ?? '')));
+            }
+
+            // keep menus without a module assignment
+            if ($menuModule === '') {
+                return true;
+            }
+
+            return $userModuleSlugs->contains($menuModule);
+        })->values();
+    } catch (\Throwable $e) {
+        // ignore filtering errors and return as-is
+    }
+
+    // Remove InvoiceDesign-related menu entries (both parent and children)
+    try {
+        $blockedSubstrings = ['invoicedesign', 'invoice design'];
+
+        // strip any children matching blocked substrings for arrays and objects
+        $result = $result->map(function ($menu) use ($blockedSubstrings, $normalizeRoute) {
+            if (is_array($menu)) {
+                $children = $menu['childrens'] ?? [];
+                $menu['childrens'] = array_values(array_filter($children, function ($child) use ($blockedSubstrings) {
+                    $cn = strtolower(trim((string) ($child['name'] ?? '')));
+                    $cr = strtolower(trim((string) ($child['route'] ?? '')));
+                    foreach ($blockedSubstrings as $s) {
+                        if ($s !== '' && (strpos($cn, $s) !== false || strpos($cr, $s) !== false)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }));
+
+                return $menu;
+            } else {
+                try {
+                    $menu->childrens = $menu->childrens->filter(function ($child) use ($blockedSubstrings) {
+                        $cn = strtolower(trim((string) ($child->name ?? '')));
+                        $cr = strtolower(trim((string) ($child->route ?? '')));
+                        foreach ($blockedSubstrings as $s) {
+                            if ($s !== '' && (strpos($cn, $s) !== false || strpos($cr, $s) !== false)) {
+                                return false;
+                            }
+                        }
+                        return true;
+                    })->values();
+                } catch (\Throwable $e) {
+                    // ignore
+                }
+
+                return $menu;
+            }
+        })->filter(function ($menu) use ($blockedSubstrings, $normalizeRoute) {
+            $name = is_array($menu) ? strtolower(trim((string) ($menu['name'] ?? ''))) : strtolower(trim((string) ($menu->name ?? '')));
+            $route = is_array($menu) ? strtolower(trim((string) ($menu['route'] ?? ''))) : strtolower(trim((string) ($menu->route ?? '')));
+
+            if ($normalizeRoute($route) === 'backend.invoicedesign.index') {
+                return false;
+            }
+
+            foreach ($blockedSubstrings as $s) {
+                if ($s !== '' && (strpos($name, $s) !== false || strpos($route, $s) !== false)) return false;
+            }
+
+            return true;
+        })->values();
+    } catch (\Throwable $e) {
+        // ignore safety filter failures
+    }
+
+    // Ensure consistent ordering across users by sorting final menus by
+    // the `sorting` field (works for both model instances and arrays).
+    try {
+        $result = $result->sortBy(function ($m) {
+            $sorting = 0;
+            $id = 0;
+            if (is_array($m)) {
+                $sorting = (int) ($m['sorting'] ?? 0);
+                $id = (int) ($m['id'] ?? 0);
+            } else {
+                $sorting = (int) ($m->sorting ?? 0);
+                $id = (int) ($m->id ?? 0);
+            }
+
+            // Composite key ensures stable ordering when `sorting` values tie.
+            return sprintf('%05d-%010d', $sorting, $id);
+        })->values();
+    } catch (\Throwable $e) {
+        // ignore sort failures and return as-is
+    }
+
+    return $result->values();
 }
 
 function web_setting_prefix(string $field, string $default = ''): string

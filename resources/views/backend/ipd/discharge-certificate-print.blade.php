@@ -6,12 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>IPD Discharge Certificate</title>
     <style>
+        @if(!empty($banglaFontUrl))
         @font-face {
             font-family: 'NotoSansBengali';
-            src: url('{{ $banglaFontPath }}') format('truetype');
+            src: url('{{ $banglaFontUrl }}') format('truetype');
             font-style: normal;
             font-weight: 400;
         }
+        @endif
 
         @page {
             size: A4;
@@ -268,11 +270,7 @@
 
     <div class="sheet">
         <div class="header-section">
-            @if (!empty($headerImage))
-                <img src="{{ $headerImage }}" class="header-img" alt="Header">
-            @else
-                <div class="header-placeholder"></div>
-            @endif
+            @includeIf('prints.partials._header')
         </div>
 
         <div class="content-section">
@@ -420,20 +418,11 @@
                 $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', ''));
             @endphp
 
-            @if (!empty($footerImage))
-                @if (!empty($footerContent))
-                    <div style="position:relative; z-index:11; margin-top:6px;font-size:11px;border-top:1px solid #cbd5e1;padding-top:4px;">{{ $footerContent }}</div>
-                @elseif(!empty($footerFallbackLine))
-                    <div style="position:relative; z-index:11; margin-top:6px;font-size:11px;border-top:1px solid #cbd5e1;padding-top:4px;">{{ $footerFallbackLine }}@if(!empty($printedAt)) , Printing Date: {{ $printedAt }}@endif</div>
-                @endif
-            @else
-                <div class="footer-placeholder"></div>
-                @if (!empty($footerContent))
-                    <div style="margin-top:6px;font-size:11px;border-top:1px solid #cbd5e1;padding-top:4px;">{{ $footerContent }}</div>
-                @elseif(!empty($footerFallbackLine))
-                    <div style="margin-top:6px;font-size:11px;border-top:1px solid #cbd5e1;padding-top:4px;">{{ $footerFallbackLine }}@if(!empty($printedAt)) , Printing Date: {{ $printedAt }}@endif</div>
-                @endif
-            @endif
+            @includeIf('prints.partials._footer', [
+                'footer_image' => $footerImage ?? null,
+                'footer_content' => $footerContent ?? ($footerFallbackLine ?: null),
+                'printedAt' => $printedAt ?? null,
+            ])
         </div>
     </div>
     @if ((empty($forPdf) || !$forPdf) && !empty($autoPrint))

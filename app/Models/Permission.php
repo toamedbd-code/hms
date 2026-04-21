@@ -9,7 +9,11 @@ class Permission extends Model
 {
     use HasFactory;
 
-    protected $fillable=['name','guard_name','parent_id'];
+    protected $casts = [
+        'module_slug' => 'string',
+    ];
+
+    protected $fillable = ['name','guard_name','parent_id','module_slug'];
 
     protected static function boot()
     {
@@ -39,6 +43,7 @@ class Permission extends Model
     }
     public function child()
     {
-        return $this->hasMany(Permission::class,'parent_id','id');
+        // Ensure children are returned in stable order (by id asc)
+        return $this->hasMany(Permission::class,'parent_id','id')->orderBy('id', 'asc');
     }
 }

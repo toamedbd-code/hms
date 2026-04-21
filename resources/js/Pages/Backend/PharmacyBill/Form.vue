@@ -303,7 +303,14 @@ onMounted(() => {
 const submit = (shouldPrint = false) => {
     let printTab = null;
     if (shouldPrint) {
-        printTab = window.open('about:blank', '_blank');
+        try {
+            const features = 'noopener,noreferrer,width=1000,height=800,left=200,top=200,resizable,scrollbars';
+            // open a plain new tab (no popup feature string)
+            printTab = window.open('about:blank', '_blank');
+            try { if (printTab) printTab.opener = null; } catch (e) { /* ignore */ }
+        } catch (e) {
+            printTab = null;
+        }
     }
 
     form.products = medicineRows.value.map(row => ({
@@ -334,9 +341,9 @@ const submit = (shouldPrint = false) => {
 
                 if (printUrl) {
                     if (printTab) {
-                        printTab.location.href = printUrl;
+                        try { printTab.location.href = printUrl; } catch (e) { /* ignore */ }
                     } else {
-                        window.open(printUrl, '_blank');
+                        try { window.open(printUrl, '_blank'); } catch (e) { window.open(printUrl, '_blank'); }
                     }
                 } else {
                     if (printTab) {
@@ -344,7 +351,7 @@ const submit = (shouldPrint = false) => {
                     }
                     displayWarning({ message: 'Bill saved, but invoice ID was not returned. Please open invoice from Pharmacy Bill List.' });
                 }
-            }
+                }
 
             if (!props.id) {
                 form.reset();

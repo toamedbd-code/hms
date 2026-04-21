@@ -40,7 +40,7 @@ const exportBills = (format) => {
     );
 
     const url = route('backend.pharmacybill.export', { format, ...cleanQuery });
-    window.open(url, '_blank');
+    try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
 };
 
 const page = usePage();

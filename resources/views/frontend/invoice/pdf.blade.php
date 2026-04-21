@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8">
-    <title>Medical Invoice</title>
+    <title>Billing Invoice</title>
     <style>
         @php
             $__inv_header_h = (int) ($header_height ?? 115);
@@ -522,14 +522,13 @@
 
 <body>
     <div class="invoice-container">
-        <!-- Header Section -->
-        <div class="header-section">
-            @if($header_image)
-            <img src="{{ $header_image }}" alt="Header" class="header-image">
-            @else
-            <div class="header-placeholder"></div>
-            @endif
-        </div>
+        {{-- Use shared header partial for consistent header across prints --}}
+        @includeIf('prints.partials._header', [
+            'header_image' => $header_image ?? null,
+            'headerHeight' => $__inv_header_h,
+            'footerHeight' => $__inv_footer_h,
+            'printed_at' => $invoiceDateTime ?? ($printed_at ?? null),
+        ])
 
         <div class="content-section">
             <table class="title-section-table">

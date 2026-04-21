@@ -47,7 +47,11 @@ const downloadPayslip = () => {
     const params = new URLSearchParams({
         payslipData: JSON.stringify(payslipData.value),
     });
-    window.open(route('backend.download.payslip') + '?' + params.toString(), '_blank');
+    try {
+        window.open(route('backend.download.payslip') + '?' + params.toString(), '_blank');
+    } catch (e) {
+        window.open(route('backend.download.payslip') + '?' + params.toString(), '_blank');
+    }
 };
 </script>
 

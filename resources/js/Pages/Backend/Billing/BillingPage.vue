@@ -2009,7 +2009,10 @@ const saveBill = (backendInvoice = false) => {
   let invoiceWindow = null;
   if (!backendInvoice) {
     try {
+      const features = 'noopener,noreferrer,width=1000,height=800,left=200,top=200,resizable,scrollbars';
+      // open a plain new tab (no popup feature string)
       invoiceWindow = window.open('', '_blank');
+      try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
     } catch (e) {
       invoiceWindow = null;
     }
@@ -2048,16 +2051,16 @@ const saveBill = (backendInvoice = false) => {
                 console.log('Navigated invoiceWindow to URL successfully');
               } catch (navErr) {
                 console.error('Navigation of invoiceWindow failed:', navErr);
-                window.open(invoiceUrl, '_blank');
+                  try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
               }
             } else {
               console.log('invoiceWindow not available or closed; opening new tab');
-              window.open(invoiceUrl, '_blank');
+              try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
             }
           } catch (e) {
             // Fallback: open in a new tab if navigation fails
             console.error('Failed to navigate/open invoice window:', e);
-            window.open(invoiceUrl, '_blank');
+            try { window.open(invoiceUrl, '_blank'); } catch (ee) { window.open(invoiceUrl, '_blank'); }
           }
         }
       }

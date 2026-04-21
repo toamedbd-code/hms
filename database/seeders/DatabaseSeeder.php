@@ -52,6 +52,7 @@ class DatabaseSeeder extends Seeder
             WebSettingSeeder::class,
             AttendanceSeeder::class,
                 SalarySheetMenuSeeder::class,
+            ChartOfAccountsSeeder::class,
           
         ]);
     }

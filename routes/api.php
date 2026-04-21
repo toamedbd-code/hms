@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\IpdPrescriptionController;
+use App\Http\Controllers\Api\V1\AuthController;
 // use App\Http\Controllers\Api\V1\ModuleMakerController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -18,9 +19,22 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::group(['prefix' => 'v1', 'as' => 'v1.'], function () {
+    // Public admin API login
+    Route::post('admin/login', [AuthController::class, 'adminLogin'])->name('admin.login');
+
     // Route::post('/module-make', [ModuleMakerController::class, 'index'])->name('moduleMaker');
 
     Route::middleware('auth:sanctum')->group(function () {
+        // Admin logout (token revocation)
+        Route::post('admin/logout', [AuthController::class, 'adminLogout'])->name('admin.logout');
+
+        // Accounting API
+        Route::get('accounting/accounts', [\App\Http\Controllers\Api\V1\AccountingController::class, 'accounts'])->name('accounting.accounts');
+        Route::post('accounting/accounts', [\App\Http\Controllers\Api\V1\AccountingController::class, 'storeAccount'])->name('accounting.accounts.store');
+        Route::get('accounting/journals', [\App\Http\Controllers\Api\V1\AccountingController::class, 'journals'])->name('accounting.journals');
+        Route::post('accounting/journals', [\App\Http\Controllers\Api\V1\AccountingController::class, 'createJournal'])->name('accounting.journals.store');
+        Route::get('accounting/reports/trial-balance', [\App\Http\Controllers\Api\V1\AccountingController::class, 'trialBalance'])->name('accounting.reports.trial-balance');
+
         Route::get('ipd-admissions/{ipdpatient}/prescription', [IpdPrescriptionController::class, 'show'])
             ->name('ipd-admissions.prescription.show');
 

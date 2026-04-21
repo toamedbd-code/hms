@@ -53,6 +53,8 @@
     <div style="margin-top:20px" class="no-print">
         <button onclick="window.print()">Print</button>
         <button onclick="window.close()">Close</button>
+                @includeIf('prints.partials._footer')
     </div>
+    @includeIf('prints.partials._footer')
 </body>
 </html>

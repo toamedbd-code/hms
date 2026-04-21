@@ -20,6 +20,7 @@ class InvoiceDesign extends Authenticatable
         'header_photo_path',
         'footer_photo_path',
         'module',
+        'footer_content_position',
         'header_height',
         'footer_height',
         'status'

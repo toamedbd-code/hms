@@ -1142,10 +1142,12 @@ const saveBill = () => {
   }
   console.log('Complete Form Data:', formData);
   const form = useForm(formData);
-  // Open blank window synchronously to avoid popup blockers when navigating later
+  // Open blank tab synchronously to avoid popup blockers when navigating later
   let invoiceWindow = null;
   try {
+    // open a plain new tab (no popup feature string) so the browser opens a normal tab
     invoiceWindow = window.open('', '_blank');
+    try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
   } catch (e) {
     invoiceWindow = null;
   }
@@ -1162,10 +1164,10 @@ const saveBill = () => {
             if (invoiceWindow && !invoiceWindow.closed) {
               invoiceWindow.location = invoiceUrl;
             } else {
-              window.open(invoiceUrl, '_blank');
+              try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
             }
           } catch (e) {
-            window.open(invoiceUrl, '_blank');
+            try { window.open(invoiceUrl, '_blank'); } catch (ee) { window.open(invoiceUrl, '_blank'); }
           }
         }
       },
@@ -1195,10 +1197,10 @@ const saveBill = () => {
             if (invoiceWindow && !invoiceWindow.closed) {
               invoiceWindow.location = invoiceUrl;
             } else {
-              window.open(invoiceUrl, '_blank');
+              try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
             }
           } catch (e) {
-            window.open(invoiceUrl, '_blank');
+            try { window.open(invoiceUrl, '_blank'); } catch (ee) { window.open(invoiceUrl, '_blank'); }
           }
         }
       },

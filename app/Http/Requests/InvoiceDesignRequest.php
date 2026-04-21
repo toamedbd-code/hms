@@ -10,6 +10,7 @@ class InvoiceDesignRequest extends FormRequest
     {
         $rules = [
             'footer_content' => 'nullable|string|max:2000',
+            'footer_content_position' => 'nullable|in:above,below',
             'module' => 'required|in:opd,ipd,pathology,radiology,pharmacy,appointment,billing,prescription',
             'header_height' => 'nullable|integer|min:0|max:1000',
             'footer_height' => 'nullable|integer|min:0|max:1000',

@@ -65,7 +65,8 @@ class Kernel extends HttpKernel
         'signed' => \App\Http\Middleware\ValidateSignature::class,
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
-                'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
+                    'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
+                    'module.access' => \App\Http\Middleware\CheckModuleAccess::class,
 
         // Attendance kiosk (public) security
         'kiosk.pin' => \App\Http\Middleware\EnsureKioskPin::class,

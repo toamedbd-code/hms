@@ -221,13 +221,7 @@
             ?: $resolveInlineImage($header_image_path ?? '')
             ?: $resolveInlineImage($header_image_url ?? '');
     @endphp
-    <div class="header">
-        @if(!empty($headerSrc))
-            <img src="{{ $headerSrc }}" class="header-image" alt="Header">
-        @else
-            <div class="header-placeholder"></div>
-        @endif
-    </div>
+    @includeIf('prints.partials._header', ['header_image' => $headerSrc ?? $header_image ?? null, 'printed_at' => $printed_at ?? null])
 
     <div class="content">
         <table class="title-table">
@@ -377,23 +371,12 @@
             ?: $resolveInlineImage($footer_image_path ?? '')
             ?: $resolveInlineImage($footer_image_url ?? '');
     @endphp
-    <div class="footer">
-        <div class="powered-by">
-            Powered By: www.toamedit.com Support: 01919-592638 — Printing Date: {{ now()->timezone('Asia/Dhaka')->format('d F, Y h:i a') }}
-        </div>
 
-        @if(!empty($footerSrc))
-            @if(!empty($footer_content))
-                <div class="footer-content" style="position:relative; z-index:11;">{!! $footer_content !!}</div>
-            @endif
-            <img src="{{ $footerSrc }}" class="footer-image" alt="Footer">
-        @else
-            <div class="footer-placeholder"></div>
-            @if(!empty($footer_content))
-                <div class="footer-content">{!! $footer_content !!}</div>
-            @endif
-        @endif
+    <div class="powered-by">
+        Powered By: www.toamedit.com Support: 01919-592638 — Printing Date: {{ now()->timezone('Asia/Dhaka')->format('d F, Y h:i a') }}
     </div>
+
+    @include('prints.partials._footer', ['footer_image' => $footerSrc, 'footer_content' => $footer_content ?? null, 'printedAt' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i a')])
 </body>
 
 </html>

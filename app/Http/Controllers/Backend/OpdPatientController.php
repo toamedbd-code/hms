@@ -903,13 +903,12 @@ class OpdPatientController extends Controller
         $footerImageBase64 = '';
         $showHeaderFooter = (bool) ($websetting?->opd_prescription_header_footer ?? true);
         $banglaFontPath = '';
+        $banglaFontUrl = '';
 
         $banglaFontFile = public_path('fonts/NotoSansBengali-Regular.ttf');
         if (is_file($banglaFontFile)) {
-            $normalized = str_replace('\\', '/', $banglaFontFile);
-            $banglaFontPath = str_starts_with($normalized, '/')
-                ? 'file://' . $normalized
-                : 'file:///' . ltrim($normalized, '/');
+            // Prefer web-served font URL; avoid emitting file:// URIs that browsers block.
+            $banglaFontUrl = asset('fonts/NotoSansBengali-Regular.ttf');
         }
 
         if ($showHeaderFooter && $invoiceDesign && $invoiceDesign->header_photo_path) {
@@ -1032,6 +1031,7 @@ class OpdPatientController extends Controller
             'patientBarcodeImage' => $patientBarcodeImage,
             'rxBarcodeImage' => $rxBarcodeImage,
             'banglaFontPath' => $banglaFontPath,
+            'banglaFontUrl' => $banglaFontUrl,
             'invoiceFooterFallback' => $invoiceFooterFallback,
             // Add paid amount for print view
             'paidAmount' => (float)($opdpatient->paid_amount ?? 0),

@@ -44,7 +44,7 @@ return [
     |
     */
 
-    'guard' => 'sanctum',
+    'guard' => 'web',
 
     /*
     |--------------------------------------------------------------------------
@@ -61,7 +61,7 @@ return [
         // Features::termsAndPrivacyPolicy(),
         // Features::profilePhotos(),
         // Features::api(),
-        // Features::teams(['invitations' => true]),
+        Features::teams(['invitations' => true]),
         Features::accountDeletion(),
     ],
 

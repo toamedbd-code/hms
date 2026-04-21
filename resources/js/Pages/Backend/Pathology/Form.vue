@@ -447,10 +447,12 @@ const submit = () => {
 
     const routeName = props.id ? route('backend.pathology.update', props.id) : route('backend.pathology.store');
 
-    // Open blank window synchronously to avoid popup blockers when navigating later
+    // Open blank tab synchronously to avoid popup blockers when navigating later
     let invoiceWindow = null;
     try {
+        // open a plain new tab (no popup feature string)
         invoiceWindow = window.open('', '_blank');
+        try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
     } catch (e) {
         invoiceWindow = null;
     }
@@ -478,7 +480,7 @@ const submit = () => {
                                 if (invoiceWindow && !invoiceWindow.closed) {
                                     invoiceWindow.location = invoiceUrl;
                                 } else {
-                                    window.open(invoiceUrl, '_blank');
+                                    try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
                                 }
                             } catch (e) {
                                 window.open(invoiceUrl, '_blank');
@@ -501,10 +503,10 @@ const submit = () => {
                         if (invoiceWindow && !invoiceWindow.closed) {
                             invoiceWindow.location = invoiceUrl;
                         } else {
-                            window.open(invoiceUrl, '_blank');
+                            try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
                         }
                     } catch (e) {
-                        window.open(invoiceUrl, '_blank');
+                        try { window.open(invoiceUrl, '_blank'); } catch (ee) { window.open(invoiceUrl, '_blank'); }
                     }
                 }
             }

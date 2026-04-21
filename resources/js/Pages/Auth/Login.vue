@@ -1,5 +1,5 @@
 <script setup>
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
 
 defineProps({
@@ -12,6 +12,8 @@ const form = useForm({
     password: '',
     remember: false,
 });
+
+const page = usePage();
 
 const submit = () => {
     form.transform(data => ({
@@ -36,10 +38,10 @@ const submit = () => {
         <div class="relative z-10 grid min-h-screen grid-cols-1 lg:grid-cols-2">
             <section class="hidden lg:flex flex-col justify-between p-12 xl:p-16 bg-gradient-to-br from-[#0f3a37] via-[#16524f] to-[#1f5f5b] text-white">
                 <div>
-                    <p class="inline-flex items-center rounded-full bg-white/15 px-4 py-1 text-xs tracking-[0.25em] uppercase">Hospital Management Suite</p>
-                    <h1 class="mt-8 text-5xl xl:text-6xl leading-[1.05] font-semibold">Welcome Back.</h1>
+                    <p class="inline-flex items-center rounded-full bg-white/15 px-4 py-1 text-xs tracking-[0.25em] uppercase">{{ page.props.loginTexts.banner }}</p>
+                    <h1 class="mt-8 text-5xl xl:text-6xl leading-[1.05] font-semibold">{{ page.props.loginTexts.title }}</h1>
                     <p class="mt-6 max-w-xl text-base xl:text-lg text-white/85">
-                        Continue with your secure account and manage all operations with confidence.
+                        {{ page.props.loginTexts.subtitle }}
                     </p>
                 </div>
                 <div class="grid grid-cols-3 gap-3 text-sm">

@@ -122,5 +122,6 @@
             };
         </script>
     @endif
+    @includeIf('prints.partials._footer')
 </body>
 </html>

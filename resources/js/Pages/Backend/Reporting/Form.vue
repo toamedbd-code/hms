@@ -153,6 +153,8 @@ items.value.forEach((item) => {
     report_file: null,
     // Always use direct editable result box for simpler workflow.
     use_full_page: initialUseFullPage,
+    // parameter_values will be populated below (empty by default)
+    parameter_values: {},
   });
 
   fileUiState[item.id] = {
@@ -170,6 +172,15 @@ items.value.forEach((item) => {
     tableBorderWidth: '1',
   };
 
+  // Initialize parameter_values from saved data or empty strings
+  if (Array.isArray(item.parameters) && item.parameters.length) {
+    itemForms[item.id].parameter_values = {};
+    const saved = item.saved_parameter_values ?? {};
+    item.parameters.forEach((p) => {
+      itemForms[item.id].parameter_values[p.id] = String(saved[p.id] ?? '');
+    });
+  }
+
   if (!String(itemForms[item.id].report_note ?? '').trim()) {
     const narrativeTemplate = resolveNarrativeTemplate(item);
     if (narrativeTemplate) {
@@ -179,7 +190,9 @@ items.value.forEach((item) => {
 });
 
 const shouldRenderLargeResultBox = (itemId) => {
-  return Boolean(fileUiState[itemId]?.selectedName) || Boolean(itemForms[itemId]?.use_full_page);
+  return Boolean(fileUiState[itemId]?.selectedName)
+    || Boolean(fileUiState[itemId]?.savedName)
+    || Boolean(itemForms[itemId]?.use_full_page);
 };
 
 const deactivateFullPageEditor = async (itemId) => {
@@ -1067,12 +1080,34 @@ const getReportNotePlaceholder = (itemId) => {
   return unit ? `Enter result (${unit})` : 'Enter result';
 };
 
+const getParameterNoteFor = (itemId) => {
+  const item = (items.value || []).find((i) => i.id === itemId) || null;
+  if (!item || !Array.isArray(item.parameters) || item.parameters.length === 0) return null;
+
+  const values = itemForms[itemId]?.parameter_values || {};
+  const lines = [];
+  item.parameters.forEach((p) => {
+    const raw = String(values[p.id] ?? '').trim();
+    if (raw !== '') {
+      const unit = String(p.unit ?? '').trim();
+      lines.push(`${p.name}: ${raw}${unit ? ' ' + unit : ''}`);
+    }
+  });
+
+  return lines.length ? lines.join('\n') : null;
+};
+
 const submitItem = (itemId) => {
   const useFullPage = !!itemForms[itemId].use_full_page;
 
   if (useFullPage) {
     itemForms[itemId].report_note = withFullPageMarker(itemForms[itemId].report_note);
   } else {
+    // If parameter inputs exist for this item, prefer them as the report_note
+    const parameterNote = getParameterNoteFor(itemId);
+    if (parameterNote) {
+      itemForms[itemId].report_note = parameterNote;
+    }
     const unit = getUnitFromRange(itemForms[itemId].report_range);
     itemForms[itemId].report_note = normalizeReportNote(itemForms[itemId].report_note, unit);
   }
@@ -1293,6 +1328,26 @@ const formatSampleDateTime = (value) => {
 
             <div v-if="!shouldRenderLargeResultBox(item.id)" class="grid grid-cols-1 gap-4 mt-3 sm:grid-cols-2 lg:grid-cols-3">
               <div class="lg:col-span-3">
+                <div v-if="item.parameters && item.parameters.length" class="mb-3">
+                  <div class="text-sm font-semibold mb-1">Parameters</div>
+                  <div class="grid grid-cols-1 gap-2">
+                    <div v-for="param in item.parameters" :key="param.id" class="flex items-center gap-2">
+                      <div class="flex-1">
+                        <div class="text-xs font-medium">{{ param.name }}</div>
+                        <div class="text-xs text-gray-500">
+                          <span v-if="param.reference_from || param.reference_to">{{ param.reference_from }}<span v-if="param.reference_from && param.reference_to"> - </span>{{ param.reference_to }}</span>
+                          <span v-if="param.unit"> {{ param.unit }}</span>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        v-model="itemForms[item.id].parameter_values[param.id]"
+                        placeholder="Result"
+                        class="w-36 p-2 text-sm border rounded"
+                      />
+                    </div>
+                  </div>
+                </div>
                 <InputLabel :for="`note_${item.id}`" value="Result" />
                 <textarea
                   :id="`note_${item.id}`"

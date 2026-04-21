@@ -59,6 +59,9 @@
         "post-create-project-cmd": [
             "@php artisan key:generate --ansi"
         ]
+        ,
+        "test": "php vendor/bin/phpunit",
+        "test:ci": "php artisan migrate --force && php vendor/bin/phpunit --testsuite Unit"
     },
     "extra": {
         "laravel": {

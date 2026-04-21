@@ -349,19 +349,7 @@
             ?: $resolveInlineImage($footer_image_path ?? '')
             ?: $resolveInlineImage($footer_image_url ?? '');
     @endphp
-    <div class="footer">
-        @if(!empty($footerSrc))
-            @if(!empty($footer_content))
-                <div class="footer-content" style="position:relative; z-index:11;">{!! $footer_content !!}</div>
-            @endif
-            <img src="{{ $footerSrc }}" class="footer-image" alt="Clinic Footer">
-        @else
-            <div class="footer-placeholder"></div>
-            @if(!empty($footer_content))
-                <div class="footer-content">{!! $footer_content !!}</div>
-            @endif
-        @endif
-    </div>
+    @include('prints.partials._footer', ['footer_image' => $footerSrc, 'footer_content' => $footer_content ?? null])
 </body>
 
 </html>

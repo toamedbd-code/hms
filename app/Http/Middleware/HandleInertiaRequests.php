@@ -39,11 +39,14 @@ class HandleInertiaRequests extends Middleware
 
         $sideMenus = [];
         $companyInfo = [];
-        $adminUser = null;
 
-        if (auth()->guard('admin')->check() && auth()->guard('admin')->user()->status == 'Active') {
-            $adminUser = auth()->guard('admin')->user();
+        // Try to detect the admin user from the request (explicit guard) first,
+        // fall back to the default auth guard accessor. This ensures that the
+        // side menus are available even when route-level middleware hasn't yet
+        // called Auth::shouldUse('admin').
+        $adminUser = $request->user('admin') ?? auth()->guard('admin')->user();
 
+        if ($adminUser && ($adminUser->status ?? '') == 'Active') {
             // Force a fresh role/permission snapshot so recent role changes reflect instantly.
             try {
                 $adminUser = Admin::query()
@@ -104,9 +107,9 @@ class HandleInertiaRequests extends Middleware
             'recent' => [],
         ];
 
-        if (auth()->guard('admin')->check()) {
+        if ($adminUser) {
             /** @var \App\Models\Admin|null $adminUser */
-            $adminUser = $adminUser ?: auth()->guard('admin')->user();
+            $adminUser = $adminUser ?: ($request->user('admin') ?? auth()->guard('admin')->user());
             $today = Carbon::today()->toDateString();
             $soonDate = Carbon::today()->addDays(30)->toDateString();
 
@@ -180,6 +183,11 @@ class HandleInertiaRequests extends Middleware
                 'medicineExpiry' => $medicineExpiryAlert,
             ],
             'activityLogAlerts' => $activityLogAlert,
+            'loginTexts' => [
+                'banner' => env('LOGIN_BANNER', 'Hospital Management Suite'),
+                'title' => env('LOGIN_TITLE', 'Welcome Back.'),
+                'subtitle' => env('LOGIN_SUBTITLE', 'Continue with your secure account and manage all operations with confidence.'),
+            ],
         ]);
     }
 }

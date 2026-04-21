@@ -121,7 +121,8 @@ const submit = () => {
 
             if (billId) {
                 // Open IPD invoice PDF in a new tab when server provides billId
-                window.open(route('backend.download.ipd.invoice', { id: billId }), "_blank");
+                const url = route('backend.download.ipd.invoice', { id: billId });
+                try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
             }
 
             // Show toast only when server did not set a flash (to avoid duplicates

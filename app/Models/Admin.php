@@ -9,10 +9,11 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Traits\HasRoles;
+use Laravel\Sanctum\HasApiTokens;
 
 class Admin extends Authenticatable
 {
-    use Notifiable, HasFactory, HasRoles;
+    use Notifiable, HasFactory, HasRoles, HasApiTokens;
 
     /**
      * Spatie permissions must use the same guard as the admin authentication guard.
@@ -88,5 +89,10 @@ class Admin extends Authenticatable
     public function staffAttendance()
     {
         return $this->hasMany(StaffAttendance::class, 'staff_id', 'id');
+    }
+
+    public function modules()
+    {
+        return $this->belongsToMany(\App\Models\Module::class, 'admin_module', 'admin_id', 'module_id');
     }
 }

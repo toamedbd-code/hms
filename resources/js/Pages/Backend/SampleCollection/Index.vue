@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { router } from '@inertiajs/vue3';
+import axios from 'axios';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { displayWarning } from '@/responseMessage.js';
@@ -20,6 +21,13 @@ const props = defineProps({
 const rows = computed(() => props.datas?.data ?? []);
 const printedBarcodes = ref({});
 const search = ref(props.filters?.search ?? '');
+
+// modal state for per-item collection
+const showCollectModal = ref(false);
+const modalItems = ref([]);
+const modalBilling = ref(null);
+const collectingItemIds = ref({});
+const collectedMap = ref({});
 
 const getItems = (billing) => billing.bill_items ?? billing.billItems ?? [];
 
@@ -44,6 +52,47 @@ const collectSample = (billingId) => {
   });
 };
 
+const collectItem = async (item) => {
+  if (collectingItemIds.value[item.id]) return;
+  collectingItemIds.value = { ...collectingItemIds.value, [item.id]: true };
+  try {
+    await axios.post(route('backend.sample-collection.item.collect', item.id));
+    // remove collected item from modal list
+    modalItems.value = modalItems.value.filter((i) => i.id !== item.id);
+    collectedMap.value = { ...collectedMap.value, [item.id]: true };
+
+    if (modalItems.value.length === 0) {
+      showCollectModal.value = false;
+      router.reload();
+    }
+  } catch (e) {
+    displayWarning({ message: 'Failed to collect sample for the test.' });
+  } finally {
+    collectingItemIds.value = { ...collectingItemIds.value, [item.id]: false };
+  }
+};
+
+const collectAllFromModal = async () => {
+  if (!modalBilling.value) return;
+  try {
+    await axios.post(route('backend.sample-collection.collect', modalBilling.value.id));
+    showCollectModal.value = false;
+    router.reload();
+  } catch (e) {
+    displayWarning({ message: 'Failed to collect samples.' });
+  }
+};
+
+const openCollectModal = (billing) => {
+  if (!canCollect(billing.id)) {
+    displayWarning({ message: 'Print barcode first, then collect the sample.' });
+    return;
+  }
+  modalBilling.value = billing;
+  modalItems.value = (getItems(billing) || []).map((it) => ({ ...it }));
+  showCollectModal.value = true;
+};
+
 const markBarcodePrinted = (billingId) => {
   printedBarcodes.value = {
     ...printedBarcodes.value,
@@ -53,12 +102,8 @@ const markBarcodePrinted = (billingId) => {
 
 const canCollect = (billingId) => !!printedBarcodes.value[billingId];
 
-const handleCollect = (billingId) => {
-  if (!canCollect(billingId)) {
-    displayWarning({ message: 'Print barcode first, then collect the sample.' });
-    return;
-  }
-  collectSample(billingId);
+const handleCollect = (billing) => {
+  openCollectModal(billing);
 };
 
 const handleSearch = () => {
@@ -141,7 +186,7 @@ const goBack = () => {
                     type="button"
                     class="px-3 py-1 text-xs text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!canCollect(billing.id)"
-                    @click="handleCollect(billing.id)"
+                    @click="handleCollect(billing)"
                   >
                     Collect Sample
                   </button>
@@ -162,6 +207,61 @@ const goBack = () => {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Per-test collect modal -->
+      <div v-if="showCollectModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+        <div class="bg-white rounded shadow p-4 w-full max-w-2xl">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">Collect Samples - {{ modalBilling?.bill_number || '' }}</h2>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="px-3 py-1 text-sm text-gray-700 bg-white border rounded hover:bg-gray-50"
+                @click="showCollectModal = false"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                class="px-3 py-1 text-sm text-white bg-green-600 rounded hover:bg-green-700"
+                @click="collectAllFromModal"
+              >
+                Collect All
+              </button>
+            </div>
+          </div>
+
+          <div class="overflow-y-auto max-h-72">
+            <table class="w-full text-sm text-left">
+              <thead>
+                <tr>
+                  <th class="pb-2">Test</th>
+                  <th class="pb-2 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in modalItems" :key="item.id" class="border-t">
+                  <td class="py-2">{{ item.item_name }}</td>
+                  <td class="py-2 text-right">
+                    <button
+                      type="button"
+                      class="px-3 py-1 text-xs text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50"
+                      :disabled="collectingItemIds[item.id]"
+                      @click="collectItem(item)"
+                    >
+                      <span v-if="collectingItemIds[item.id]">Collecting...</span>
+                      <span v-else>Collect</span>
+                    </button>
+                  </td>
+                </tr>
+                <tr v-if="modalItems.length === 0">
+                  <td colspan="2" class="py-6 text-center text-gray-500">No uncollected tests.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <Pagination />

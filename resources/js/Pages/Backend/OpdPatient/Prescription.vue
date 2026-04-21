@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { ref, reactive, nextTick } from "vue";
 import BackendLayout from "@/Layouts/BackendLayout.vue";
 import InputLabel from "@/Components/InputLabel.vue";
 import { useForm } from "@inertiajs/vue3";
@@ -26,8 +26,19 @@ const doctorSignaturePreview = ref(props.prescription?.doctor_signature_url ?? "
 const doctorSealPreview = ref(props.prescription?.doctor_seal_url ?? "");
 const medicineSuggestions = ref([]);
 const testSuggestions = ref([]);
+// Medicine dropdown state
+const focusedMedicineIndex = ref(-1);
+const showMedicineDropdown = ref(false);
+const highlightedMedicineIndex = ref(-1);
+const medicineInputs = ref([]);
 let medicineSearchTimer = null;
-let testSearchTimer = null;
+const testSearchTimers = {};
+
+// Per-row suggestions and dropdown state for Recommended Tests
+const testSuggestionsMap = reactive({});
+const focusedTestIndex = ref(-1);
+const showTestDropdown = ref(false);
+const highlightedIndex = ref(-1);
 
 const form = useForm({
     notes: props.prescription?.notes ?? "",
@@ -111,6 +122,11 @@ const addRow = () => {
         frequency: "",
         instructions: "",
     });
+    nextTick(() => {
+        const newIndex = form.items.length - 1;
+        medicineInputs.value[newIndex]?.focus();
+        medicineInputs.value[newIndex]?.select();
+    });
 };
 
 const removeRow = (index) => {
@@ -120,6 +136,11 @@ const removeRow = (index) => {
 
 const addTestRow = () => {
     form.tests.push("");
+    nextTick(() => {
+        const newIndex = form.tests.length - 1;
+        const field = (typeof document !== 'undefined') ? document.querySelector(`#testSearch_${newIndex}`) : null;
+        if (field) { field.focus(); field.select(); }
+    });
 };
 
 const removeTestRow = (index) => {
@@ -142,11 +163,13 @@ const savePrescription = () => {
 };
 
 const printPrescription = () => {
-    window.open(route("backend.opdpatient.prescription.print", props.opdpatient.id), "_blank");
+    const url = route("backend.opdpatient.prescription.print", props.opdpatient.id);
+    try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
 };
 
 const downloadPrescriptionPdf = () => {
-    window.open(route("backend.opdpatient.prescription.pdf", props.opdpatient.id), "_blank");
+    const url = route("backend.opdpatient.prescription.pdf", props.opdpatient.id);
+    try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
 };
 
 const fetchSuggestions = async (url, target) => {
@@ -265,6 +288,10 @@ const searchMedicine = (query, rowIndex = null) => {
             medicineSuggestions.value = normalizeMedicineResults(data?.results);
 
             if (rowIndex !== null) {
+                // show dropdown for this row
+                showMedicineDropdown.value = true;
+                focusedMedicineIndex.value = rowIndex;
+                highlightedMedicineIndex.value = 0;
                 applyMedicineDefaults(rowIndex, form.items[rowIndex]?.medicine_name);
             }
         } catch (error) {
@@ -273,19 +300,196 @@ const searchMedicine = (query, rowIndex = null) => {
     }, 250);
 };
 
-const searchTest = (query) => {
-    if (testSearchTimer) {
-        clearTimeout(testSearchTimer);
+const onMedicineFocus = (rowIndex) => {
+    focusedMedicineIndex.value = rowIndex;
+    if (Array.isArray(medicineSuggestions.value) && medicineSuggestions.value.length > 0) {
+        showMedicineDropdown.value = true;
     }
+};
+
+const onMedicineBlur = (rowIndex) => {
+    setTimeout(() => {
+        if (focusedMedicineIndex.value === rowIndex) {
+            showMedicineDropdown.value = false;
+            highlightedMedicineIndex.value = -1;
+        }
+    }, 150);
+};
+
+const onMedicineKeyDown = (rowIndex, event) => {
+    const list = medicineSuggestions.value || [];
+    if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        highlightedMedicineIndex.value = Math.min((highlightedMedicineIndex.value || -1) + 1, list.length - 1);
+        scrollToHighlighted(rowIndex);
+    } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        highlightedMedicineIndex.value = Math.max((highlightedMedicineIndex.value || -1) - 1, -1);
+        scrollToHighlighted(rowIndex);
+    } else if (event.key === 'Escape') {
+        showMedicineDropdown.value = false;
+    }
+};
+
+const onMedicineEnter = async (rowIndex) => {
+    const list = medicineSuggestions.value || [];
+    if (showMedicineDropdown.value && list.length > 0) {
+        const pick = (highlightedMedicineIndex.value >= 0) ? highlightedMedicineIndex.value : 0;
+        const item = list[pick];
+        if (item) {
+            await selectMedicineSuggestion(rowIndex, item);
+            return;
+        }
+    }
+
+    // If dropdown not open (or no suggestions), move to next row / add new
+    const nextIndex = rowIndex + 1;
+    if (form.items[nextIndex] !== undefined) {
+        await nextTick();
+        medicineInputs.value[nextIndex]?.focus();
+        medicineInputs.value[nextIndex]?.select();
+    } else {
+        addRow();
+        await nextTick();
+        const newIndex = form.items.length - 1;
+        medicineInputs.value[newIndex]?.focus();
+        medicineInputs.value[newIndex]?.select();
+    }
+};
+
+const selectMedicineSuggestion = async (rowIndex, item) => {
+    const name = typeof item === 'string' ? item : (item?.name ?? item?.medicine_name ?? '');
+    if (!name) return;
+    form.items[rowIndex].medicine_name = name;
+    applyMedicineDefaults(rowIndex, name);
+    showMedicineDropdown.value = false;
+    highlightedMedicineIndex.value = -1;
+    // After selecting, move focus to next row (select+move in one Enter)
+    const nextIndex = rowIndex + 1;
+    if (form.items[nextIndex] !== undefined) {
+        await nextTick();
+        medicineInputs.value[nextIndex]?.focus();
+        medicineInputs.value[nextIndex]?.select();
+    } else {
+        addRow();
+        await nextTick();
+        const newIndex = form.items.length - 1;
+        medicineInputs.value[newIndex]?.focus();
+        medicineInputs.value[newIndex]?.select();
+    }
+};
+
+const searchTest = (query, rowIndex) => {
+    try {
+        if (testSearchTimers[rowIndex]) {
+            clearTimeout(testSearchTimers[rowIndex]);
+        }
+    } catch (e) { /* ignore */ }
+
     const term = String(query ?? "").trim();
     if (term.length < 2) {
-        testSuggestions.value = [];
+        testSuggestionsMap[rowIndex] = [];
+        showTestDropdown.value = false;
         return;
     }
-    testSearchTimer = setTimeout(() => {
+
+    testSearchTimers[rowIndex] = setTimeout(async () => {
         const url = route("backend.testpathology.search", { q: term });
-        fetchSuggestions(url, testSuggestions);
+        try {
+            const response = await fetch(url, { headers: { Accept: "application/json" } });
+            if (!response.ok) {
+                testSuggestionsMap[rowIndex] = [];
+                showTestDropdown.value = false;
+                return;
+            }
+            const data = await response.json();
+            testSuggestionsMap[rowIndex] = Array.isArray(data?.results) ? data.results : [];
+            focusedTestIndex.value = rowIndex;
+            showTestDropdown.value = true;
+            highlightedIndex.value = -1;
+        } catch (err) {
+            testSuggestionsMap[rowIndex] = [];
+            showTestDropdown.value = false;
+        }
     }, 250);
+};
+
+const resetTestHighlight = () => { highlightedIndex.value = -1; };
+
+const scrollToHighlighted = (rowIndex) => {
+    nextTick(() => {
+        const doc = (typeof document !== 'undefined') ? document : null;
+        const dropdown = doc ? (doc.querySelector(`#testDropdown_${rowIndex}`) || doc.querySelector(`#medicineDropdown_${rowIndex}`)) : null;
+        const highlightedItem = dropdown?.querySelector('.highlighted');
+        if (highlightedItem) highlightedItem.scrollIntoView({ block: 'nearest' });
+    });
+};
+
+const selectTestFromSuggestion = async (rowIndex, name) => {
+    form.tests[rowIndex] = name || '';
+    showTestDropdown.value = false;
+    highlightedIndex.value = -1;
+    // keep focus on the field so a subsequent Enter can add next row
+    await nextTick();
+    const field = (typeof document !== 'undefined') ? document.querySelector(`#testSearch_${rowIndex}`) : null;
+    if (field) {
+        field.focus();
+        field.select();
+    }
+};
+
+const onTestFocus = (rowIndex) => {
+    focusedTestIndex.value = rowIndex;
+    if (Array.isArray(testSuggestionsMap[rowIndex]) && testSuggestionsMap[rowIndex].length > 0) {
+        showTestDropdown.value = true;
+    } else {
+        showTestDropdown.value = false;
+    }
+};
+
+const onTestBlur = (rowIndex) => {
+    setTimeout(() => {
+        if (focusedTestIndex.value === rowIndex) {
+            showTestDropdown.value = false;
+            highlightedIndex.value = -1;
+        }
+    }, 180);
+};
+
+const onTestKeyDown = (rowIndex, event) => {
+    const list = testSuggestionsMap[rowIndex] || [];
+    if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        highlightedIndex.value = Math.min((highlightedIndex.value || -1) + 1, list.length - 1);
+        scrollToHighlighted(rowIndex);
+    } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        highlightedIndex.value = Math.max((highlightedIndex.value || -1) - 1, -1);
+        scrollToHighlighted(rowIndex);
+    }
+};
+
+const onTestEnter = async (rowIndex) => {
+    const list = testSuggestionsMap[rowIndex] || [];
+    if (showTestDropdown.value && list.length > 0) {
+        const pick = (highlightedIndex.value >= 0) ? highlightedIndex.value : 0;
+        await selectTestFromSuggestion(rowIndex, list[pick]);
+        return;
+    }
+
+    // If dropdown not open (or no suggestions), move to next row / add new
+    const nextIndex = rowIndex + 1;
+    if (form.tests[nextIndex] !== undefined) {
+        await nextTick();
+        const field = (typeof document !== 'undefined') ? document.querySelector(`#testSearch_${nextIndex}`) : null;
+        if (field) { field.focus(); field.select(); }
+    } else {
+        addTestRow();
+        await nextTick();
+        const newIndex = form.tests.length - 1;
+        const field = (typeof document !== 'undefined') ? document.querySelector(`#testSearch_${newIndex}`) : null;
+        if (field) { field.focus(); field.select(); }
+    }
 };
 </script>
 
@@ -337,10 +541,7 @@ const searchTest = (query) => {
                     <div class="mt-3 border-b border-gray-300"></div>
                     <div class="mt-3 text-sm font-semibold">Rx</div>
                 </div>
-                <div v-if="$page.props.flash?.successMessage"
-                    class="mb-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
-                    {{ $page.props.flash.successMessage }}
-                </div>
+                
                 <div v-if="$page.props.flash?.errorMessage"
                     class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                     {{ $page.props.flash.errorMessage }}
@@ -437,15 +638,30 @@ const searchTest = (query) => {
                         <tbody>
                             <tr v-for="(row, index) in form.items" :key="index">
                                 <td class="px-2 py-2 border">
-                                    <input
-                                        v-model="row.medicine_name"
-                                        type="text"
-                                        list="medicine-suggestions"
-                                        class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                                        placeholder="Medicine name"
-                                        @input="onMedicineInput(index)"
-                                        @change="onMedicineChange(index)"
-                                    />
+                                    <div class="relative">
+                                        <input
+                                            v-model="row.medicine_name"
+                                            type="text"
+                                            :ref="el => medicineInputs.value[index] = el"
+                                            class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                            placeholder="Medicine name"
+                                            @input="onMedicineInput(index)"
+                                            @change="onMedicineChange(index)"
+                                            @focus="onMedicineFocus(index)"
+                                            @blur="onMedicineBlur(index)"
+                                            @keydown.enter.prevent="onMedicineEnter(index)"
+                                            @keydown="onMedicineKeyDown(index, $event)"
+                                            autocomplete="off"
+                                        />
+
+                                        <div v-if="focusedMedicineIndex === index && showMedicineDropdown" :id="`medicineDropdown_${index}`" class="absolute z-50 left-0 right-0 mt-1 bg-white border rounded shadow text-xs">
+                                            <div v-for="(item, sIndex) in medicineSuggestions" :key="sIndex" @mousedown.prevent="selectMedicineSuggestion(index, item)" @mouseenter="highlightedMedicineIndex = sIndex" :class="{ 'bg-blue-100': highlightedMedicineIndex === sIndex, 'highlighted': highlightedMedicineIndex === sIndex }" class="px-3 py-2 cursor-pointer">
+                                                <div class="font-medium">{{ typeof item === 'string' ? item : (item.name ?? item.medicine_name ?? '') }}</div>
+                                                <div v-if="typeof item !== 'string' && (item.dose || item.duration)" class="text-[11px] text-gray-500">{{ item.dose ? item.dose + (item.duration ? ' · ' + item.duration : '') : (item.duration ?? '') }}</div>
+                                            </div>
+                                            <div v-if="!medicineSuggestions.length" class="px-3 py-2 text-sm text-gray-500 text-center">No medicines found</div>
+                                        </div>
+                                    </div>
                                     <p v-if="form.errors[`items.${index}.medicine_name`]" class="mt-1 text-xs text-red-600">
                                         {{ form.errors[`items.${index}.medicine_name`] }}
                                     </p>
@@ -500,9 +716,7 @@ const searchTest = (query) => {
                             </tr>
                         </tbody>
                     </table>
-                    <datalist id="medicine-suggestions">
-                        <option v-for="item in medicineSuggestions" :key="item.name" :value="item.name" />
-                    </datalist>
+                    <!-- per-row medicine dropdown replaces datalist -->
                 </div>
 
                 <div class="mt-3 no-print">
@@ -526,14 +740,33 @@ const searchTest = (query) => {
                             <div class="h-5 min-w-[20px] px-1 inline-flex items-center justify-center rounded bg-gray-100 text-[11px] font-semibold text-gray-700 dark:bg-slate-700 dark:text-gray-200">
                                 {{ index + 1 }}
                             </div>
-                            <input
-                                v-model="form.tests[index]"
-                                type="text"
-                                list="test-suggestions"
-                                class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                                placeholder="Test name"
-                                @input="searchTest(form.tests[index])"
-                            />
+
+                            <div class="relative flex-1">
+                                <input
+                                    :id="`testSearch_${index}`"
+                                    v-model="form.tests[index]"
+                                    type="text"
+                                    class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                    placeholder="Test name"
+                                    @input="e => { searchTest(e.target.value, index); resetTestHighlight(); }"
+                                    @focus="onTestFocus(index)"
+                                    @blur="onTestBlur(index)"
+                                    @keydown.enter.prevent="onTestEnter(index)"
+                                    @keydown="onTestKeyDown(index, $event)"
+                                    autocomplete="off"
+                                />
+
+                                <!-- Custom dropdown for test suggestions -->
+                                <div v-if="focusedTestIndex === index && showTestDropdown" :id="`testDropdown_${index}`" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
+                                    <div v-for="(name, sIndex) in (testSuggestionsMap[index] || [])" :key="sIndex" @click="selectTestFromSuggestion(index, name)" :class="{ 'bg-blue-100': highlightedIndex === sIndex, 'highlighted': highlightedIndex === sIndex }" class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-700 border-b border-gray-100 last:border-b-0">
+                                        <div class="font-medium">{{ name }}</div>
+                                    </div>
+                                    <div v-if="(testSuggestionsMap[index] || []).length === 0" class="px-3 py-2 text-sm text-gray-500 text-center">
+                                        No tests found
+                                    </div>
+                                </div>
+                            </div>
+
                             <button
                                 type="button"
                                 class="px-2 py-1 text-xs bg-red-500 text-white rounded no-print"
@@ -563,9 +796,7 @@ const searchTest = (query) => {
                     >
                         {{ form.errors[`tests.${index}`] }}
                     </p>
-                    <datalist id="test-suggestions">
-                        <option v-for="name in testSuggestions" :key="name" :value="name" />
-                    </datalist>
+                    <!-- custom dropdown used instead of datalist -->
                 </div>
 
                 <div class="flex items-center justify-end mt-3 no-print">

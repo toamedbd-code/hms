@@ -109,7 +109,7 @@ const handleLinkClick = (linkInfo, event) => {
 const visitLink = (link, target) => {
     if (!link) return;
     if (target === '_blank') {
-        window.open(link, '_blank', 'noopener');
+        window.open(link, '_blank');
         return;
     }
     router.visit(link);

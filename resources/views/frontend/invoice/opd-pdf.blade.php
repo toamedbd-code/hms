@@ -190,20 +190,20 @@
                 max-height: {{ $__inv_footer_h + 10 }}px;
                 object-fit: contain;
                 z-index: 10;
+                display: block;
             }
 
+            /* Footer content sits inside the fixed footer container so it appears above the image */
             .footer-content {
-                position: fixed;
-                bottom: {{ (int) floor($__inv_footer_h / 2) }}px; /* sit centered with footer image */
-                left: 0;
-                right: 0;
-                width: 100%;
                 text-align: center;
-                z-index: 60; /* ensure content is above footer image */
-                border-top: none !important; /* remove border */
-                padding-top: 0;
+                width: 100%;
+                padding: 0 10px;
+                margin: 0 0 5px;
+                font-size: inherit;
                 background: transparent;
             }
+
+            .header-placeholder, .footer-placeholder { display: none; }
         }
 
         .clearfix {
@@ -297,14 +297,7 @@
 </head>
 
 <body>
-    <!-- Header Section -->
-    <div class="header">
-        @if($header_image)
-        <img src="{{ $header_image }}" class="header-image" alt="Clinic Header">
-        @else
-        <div class="header-placeholder"></div>
-        @endif
-    </div>
+    @include('prints.partials._header')
 
     <!-- Patient Information Section - Two Column Layout -->
     <div class="patient-info">
@@ -448,39 +441,8 @@
     </div>
     @endif
 
-    <!-- Footer Section -->
-    <div class="footer">
-        @php
-            $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
-            $footerPrintedAt = trim((string) ($printed_at ?? ''));
-        @endphp
-        <div class="footer-meta">
-            <table style="width: 100%; border-collapse: collapse;">
-                <tr>
-                    <td style="text-align: left; padding-right: 12px;">
-                        {{ $footerFallbackLine }}
-                    </td>
-                    <td style="text-align: right; white-space: nowrap; padding-right: 60px;">
-                        @if($footerPrintedAt !== '')
-                        Printing Date: {{ $footerPrintedAt }}
-                        @endif
-                    </td>
-                </tr>
-            </table>
-        </div>
-
-        @if(!empty($footer_image))
-                @if(!empty($footer_content))
-                    <div class="footer-content" style="position:fixed; bottom:{{ (int) floor($__inv_footer_h / 2) + 18 }}px; left:0; right:0; width:100%; text-align:center; z-index:60; border-top:none !important; padding-top:0; background:transparent;">{!! $footer_content !!}</div>
-            @endif
-            <img src="{{ $footer_image }}" class="footer-image" alt="Clinic Footer">
-        @else
-            <div class="footer-placeholder"></div>
-            @if(!empty($footer_content))
-                <div class="footer-content">{!! $footer_content !!}</div>
-            @endif
-        @endif
-    </div>
+    <div class="footer-placeholder"></div>
+    @include('prints.partials._footer')
 </body>
 
 </html>

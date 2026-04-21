@@ -135,6 +135,8 @@
         </tbody>
     </table>
 
+    @includeIf('prints.partials._footer')
+
     <script>
         window.addEventListener('load', function () {
             window.print();

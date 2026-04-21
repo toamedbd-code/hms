@@ -58,7 +58,9 @@
         @endif
         <div class="print-time">Printed: {{ now()->format('d-M-Y h:i A') }}</div>
     </div>
-    <script>
+        @includeIf('prints.partials._footer')
+
+        <script>
         window.addEventListener('load', function () {
             window.print();
         });

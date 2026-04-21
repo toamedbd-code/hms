@@ -74,11 +74,14 @@ class DefineLeaveController extends Controller
     {
         $query = $this->defineleaveService->list();
 
-        if (request()->filled('role'))
-            $query->where('role', 'like', request()->role . '%');
+        if (request()->filled('role')) {
+            $query->whereHas('role', function ($q) {
+                $q->where('name', 'like', request()->role . '%');
+            });
+        }
 
         if (request()->filled('type')) {
-            $query->join('leave_types.id', '=', 'define_leaves.type_id')
+            $query->join('leave_types', 'leave_types.id', '=', 'define_leaves.type_id')
                 ->where('leave_types.type_name', 'like', '%' . request()->type . '%');
         }
 

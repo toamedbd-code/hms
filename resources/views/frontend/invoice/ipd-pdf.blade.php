@@ -257,29 +257,29 @@
                 max-height: {{ $__inv_footer_h + 10 }}px;
                 object-fit: contain;
                 z-index: 10;
+                display: block;
             }
 
+            /* Keep footer content inside footer container so it displays like report print */
             .footer-content {
-                text-align: center;
-                width: 100%;
                 position: relative;
+                left: 0;
+                right: 0;
+                width: 100%;
+                text-align: center;
                 z-index: 60;
                 border-top: none !important;
                 padding-top: 0;
                 background: transparent;
             }
+
+            .header-placeholder, .footer-placeholder { display: none; }
         }
     </style>
 </head>
 
 <body>
-    <div class="header">
-        @if(!empty($header_image))
-            <img src="{{ $header_image }}" class="header-image" alt="Header">
-        @else
-            <div class="header-placeholder"></div>
-        @endif
-    </div>
+    @include('prints.partials._header')
 
     <div class="content">
         <table class="title-table">
@@ -450,39 +450,8 @@
     </div>
     @endif
 
-    <div class="footer">
-        @php
-            $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
-            $footerPrintedAt = trim((string) ($printed_at ?? ''));
-        @endphp
-
-        <div class="footer-meta">
-            <table style="width: 100%; border-collapse: collapse;">
-                <tr>
-                    <td style="text-align: left; padding-right: 12px;">
-                        {{ $footerFallbackLine }}
-                    </td>
-                    <td style="text-align: right; white-space: nowrap; padding-right: 60px;">
-                        @if($footerPrintedAt !== '')
-                            Printing Date: {{ $footerPrintedAt }}
-                        @endif
-                    </td>
-                </tr>
-            </table>
-        </div>
-
-        @if(!empty($footer_image))
-            @if(!empty($footer_content))
-                <div class="footer-content" style="position:relative; z-index:11;">{!! $footer_content !!}</div>
-            @endif
-            <img src="{{ $footer_image }}" class="footer-image" alt="Footer">
-        @else
-            <div class="footer-placeholder"></div>
-            @if(!empty($footer_content))
-                <div class="footer-content">{!! $footer_content !!}</div>
-            @endif
-        @endif
-    </div>
+    <div class="footer-placeholder"></div>
+    @include('prints.partials._footer')
 </body>
 
 </html>

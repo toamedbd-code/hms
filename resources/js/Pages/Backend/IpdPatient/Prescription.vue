@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { ref, nextTick } from "vue";
 import BackendLayout from "@/Layouts/BackendLayout.vue";
 import InputLabel from "@/Components/InputLabel.vue";
 import { useForm } from "@inertiajs/vue3";
@@ -9,6 +9,17 @@ const medicineSuggestions = ref([]);
 const testSuggestions = ref([]);
 let medicineSearchTimer = null;
 let testSearchTimer = null;
+
+// Refs for per-row test suggestion UI
+const testInputs = ref([]); // DOM refs to test input fields
+const activeTestRowIndex = ref(null);
+const suggestionsVisible = ref(false);
+const highlightedIndex = ref(0);
+// Medicine dropdown refs/state
+const medicineInputs = ref([]);
+const activeMedicineRowIndex = ref(null);
+const medicineSuggestionsVisible = ref(false);
+const medicineHighlightedIndex = ref(0);
 
 const props = defineProps({
     ipdpatient: Object,
@@ -93,6 +104,11 @@ const addMedicineRow = () => {
         duration: "",
         instructions: "",
     });
+    nextTick(() => {
+        const newIndex = form.medicines.length - 1;
+        medicineInputs.value[newIndex]?.focus();
+        medicineInputs.value[newIndex]?.select();
+    });
 };
 
 const removeMedicineRow = (index) => {
@@ -102,6 +118,11 @@ const removeMedicineRow = (index) => {
 
 const addTestRow = () => {
     form.tests.push("");
+    nextTick(() => {
+        const newIndex = form.tests.length - 1;
+        testInputs.value[newIndex]?.focus();
+        testInputs.value[newIndex]?.select();
+    });
 };
 
 const removeTestRow = (index) => {
@@ -118,6 +139,10 @@ const fetchSuggestions = async (url, target) => {
         }
         const data = await response.json();
         target.value = Array.isArray(data?.results) ? data.results : [];
+        // If these are test suggestions, reset highlight and show dropdown
+        if (target === testSuggestions) {
+            highlightedIndex.value = 0;
+        }
     } catch (error) {
         target.value = [];
     }
@@ -229,6 +254,10 @@ const searchMedicine = (query, rowIndex = null) => {
             medicineSuggestions.value = normalizeMedicineResults(data?.results);
 
             if (rowIndex !== null) {
+                // show dropdown for this medicine row
+                medicineSuggestionsVisible.value = true;
+                activeMedicineRowIndex.value = rowIndex;
+                medicineHighlightedIndex.value = 0;
                 applyMedicineDefaults(rowIndex, form.medicines[rowIndex]?.medicine_name);
             }
         } catch (error) {
@@ -254,6 +283,136 @@ const searchTest = (query) => {
     }, 250);
 };
 
+// Handlers for per-row test suggestion UI
+const onTestInput = (index) => {
+    const term = String(form.tests[index] ?? '').trim();
+    activeTestRowIndex.value = index;
+    if (term.length < 2) {
+        testSuggestions.value = [];
+        suggestionsVisible.value = false;
+        return;
+    }
+
+    suggestionsVisible.value = true;
+    searchTest(term);
+};
+
+const onTestKeydown = (index, event) => {
+    const list = testSuggestions.value || [];
+    if (!suggestionsVisible.value || !list.length) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            if (index + 1 >= form.tests.length) addTestRow();
+            nextTick(() => { testInputs.value[index + 1]?.focus(); });
+        }
+        return;
+    }
+
+    if (event.key === 'ArrowDown') {
+        highlightedIndex.value = (highlightedIndex.value + 1) % list.length;
+        event.preventDefault();
+    } else if (event.key === 'ArrowUp') {
+        highlightedIndex.value = (highlightedIndex.value - 1 + list.length) % list.length;
+        event.preventDefault();
+    } else if (event.key === 'Enter') {
+        event.preventDefault();
+        const item = list[highlightedIndex.value];
+        const name = typeof item === 'string' ? item : (item?.name ?? item?.test_name ?? '');
+        if (name) {
+            form.tests[index] = name;
+            suggestionsVisible.value = false;
+            if (index + 1 >= form.tests.length) addTestRow();
+            nextTick(() => { testInputs.value[index + 1]?.focus(); });
+        }
+    } else if (event.key === 'Escape') {
+        suggestionsVisible.value = false;
+    }
+};
+
+const selectTestSuggestion = (index, item) => {
+    const name = typeof item === 'string' ? item : (item?.name ?? item?.test_name ?? '');
+    if (!name) return;
+    form.tests[index] = name;
+    suggestionsVisible.value = false;
+    if (index + 1 >= form.tests.length) addTestRow();
+    nextTick(() => { testInputs.value[index + 1]?.focus(); });
+};
+
+const onTestBlur = (index) => {
+    // Delay hiding to allow click on suggestion
+    setTimeout(() => {
+        suggestionsVisible.value = false;
+        activeTestRowIndex.value = null;
+    }, 150);
+};
+
+// Medicine handlers
+const onMedicineFocus = (index) => {
+    activeMedicineRowIndex.value = index;
+    if (Array.isArray(medicineSuggestions.value) && medicineSuggestions.value.length > 0) {
+        medicineSuggestionsVisible.value = true;
+    }
+};
+
+const onMedicineBlur = (index) => {
+    setTimeout(() => {
+        medicineSuggestionsVisible.value = false;
+        activeMedicineRowIndex.value = null;
+    }, 150);
+};
+
+const onMedicineKeydown = (index, event) => {
+    const list = medicineSuggestions.value || [];
+    if (event.key === 'ArrowDown') {
+        medicineHighlightedIndex.value = (medicineHighlightedIndex.value + 1) % list.length;
+        event.preventDefault();
+    } else if (event.key === 'ArrowUp') {
+        medicineHighlightedIndex.value = (medicineHighlightedIndex.value - 1 + list.length) % list.length;
+        event.preventDefault();
+    } else if (event.key === 'Escape') {
+        medicineSuggestionsVisible.value = false;
+    }
+};
+
+const onMedicineEnter = async (index) => {
+    const list = medicineSuggestions.value || [];
+    if (medicineSuggestionsVisible.value && list.length > 0) {
+        const pick = (medicineHighlightedIndex.value >= 0) ? medicineHighlightedIndex.value : 0;
+        const item = list[pick];
+        if (item) {
+            await selectMedicineSuggestion(index, item);
+            return;
+        }
+    }
+
+    // If dropdown not open (or no suggestions), move to next row / add new
+    if (index + 1 >= form.medicines.length) {
+        addMedicineRow();
+        await nextTick();
+    }
+    medicineInputs.value[index + 1]?.focus();
+};
+
+const selectMedicineSuggestion = async (index, item) => {
+    const name = typeof item === 'string' ? item : (item?.name ?? item?.medicine_name ?? '');
+    if (!name) return;
+    form.medicines[index].medicine_name = name;
+    applyMedicineDefaults(index, name);
+    medicineSuggestionsVisible.value = false;
+    // After selecting, move to next row (single-Enter selects and advances)
+    const next = index + 1;
+    if (form.medicines[next] !== undefined) {
+        await nextTick();
+        medicineInputs.value[next]?.focus();
+        medicineInputs.value[next]?.select();
+    } else {
+        addMedicineRow();
+        await nextTick();
+        medicineInputs.value[index + 1]?.focus();
+        medicineInputs.value[index + 1]?.select();
+    }
+};
+
 const savePrescription = () => {
     saveError.value = "";
 
@@ -270,11 +429,13 @@ const savePrescription = () => {
 };
 
 const printPrescription = () => {
-    window.open(route("backend.ipdpatient.prescription.print", props.ipdpatient.id), "_blank");
+    const url = route("backend.ipdpatient.prescription.print", props.ipdpatient.id);
+    try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
 };
 
 const downloadPrescriptionPdf = () => {
-    window.open(route("backend.ipdpatient.prescription.pdf", props.ipdpatient.id), "_blank");
+    const url = route("backend.ipdpatient.prescription.pdf", props.ipdpatient.id);
+    try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
 };
 </script>
 
@@ -305,10 +466,7 @@ const downloadPrescriptionPdf = () => {
             </div>
 
             <div class="border border-gray-200 rounded-md p-3 dark:border-gray-700">
-                <div v-if="$page.props.flash?.successMessage"
-                    class="mb-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
-                    {{ $page.props.flash.successMessage }}
-                </div>
+                <!-- successMessage displayed via toast; inline success removed -->
                 <div v-if="$page.props.flash?.errorMessage"
                     class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                     {{ $page.props.flash.errorMessage }}
@@ -422,15 +580,28 @@ const downloadPrescriptionPdf = () => {
                         <tbody>
                             <tr v-for="(row, index) in form.medicines" :key="index">
                                 <td class="px-2 py-2 border">
-                                    <input
-                                        v-model="row.medicine_name"
-                                        type="text"
-                                        list="ipd-medicine-suggestions"
-                                        class="w-full px-2 py-1 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                                        placeholder="Medicine name"
-                                        @input="onMedicineInput(index)"
-                                        @change="onMedicineChange(index)"
-                                    />
+                                    <div class="relative">
+                                        <input
+                                            v-model="row.medicine_name"
+                                            type="text"
+                                            :ref="el => medicineInputs.value[index] = el"
+                                            class="w-full px-2 py-1 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                            placeholder="Medicine name"
+                                            @input="onMedicineInput(index)"
+                                            @change="onMedicineChange(index)"
+                                            @focus="onMedicineFocus(index)"
+                                            @blur="onMedicineBlur(index)"
+                                            @keydown.enter.prevent="onMedicineEnter(index)"
+                                            @keydown="onMedicineKeydown(index, $event)"
+                                            autocomplete="off"
+                                        />
+
+                                        <div v-if="activeMedicineRowIndex === index && medicineSuggestionsVisible && medicineSuggestions.length" :id="`ipdMedicineDropdown_${index}`" class="absolute z-50 left-0 right-0 mt-1 bg-white border rounded shadow text-xs">
+                                            <div v-for="(item, sIndex) in medicineSuggestions" :key="sIndex" @mousedown.prevent="selectMedicineSuggestion(index, item)" @mouseenter="medicineHighlightedIndex = sIndex" :class="{ 'bg-blue-100': medicineHighlightedIndex === sIndex, 'highlighted': medicineHighlightedIndex === sIndex }" class="px-2 py-1 cursor-pointer">
+                                                {{ typeof item === 'string' ? item : (item.name ?? item.medicine_name ?? '') }}
+                                            </div>
+                                        </div>
+                                    </div>
                                 </td>
                                 <td class="px-2 py-2 border">
                                     <input v-model="row.dose" type="text"
@@ -462,9 +633,7 @@ const downloadPrescriptionPdf = () => {
                         </tbody>
                     </table>
 
-                    <datalist id="ipd-medicine-suggestions">
-                        <option v-for="item in medicineSuggestions" :key="item.name" :value="item.name" />
-                    </datalist>
+                    <!-- per-row medicine dropdown replaces datalist -->
 
                     <div class="mt-3">
                         <button type="button" class="px-3 py-1.5 text-xs bg-gray-600 text-white rounded"
@@ -478,22 +647,36 @@ const downloadPrescriptionPdf = () => {
                     <div class="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Recommended Tests</div>
 
                     <div class="space-y-1.5">
-                        <div v-for="(testName, index) in form.tests" :key="`test-${index}`" class="flex items-center gap-2">
+                        <div v-for="(testName, index) in form.tests" :key="`test-${index}`" class="flex items-start gap-2">
                             <div class="h-5 min-w-[20px] px-1 inline-flex items-center justify-center rounded bg-gray-100 text-[11px] font-semibold text-gray-700 dark:bg-slate-700 dark:text-gray-200">
                                 {{ index + 1 }}
                             </div>
-                            <input
-                                v-model="form.tests[index]"
-                                type="text"
-                                list="ipd-test-suggestions"
-                                class="w-full px-2 py-1 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                                placeholder="Test name"
-                                @input="searchTest(form.tests[index])"
-                            />
-                            <button type="button" class="px-2 py-1 text-xs bg-red-500 text-white rounded"
-                                @click="removeTestRow(index)">
-                                Remove
-                            </button>
+
+                            <div class="relative w-full">
+                                    <input
+                                    v-model="form.tests[index]"
+                                    type="text"
+                                    :ref="el => testInputs[index] = el"
+                                    class="w-full px-2 py-1 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                    placeholder="Test name"
+                                    @input="onTestInput(index)"
+                                    @keydown="onTestKeydown(index, $event)"
+                                    @blur="onTestBlur(index)"
+                                    @focus="activeTestRowIndex = index; if (String(form.tests[index] ?? '').trim().length >= 2) { suggestionsVisible = true; searchTest(form.tests[index]); }"
+                                />
+
+                                <div v-if="activeTestRowIndex === index && suggestionsVisible && testSuggestions.length" class="absolute z-50 left-0 right-0 mt-1 bg-white border rounded shadow max-h-48 overflow-auto text-xs">
+                                    <div v-for="(item, sIndex) in testSuggestions" :key="sIndex" :class="highlightedIndex === sIndex ? 'bg-blue-100' : ''" @mousedown.prevent="selectTestSuggestion(index, item)" @mouseenter="highlightedIndex = sIndex" class="px-2 py-1 cursor-pointer">
+                                        {{ typeof item === 'string' ? item : (item.name ?? item.test_name ?? '') }}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="pt-1">
+                                <button type="button" class="px-2 py-1 text-xs bg-red-500 text-white rounded" @click="removeTestRow(index)">
+                                    Remove
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -503,9 +686,7 @@ const downloadPrescriptionPdf = () => {
                         </button>
                     </div>
 
-                    <datalist id="ipd-test-suggestions">
-                        <option v-for="name in testSuggestions" :key="name" :value="name" />
-                    </datalist>
+                    <!-- testSuggestions dropdown rendered per-row above; removed datalist -->
                 </div>
 
                 <div class="flex items-center justify-end mt-3">

@@ -559,7 +559,7 @@ class PatientPortalController extends Controller
         $pdf->setPaper('A4', 'portrait');
         $pdf->setOptions([
             'isHtml5ParserEnabled' => true,
-            'isRemoteEnabled' => false,
+            'isRemoteEnabled' => true,
             'defaultFont' => 'dejavu sans',
             'dpi' => 96,
             'isPhpEnabled' => false,

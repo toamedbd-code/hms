@@ -83,6 +83,29 @@ class SampleCollectionController extends Controller
         return back()->with('success', 'Sample collected successfully.');
     }
 
+    /**
+     * Collect a single bill item (sample) via AJAX/post from UI.
+     */
+    public function collectItem(BillItem $billItem)
+    {
+        $allowedCategories = $this->resolveDepartmentCategories();
+
+        if (! in_array($billItem->category, $allowedCategories)) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        if ($billItem->sample_collected_at) {
+            return response()->json(['warning' => 'Already collected'], 200);
+        }
+
+        $billItem->update([
+            'sample_collected_at' => now(),
+            'sample_collected_by' => auth('admin')->id(),
+        ]);
+
+        return response()->json(['success' => true, 'message' => 'Sample collected.']);
+    }
+
     public function barcode(Billing $billing)
     {
         $allowedCategories = $this->resolveDepartmentCategories();

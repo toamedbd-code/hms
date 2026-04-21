@@ -1,0 +1,27 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up()
+    {
+        Schema::create('admin_module', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('admin_id');
+            $table->unsignedBigInteger('module_id');
+            $table->timestamps();
+
+            $table->foreign('admin_id')->references('id')->on('admins')->cascadeOnDelete();
+            $table->foreign('module_id')->references('id')->on('modules')->cascadeOnDelete();
+            $table->unique(['admin_id', 'module_id']);
+        });
+    }
+
+    public function down()
+    {
+        Schema::dropIfExists('admin_module');
+    }
+};

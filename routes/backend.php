@@ -8,6 +8,7 @@ use App\Http\Controllers\Backend\RoleController;
 use App\Http\Controllers\LoginController;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Http\Request;
 use App\Http\Controllers\Backend\PatientController;
 use App\Http\Controllers\Backend\TpaController;
 use App\Http\Controllers\Backend\BillingController;
@@ -29,6 +30,11 @@ use App\Http\Controllers\Backend\AnnualCalendarController;
 use App\Http\Controllers\Backend\ApplyLeaveController;
 use App\Http\Controllers\Backend\ReferralController;
 use App\Http\Controllers\Backend\FinanceController;
+use App\Http\Controllers\Backend\AccountController;
+use App\Http\Controllers\Backend\LedgerController;
+use App\Http\Controllers\Backend\AccountAuditController;
+use App\Http\Controllers\Backend\AccountApiController;
+use App\Http\Controllers\Backend\LedgerApiController;
 use App\Http\Controllers\Backend\InventoryController;
 use App\Http\Controllers\Backend\CertificateController;
 use App\Http\Controllers\Backend\ReportsController;
@@ -172,6 +178,43 @@ Route::get('/dev/bkash-setup', function () {
     return response()->json(['ok' => true, 'setting' => $setting]);
 })->name('debug.bkash.setup');
 
+// Debug route: inspect side menu generation for current or specified admin (local/dev only)
+Route::get('/dev/debug-side-menus', function (Request $request) {
+    if (!app()->environment('local') && !config('app.debug')) {
+        abort(404);
+    }
+
+    $adminGuardCheck = auth()->guard('admin')->check();
+    $adminGuardUser = auth()->guard('admin')->user();
+    $requestAdminUser = $request->user('admin');
+    $defaultUser = auth()->user();
+
+    $sideMenusCurrent = $adminGuardUser ? getSideMenus($adminGuardUser) : [];
+
+    $email = $request->query('email');
+    $sideMenusForEmail = null;
+    $foundAdmin = null;
+    if ($email) {
+        $foundAdminModel = \App\Models\Admin::where('email', $email)->first();
+        if ($foundAdminModel) {
+            $foundAdmin = ['id' => $foundAdminModel->id, 'email' => $foundAdminModel->email];
+            $sideMenusForEmail = getSideMenus($foundAdminModel);
+        }
+    }
+
+    return response()->json([
+        'env' => app()->environment(),
+        'debug' => config('app.debug'),
+        'admin_guard_check' => $adminGuardCheck,
+        'admin_guard_user' => $adminGuardUser ? ['id' => $adminGuardUser->id, 'email' => $adminGuardUser->email ?? null, 'status' => $adminGuardUser->status ?? null] : null,
+        'request_user_admin' => $requestAdminUser ? ['id' => $requestAdminUser->id, 'email' => $requestAdminUser->email ?? null] : null,
+        'default_user' => $defaultUser ? ['id' => $defaultUser->id, 'email' => $defaultUser->email ?? null] : null,
+        'sideMenusCurrent' => $sideMenusCurrent,
+        'sideMenusForEmail' => $sideMenusForEmail,
+        'foundAdmin' => $foundAdmin,
+    ]);
+})->name('dev.debug.side-menus');
+
 // Test-only registration endpoint (no admin auth) for automated browser tests
 Route::post('/test/attendance/face/register', [FaceAttendanceController::class, 'registerStoreTest']);
 Route::post('/test/attendance/face/mark', [FaceAttendanceController::class, 'markTest']);
@@ -181,6 +224,12 @@ Route::get('/test/attendance/face/register-page', function () {
 Route::get('/test/attendance/face/page', function () {
     return view('backend.staffattendance.face', ['testMode' => true]);
 });
+
+// Public invoice download (allow anonymous access via query string)
+Route::get('/download-invoice', [InvoiceController::class, 'downloadInvoice']);
+
+// Public IPD invoice download (anonymous access)
+Route::get('/download/ipd/invoice', [InvoiceController::class, 'downloadIpdInvoice']);
 
 Route::get('/cache-clear', function () {
     Artisan::call('cache:clear');
@@ -202,9 +251,9 @@ Route::get('/public-storage/{path}', [PublicStorageController::class, 'show'])
     ->name('public.storage.file');
 
 Route::group(['as' => 'auth.'], function () {
-    Route::get('/login', [LoginController::class, 'loginPage'])->name('login2')->middleware('AuthCheck');
-    Route::post('/login', [LoginController::class, 'login'])->name('login');
-    Route::get('/logout', [LoginController::class, 'logout'])->name('logout');
+    Route::get('/admin/login', [LoginController::class, 'loginPage'])->name('login2')->middleware('AuthCheck');
+    Route::post('/admin/login', [LoginController::class, 'login'])->name('login');
+    Route::get('/admin/logout', [LoginController::class, 'logout'])->name('logout');
 });
 
 // Public bKash endpoints for subscription renewal (used from login page)
@@ -218,6 +267,29 @@ Route::post('/website/appointment', [HomeController::class, 'storeAppointment'])
 Route::group(['middleware' => 'AdminAuth'], function () {
 
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+
+    // API: return side menus as JSON for client-side fallback
+    Route::get('/admin/side-menus', function () {
+        $user = auth()->guard('admin')->user();
+        return response()->json(getSideMenus($user));
+    })->name('backend.api.side-menus');
+
+    // Account Management (Chart of Accounts, Ledger, Audit)
+    Route::get('accounts', [AccountController::class, 'index'])->name('backend.accounts.index');
+    Route::get('accounts/balances', [AccountController::class, 'balances'])->name('backend.accounts.balances');
+    Route::get('ledger', [LedgerController::class, 'index'])->name('backend.ledger.index');
+    Route::get('accounts/audit', [AccountAuditController::class, 'index'])->name('backend.accounts.audit');
+
+    // Account API (JSON) for Chart of Accounts CRUD
+    Route::get('accounts/list', [AccountApiController::class, 'index'])->name('backend.accounts.list');
+    Route::get('accounts/{id}/show', [AccountApiController::class, 'show'])->name('backend.accounts.show');
+    Route::post('accounts', [AccountApiController::class, 'store'])->name('backend.accounts.store');
+    Route::put('accounts/{id}', [AccountApiController::class, 'update'])->name('backend.accounts.update');
+    Route::delete('accounts/{id}', [AccountApiController::class, 'destroy'])->name('backend.accounts.destroy');
+
+    // Ledger API (JSON) for browsing transactions
+    Route::get('ledger/list', [LedgerApiController::class, 'index'])->name('backend.ledger.list');
+    Route::get('ledger/{id}/show', [LedgerApiController::class, 'show'])->name('backend.ledger.show');
 
     // bKash settings (admin)
     Route::get('settings/payment/bkash', [BkashSettingController::class, 'index'])->name('settings.payment.bkash');
@@ -239,6 +311,8 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::post('/symptom-types', [SymptomTypeController::class, 'store'])->name('symptom-types.store');
 
     Route::resource('admin', AdminController::class);
+    Route::get('admin/{id}/modules', [AdminController::class, 'editModules'])->name('admin.modules.edit');
+    Route::post('admin/{id}/modules', [AdminController::class, 'updateModules'])->name('admin.modules.update');
     Route::get('admin/{id}/status/{status}/change', [AdminController::class, 'changeStatus'])->name('admin.status.change');
 
     // for role
@@ -436,6 +510,7 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     // for Sample Collection
     Route::get('sample-collection', [SampleCollectionController::class, 'index'])->name('sample-collection.index');
     Route::post('sample-collection/{billing}/collect', [SampleCollectionController::class, 'collect'])->name('sample-collection.collect');
+    Route::post('sample-collection/item/{billItem}/collect', [SampleCollectionController::class, 'collectItem'])->name('sample-collection.item.collect');
     Route::get('sample-collection/{billing}/barcode', [SampleCollectionController::class, 'barcode'])->name('sample-collection.barcode');
 
     // for Reporting
@@ -452,6 +527,9 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('report-delivery', [ReportDeliveryController::class, 'index'])->name('report-delivery.index');
     Route::post('report-delivery/{billItem}/send', [ReportDeliveryController::class, 'send'])->name('report-delivery.send');
     Route::post('report-delivery/{billItem}/deliver', [ReportDeliveryController::class, 'deliver'])->name('report-delivery.deliver');
+    // Billing-level send/deliver actions (bulk for an invoice)
+    Route::post('report-delivery/{billing}/send-all', [ReportDeliveryController::class, 'sendAll'])->name('report-delivery.sendAll');
+    Route::post('report-delivery/{billing}/deliver-all', [ReportDeliveryController::class, 'deliverAll'])->name('report-delivery.deliverAll');
 
 
     //for Setup

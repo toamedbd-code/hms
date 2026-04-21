@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Services\ActivityLogService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Pivot;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
 
@@ -19,7 +20,132 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register()
     {
-        //
+        // Ensure `app.key` is available to all runtime processes. Some environments
+        // may start long-running workers or PHP-FPM instances before `.env` is
+        // available which causes MissingAppKeyException intermittently. Try to
+        // read APP_KEY from the environment, the `.env` file, or a cached file;
+        // if none exists generate and persist a key for consistent behaviour.
+        try {
+            if (empty(config('app.key'))) {
+                $key = env('APP_KEY');
+
+                // Try reading from .env file directly if env() didn't return a value
+                if (empty($key)) {
+                    $envPath = base_path('.env');
+                    if (file_exists($envPath)) {
+                        $contents = file_get_contents($envPath);
+                        if (preg_match('/^APP_KEY=(.+)$/m', $contents, $m)) {
+                            $key = trim($m[1]);
+                            $key = trim($key, "\"'");
+                        }
+                    }
+                }
+
+                // Use cached key file if present
+                if (empty($key)) {
+                    $cacheKeyFile = storage_path('app/.app_key');
+                    if (file_exists($cacheKeyFile)) {
+                        $key = trim(file_get_contents($cacheKeyFile));
+                    }
+                }
+
+                // Generate and persist a key if still missing
+                if (empty($key)) {
+                    try {
+                        $key = 'base64:' . base64_encode(random_bytes(32));
+                    } catch (\Throwable $ex) {
+                        $key = null;
+                    }
+
+                    if (!empty($key)) {
+                        try {
+                            $cacheKeyFile = storage_path('app/.app_key');
+                            if (!is_dir(dirname($cacheKeyFile))) {
+                                @mkdir(dirname($cacheKeyFile), 0755, true);
+                            }
+                            @file_put_contents($cacheKeyFile, $key, LOCK_EX);
+
+                            // If .env is writable and doesn't contain APP_KEY, append it
+                            $envPath = base_path('.env');
+                            if (file_exists($envPath) && is_writable($envPath)) {
+                                $envContents = file_get_contents($envPath);
+                                if (strpos($envContents, 'APP_KEY=') === false) {
+                                    @file_put_contents($envPath, PHP_EOL . 'APP_KEY=' . $key . PHP_EOL, FILE_APPEND | LOCK_EX);
+                                }
+                            }
+                        } catch (\Throwable $ignored) {
+                        }
+                    }
+                }
+
+                if (!empty($key)) {
+                    config(['app.key' => $key]);
+                    $_ENV['APP_KEY'] = $key;
+                    putenv("APP_KEY={$key}");
+                    Log::info('AppServiceProvider: ensured APP_KEY is set at runtime');
+                } else {
+                    Log::warning('AppServiceProvider: APP_KEY missing and could not be generated');
+                }
+            }
+        } catch (\Throwable $e) {
+            // Avoid breaking bootstrap if anything goes wrong here; missing key
+            // will still surface as an exception but we try best-effort fix above.
+        }
+
+        // Ensure database connection config is available early in the
+        // bootstrap process. Some environments may not expose env vars to
+        // the running PHP process in time; try reading .env and enforce
+        // DB config into runtime `config()` so middleware/auth can use it.
+        try {
+            $dbHost = env('DB_HOST');
+            $dbPort = env('DB_PORT');
+            $dbName = env('DB_DATABASE');
+            $dbUser = env('DB_USERNAME');
+            $dbPass = env('DB_PASSWORD');
+
+            $envPath = base_path('.env');
+            if (file_exists($envPath)) {
+                $contents = @file_get_contents($envPath);
+                if (is_string($contents) && $contents !== '') {
+                    if (preg_match('/^DB_HOST=(.+)$/m', $contents, $m)) { $dbHost = trim(trim($m[1]), "\"'"); }
+                    if (preg_match('/^DB_PORT=(.+)$/m', $contents, $m)) { $dbPort = trim(trim($m[1]), "\"'"); }
+                    if (preg_match('/^DB_DATABASE=(.+)$/m', $contents, $m)) { $dbName = trim(trim($m[1]), "\"'"); }
+                    if (preg_match('/^DB_USERNAME=(.+)$/m', $contents, $m)) { $dbUser = trim(trim($m[1]), "\"'"); }
+                    if (preg_match('/^DB_PASSWORD=(.*)$/m', $contents, $m)) { $dbPass = trim(trim($m[1]), "\"'"); }
+                }
+            }
+
+            if (!empty($dbName) && !empty($dbUser)) {
+                config(['database.connections.mysql.host' => $dbHost ?? config('database.connections.mysql.host')]);
+                config(['database.connections.mysql.port' => $dbPort ?? config('database.connections.mysql.port')]);
+                config(['database.connections.mysql.database' => $dbName]);
+                config(['database.connections.mysql.username' => $dbUser]);
+                config(['database.connections.mysql.password' => $dbPass]);
+
+                $_ENV['DB_HOST'] = $dbHost ?? '';
+                $_ENV['DB_PORT'] = $dbPort ?? '';
+                $_ENV['DB_DATABASE'] = $dbName ?? '';
+                $_ENV['DB_USERNAME'] = $dbUser ?? '';
+                $_ENV['DB_PASSWORD'] = $dbPass ?? '';
+
+                @putenv("DB_HOST={$dbHost}");
+                @putenv("DB_PORT={$dbPort}");
+                @putenv("DB_DATABASE={$dbName}");
+                @putenv("DB_USERNAME={$dbUser}");
+                @putenv("DB_PASSWORD={$dbPass}");
+
+                // Log non-sensitive DB info for diagnostics (do not log password)
+                Log::info('AppServiceProvider: enforced DB config at runtime', [
+                    'db_host' => $dbHost,
+                    'db_database' => $dbName,
+                    'db_username' => $dbUser,
+                ]);
+            } else {
+                Log::warning('AppServiceProvider: DB env values missing; skipping enforcement');
+            }
+        } catch (\Throwable $ignored) {
+            // avoid breaking bootstrap
+        }
     }
 
     /**
@@ -57,17 +183,19 @@ class AppServiceProvider extends ServiceProvider
         } catch (\Throwable $exception) {
             // Avoid breaking the request cycle if permissions are locked down.
         }
-        //$viewShare = [];
-        //if (auth()->guard('admin')->check() && auth()->guard('admin')->user()->status == 'Active') {
-        //    $sideMenus = (session()->has('sideMenus')) ? session()->get('sideMenus') : getSideMenus();
-        //    $viewShare['sideMenus'] = $sideMenus;
-        //}
-        //$sideMenus = (session()->has('sideMenus')) ? session()->get('sideMenus') : getSideMenus();
-        //$viewShare['sideMenus'] = $sideMenus;
-        //$companyInfo = (session()->has('companyInfo')) ? session()->get('companyInfo') : Company::first();
-        //$viewShare['companyInfo'] = $companyInfo;
 
-        //Inertia::share($viewShare);
+        // Share side menus for admin users with Inertia so frontend can render sidebar
+        Inertia::share('auth.sideMenus', function () {
+            try {
+                if (auth()->guard('admin')->check() && auth()->guard('admin')->user()->status == 'Active') {
+                    return getSideMenus(auth()->guard('admin')->user());
+                }
+            } catch (\Throwable $e) {
+                // ignore errors while preparing side menus
+            }
+
+            return [];
+        });
         $this->registerCrudActivityLogging();
 
     }

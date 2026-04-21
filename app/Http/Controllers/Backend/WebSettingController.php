@@ -32,6 +32,39 @@ class WebSettingController extends Controller
         $this->middleware('permission:websetting-add|cms-setting|general-setting-add', ['only' => ['create', 'section', 'store']]);
     }
 
+    /**
+     * Update or add a key in the .env file.
+     */
+    private function setEnvValue(string $key, string $value): bool
+    {
+        $envPath = base_path('.env');
+        if (!is_file($envPath) || !is_writable($envPath)) {
+            return false;
+        }
+
+        $content = file_get_contents($envPath);
+        $escaped = str_replace('"', '\\"', $value);
+        $newLine = $key . '="' . $escaped . '"';
+
+        if (preg_match('/^' . preg_quote($key, '/') . '=.*/m', $content)) {
+            $content = preg_replace('/^' . preg_quote($key, '/') . '=.*/m', $newLine, $content);
+        } else {
+            $content = rtrim($content, "\n") . PHP_EOL . $newLine . PHP_EOL;
+        }
+
+        file_put_contents($envPath, $content);
+        // Also update runtime environment for immediate effect in current process
+        try {
+            putenv($key . '=' . $value);
+            $_ENV[$key] = $value;
+            $_SERVER[$key] = $value;
+        } catch (\Throwable $_) {
+            // ignore runtime update errors
+        }
+
+        return true;
+    }
+
     public function create(Request $request)
     {
         $requestedSection = trim((string) $request->query('section', ''));
@@ -208,10 +241,13 @@ class WebSettingController extends Controller
             $oldSettingsSnapshot = $dataInfo ? clone $dataInfo : null;
 
             if ($dataInfo) {
+                // Remove env-only fields so DB update doesn't fail if columns are absent
+                unset($data['login_banner'], $data['login_title'], $data['login_subtitle']);
                 $updatedSettings = $this->websettingService->update($data, $dataInfo->id);
                 $this->syncHistoricalPrefixValues($oldSettingsSnapshot, $updatedSettings);
                 $message = 'General settings updated successfully';
             } else {
+                unset($data['login_banner'], $data['login_title'], $data['login_subtitle']);
                 WebSetting::create($data);
                 $message = 'General settings created successfully';
             }
@@ -334,6 +370,23 @@ class WebSettingController extends Controller
             $this->storeAdminWorkLog($dataInfo ? $dataInfo->id : WebSetting::latest()->first()->id, 'web_settings', $message);
 
             DB::commit();
+
+            // Persist optional login texts into .env so admin can edit them from WebSetting form
+            try {
+                $envUpdates = [
+                    'LOGIN_BANNER' => $request->input('login_banner', null),
+                    'LOGIN_TITLE' => $request->input('login_title', null),
+                    'LOGIN_SUBTITLE' => $request->input('login_subtitle', null),
+                ];
+
+                foreach ($envUpdates as $envKey => $envValue) {
+                    if (!is_null($envValue)) {
+                        $this->setEnvValue($envKey, (string) $envValue);
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Failed to update .env login texts: ' . $e->getMessage());
+            }
 
             return redirect()
                 ->back()

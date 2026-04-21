@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
 use App\Models\BillItem;
+use App\Models\Billing;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -15,35 +16,107 @@ class ReportDeliveryController extends Controller
         $this->middleware('permission:report-delivery');
     }
 
+    /**
+     * Mark all reported bill items of a billing as sent.
+     */
+    public function sendAll(Billing $billing)
+    {
+        $allowedCategories = ['Pathology', 'Radiology'];
+
+        if ((float) ($billing->due_amount ?? 0) > 0) {
+            return back()->with('error', 'Cannot send report while due amount exists.');
+        }
+
+        BillItem::query()
+            ->where('billing_id', $billing->id)
+            ->whereIn('category', $allowedCategories)
+            ->whereNotNull('reported_at')
+            ->whereNull('sent_at')
+            ->update([
+                'sent_at' => now(),
+                'sent_via' => 'manual',
+            ]);
+
+        return back()->with('success', 'Reports marked as sent.');
+    }
+
+    /**
+     * Mark all reported bill items of a billing as delivered.
+     */
+    public function deliverAll(Billing $billing)
+    {
+        $allowedCategories = ['Pathology', 'Radiology'];
+
+        if ((float) ($billing->due_amount ?? 0) > 0) {
+            return back()->with('error', 'Cannot deliver reports while due amount exists.');
+        }
+
+        BillItem::query()
+            ->where('billing_id', $billing->id)
+            ->whereIn('category', $allowedCategories)
+            ->whereNotNull('reported_at')
+            ->whereNull('delivered_at')
+            ->update([
+                'delivered_at' => now(),
+                'delivered_by' => auth('admin')->id(),
+            ]);
+
+        return back()->with('success', 'Reports marked as delivered.');
+    }
+
     public function index(Request $request)
     {
         $search = trim((string) $request->input('search', ''));
+        $status = trim((string) $request->input('status', ''));
 
-        $datas = BillItem::query()
-            ->whereIn('category', ['Pathology', 'Radiology'])
-            ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($searchQuery) use ($search) {
-                    $searchQuery
-                        ->where('item_name', 'like', "%{$search}%")
-                        ->orWhereHas('billing', function ($billingQuery) use ($search) {
-                            $billingQuery
-                                ->where('bill_number', 'like', "%{$search}%")
-                                ->orWhereHas('patient', function ($patientQuery) use ($search) {
-                                    $patientQuery
-                                    ->where('name', 'like', "%{$search}%")
-                                    ->orWhere('phone', 'like', "%{$search}%");
-                                });
+        $allowedCategories = ['Pathology', 'Radiology'];
+
+        $datas = Billing::query()
+            ->where('status', 'Active')
+            ->whereHas('billItems', function ($q) use ($allowedCategories) {
+                $q->whereIn('category', $allowedCategories);
+            })
+            ->when($search !== '', function ($query) use ($search, $allowedCategories) {
+                $query->where(function ($q) use ($search, $allowedCategories) {
+                    $q->where('bill_number', 'like', "%{$search}%")
+                        ->orWhereHas('patient', function ($patientQuery) use ($search) {
+                            $patientQuery
+                                ->where('name', 'like', "%{$search}%")
+                                ->orWhere('phone', 'like', "%{$search}%");
+                        })
+                        ->orWhereHas('billItems', function ($itemQuery) use ($search, $allowedCategories) {
+                            $itemQuery->whereIn('category', $allowedCategories)
+                                ->where('item_name', 'like', "%{$search}%");
                         });
                 });
             })
+            ->when($status !== '', function ($query) use ($status) {
+                if ($status === 'pending') {
+                    // No sample collected for any item
+                    $query->whereDoesntHave('billItems', function ($q) {
+                        $q->whereNotNull('sample_collected_at');
+                    });
+                } elseif ($status === 'processing') {
+                    // Has at least one collected and at least one not yet reported
+                    $query->whereHas('billItems', function ($q) {
+                        $q->whereNotNull('sample_collected_at');
+                    })->whereHas('billItems', function ($q) {
+                        $q->whereNull('reported_at');
+                    });
+                } elseif ($status === 'complete') {
+                    // All relevant items reported
+                    $query->whereDoesntHave('billItems', function ($q) {
+                        $q->whereNull('reported_at');
+                    });
+                }
+            })
             ->with([
-                'billing.patient',
-                'collectedBy',
-                'reportedBy',
-                'deliveredBy',
+                'patient',
+                'billItems' => function ($q) use ($allowedCategories) {
+                    $q->whereIn('category', $allowedCategories)
+                        ->with(['collectedBy', 'reportedBy', 'deliveredBy']);
+                },
             ])
-            ->orderByDesc('reported_at')
-            ->orderByDesc('sample_collected_at')
             ->orderByDesc('id')
             ->paginate($request->input('numOfData', 10))
             ->withQueryString();
@@ -53,6 +126,7 @@ class ReportDeliveryController extends Controller
             'datas' => $datas,
             'filters' => [
                 'search' => $search,
+                'status' => $status,
             ],
         ]);
     }

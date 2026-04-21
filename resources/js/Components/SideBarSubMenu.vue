@@ -1,28 +1,24 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { router } from "@inertiajs/vue3";
 
 const props = defineProps({
-  align: {
-    type: String,
-    default: "right",
-  },
-  width: {
-    type: String,
-    default: "48",
-  },
-  contentClasses: {
-    type: Array,
-    default: () => ["py-0", "text-gray-700"],
-  },
-  activeRoute: {
-    required: true,
-  },
+  align: { type: String, default: "right" },
+  width: { type: String, default: "48" },
+  contentClasses: { type: Array, default: () => ["py-0", "text-gray-700"] },
+  activeRoute: { required: true },
+  open: { type: Boolean, required: false },
 });
 
 let open = ref(false);
+const emit = defineEmits(["toggle", "update:open"]);
 
-const isActiveRoute = computed(() => route().current() === props.activeRoute);
+const isActiveRoute = computed(() => {
+  try {
+    return route().current() === props.activeRoute;
+  } catch (e) {
+    return false;
+  }
+});
 
 const closeOnEscape = (e) => {
   if (open.value && e.key === "Escape") {
@@ -32,38 +28,50 @@ const closeOnEscape = (e) => {
 
 onMounted(() => {
   document.addEventListener("keydown", closeOnEscape);
-  if (isActiveRoute.value) {
-    open.value = true;
+  if (isActiveRoute.value) open.value = true;
+  // If parent provided controlled `open` prop, respect it initially
+  if (props.open !== undefined) {
+    open.value = !!props.open;
   }
 });
 onUnmounted(() => document.removeEventListener("keydown", closeOnEscape));
 
-const widthClass = computed(() => {
-  return {
-    48: "w-full",
-  }[props.width.toString()];
-});
+const widthClass = computed(() => ({ 48: "w-full" })[props.width.toString()]);
 
 const alignmentClasses = computed(() => {
-  if (props.align === "left") {
-    return "ltr:origin-top-left rtl:origin-top-right start-0";
-  }
-
-  if (props.align === "right") {
-    return "ltr:origin-top-right rtl:origin-top-left end-0";
-  }
-
+  if (props.align === "left") return "ltr:origin-top-left rtl:origin-top-right start-0";
+  if (props.align === "right") return "ltr:origin-top-right rtl:origin-top-left end-0";
   return "origin-top";
 });
+
+const toggle = (e) => {
+  open.value = !open.value;
+  try { emit('update:open', open.value); } catch (err) { /* ignore */ }
+  try { emit('toggle', e); } catch (err) { /* ignore */ }
+
+  try {
+    console.debug('[SideBarSubMenu] toggle', { open: open.value, eventType: e?.type, target: e?.target?.dataset ?? null });
+    window.__sidebar_debug = window.__sidebar_debug || {};
+    window.__sidebar_debug.lastToggle = { time: Date.now(), open: open.value, eventType: e?.type, target: e?.target?.dataset ?? null };
+  } catch (err) { /* ignore */ }
+};
+
+// Watch for controlled prop changes
+import { watch } from 'vue';
+watch(() => props.open, (v) => {
+  if (v !== undefined) open.value = !!v;
+});
+
+const close = () => { open.value = false; };
 </script>
 
 <template>
   <div class="relative">
-    <div @click="open = !open" :class="open ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-600' : ''">
+    <div @click.stop="toggle" :class="open ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-600' : ''">
       <slot name="trigger" />
     </div>
 
-    <div v-show="open" class="" @click="open = false" />
+    <div v-if="open" class="" @click="close"></div>
 
     <transition
       enter-active-class="transition duration-200 ease-out"
@@ -74,11 +82,10 @@ const alignmentClasses = computed(() => {
       leave-to-class="transform scale-95 opacity-0"
     >
       <div
-        v-show="open"
+        v-if="open"
         class="rounded-md"
         :class="[widthClass, alignmentClasses]"
-        style="display: none"
-        @click="open = false"
+        @click="close"
       >
         <div :class="[...contentClasses, 'bg-white rounded-md border border-gray-100']">
           <slot name="content" />

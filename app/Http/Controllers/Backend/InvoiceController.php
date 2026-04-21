@@ -144,11 +144,21 @@ class InvoiceController extends Controller
             'header_image' => $designAssets['header_image'],
             'footer_image' => $designAssets['footer_image'],
             'footer_content' => $designAssets['footer_content'],
-            'header_height' => $designAssets['header_height'],
-            'footer_height' => $designAssets['footer_height'],
+                'footer_content_position' => $designAssets['footer_content_position'] ?? 'above',
+                'header_height' => $designAssets['header_height'],
+                'footer_height' => $designAssets['footer_height'],
             'barcode' => $barcode,
             'module' => $module,
         ];
+
+        // Prefer web-served Bengali font URL when available so PDF renderer can fetch it.
+        $banglaFontUrl = '';
+        $banglaFontFile = public_path('fonts/NotoSansBengali-Regular.ttf');
+        if (is_file($banglaFontFile)) {
+            $banglaFontUrl = asset('fonts/NotoSansBengali-Regular.ttf');
+        }
+
+        $data['banglaFontUrl'] = $banglaFontUrl;
 
         $safeBillNo = Str::of((string) ($billing->bill_number ?? $billing->id))
             ->replaceMatches('/[^A-Za-z0-9_-]+/', '_')
@@ -225,7 +235,7 @@ class InvoiceController extends Controller
         $pdf->setPaper('A4', 'portrait');
         $pdf->setOptions([
             'isHtml5ParserEnabled' => true,
-            'isRemoteEnabled' => false,
+            'isRemoteEnabled' => true,
             'defaultFont' => $defaultFont,
             'dpi' => 96,
             'isPhpEnabled' => false,
@@ -242,7 +252,7 @@ class InvoiceController extends Controller
         $pdf->setPaper('A4', 'portrait');
         $pdf->setOptions([
             'isHtml5ParserEnabled' => true,
-            'isRemoteEnabled' => false,
+            'isRemoteEnabled' => true,
             'defaultFont' => $defaultFont,
             'dpi' => 96,
             'isPhpEnabled' => false,
@@ -411,6 +421,10 @@ class InvoiceController extends Controller
             'header_image' => $this->storageInvoiceImageToDataUri($invoiceDesign?->header_photo_path),
             'footer_image' => $this->storageInvoiceImageToDataUri($invoiceDesign?->footer_photo_path),
             'footer_content' => $this->sanitizeHtmlForPdf((string) ($invoiceDesign?->footer_content ?? '')),
+            // per-design option: whether footer content appears "above" or "below" the footer image
+            'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below'])
+                ? strtolower((string) $invoiceDesign->footer_content_position)
+                : 'above',
             'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
             'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
         ];
@@ -520,6 +534,14 @@ class InvoiceController extends Controller
         $footerContentBlock = $footerContent !== ''
             ? "<div class='footer-content'>{$footerContent}</div>"
             : '';
+
+        // Determine footer content positioning: 'above' places content above the image.
+        $footerPosition = in_array(strtolower((string) ($data['footer_content_position'] ?? 'above')), ['above', 'below'])
+            ? strtolower((string) ($data['footer_content_position'] ?? 'above'))
+            : 'above';
+
+        $footerTop = $footerPosition === 'above' ? $footerContentBlock : $footerImageBlock;
+        $footerBottom = $footerPosition === 'above' ? $footerImageBlock : $footerContentBlock;
 
         $barcodeLeft = $barcodeImage !== ''
             ? "<img class='barcode-image' src='" . e($barcodeImage) . "' alt='Barcode'>"
@@ -767,8 +789,8 @@ class InvoiceController extends Controller
     </table>
 
     <div class='footer'>
-        {$footerImageBlock}
-        {$footerContentBlock}
+        {$footerTop}
+        {$footerBottom}
         <div class='footer-left'>{$fallbackFooterLine}</div>
         <div class='footer-right'>Printing Date: {$printedAt}</div>
     </div>
@@ -946,6 +968,15 @@ class InvoiceController extends Controller
 
         $invoiceDesign = InvoiceDesign::where('status', 'Active')->where('module', $module)->first();
 
+        // Fallback to a default invoice design if module-specific one is not available
+        if (! $invoiceDesign) {
+            $invoiceDesign = InvoiceDesign::where('status', 'Active')->whereNull('module')->first();
+        }
+
+        if (! $invoiceDesign) {
+            $invoiceDesign = InvoiceDesign::where('status', 'Active')->first();
+        }
+
         $headerImageBase64 = '';
         $footerImageBase64 = '';
 
@@ -1040,14 +1071,36 @@ class InvoiceController extends Controller
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
-            'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
-            'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
+                'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
+                'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
+                'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
             'printed_at' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i:s a'),
             'barcode' => $barcode,
             'clinic_address' => 'Daulatur Master Para, Daulatur Kushita Mobile: 01796-302512',
         ];
 
+        // Prefer web-served Bengali font URL for OPD invoice view/pdf rendering.
+        $banglaFontUrl = '';
+        $banglaFontFile = public_path('fonts/NotoSansBengali-Regular.ttf');
+        if (is_file($banglaFontFile)) {
+            $banglaFontUrl = asset('fonts/NotoSansBengali-Regular.ttf');
+        }
+
+        $data['banglaFontUrl'] = $banglaFontUrl;
+
         $pdf = Pdf::loadView('frontend.invoice.opd-pdf', $data);
+
+        // Ensure DomPDF parses HTML5 and remote resources so header/footer images and
+        // fixed positioning render correctly in generated PDFs.
+        $pdf->setPaper('A4', 'portrait');
+        $pdf->setOptions([
+            'isHtml5ParserEnabled' => true,
+            'isRemoteEnabled' => true,
+            'defaultFont' => 'dejavu sans',
+            'dpi' => 96,
+            'isPhpEnabled' => true,
+            'isJavascriptEnabled' => true,
+        ]);
 
         $filename = 'opd_invoice_' . $opdId . '.pdf';
 
@@ -1111,12 +1164,23 @@ class InvoiceController extends Controller
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
-            'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
-            'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
+                'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
+                'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
+                'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
             'printed_at' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i:s a'),
         ];
 
         $pdf = Pdf::loadView('frontend.invoice.appointment-pdf', $data);
+
+        $pdf->setPaper('A4', 'portrait');
+        $pdf->setOptions([
+            'isHtml5ParserEnabled' => true,
+            'isRemoteEnabled' => true,
+            'defaultFont' => 'dejavu sans',
+            'dpi' => 96,
+            'isPhpEnabled' => true,
+            'isJavascriptEnabled' => true,
+        ]);
 
         $filename = 'appointment_invoice_' . $appointmentId . '.pdf';
 
@@ -1237,6 +1301,7 @@ class InvoiceController extends Controller
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
+            'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
             'barcode' => $barcode,
             'module' => $module,
         ];
@@ -1372,6 +1437,7 @@ class InvoiceController extends Controller
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
+            'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
             'barcode' => $barcode,
             'module' => $module,
         ];
@@ -1447,6 +1513,7 @@ class InvoiceController extends Controller
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
+            'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
             'barcode' => $barcode,
             'printed_at' => now()->timezone('Asia/Dhaka')->format('d-M-Y h:i:s A'),
         ];
@@ -1536,6 +1603,7 @@ class InvoiceController extends Controller
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
+            'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
             'barcode' => $barcode,
             'printed_at' => now()->timezone('Asia/Dhaka')->format('d-M-Y h:i:s A'),
         ];

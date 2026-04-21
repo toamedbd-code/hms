@@ -17,6 +17,126 @@ const handleResize = () => {
 
 onMounted(() => {
   window.addEventListener("resize", handleResize);
+  // If server didn't provide sideMenus, try to fetch via API (fallback)
+  try {
+    const serverMenus = page.props.auth?.sideMenus ?? [];
+    if (!Array.isArray(serverMenus) || serverMenus.length === 0) {
+      let apiUrl = null;
+      try {
+        if (typeof route === 'function') {
+          try { apiUrl = route('backend.api.side-menus'); } catch (e) { /* ignore */ }
+          if (!apiUrl) {
+            try { apiUrl = route('backend.backend.api.side-menus'); } catch (e) { /* ignore */ }
+          }
+        }
+      } catch (err) {
+        // ignore
+      }
+
+      if (!apiUrl) apiUrl = '/admin/side-menus';
+
+      // Prefer axios when available, otherwise use fetch fallback
+      if (typeof window !== 'undefined' && window.axios && typeof window.axios.get === 'function') {
+        window.axios.get(apiUrl)
+          .then((resp) => {
+            if (resp && resp.data) {
+              remoteSideMenus.value = resp.data;
+            }
+          }).catch(() => {
+            // ignore
+          });
+      } else if (typeof fetch === 'function') {
+        try {
+          fetch(apiUrl, { credentials: 'include' })
+            .then((r) => r.json())
+            .then((data) => {
+              if (data) remoteSideMenus.value = data;
+            }).catch(() => {
+              // ignore
+            });
+        } catch (fErr) {
+          // ignore
+        }
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // Client-side injection: if permissions indicate Account Management should
+  // be visible but the server-side menus are missing it (stale Inertia props),
+  // insert a minimal Account Management menu so the sidebar shows it immediately.
+  try {
+    const perms = userPermissions.value || [];
+    const accountPerms = ['account-management', 'chart-of-accounts', 'ledger', 'account-balances', 'activity-log-view'];
+    const hasAnyAccountPerm = accountPerms.some((p) => perms.includes(p));
+    const alreadyPresent = (sourceMenus.value || []).some((m) => String(m?.name ?? '').trim().toLowerCase() === 'account management');
+    const isAdminPresent = Boolean(page.props?.auth?.admin) || (typeof window !== 'undefined' && Boolean(window.__inertia?.page?.props?.auth?.admin));
+
+    if ((hasAnyAccountPerm || isAdminPresent) && !alreadyPresent) {
+      const possibleChildren = [
+        { name: 'Chart of Accounts', icon: 'list', route: 'backend.accounts.index', permission: 'chart-of-accounts' },
+        { name: 'Ledger', icon: 'book', route: 'backend.ledger.index', permission: 'ledger' },
+        { name: 'Account Balances', icon: 'balance', route: 'backend.accounts.balances', permission: 'account-balances' },
+        { name: 'Audit Log', icon: 'activity-log', route: 'backend.accounts.audit', permission: 'activity-log-view' },
+      ];
+
+      const children = possibleChildren.filter((c) => {
+        if (c.permission && !perms.includes(c.permission)) return false;
+        return hasRoute(c.route);
+      }).map((c) => ({
+        id: null,
+        name: c.name,
+        icon: c.icon,
+        route: c.route,
+        permission_name: c.permission,
+        status: 'Active',
+      }));
+
+      // Only add the parent if we have at least one visible child or the user
+      // explicitly has the parent permission.
+      if (children.length > 0 || perms.includes('account-management')) {
+        const accountMenu = {
+          id: null,
+          name: 'Account Management',
+          icon: 'dollar-sign',
+          route: null,
+          description: 'Ledger, accounts and audit',
+          sorting: 1,
+          parent_id: null,
+          permission_name: 'account-management',
+          status: 'Active',
+          childrens: children,
+        };
+
+        remoteSideMenus.value = Array.isArray(remoteSideMenus.value) ? [...remoteSideMenus.value, accountMenu] : [accountMenu];
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+
+  // Expose debug hooks for developer inspection in browser console
+  try {
+    window.__sidebar_debug = window.__sidebar_debug || {};
+    window.__sidebar_debug.getSnapshot = () => ({
+      remoteSideMenus: Array.isArray(remoteSideMenus.value) ? JSON.parse(JSON.stringify(remoteSideMenus.value)) : [],
+      sourceMenus: Array.isArray(sourceMenus.value) ? JSON.parse(JSON.stringify(sourceMenus.value)) : [],
+      filteredMenus: Array.isArray(filteredMenus.value) ? JSON.parse(JSON.stringify(filteredMenus.value)) : [],
+      userPermissions: Array.isArray(userPermissions.value) ? [...userPermissions.value] : [],
+      pageAuth: page.props?.auth ?? (window.__inertia?.page?.props?.auth ?? null),
+    });
+
+    // Keep live copies for easier inspection
+    watch(remoteSideMenus, (v) => { window.__sidebar_debug.remoteSideMenus = v; console.log('[sidebar debug] remoteSideMenus updated', v); }, { deep: true });
+    watch(sourceMenus, (v) => { window.__sidebar_debug.sourceMenus = v; console.log('[sidebar debug] sourceMenus updated', v); }, { deep: true });
+    watch(filteredMenus, (v) => { window.__sidebar_debug.filteredMenus = v; console.log('[sidebar debug] filteredMenus updated', v); }, { deep: true, immediate: true });
+
+    // populate initial snapshot
+    try { window.__sidebar_debug.getSnapshot(); } catch (e) { /* ignore */ }
+  } catch (e) {
+    // ignore
+  }
 });
 
 onBeforeUnmount(() => {
@@ -30,6 +150,27 @@ eventBus.on("sidebarToggled", (flag) => {
 const navSidebar = reactive([
   "flex items-center p-3 space-x-3 rounded-md cursor-pointer hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 group",
 ]);
+
+// Local fallback storage for side menus if server-side Inertia props are empty
+const remoteSideMenus = ref(page.props.auth?.sideMenus ?? []);
+// Controlled open state for submenu components (keyed by childUniqueKey(menu))
+const openState = reactive({});
+
+const onMenuTriggerClick = (event, key, route = null) => {
+  try {
+    // If the click came from inside the submenu content, don't toggle
+    if (event?.target?.closest && event.target.closest('.submenu')) return;
+  } catch (e) { /* ignore */ }
+
+  openState[key] = !openState[key];
+  if (route) {
+    try { handleMenuClick(event, route); } catch (e) { /* ignore */ }
+  }
+};
+const sourceMenus = computed(() => {
+  const serverMenus = page.props.auth?.sideMenus ?? [];
+  return (Array.isArray(serverMenus) && serverMenus.length > 0) ? serverMenus : remoteSideMenus.value;
+});
 
 const integrationModules = computed(() => {
   const defaults = {
@@ -64,6 +205,16 @@ const routeAliasMap = {
   'pathology-machine-logs.index': 'backend.pathology-machine-logs.index',
   'admin.attendance.devices': 'backend.attendance.devices',
 };
+
+// Some environments prefix route names (e.g., group 'as' + explicit names) causing
+// duplicated name parts like 'backend.backend.accounts.index'. Add common aliases
+// so client-side menu descriptors resolve to the Ziggy-exported names.
+Object.assign(routeAliasMap, {
+  'backend.accounts.index': 'backend.backend.accounts.index',
+  'backend.ledger.index': 'backend.backend.ledger.index',
+  'backend.accounts.balances': 'backend.backend.accounts.balances',
+  'backend.accounts.audit': 'backend.backend.accounts.audit',
+});
 
 const menuLabelOverrides = {
   'backend.productreturn.index': 'Supplier Product Return',
@@ -186,7 +337,7 @@ const isRouteActive = (name) => {
 
 const allowedMenuRoutes = computed(() => {
   const routes = new Set();
-  const menus = page.props.auth?.sideMenus ?? [];
+  const menus = sourceMenus.value ?? [];
 
   menus.forEach((menu) => {
     if (menu?.route) {
@@ -214,7 +365,15 @@ const canAccessAnyMenuRoute = (routeNames = []) => {
 
 const userPermissions = computed(() => {
   const raw = page.props.auth?.permissions ?? [];
-  return Array.isArray(raw) ? raw : [];
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object') {
+    try {
+      return Object.values(raw);
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
 });
 
 const hasPermission = (permissionName) => userPermissions.value.includes(permissionName);
@@ -387,7 +546,26 @@ const quickLinks = computed(() => {
     });
   }
 
-  return links;
+  // If any of these quickLinks already appear in the rendered menus,
+  // don't return them to avoid duplication.
+  try {
+    const existsInMenus = (route) => {
+      try {
+        const rn = parseRouteDescriptor(route).name;
+        if (!rn) return false;
+        return filteredMenus.value.some((m) => {
+          if (m?.route && parseRouteDescriptor(m.route).name === rn) return true;
+          return (m.childrens ?? []).some((c) => c?.route && parseRouteDescriptor(c.route).name === rn);
+        });
+      } catch (e) {
+        return false;
+      }
+    };
+
+    return links.filter((l) => !existsInMenus(l.route));
+  } catch (e) {
+    return links;
+  }
 });
 
 const showHrHub = computed(() => quickLinks.value.length > 0);
@@ -505,27 +683,26 @@ watch(currentRouteName, async (newRoute) => {
 }, { immediate: true });
 
 const filteredMenus = computed(() => {
-  return (page.props.auth?.sideMenus ?? []).map(menu => {
+  const base = (sourceMenus.value ?? []).map(menu => {
     if (isBlockedMenuName(menu?.name)) {
       return null;
     }
 
     const filteredChildren = (menu.childrens ?? []).filter(child => {
-      if (isBlockedMenuName(child?.name)) {
-        return false;
-      }
+        if (isBlockedMenuName(child?.name)) {
+          return false;
+        }
 
-      if (!child?.route || !hasRoute(child.route)) {
-        return false;
-      }
+        if (!child?.route || !hasRoute(child.route)) {
+          return false;
+        }
 
-      if (!canAccessMenuRoute(child.route)) {
-        return false;
-      }
+        if (!canAccessMenuRoute(child.route)) {
+          return false;
+        }
 
-      const normalizedChildRoute = parseRouteDescriptor(child.route).name;
-      return !quickAccessRoutes.has(normalizedChildRoute);
-    }).filter((child, index, list) => list.findIndex((item) => childUniqueKey(item) === childUniqueKey(child)) === index);
+        return true;
+      }).filter((child, index, list) => list.findIndex((item) => childUniqueKey(item) === childUniqueKey(child)) === index);
 
     const eligibleModuleSubmenus = webSettingModuleSubmenus.filter((submenu) => {
       return !submenu.requiredPermission || hasPermission(submenu.requiredPermission);
@@ -535,19 +712,38 @@ const filteredMenus = computed(() => {
       ? [...filteredChildren, ...eligibleModuleSubmenus]
       : filteredChildren;
 
-    const uniqueChildren = enrichedChildren.filter((child, index, list) => (
+    let uniqueChildren = enrichedChildren.filter((child, index, list) => (
       list.findIndex((item) => childUniqueKey(item) === childUniqueKey(child)) === index
     ));
 
+    // Ensure submenu ordering is stable: sort by `sorting` then `id` when available
+    try {
+      uniqueChildren.sort((a, b) => {
+        const sa = parseInt((a && a.sorting) || 0, 10) || 0;
+        const sb = parseInt((b && b.sorting) || 0, 10) || 0;
+        if (sa !== sb) return sa - sb;
+        const ida = parseInt((a && a.id) || 0, 10) || 0;
+        const idb = parseInt((b && b.id) || 0, 10) || 0;
+        return ida - idb;
+      });
+    } catch (e) {
+      // ignore sort errors
+    }
+
     const menuRoute = menu?.route ? parseRouteDescriptor(menu.route).name : null;
-    const shouldHideTopLevelQuickLink = menuRoute ? quickAccessRoutes.has(menuRoute) : false;
+    // Do not automatically hide top-level menus that match quick-access routes.
+    const shouldHideTopLevelQuickLink = false;
 
     const canShowTopLevelMenu = menu.route
       && hasRoute(menu.route)
       && canAccessMenuRoute(menu.route)
       && !shouldHideTopLevelQuickLink;
 
-    if (canShowTopLevelMenu || uniqueChildren.length > 0) {
+    // Show parent menu when admin has the parent's permission even if it has no route/children
+    const showBecauseHasParentPermission = (!menu.route || String(menu.route).trim() === '')
+      && (menu.permission_name && hasPermission(menu.permission_name));
+
+    if (canShowTopLevelMenu || uniqueChildren.length > 0 || showBecauseHasParentPermission) {
       return {
         ...menu,
         childrens: uniqueChildren,
@@ -555,14 +751,177 @@ const filteredMenus = computed(() => {
     }
     return null;
   }).filter(Boolean);
+
+  // Ensure Account Management is visible to admin users even if server props are stale
+  try {
+    const hasAccount = base.some((m) => String(m?.name ?? '').trim().toLowerCase() === 'account management');
+    const perms = userPermissions.value || [];
+    const accountPerms = ['account-management', 'chart-of-accounts', 'ledger', 'account-balances', 'activity-log-view'];
+    const hasAnyAccountPerm = accountPerms.some((p) => perms.includes(p));
+    const isAdminPresent = Boolean(page.props?.auth?.admin) || (typeof window !== 'undefined' && Boolean(window.__inertia?.page?.props?.auth?.admin));
+
+    // Show Account Management when the user either is an admin OR has any account-related permission
+    if ((isAdminPresent || hasAnyAccountPerm) && !hasAccount) {
+      const possibleChildren = [
+        { name: 'Chart of Accounts', icon: 'list', route: 'backend.accounts.index', permission: 'chart-of-accounts' },
+        { name: 'Ledger', icon: 'book', route: 'backend.ledger.index', permission: 'ledger' },
+        { name: 'Account Balances', icon: 'balance', route: 'backend.accounts.balances', permission: 'account-balances' },
+        { name: 'Audit Log', icon: 'activity-log', route: 'backend.accounts.audit', permission: 'activity-log-view' },
+      ];
+
+      const children = possibleChildren.filter((c) => {
+        if (!hasRoute(c.route)) return false;
+        // If no permissions are available on the page, be permissive to help debugging.
+        if (!perms || perms.length === 0) return true;
+        return perms.includes(c.permission) || perms.includes('account-management');
+      }).map((c) => ({
+        id: null,
+        name: c.name,
+        icon: c.icon,
+        route: c.route,
+        permission_name: c.permission,
+        status: 'Active',
+      }));
+
+      const accountMenu = {
+        id: null,
+        name: 'Account Management',
+        icon: 'dollar-sign',
+        route: null,
+        description: 'Ledger, accounts and audit',
+        sorting: 1,
+        parent_id: null,
+        permission_name: 'account-management',
+        status: 'Active',
+        childrens: children,
+      };
+
+      base.push(accountMenu);
+    }
+  } catch (err) {
+    // ignore
+  }
+
+  // Deduplicate top-level menus that are also listed as children
+  try {
+    const deduped = base.filter((m, idx) => {
+      const normalizedName = normalizeMenuName(m?.name);
+
+      // If any other menu contains a child with the same normalized name,
+      // treat this top-level menu as a duplicate and remove it.
+      const isDuplicate = base.some((other, otherIdx) => {
+        if (otherIdx === idx) return false;
+        return (other?.childrens ?? []).some((c) => normalizeMenuName(c?.name) === normalizedName);
+      });
+
+      return !isDuplicate;
+    });
+
+    // Ensure top-level ordering matches server-side sorting: `sorting` then `id`.
+    try {
+      deduped.sort((a, b) => {
+        const sa = parseInt((a && a.sorting) || 0, 10) || 0;
+        const sb = parseInt((b && b.sorting) || 0, 10) || 0;
+        if (sa !== sb) return sa - sb;
+        const ida = parseInt((a && a.id) || 0, 10) || 0;
+        const idb = parseInt((b && b.id) || 0, 10) || 0;
+        return ida - idb;
+      });
+    } catch (e) {
+      // ignore sort failure
+    }
+
+    return deduped;
+  } catch (e) {
+    return base;
+  }
 });
 
-const payrollMenuIndex = computed(() => {
-  return filteredMenus.value.findIndex((menu) => {
-    const normalizedName = String(menu?.name ?? '').trim().toLowerCase();
-    const normalizedPermission = String(menu?.permission_name ?? '').trim().toLowerCase();
-    return normalizedName === 'payroll' || normalizedPermission === 'payroll-management';
-  });
+// Previously we auto-expanded parents with quick-access children on load.
+// That behaviour is disabled to ensure all menus remain closed after a
+// full page refresh. Users can still expand menus by clicking them.
+
+// Helper: find the original menu object from source or remote lists
+const findRawMenu = (menu) => {
+  try {
+    const name = normalizeMenuName(menu?.name);
+    const server = sourceMenus.value ?? [];
+    let found = server.find(m => (m?.id && menu?.id && m.id === menu.id) || normalizeMenuName(m?.name) === name);
+    if (found) return found;
+    const remote = Array.isArray(remoteSideMenus.value) ? remoteSideMenus.value : [];
+    found = remote.find(m => (m?.id && menu?.id && m.id === menu.id) || normalizeMenuName(m?.name) === name);
+    return found || null;
+  } catch (e) {
+    return null;
+  }
+};
+
+// Get children to render for a menu: prefer already-filtered children, otherwise
+// fall back to raw source children (with light permission filtering).
+const getRenderedChildren = (mainMenu) => {
+  try {
+    if (mainMenu?.childrens && mainMenu.childrens.length > 0) return mainMenu.childrens;
+    const raw = findRawMenu(mainMenu);
+    if (!raw || !Array.isArray(raw.childrens) || raw.childrens.length === 0) return [];
+
+    return raw.childrens.filter((child) => {
+      if (isBlockedMenuName(child?.name)) return false;
+      // require a route to render as submenu link
+      if (!child?.route) return false;
+      // Respect permission check (if the submenu has a permission_name, require it)
+      if (child.permission_name && !hasPermission(child.permission_name)) return false;
+      return true;
+    });
+  } catch (e) {
+    return [];
+  }
+};
+
+const navigateFallback = (routeDescriptorValue, event) => {
+  try {
+    // Try to build href via getMenuHref first
+    const href = getMenuHref(routeDescriptorValue);
+    if (href) {
+      window.location.href = href;
+      return;
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  try {
+    const descriptor = parseRouteDescriptor(routeDescriptorValue);
+    if (descriptor.name) {
+      const url = route(descriptor.name, descriptor.params);
+      if (typeof url === 'string') {
+        window.location.href = url;
+        return;
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+
+  console.warn('[Sidebar] fallback navigation failed for', routeDescriptorValue);
+};
+
+const menuHasChildren = (mainMenu) => {
+  try {
+    const arr = getRenderedChildren(mainMenu);
+    return Array.isArray(arr) && arr.length > 0;
+  } catch (e) {
+    return false;
+  }
+};
+
+// Insert HR quick links at the end of the menu list so they appear lower.
+const insertionIndex = computed(() => {
+  if (!showHrHub) return -1;
+  try {
+    return Array.isArray(filteredMenus.value) ? filteredMenus.value.length : 0;
+  } catch (e) {
+    return 0;
+  }
 });
 
 const getActiveRoute = (mainMenu) => {
@@ -599,54 +958,20 @@ const sidebarClasses = computed(() => {
     <!-- Navigation Menu -->
     <div ref="sidebarScrollContainer" style="width: inherit" class="h-[calc(100vh-60px)] overflow-y-auto bg-gray-100">
       <ul class="w-full px-3 py-4 space-y-1">
-        <template v-if="showHrHub && payrollMenuIndex === -1">
-          <li v-if="!sideBar" class="px-3 pt-1 pb-2">
-            <p class="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">HR Attendance Hub</p>
-          </li>
+        <!-- quickLinks will be inserted inline within the menu list (see insertionIndex) -->
 
-          <li v-for="quickLink in quickLinks" :key="`top-${quickLink.route}`" :class="{ 'flex justify-center': sideBar }">
-            <template v-if="isFullReloadRoute(quickLink.route)">
-              <a :href="getMenuHref(quickLink.route)" :data-menu-route="normalizeRouteName(quickLink.route)" @click="handleMenuClick($event, quickLink.route)" :class="[
-                isRouteActive(quickLink.route)
-                  ? 'bg-blue-50 text-blue-600 font-medium border-l-3 border-blue-500'
-                  : 'text-gray-700 hover:bg-blue-50 hover:text-blue-600',
-                navSidebar,
-              ]" class="w-full">
-                <div class="flex items-center justify-center w-5 h-5">
-                  <FeatherIcon :name="quickLink.icon" size="18" :class="[
-                    'transition-colors duration-200',
-                    isRouteActive(quickLink.route) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
-                  ]" />
-                </div>
-                <span v-if="!sideBar" class="truncate text-sm">{{ quickLink.label }}</span>
-              </a>
-            </template>
-
-            <template v-else>
-              <Link :href="getMenuHref(quickLink.route)" :data-menu-route="normalizeRouteName(quickLink.route)" @click="handleMenuClick($event, quickLink.route)" :class="[
-                isRouteActive(quickLink.route)
-                  ? 'bg-blue-50 text-blue-600 font-medium border-l-3 border-blue-500'
-                  : 'text-gray-700 hover:bg-blue-50 hover:text-blue-600',
-                navSidebar,
-              ]" class="w-full">
-                <div class="flex items-center justify-center w-5 h-5">
-                  <FeatherIcon :name="quickLink.icon" size="18" :class="[
-                    'transition-colors duration-200',
-                    isRouteActive(quickLink.route) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
-                  ]" />
-                </div>
-                <span v-if="!sideBar" class="truncate text-sm">{{ quickLink.label }}</span>
-              </Link>
-            </template>
-          </li>
-        </template>
-
-        <template v-for="(mainMenu, Index) in filteredMenus" :key="Index">
+        <template v-for="(mainMenu, Index) in filteredMenus" :key="childUniqueKey(mainMenu)">
           <!-- Menu with Submenu -->
-          <li v-if="mainMenu.childrens?.length > 0" :class="{ 'flex justify-center': sideBar }" class="relative">
-            <SideBarSubMenu align="left" :activeRoute="getActiveRoute(mainMenu)">
+          <li v-if="menuHasChildren(mainMenu)" :class="{ 'flex justify-center': sideBar }" class="relative" @click="onMenuTriggerClick($event, childUniqueKey(mainMenu), getActiveRoute(mainMenu) || (getRenderedChildren(mainMenu)[0] && getRenderedChildren(mainMenu)[0].route))">
+            <SideBarSubMenu
+              align="left"
+              :activeRoute="getActiveRoute(mainMenu)"
+              :open="openState[childUniqueKey(mainMenu)]"
+              @update:open="(v) => (openState[childUniqueKey(mainMenu)] = v)"
+              @toggle="handleMenuClick($event, getActiveRoute(mainMenu) || (getRenderedChildren(mainMenu)[0] && getRenderedChildren(mainMenu)[0].route))"
+            >
               <template #trigger>
-                <div @click="handleMenuClick($event)" :class="[
+                <div :class="[
                   navSidebar,
                   getActiveRoute(mainMenu) ? 'bg-blue-50 text-blue-600 font-medium border-l-3 border-blue-500' : ''
                 ]">
@@ -662,7 +987,7 @@ const sidebarClasses = computed(() => {
 
               <template #content>
                 <ul class="submenu bg-gray-100 border border-gray-200 rounded-md py-1">
-                  <li v-for="(submenu, subIndex) in mainMenu.childrens" :key="subIndex">
+                  <li v-for="(submenu, subIndex) in getRenderedChildren(mainMenu)" :key="childUniqueKey(submenu)">
                     <template v-if="getMenuHref(submenu.route)">
                       <template v-if="isFullReloadRoute(submenu.route)">
                         <a :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click="handleMenuClick($event, submenu.route)" :class="[
@@ -689,6 +1014,16 @@ const sidebarClasses = computed(() => {
                         </Link>
                       </template>
                     </template>
+                    <template v-else>
+                      <a href="#" @click.prevent="navigateFallback(submenu.route, $event)" :class="[
+                        'text-gray-700 hover:bg-gray-50',
+                        'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-sm mx-1',
+                        sideBar ? '' : 'ml-3',
+                      ]">
+                        <FeatherIcon :name="submenu.icon" size="16" class="text-gray-500" />
+                        <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(submenu) }}</span>
+                      </a>
+                    </template>
                   </li>
                 </ul>
               </template>
@@ -697,7 +1032,7 @@ const sidebarClasses = computed(() => {
 
           <!-- Single Menu Item -->
           <li v-else :class="{ 'flex justify-center': sideBar }">
-            <template v-if="getMenuHref(mainMenu.route)">
+            <div v-if="getMenuHref(mainMenu.route)">
               <template v-if="isFullReloadRoute(mainMenu.route)">
                 <a :href="getMenuHref(mainMenu.route)" :data-menu-route="normalizeRouteName(mainMenu.route)" @click="handleMenuClick($event, mainMenu.route)" :class="[
                   isRouteActive(mainMenu.route)
@@ -705,13 +1040,13 @@ const sidebarClasses = computed(() => {
                     : 'text-gray-700 hover:bg-blue-50 hover:text-blue-600',
                   navSidebar,
                 ]" class="w-full">
-                <div class="flex items-center justify-center w-5 h-5">
-                  <FeatherIcon :name="mainMenu.icon" size="18" :class="[
-                    'transition-colors duration-200',
-                    isRouteActive(mainMenu.route) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
-                  ]" />
-                </div>
-                <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
+                  <div class="flex items-center justify-center w-5 h-5">
+                    <FeatherIcon :name="mainMenu.icon" size="18" :class="[
+                      'transition-colors duration-200',
+                      isRouteActive(mainMenu.route) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
+                    ]" />
+                  </div>
+                  <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
                 </a>
               </template>
               <template v-else>
@@ -721,23 +1056,26 @@ const sidebarClasses = computed(() => {
                     : 'text-gray-700 hover:bg-blue-50 hover:text-blue-600',
                   navSidebar,
                 ]" class="w-full">
-                <div class="flex items-center justify-center w-5 h-5">
-                  <FeatherIcon :name="mainMenu.icon" size="18" :class="[
-                    'transition-colors duration-200',
-                    isRouteActive(mainMenu.route) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
-                  ]" />
-                </div>
-                <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
+                  <div class="flex items-center justify-center w-5 h-5">
+                    <FeatherIcon :name="mainMenu.icon" size="18" :class="[
+                      'transition-colors duration-200',
+                      isRouteActive(mainMenu.route) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
+                    ]" />
+                  </div>
+                  <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
                 </Link>
               </template>
-            </template>
+            </div>
+
+            <div v-else @click="handleMenuClick($event)" :class="[navSidebar, 'cursor-default']">
+              <div class="flex items-center justify-center w-5 h-5">
+                <FeatherIcon :name="mainMenu.icon" size="18" class="text-gray-500" />
+              </div>
+              <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
+            </div>
           </li>
 
-          <template v-if="showHrHub && Index === payrollMenuIndex">
-            <li v-if="!sideBar" class="px-3 pt-2 pb-2">
-              <p class="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">HR Attendance Hub</p>
-            </li>
-
+          <template v-if="showHrHub && Index === insertionIndex">
             <li v-for="quickLink in quickLinks" :key="`payroll-${quickLink.route}`" :class="{ 'flex justify-center': sideBar }">
               <template v-if="isFullReloadRoute(quickLink.route)">
                 <a :href="getMenuHref(quickLink.route)" :data-menu-route="normalizeRouteName(quickLink.route)" @click="handleMenuClick($event, quickLink.route)" :class="[

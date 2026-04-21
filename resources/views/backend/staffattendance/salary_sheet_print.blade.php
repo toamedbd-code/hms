@@ -318,10 +318,10 @@
             @endif
         </table>
 
-        <div class="footer">
-            <div>Prepared by: ____________________</div>
-            <div>Authorized by: ____________________</div>
-        </div>
+        @php
+            $salaryFooter = '<div>Prepared by: ____________________</div><div>Authorized by: ____________________</div>';
+        @endphp
+        @include('prints.partials._footer', ['footer_content' => $salaryFooter])
     </div>
 
     @unless($isPdf)

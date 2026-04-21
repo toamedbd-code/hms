@@ -166,13 +166,7 @@
     </div>
 
     <div class="sheet">
-        <div class="header-section">
-            @if(!empty($header_image))
-                <img src="{{ $header_image }}" alt="Header" class="header-image">
-            @else
-                <div class="header-placeholder"></div>
-            @endif
-        </div>
+        @includeIf('prints.partials._header', ['header_image' => $header_image ?? null, 'printed_at' => now()->format('d F, Y h:i:s a')])
 
         <div class="content">
             <div class="meta-row">
@@ -199,14 +193,7 @@
             </div>
         </div>
 
-        <div class="footer-section">
-            <div class="footer-date-time">Printed: {{ now()->format('d M Y h:i A') }}</div>
-            @if(!empty($footer_content))
-                <div class="footer-text">{{ $footer_content }}</div>
-            @elseif(!empty($footer_image))
-                <img src="{{ $footer_image }}" alt="Footer" class="footer-image">
-            @endif
-        </div>
+        @includeIf('prints.partials._footer')
     </div>
 
     @if(!empty($autoPrint))

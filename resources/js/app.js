@@ -235,12 +235,66 @@ createInertiaApp({
     setup({ el, App, props, plugin }) {
         applyRuntimeBranding(props?.initialPage?.props);
 
-        return createApp({ render: () => h(App, props) })
+        const instance = createApp({ render: () => h(App, props) })
             .use(plugin)
             .use(ZiggyVue)
-            .component('FeatherIcon', FeatherIcon)
-            // .mixin({ methods: { handleFormSubmission, defaultSuccessHandler, defaultErrorHandler,showToast } })
-            .mount(el);
+            .component('FeatherIcon', FeatherIcon);
+
+        const mounted = instance.mount(el);
+
+        // Monkey-patch global `route()` to try sensible fallbacks when Ziggy
+        // throws "route ... is not in the route list" due to naming prefixes
+        // differences (for example 'backend.accounts.list' vs 'backend.backend.accounts.list').
+        try {
+            if (typeof window !== 'undefined' && typeof window.route === 'function') {
+                const _origRoute = window.route;
+                window._origRoute = _origRoute;
+
+                window.route = function (name, params = {}, absolute = undefined) {
+                    try {
+                        return _origRoute(name, params, absolute);
+                    } catch (err) {
+                        // Only attempt fallbacks for string route names
+                        if (typeof name !== 'string') throw err;
+
+                        const tried = new Set();
+                        const alts = [];
+
+                        // If route begins with 'backend.' but not 'backend.backend.', try inserting extra 'backend.'
+                        if (name.startsWith('backend.') && !name.startsWith('backend.backend.')) {
+                            alts.push(name.replace(/^backend\./, 'backend.backend.'));
+                        }
+
+                        // If route does not start with 'backend.', try adding common prefixes
+                        if (!name.startsWith('backend.')) {
+                            alts.push(`backend.${name}`);
+                            alts.push(`backend.backend.${name}`);
+                        }
+
+                        // Try each alternative until one succeeds
+                        for (const alt of alts) {
+                            if (!alt || tried.has(alt)) continue;
+                            tried.add(alt);
+                            try {
+                                const result = _origRoute(alt, params, absolute);
+                                console.warn(`[route] fallback used: ${name} -> ${alt}`);
+                                return result;
+                            } catch (_) {
+                                // continue
+                            }
+                        }
+
+                        // No fallback worked — rethrow original error
+                        throw err;
+                    }
+                };
+            }
+        } catch (e) {
+            // Non-fatal: keep original route behavior if patching fails
+            console.warn('route fallback wrapper not installed', e?.message ?? e);
+        }
+
+        return mounted;
     },
     progress: {
         color: '#4B5563',

@@ -206,6 +206,7 @@ class InvoiceDesignController extends Controller
             'id' => $invoicedesign->id,
             'module' => $invoicedesign->module,
             'footer_content' => $invoicedesign->footer_content,
+            'footer_content_position' => $invoicedesign->footer_content_position,
             'header_photo_path' => $invoicedesign->header_photo_path,
             'footer_photo_path' => $invoicedesign->footer_photo_path,
             'header_photo_url' => $invoicedesign->header_photo_url,

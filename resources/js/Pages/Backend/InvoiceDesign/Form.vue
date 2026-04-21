@@ -40,6 +40,7 @@ const form = useForm({
     ),
     header_height: props.invoicedesign?.header_height ?? 115,
     footer_height: props.invoicedesign?.footer_height ?? 70,
+    footer_content_position: props.invoicedesign?.footer_content_position ?? 'above',
 
     _method: props.invoicedesign?.id ? 'put' : 'post',
 });
@@ -173,6 +174,17 @@ const goToInvoiceDesignList = () => {
                             class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:focus:ring-slate-500 dark:focus:border-slate-500"
                             placeholder="Enter Footer Contents"></textarea>
                         <InputError class="mt-1" :message="form.errors.footer_content" />
+                    </div>
+
+                    <!-- Footer Content Position -->
+                    <div class="col-span-1 md:col-span-1">
+                        <InputLabel for="footer_content_position" value="Footer Content Position" />
+                        <select id="footer_content_position" v-model="form.footer_content_position"
+                            class="w-[40%] p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                            <option value="above">Above Image</option>
+                            <option value="below">Below Image</option>
+                        </select>
+                        <InputError class="mt-1" :message="form.errors.footer_content_position" />
                     </div>
 
                     <!-- Header/Footer Height -->

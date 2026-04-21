@@ -89,7 +89,7 @@ const submitSearch = () => {
             <tr v-for="billing in rows" :key="billing.id" class="hover:bg-gray-50">
               <td class="px-3 py-2 border">{{ billing.bill_number ?? 'N/A' }}</td>
               <td class="px-3 py-2 border">
-                {{ billing.patient?.first_name ? `${billing.patient.first_name} ${billing.patient.last_name ?? ''}` : 'N/A' }}
+                {{ billing.patient?.name || billing.patient_name || 'N/A' }}
               </td>
               <td class="px-3 py-2 border">{{ getCollectorNames(billing) }}</td>
               <td class="px-3 py-2 border">{{ getItems(billing).length }}</td>

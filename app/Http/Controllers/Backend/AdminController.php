@@ -15,6 +15,7 @@ use App\Services\SpecialistService;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
 use Exception;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class AdminController extends Controller
@@ -74,9 +75,26 @@ class AdminController extends Controller
             $query->where('email', 'like', request()->email . '%');
 
         if (request()->filled('role_id'))
-            $query->where('role', request()->role_id);
+            $query->where('role_id', request()->role_id);
 
         $user = auth()->guard('admin')->user();
+
+        // Apply visibility rules: hide users whose role is private unless current user belongs to that role
+        try {
+            if ($user) {
+                $currentRoleId = $user->role_id;
+                $query = $query->select('admins.*')
+                    ->leftJoin('roles as r', 'admins.role_id', '=', 'r.id')
+                    ->where(function ($q) use ($currentRoleId) {
+                        $q->whereNull('r.is_private')
+                            ->orWhere('r.is_private', false)
+                            ->orWhere('admins.role_id', $currentRoleId);
+                    });
+            }
+        } catch (\Throwable $e) {
+            // ignore and proceed without additional filtering
+        }
+
         $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
 
         $formatedDatas = $datas->map(function ($data, $index) {
@@ -165,7 +183,20 @@ class AdminController extends Controller
             'Backend/Admin/Form',
             [
                 'pageTitle' => fn() => 'Basic Information',
-                'roles' => fn() => $this->roleService->all(),
+                'roles' => fn() => (function () {
+                    $user = auth()->guard('admin')->user();
+                    $roles = $this->roleService->all();
+                    try {
+                        if ($user && method_exists($user, 'hasRole') && !$user->hasRole('developer')) {
+                            $roles = collect($roles)->filter(function ($r) use ($user) {
+                                return empty($r->is_private) || $r->id == $user->role_id;
+                            })->values();
+                        }
+                    } catch (\Throwable $e) {
+                        // ignore and return unfiltered roles
+                    }
+                    return $roles;
+                })(),
                 'designations' => fn() => $this->designationService->activeList(),
                 'departments' => fn() => $this->departmentService->activeList(),
                 'specialists' => fn() => $this->specialistService->activeList(),
@@ -288,7 +319,20 @@ class AdminController extends Controller
                 'pageTitle' => fn() => 'Staff Edit',
                 'user' => fn() => $user,
                 'id' => fn() => $id,
-                'roles' => fn() => $this->roleService->all(),
+                'roles' => fn() => (function () {
+                    $user = auth()->guard('admin')->user();
+                    $roles = $this->roleService->all();
+                    try {
+                        if ($user && method_exists($user, 'hasRole') && !$user->hasRole('developer')) {
+                            $roles = collect($roles)->filter(function ($r) use ($user) {
+                                return empty($r->is_private) || $r->id == $user->role_id;
+                            })->values();
+                        }
+                    } catch (\Throwable $e) {
+                        // ignore and return unfiltered roles
+                    }
+                    return $roles;
+                })(),
                 'designations' => fn() => $this->designationService->activeList(),
                 'departments' => fn() => $this->departmentService->activeList(),
                 'specialists' => fn() => $this->specialistService->activeList(),
@@ -435,6 +479,75 @@ class AdminController extends Controller
             return redirect()
                 ->back()
                 ->with('errorMessage', "Server Error: " . $err->getMessage());
+        }
+    }
+
+    public function editModules($id)
+    {
+        $user = $this->adminService->find($id);
+        $modules = \App\Models\Module::orderBy('name')->get();
+        // limit visible/assignable modules to actor's modules unless developer
+        try {
+            $actor = auth()->guard('admin')->user();
+            if (!($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer'))) {
+                $allowedModuleIds = $actor->modules()->pluck('id')->toArray();
+                $modules = $modules->filter(function ($m) use ($allowedModuleIds) {
+                    return in_array($m->id, $allowedModuleIds);
+                })->values();
+            }
+        } catch (\Throwable $e) {
+            // ignore and show modules as-is
+        }
+        $assigned = [];
+        try {
+            $assigned = $user->modules()->pluck('id')->toArray();
+        } catch (\Throwable $e) {
+            $assigned = [];
+        }
+
+        return Inertia::render(
+            'Backend/Admin/Modules',
+            [
+                'pageTitle' => fn() => 'Assign Modules',
+                'user' => fn() => $user,
+                'modules' => fn() => $modules,
+                'assignedModules' => fn() => $assigned,
+            ]
+        );
+    }
+
+    public function updateModules(Request $request, $id)
+    {
+        DB::beginTransaction();
+        try {
+            $admin = $this->adminService->find($id);
+            if (!$admin) {
+                throw new Exception("Staff not found");
+            }
+
+            $submitted = $request->input('modules', []);
+            try {
+                $actor = auth()->guard('admin')->user();
+                if ($actor && method_exists($actor, 'hasRole') && !$actor->hasRole('developer')) {
+                    $allowedModuleIds = $actor->modules()->pluck('id')->toArray();
+                    $toSync = array_values(array_intersect($allowedModuleIds, $submitted));
+                } else {
+                    $toSync = $submitted;
+                }
+            } catch (\Throwable $e) {
+                $toSync = [];
+            }
+
+            $admin->modules()->sync($toSync);
+
+            $message = 'Modules updated successfully';
+            $this->storeAdminWorkLog($admin->id, 'admin_module', $message);
+            DB::commit();
+            return redirect()->back()->with('successMessage', $message);
+        } catch (Exception $err) {
+            DB::rollBack();
+            $this->storeSystemError('Backend', 'AdminController', 'updateModules', $err->getMessage());
+            return redirect()->back()->with('errorMessage', "Server Error: " . $err->getMessage());
         }
     }
 

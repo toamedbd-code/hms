@@ -60,6 +60,7 @@
     @php
         $fmtTk = function ($value) {
             $symbol = 'TK.';
+
             $val = number_format((float) $value, 2);
             return '<span class="tk"><span class="tk-symbol">'. $symbol .'</span><span class="tk-value">'. $val .'</span></span>';
         };
@@ -106,6 +107,8 @@
         }
     }
     @endphp
+
+    @includeIf('prints.partials._header')
 
     <div class="header">
         <div class="hospital-name">{{ optional($websetting)->company_name ?? config('app.name', 'Hospital') }}</div>

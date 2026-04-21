@@ -257,13 +257,7 @@
 
 <body class="{{ $paperSize ?? 'A4' }}">
     <!-- Header Section -->
-    <div class="header">
-        @if(isset($header_image) && $header_image)
-        <img src="{{ $header_image }}" class="header-image" alt="Clinic Header">
-        @else
-        <div class="header-placeholder"></div>
-        @endif
-    </div>
+    @includeIf('prints.partials._header', ['header_image' => $header_image ?? null, 'printed_at' => $appointment_date ?? null])
 
     <!-- Content Section -->
     <div class="content">
@@ -368,38 +362,7 @@
     </div>
 
     <!-- Footer Section -->
-    <div class="footer">
-        @php
-            $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
-            $footerPrintedAt = trim((string) ($printed_at ?? ''));
-        @endphp
-        <div class="footer-meta">
-            <table style="width: 100%; border-collapse: collapse;">
-                <tr>
-                    <td style="text-align: left; padding-right: 12px;">
-                        {{ $footerFallbackLine }}
-                    </td>
-                    <td style="text-align: right; white-space: nowrap; padding-right: 60px;">
-                        @if($footerPrintedAt !== '')
-                        Printing Date: {{ $footerPrintedAt }}
-                        @endif
-                    </td>
-                </tr>
-            </table>
-        </div>
-
-        @if(!empty($footer_image))
-            @if(!empty($footer_content))
-                <div class="footer-content" style="position:relative; z-index:11;">{!! $footer_content !!}</div>
-            @endif
-            <img src="{{ $footer_image }}" class="footer-image" alt="Clinic Footer">
-        @else
-            <div class="footer-placeholder"></div>
-            @if(!empty($footer_content))
-                <div class="footer-content">{!! $footer_content !!}</div>
-            @endif
-        @endif
-    </div>
+    @includeIf('prints.partials._footer')
 </body>
 
 </html>

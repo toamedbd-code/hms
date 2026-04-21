@@ -356,13 +356,7 @@
 <body>
     <div class="invoice-container">
         <!-- Header Section -->
-        <div class="header-section">
-            @if($header_image)
-            <img src="{{ $header_image }}" alt="Header" class="header-image">
-            @else
-            <div class="header-placeholder"></div>
-            @endif
-        </div>
+        @includeIf('prints.partials._header', ['header_image' => $header_image ?? null, 'printed_at' => $invoiceDateTime ?? null])
 
         <div class="content-section">
             <table class="title-section-table">
@@ -611,29 +605,7 @@ Discount ({{ number_format($discount, 2) }}%)
   {{ $amount_in_words }}
 </div>
         <!-- Footer Section -->
-        <div class="footer-section">
-            @php
-                $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
-                $footerPrintedAt = trim((string) ($printed_at ?? now()->timezone('Asia/Dhaka')->format('d F, Y h:i a')));
-            @endphp
-
-            @if(!empty($footer_image))
-                @if(!empty($footer_content))
-                    <div class="footer-content" style="position:relative; z-index:11;">{!! $footer_content !!}</div>
-                @elseif($footerFallbackLine !== '')
-                    <div class="footer-content" style="position:relative; z-index:11;">{{ $footerFallbackLine }}@if(!empty($footerPrintedAt)) , Printing Date: {{ $footerPrintedAt }}@endif</div>
-                @endif
-
-                <img src="{{ $footer_image }}" alt="Footer" class="footer-image">
-            @else
-                <div class="footer-placeholder"></div>
-                @if(!empty($footer_content))
-                    <div class="footer-content">{!! $footer_content !!}</div>
-                @elseif($footerFallbackLine !== '')
-                    <div class="footer-content">{{ $footerFallbackLine }}@if(!empty($footerPrintedAt)) , Printing Date: {{ $footerPrintedAt }}@endif</div>
-                @endif
-            @endif
-        </div>
+        @includeIf('prints.partials._footer')
     </div>
 </body>
 </html>

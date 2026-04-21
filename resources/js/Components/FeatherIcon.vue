@@ -54,6 +54,11 @@ export default {
   },
   methods: {
     getLucideIcon(iconName) {
+      // map some non-standard names to available lucide icons
+      const aliasMap = {
+        'balance': 'finance',
+        'activity-log': 'activity',
+      };
 
       const lucideIcons = {
         'bed': `<svg width="${this.size}" height="${this.size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -193,6 +198,12 @@ export default {
             <circle cx="17" cy="8.5" r="1"/>
             <path d="M3 10h18"/>
           </svg>`,
+
+        'wallet': `<svg width="${this.size}" height="${this.size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7h18v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+          <path d="M16 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/>
+          <path d="M3 7v2h16V7"/>
+        </svg>`,
 
         'message-square': `<svg width="${this.size}" height="${this.size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -350,7 +361,8 @@ export default {
         </svg>`
       };
 
-      return lucideIcons[iconName] || null;
+      const mapped = aliasMap[iconName] || iconName;
+      return lucideIcons[mapped] || null;
     }
   }
 };

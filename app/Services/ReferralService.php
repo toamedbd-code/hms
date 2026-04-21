@@ -7,14 +7,17 @@ use App\Models\ExpenseHead;
 use App\Models\Referral;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use App\Services\LedgerService;
 
 class ReferralService
 {
     protected $referralModel;
+    protected $ledgerService;
 
-    public function __construct(Referral $referralModel)
+    public function __construct(Referral $referralModel, LedgerService $ledgerService)
     {
         $this->referralModel = $referralModel;
+        $this->ledgerService = $ledgerService;
     }
 
     public function list()
@@ -218,9 +221,23 @@ public function update(array $data, $id)
             ['status' => 'Active']
         );
 
+        $billNumber = $referral->billing->bill_number ?? null;
+
+        if (empty($billNumber)) {
+            Log::warning('Referral commission expense skipped (missing bill_number)', [
+                'referral_id' => $referral->id,
+                'amount' => $commissionAmount,
+            ]);
+            return;
+        }
+
+        $existing = Expense::where('bill_number', $billNumber)->first();
+        $prevAmount = $existing ? (float) $existing->amount : 0.0;
+        $delta = round($commissionAmount - $prevAmount, 2);
+
         $expenseData = [
             'expense_header_id' => $expenseHeader->id,
-            'bill_number' => $referral->billing->bill_number ?? null,
+            'bill_number' => $billNumber,
             'case_id' => null,
             'name' => $referral->payee->name ?? '',
             'description' => 'Referral commission payment (Ref #' . $referral->id . ')',
@@ -231,22 +248,49 @@ public function update(array $data, $id)
             'created_by' => auth('admin')->user()->id ?? null,
         ];
 
-        if (!empty($expenseData['bill_number'])) {
-            $expense = Expense::updateOrCreate(
-                ['bill_number' => $expenseData['bill_number']],
-                $expenseData
-            );
+        $expense = Expense::updateOrCreate(
+            ['bill_number' => $billNumber],
+            $expenseData
+        );
 
-            Log::info('Referral commission expense upserted', [
-                'referral_id' => $referral->id,
-                'bill_number' => $expenseData['bill_number'],
-                'amount' => $commissionAmount,
-                'expense_id' => $expense->id,
-            ]);
+        Log::info('Referral commission expense upserted', [
+            'referral_id' => $referral->id,
+            'bill_number' => $billNumber,
+            'amount' => $commissionAmount,
+            'expense_id' => $expense->id,
+            'delta' => $delta,
+        ]);
+
+        // If there's an increase in paid commission, post only the delta to ledger
+        if ($delta > 0) {
+            try {
+                $description = 'Referral commission payment (Ref #' . $referral->id . ')';
+                $createdBy = auth('admin')->user()->id ?? null;
+                $this->ledgerService->recordExpense(
+                    'COMMISSION_EXP',
+                    'CASH',
+                    $delta,
+                    $description,
+                    Carbon::now()->toDateString(),
+                    'Referral',
+                    $referral->id,
+                    $createdBy
+                );
+
+                Log::info('Referral commission ledger recorded', [
+                    'referral_id' => $referral->id,
+                    'delta' => $delta,
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Failed to record referral commission ledger', [
+                    'referral_id' => $referral->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         } else {
-            Log::warning('Referral commission expense skipped (missing bill_number)', [
+            Log::info('No new commission delta to post to ledger', [
                 'referral_id' => $referral->id,
-                'amount' => $commissionAmount,
+                'delta' => $delta,
             ]);
         }
     }

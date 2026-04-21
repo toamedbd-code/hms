@@ -1007,13 +1007,12 @@ class IpdPatientController extends Controller
         $headerImageBase64 = '';
         $footerImageBase64 = '';
         $banglaFontPath = '';
+        $banglaFontUrl = '';
 
         $banglaFontFile = public_path('fonts/NotoSansBengali-Regular.ttf');
         if (is_file($banglaFontFile)) {
-            $normalized = str_replace('\\', '/', $banglaFontFile);
-            $banglaFontPath = str_starts_with($normalized, '/')
-                ? 'file://' . $normalized
-                : 'file:///' . ltrim($normalized, '/');
+            // Prefer web-served font URL; avoid emitting file:// URIs that browsers block.
+            $banglaFontUrl = asset('fonts/NotoSansBengali-Regular.ttf');
         }
 
         if ($invoiceDesign && $invoiceDesign->header_photo_path) {
@@ -1119,6 +1118,7 @@ class IpdPatientController extends Controller
             'patientBarcodeImage' => $patientBarcodeImage,
             'rxBarcodeImage' => $rxBarcodeImage,
             'banglaFontPath' => $banglaFontPath,
+            'banglaFontUrl' => $banglaFontUrl,
         ];
     }
 
@@ -1278,13 +1278,12 @@ class IpdPatientController extends Controller
         $headerImageBase64 = '';
         $footerImageBase64 = '';
         $banglaFontPath = '';
+        $banglaFontUrl = '';
 
         $banglaFontFile = public_path('fonts/NotoSansBengali-Regular.ttf');
         if (is_file($banglaFontFile)) {
-            $normalized = str_replace('\\', '/', $banglaFontFile);
-            $banglaFontPath = str_starts_with($normalized, '/')
-                ? 'file://' . $normalized
-                : 'file:///' . ltrim($normalized, '/');
+            // Prefer web-served font URL; avoid emitting file:// URIs that browsers block.
+            $banglaFontUrl = asset('fonts/NotoSansBengali-Regular.ttf');
         }
 
         if ($invoiceDesign && $invoiceDesign->header_photo_path) {
@@ -1361,6 +1360,7 @@ class IpdPatientController extends Controller
             'patientBarcodeImage' => $patientBarcodeImage,
             'certificateBarcodeImage' => $certificateBarcodeImage,
             'banglaFontPath' => $banglaFontPath,
+            'banglaFontUrl' => $banglaFontUrl,
         ];
     }
 
