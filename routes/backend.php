@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Backend\PatientController;
 use App\Http\Controllers\Backend\TpaController;
+use App\Http\Controllers\Backend\EmployeeController;
 use App\Http\Controllers\Backend\BillingController;
 use App\Http\Controllers\Backend\AppoinmentController;
 use App\Http\Controllers\Backend\OpdPatientController;
@@ -338,6 +339,9 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     //for Tpa
     Route::resource('tpa', TpaController::class);
     Route::get('tpa/{id}/status/{status}/change', [TpaController::class, 'changeStatus'])->name('tpa.status.change');
+
+    // Employee admin UI (Inertia)
+    Route::resource('employee', EmployeeController::class);
 
 
     //for Billing

@@ -8,6 +8,7 @@ use App\Models\Attendance;
 use App\Models\Payslip;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Config;
 
 class PayrollService
 {
@@ -32,8 +33,28 @@ class PayrollService
             ->where('status', 'present')
             ->count();
 
+        // total days in the period (inclusive)
+        $totalDays = $start->diffInDays($end) + 1;
+
         $gross = bcadd((string)$basic, (string)$allowances, 2);
+
         $deductions = $salaryDeductions;
+
+        // Absence-based prorated deduction (optional, configurable)
+        if (Config::get('payroll.absence_deduction', false) && $totalDays > 0) {
+            $daysAbsent = max(0, $totalDays - $daysPresent);
+            $perDay = $totalDays > 0 ? (float) $basic / $totalDays : 0;
+            $absenceDeduction = round($perDay * $daysAbsent, 2);
+            $deductions = bcadd((string)$deductions, (string)$absenceDeduction, 2);
+        }
+
+        // Tax (configurable rate applied on gross)
+        $taxRate = (float) Config::get('payroll.tax_rate', 0.0);
+        if ($taxRate > 0) {
+            $tax = round($gross * $taxRate, 2);
+            $deductions = bcadd((string)$deductions, (string)$tax, 2);
+        }
+
         $net = bcsub((string)$gross, (string)$deductions, 2);
 
         $payslip = Payslip::create([
