@@ -44,30 +44,4 @@ class ChartOfAccountsSeeder extends Seeder
         }
     }
 }
-<?php
 
-namespace Database\Seeders;
-
-use Illuminate\Database\Seeder;
-use App\Models\Account;
-
-class ChartOfAccountsSeeder extends Seeder
-{
-    /**
-     * Run the database seeds.
-     */
-    public function run(): void
-    {
-        $defaults = [
-            ['code' => 'CASH', 'name' => 'Cash', 'type' => 'asset'],
-            ['code' => 'AR', 'name' => 'Accounts Receivable', 'type' => 'asset'],
-            ['code' => 'DIAG_INC', 'name' => 'Diagnostic Income', 'type' => 'income'],
-            ['code' => 'DIAG_EXP', 'name' => 'Diagnostic Expense', 'type' => 'expense'],
-            ['code' => 'COMMISSION_EXP', 'name' => 'Commission Expense', 'type' => 'expense'],
-        ];
-
-        foreach ($defaults as $d) {
-            Account::firstOrCreate(['code' => $d['code']], $d);
-        }
-    }
-}

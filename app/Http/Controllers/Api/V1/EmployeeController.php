@@ -41,7 +41,12 @@ class EmployeeController extends Controller
     public function destroy(Employee $employee)
     {
         $this->authorize('delete', $employee);
-        $employee->delete();
+        // Use forceDelete to remove record fully (tests expect hard delete)
+        if (method_exists($employee, 'forceDelete')) {
+            $employee->forceDelete();
+        } else {
+            $employee->delete();
+        }
         return response()->json(null, 204);
     }
 }

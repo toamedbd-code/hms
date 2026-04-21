@@ -8,6 +8,11 @@ return new class extends Migration
 {
     public function up()
     {
+        if (Schema::hasTable('attendances')) {
+            // Table already exists on this installation; skip creating it to avoid conflicts
+            return;
+        }
+
         Schema::create('attendances', function (Blueprint $table) {
             $table->id();
             $table->foreignId('employee_id')->constrained('employees')->cascadeOnDelete();
