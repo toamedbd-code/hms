@@ -35,6 +35,9 @@ Route::group(['prefix' => 'v1', 'as' => 'v1.'], function () {
         Route::post('accounting/journals', [\App\Http\Controllers\Api\V1\AccountingController::class, 'createJournal'])->name('accounting.journals.store');
         Route::get('accounting/reports/trial-balance', [\App\Http\Controllers\Api\V1\AccountingController::class, 'trialBalance'])->name('accounting.reports.trial-balance');
 
+        // HR: Employee API
+        Route::apiResource('employees', \App\Http\Controllers\Api\V1\EmployeeController::class);
+
         Route::get('ipd-admissions/{ipdpatient}/prescription', [IpdPrescriptionController::class, 'show'])
             ->name('ipd-admissions.prescription.show');
 
