@@ -1,6 +1,12 @@
-/vendor
-/node_modules
-.env
-/storage/*.key
-/public/storage
-/.vscode
+ /vendor
+ /node_modules
+ .env
+ /storage/*.key
+ /public/storage
+ /.vscode
+
+# Ignore generated build assets and large files
+hms.zip
+/public/build/
+/public/js/
+/public/css/
