@@ -7,7 +7,122 @@ import eventBus from "@/eventBus.js";
 const page = usePage();
 const screenWidth = ref(window.innerWidth);
 const sideBar = ref(false);
-const webSetting = computed(() => page.props.webSetting);
+const brandingOverride = ref(null);
+let brandingHandler = null;
+let remoteUpdateHandler = null;
+// Accept both Inertia shared prop `webSetting` and page-specific `websetting`
+// (the WebSetting form returns `websetting` on partial reloads).
+// Prefer any client-side branding override so runtime updates persist
+// across navigation even if the server returns stale shared props.
+const webSetting = computed(() => {
+  const p = page.props ?? {};
+  let ws = null;
+
+  // If an in-memory branding override exists (emitted by app.js), prefer it
+  if (brandingOverride.value && Object.keys(brandingOverride.value || {}).length > 0) {
+    const b = brandingOverride.value;
+    ws = {
+      id: b.id ?? null,
+      company_name: b.name ?? b.company_name ?? '',
+      company_short_name: b.short_name ?? '',
+      phone: b.phone ?? '',
+      email: b.email ?? '',
+      logo: b.logo ?? '',
+      icon: b.favicon ?? b.icon ?? '',
+      address: b.address ?? '',
+      sorting: b.sorting ?? 0,
+      status: b.status ?? 'Active',
+      created_at: b.created_at ?? null,
+      updated_at: b.updated_at ?? null,
+      current_theme: b.current_theme ?? undefined,
+    };
+
+    return ws;
+  }
+
+  ws = p?.websetting ?? p?.webSetting ?? null;
+
+  // If shared companyInfo exists but no webSetting, map it into webSetting-like shape
+  if ((!ws || Object.keys(ws).length === 0) && p?.companyInfo) {
+    const c = p.companyInfo;
+    ws = {
+      id: c.id ?? null,
+      company_name: c.name ?? c.company_name ?? '',
+      company_short_name: c.short_name ?? '',
+      phone: c.phone ?? '',
+      email: c.email ?? '',
+      logo: c.logo ?? '',
+      icon: c.favicon ?? c.icon ?? '',
+      address: c.address ?? '',
+      sorting: c.sorting ?? 0,
+      status: c.status ?? 'Active',
+      created_at: c.created_at ?? null,
+      updated_at: c.updated_at ?? null,
+      current_theme: c.current_theme ?? undefined,
+    };
+  }
+
+  // Final fallback: parse inline data-page JSON if present
+  if ((!ws || Object.keys(ws).length === 0) && typeof document !== 'undefined') {
+    try {
+      const pageScript = document.querySelector('script[type="application/json"][data-page="app"]')
+        ?? document.querySelector('script[type="application/json"][data-page]');
+      const scriptPayload = pageScript?.textContent;
+      if (scriptPayload) {
+        const parsed = JSON.parse(scriptPayload);
+        const p2 = parsed?.props ?? {};
+        if (p2?.websetting || p2?.webSetting) {
+          ws = p2.websetting ?? p2.webSetting;
+        } else if (p2?.companyInfo) {
+          const c = p2.companyInfo;
+          ws = {
+            id: c.id ?? null,
+            company_name: c.name ?? c.company_name ?? '',
+            company_short_name: c.short_name ?? '',
+            phone: c.phone ?? '',
+            email: c.email ?? '',
+            logo: c.logo ?? '',
+            icon: c.favicon ?? c.icon ?? '',
+            address: c.address ?? '',
+            sorting: c.sorting ?? 0,
+            status: c.status ?? 'Active',
+            created_at: c.created_at ?? null,
+            updated_at: c.updated_at ?? null,
+            current_theme: c.current_theme ?? undefined,
+          };
+        }
+      }
+    } catch (e) {
+      // ignore parse errors
+    }
+  }
+
+  // If webSetting still empty, try last-known branding payload stored on window
+  if ((!ws || Object.keys(ws).length === 0) && typeof window !== 'undefined' && window.__last_branding_payload) {
+    try {
+      const b = window.__last_branding_payload;
+      ws = {
+        id: b.id ?? null,
+        company_name: b.name ?? b.company_name ?? '',
+        company_short_name: b.short_name ?? '',
+        phone: b.phone ?? '',
+        email: b.email ?? '',
+        logo: b.logo ?? '',
+        icon: b.favicon ?? b.icon ?? '',
+        address: b.address ?? '',
+        sorting: b.sorting ?? 0,
+        status: b.status ?? 'Active',
+        created_at: b.created_at ?? null,
+        updated_at: b.updated_at ?? null,
+        current_theme: b.current_theme ?? undefined,
+      };
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  return ws || {};
+});
 const sidebarScrollContainer = ref(null);
 const lastClickedRoute = ref(null);
 
@@ -73,7 +188,10 @@ onMounted(() => {
     const alreadyPresent = (sourceMenus.value || []).some((m) => String(m?.name ?? '').trim().toLowerCase() === 'account management');
     const isAdminPresent = Boolean(page.props?.auth?.admin) || (typeof window !== 'undefined' && Boolean(window.__inertia?.page?.props?.auth?.admin));
 
-    if ((hasAnyAccountPerm || isAdminPresent) && !alreadyPresent) {
+    // Only auto-inject Account Management when the user has any account-related
+    // permission. Don't rely on the admin flag alone, otherwise disabling all
+    // account permissions won't hide the menu.
+    if (hasAnyAccountPerm && !alreadyPresent) {
       const possibleChildren = [
         { name: 'Chart of Accounts', icon: 'list', route: 'backend.accounts.index', permission: 'chart-of-accounts' },
         { name: 'Ledger', icon: 'book', route: 'backend.ledger.index', permission: 'ledger' },
@@ -127,13 +245,65 @@ onMounted(() => {
       pageAuth: page.props?.auth ?? (window.__inertia?.page?.props?.auth ?? null),
     });
 
-    // Keep live copies for easier inspection
-    watch(remoteSideMenus, (v) => { window.__sidebar_debug.remoteSideMenus = v; console.log('[sidebar debug] remoteSideMenus updated', v); }, { deep: true });
-    watch(sourceMenus, (v) => { window.__sidebar_debug.sourceMenus = v; console.log('[sidebar debug] sourceMenus updated', v); }, { deep: true });
-    watch(filteredMenus, (v) => { window.__sidebar_debug.filteredMenus = v; console.log('[sidebar debug] filteredMenus updated', v); }, { deep: true, immediate: true });
+    // Keep live copies for easier inspection. Only log to console in dev.
+    const __sidebar_is_dev = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) || (typeof process !== 'undefined' && process.env && process.env.NODE_ENV !== 'production');
+    watch(remoteSideMenus, (v) => {
+      window.__sidebar_debug.remoteSideMenus = v;
+      if (__sidebar_is_dev) console.log('[sidebar debug] remoteSideMenus updated', v);
+    }, { deep: true });
+    watch(sourceMenus, (v) => {
+      window.__sidebar_debug.sourceMenus = v;
+      if (__sidebar_is_dev) console.log('[sidebar debug] sourceMenus updated', v);
+    }, { deep: true });
+    watch(filteredMenus, (v) => {
+      window.__sidebar_debug.filteredMenus = v;
+      if (__sidebar_is_dev) console.log('[sidebar debug] filteredMenus updated', v);
+    }, { deep: true, immediate: true });
 
     // populate initial snapshot
     try { window.__sidebar_debug.getSnapshot(); } catch (e) { /* ignore */ }
+  } catch (e) {
+    // ignore
+  }
+
+  try {
+    brandingHandler = (payload) => {
+      try {
+        brandingOverride.value = payload ?? null;
+      } catch (e) {
+        // ignore
+      }
+    };
+    eventBus.on('branding.updated', brandingHandler);
+    // Listen for remote side-menu updates emitted by other pages (fallback)
+    remoteUpdateHandler = (payload) => {
+      try {
+        if (Array.isArray(payload)) {
+          remoteSideMenus.value = payload;
+
+          // Derive permission names from the payload so client-side
+          // filtering aligns with the server-provided snapshot.
+          try {
+            const perms = new Set();
+            const walk = (menus) => {
+              (menus || []).forEach((m) => {
+                const p = m?.permission_name ?? m?.permission ?? null;
+                if (p) perms.add(String(p).trim());
+                const children = m?.childrens ?? m?.child ?? [];
+                if (Array.isArray(children) && children.length) walk(children);
+              });
+            };
+            walk(payload);
+            overrideUserPermissions.value = Array.from(perms);
+          } catch (e) {
+            // ignore
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    eventBus.on('sidebar.remoteUpdated', remoteUpdateHandler);
   } catch (e) {
     // ignore
   }
@@ -141,6 +311,16 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", handleResize);
+  try {
+    if (brandingHandler && eventBus && typeof eventBus.off === 'function') {
+      eventBus.off('branding.updated', brandingHandler);
+    }
+    if (remoteUpdateHandler && eventBus && typeof eventBus.off === 'function') {
+      eventBus.off('sidebar.remoteUpdated', remoteUpdateHandler);
+    }
+  } catch (e) {
+    // ignore
+  }
 });
 
 eventBus.on("sidebarToggled", (flag) => {
@@ -152,7 +332,9 @@ const navSidebar = reactive([
 ]);
 
 // Local fallback storage for side menus if server-side Inertia props are empty
-const remoteSideMenus = ref(page.props.auth?.sideMenus ?? []);
+const remoteSideMenus = ref([]);
+// Optional override of user permissions derived from remote side-menus
+const overrideUserPermissions = ref(null);
 // Controlled open state for submenu components (keyed by childUniqueKey(menu))
 const openState = reactive({});
 
@@ -168,6 +350,11 @@ const onMenuTriggerClick = (event, key, route = null) => {
   }
 };
 const sourceMenus = computed(() => {
+  const previewMenus = page.props?.previewSideMenus ?? null;
+  if (Array.isArray(previewMenus) && previewMenus.length > 0) {
+    return previewMenus;
+  }
+
   const serverMenus = page.props.auth?.sideMenus ?? [];
   return (Array.isArray(serverMenus) && serverMenus.length > 0) ? serverMenus : remoteSideMenus.value;
 });
@@ -205,6 +392,11 @@ const routeAliasMap = {
   'pathology-machine-logs.index': 'backend.pathology-machine-logs.index',
   'admin.attendance.devices': 'backend.attendance.devices',
 };
+// Additional aliases for menu entries that may omit the `backend.` prefix
+Object.assign(routeAliasMap, {
+  'websetting.create': 'backend.websetting.create',
+  'journal-entry.index': 'backend.journal-entry.index',
+});
 
 // Some environments prefix route names (e.g., group 'as' + explicit names) causing
 // duplicated name parts like 'backend.backend.accounts.index'. Add common aliases
@@ -364,6 +556,11 @@ const canAccessAnyMenuRoute = (routeNames = []) => {
 };
 
 const userPermissions = computed(() => {
+  // Prefer an explicit override when remote side-menus were fetched
+  if (Array.isArray(overrideUserPermissions.value) && overrideUserPermissions.value.length > 0) {
+    return overrideUserPermissions.value;
+  }
+
   const raw = page.props.auth?.permissions ?? [];
   if (Array.isArray(raw)) return raw;
   if (raw && typeof raw === 'object') {
@@ -693,6 +890,11 @@ const filteredMenus = computed(() => {
           return false;
         }
 
+        // Respect explicit permission on the menu item when present
+        if ((child.permission_name || child.permission) && !hasPermission(child.permission_name || child.permission)) {
+          return false;
+        }
+
         if (!child?.route || !hasRoute(child.route)) {
           return false;
         }
@@ -734,9 +936,14 @@ const filteredMenus = computed(() => {
     // Do not automatically hide top-level menus that match quick-access routes.
     const shouldHideTopLevelQuickLink = false;
 
+    // If the menu defines a permission requirement, enforce it for top-level visibility.
+    const menuRequiresPermission = Boolean(menu?.permission_name || menu?.permission);
+    const menuHasPermission = menuRequiresPermission ? hasPermission(menu.permission_name || menu.permission) : true;
+
     const canShowTopLevelMenu = menu.route
       && hasRoute(menu.route)
       && canAccessMenuRoute(menu.route)
+      && menuHasPermission
       && !shouldHideTopLevelQuickLink;
 
     // Show parent menu when admin has the parent's permission even if it has no route/children
@@ -752,16 +959,14 @@ const filteredMenus = computed(() => {
     return null;
   }).filter(Boolean);
 
-  // Ensure Account Management is visible to admin users even if server props are stale
+  // Ensure Account Management is visible only when the user has account-related permissions
   try {
     const hasAccount = base.some((m) => String(m?.name ?? '').trim().toLowerCase() === 'account management');
     const perms = userPermissions.value || [];
     const accountPerms = ['account-management', 'chart-of-accounts', 'ledger', 'account-balances', 'activity-log-view'];
     const hasAnyAccountPerm = accountPerms.some((p) => perms.includes(p));
-    const isAdminPresent = Boolean(page.props?.auth?.admin) || (typeof window !== 'undefined' && Boolean(window.__inertia?.page?.props?.auth?.admin));
-
-    // Show Account Management when the user either is an admin OR has any account-related permission
-    if ((isAdminPresent || hasAnyAccountPerm) && !hasAccount) {
+    // Show Account Management only when the user has any account-related permission
+    if (hasAnyAccountPerm && !hasAccount) {
       const possibleChildren = [
         { name: 'Chart of Accounts', icon: 'list', route: 'backend.accounts.index', permission: 'chart-of-accounts' },
         { name: 'Ledger', icon: 'book', route: 'backend.ledger.index', permission: 'ledger' },
@@ -771,8 +976,9 @@ const filteredMenus = computed(() => {
 
       const children = possibleChildren.filter((c) => {
         if (!hasRoute(c.route)) return false;
-        // If no permissions are available on the page, be permissive to help debugging.
-        if (!perms || perms.length === 0) return true;
+        // Require explicit permissions to show children. If the permissions list
+        // is empty, treat it as 'no permissions' and do not show.
+        if (!perms || perms.length === 0) return false;
         return perms.includes(c.permission) || perms.includes('account-management');
       }).map((c) => ({
         id: null,
@@ -878,8 +1084,8 @@ const getRenderedChildren = (mainMenu) => {
 };
 
 const navigateFallback = (routeDescriptorValue, event) => {
+  // First try: build an href via getMenuHref (preferred path)
   try {
-    // Try to build href via getMenuHref first
     const href = getMenuHref(routeDescriptorValue);
     if (href) {
       window.location.href = href;
@@ -889,18 +1095,56 @@ const navigateFallback = (routeDescriptorValue, event) => {
     // ignore
   }
 
+  // Second try: attempt several route-name variants using Ziggy's `route()`
   try {
-    const descriptor = parseRouteDescriptor(routeDescriptorValue);
-    if (descriptor.name) {
-      const url = route(descriptor.name, descriptor.params);
-      if (typeof url === 'string') {
-        window.location.href = url;
-        return;
+    const descriptor = parseRouteDescriptor(routeDescriptorValue || '');
+    const rawName = String(routeDescriptorValue ?? '').split('?')[0] || '';
+
+    const candidates = [];
+    if (descriptor.name) candidates.push(descriptor.name);
+    if (rawName) candidates.push(rawName);
+
+    // include normalized alias (if any)
+    try {
+      const normalized = normalizeRouteName(rawName);
+      if (normalized) candidates.push(normalized);
+    } catch (e) {}
+
+    // try toggling common backend prefix duplications
+    try {
+      if (descriptor.name && descriptor.name.startsWith('backend.backend.')) {
+        candidates.push(descriptor.name.replace(/^backend\.backend\./, 'backend.'));
+      } else if (descriptor.name) {
+        candidates.push(('backend.backend.' + descriptor.name).replace(/(^backend\.backend\.|^backend\.)/, (m) => m));
+        // also try ensuring single 'backend.' prefix
+        candidates.push(('backend.' + descriptor.name).replace(/^backend\.backend\./, 'backend.'));
+      }
+    } catch (e) {}
+
+    const unique = [...new Set(candidates.filter(Boolean))];
+
+    for (const name of unique) {
+      try {
+        const url = route(name, descriptor.params || {});
+        if (typeof url === 'string') {
+          window.location.href = url;
+          return;
+        }
+      } catch (err) {
+        // ignore and try next candidate
       }
     }
   } catch (err) {
     // ignore
   }
+
+  // Last-resort: if the routeDescriptorValue looks like a path, navigate directly
+  try {
+    if (typeof routeDescriptorValue === 'string' && routeDescriptorValue.startsWith('/')) {
+      window.location.href = routeDescriptorValue;
+      return;
+    }
+  } catch (e) {}
 
   console.warn('[Sidebar] fallback navigation failed for', routeDescriptorValue);
 };

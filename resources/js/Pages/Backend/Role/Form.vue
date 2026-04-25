@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
+import eventBus from '@/eventBus.js';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
@@ -31,11 +32,28 @@ const submit = () => {
                 form.reset();
             displayResponse(response);
 
-            // Reload Inertia props so `auth.sideMenus` is recomputed
+            // Reload Inertia shared `auth` props so `auth.sideMenus` is recomputed
             try {
-                router.reload();
+                router.reload({ only: ['auth'] });
             } catch (e) {
                 // ignore reload failures
+            }
+
+            // Also proactively fetch side-menus and emit to Sidebar as a fallback
+            try {
+                if (typeof window !== 'undefined' && window.axios && typeof window.axios.get === 'function') {
+                    window.axios.get('/admin/side-menus')
+                        .then((resp) => {
+                            if (resp && resp.data) eventBus.emit('sidebar.remoteUpdated', resp.data);
+                        }).catch(() => {});
+                } else if (typeof fetch === 'function') {
+                    fetch('/admin/side-menus', { credentials: 'include' })
+                        .then((r) => r.json())
+                        .then((data) => { if (data) eventBus.emit('sidebar.remoteUpdated', data); })
+                        .catch(() => {});
+                }
+            } catch (e) {
+                // ignore
             }
         },
         onError: (errorObject) => {
