@@ -29,7 +29,14 @@ const submit = () => {
         onSuccess: (response) => {
             if (!props.id)
                 form.reset();
-            displayResponse(response)
+            displayResponse(response);
+
+            // Reload Inertia props so `auth.sideMenus` is recomputed
+            try {
+                router.reload();
+            } catch (e) {
+                // ignore reload failures
+            }
         },
         onError: (errorObject) => {
 
