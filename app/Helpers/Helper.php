@@ -293,7 +293,14 @@ function getSideMenus($user)
 
     $grantedPermissions = collect();
     try {
-        $grantedPermissions = $user->getAllPermissions()->pluck('name')->filter()->values();
+        // Normalize permission names to lowercase trimmed strings so
+        // server-side matching is robust against case/whitespace differences.
+        $grantedPermissions = $user->getAllPermissions()
+            ->pluck('name')
+            ->filter()
+            ->map(function ($n) {
+                return strtolower(trim((string) $n));
+            })->unique()->values();
     } catch (\Throwable $e) {
         $grantedPermissions = collect();
     }
@@ -309,7 +316,7 @@ function getSideMenus($user)
             return false;
         }
 
-        return $grantedPermissions->contains($permissionName);
+        return $grantedPermissions->contains(strtolower($permissionName));
     };
 
     $menus = Menu::with(['childrens' => function ($q) {
@@ -326,13 +333,64 @@ function getSideMenus($user)
         ->orderBy('sorting', 'ASC')
         ->orderBy('id', 'ASC')
         ->get();
+    // Config-driven override: optionally force full unfiltered menus for
+    // debugging or for specific users. Controlled via config/sidebar.php
+    // or environment variables (FORCE_FULL_SIDEBAR, FORCE_FULL_SIDEBAR_EMAILS, etc.).
+    try {
+        $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
+        $forceForAll = config('sidebar.force_for_all', env('FORCE_FULL_SIDEBAR_FORCE_ALL', false));
+        $allowDevs = config('sidebar.allow_developers', env('FORCE_FULL_SIDEBAR_ALLOW_DEVS', true));
+        $emailsEnv = env('FORCE_FULL_SIDEBAR_EMAILS', '');
+        $emails = array_filter(array_map('trim', explode(',', (string) $emailsEnv)));
 
-        // If the current user is a developer, return all parent menus and their
-        // children unfiltered so a developer always sees everything.
+        if ($forceFull) {
+            $shouldReturn = false;
+
+            if ($forceForAll) {
+                $shouldReturn = true;
+            } else {
+                $userEmail = null;
+                try {
+                    $userEmail = strtolower(trim((string) ($user->email ?? '')));
+                } catch (\Throwable $e) {
+                    $userEmail = null;
+                }
+
+                if ($userEmail && in_array($userEmail, array_map('strtolower', $emails), true)) {
+                    $shouldReturn = true;
+                }
+
+                if (!$shouldReturn && $allowDevs) {
+                    try {
+                        if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+                            $shouldReturn = true;
+                        }
+                    } catch (\Throwable $e) {
+                        // ignore
+                    }
+                }
+            }
+
+            if ($shouldReturn) {
+                return $menus->map(function ($m) {
+                    return is_array($m) ? $m : $m->toArray();
+                })->values();
+            }
+        }
+    } catch (\Throwable $e) {
+        // ignore override failures
+    }
+
+        // Developer full-menu bypass was historically unconditional. Restrict it
+        // so it only applies when the sidebar debug override is explicitly enabled
+        // (config/sidebar.force_full_menus + config/sidebar.allow_developers).
         try {
-            if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
-                    // Remove any InvoiceDesign-related menus from the sidebar
-                    $blockedSubstrings = ['invoicedesign', 'invoice design'];
+            $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
+            $allowDevs = config('sidebar.allow_developers', env('FORCE_FULL_SIDEBAR_ALLOW_DEVS', true));
+
+            if ($forceFull && $allowDevs && method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+                    // Allow developers to see all menus only when the override is active.
+                    $blockedSubstrings = [];
 
                     $devMenus = $menus->map(function ($menu) use ($blockedSubstrings) {
                         $arr = is_array($menu) ? $menu : $menu->toArray();
@@ -491,36 +549,39 @@ function getSideMenus($user)
         return $route !== '' ? ('route:' . $route) : ('name:' . trim((string) ($menu->name ?? '')));
     })->values();
 
-    // Temporary safety: ensure Account Management parent menu appears for admins
-    // when either the admin has the parent permission or at least one child
-    // permission is granted. This helps in cases where Inertia props or
-    // permission snapshots don't reach the client immediately.
+    // Temporary safety: ensure Account Management parent menu appears only
+    // for Admin users when either the admin has the parent permission or at
+    // least one child permission is granted. This prevents non-admin roles
+    // (e.g., Developer) from getting an always-visible Account Management
+    // parent merely because they hold some child permissions.
     try {
-        $accountName = 'Account Management';
-        $already = $result->first(function ($m) use ($accountName) {
-            $name = is_array($m) ? ($m['name'] ?? '') : ($m->name ?? '');
-            return trim(strtolower((string) $name)) === trim(strtolower($accountName));
-        });
+        if (method_exists($user, 'hasRole') && ($user->hasRole('Admin') || $user->hasRole('admin'))) {
+            $accountName = 'Account Management';
+            $already = $result->first(function ($m) use ($accountName) {
+                $name = is_array($m) ? ($m['name'] ?? '') : ($m->name ?? '');
+                return trim(strtolower((string) $name)) === trim(strtolower($accountName));
+            });
 
-        if (!$already) {
-            $accountMenuModel = Menu::with('childrens')->where('name', $accountName)->first();
-            if ($accountMenuModel) {
-                $menuArr = $accountMenuModel->toArray();
-                $children = collect($menuArr['childrens'] ?? [])->filter(function ($child) use ($hasMenuPermission) {
-                    return $hasMenuPermission($child['permission_name'] ?? null);
-                })->sortBy(function ($child) {
-                    $sorting = (int) ($child['sorting'] ?? 0);
-                    $id = (int) ($child['id'] ?? 0);
-                    return sprintf('%05d-%010d', $sorting, $id);
-                })->values()->toArray();
+            if (!$already) {
+                $accountMenuModel = Menu::with('childrens')->where('name', $accountName)->first();
+                if ($accountMenuModel) {
+                    $menuArr = $accountMenuModel->toArray();
+                    $children = collect($menuArr['childrens'] ?? [])->filter(function ($child) use ($hasMenuPermission) {
+                        return $hasMenuPermission($child['permission_name'] ?? null);
+                    })->sortBy(function ($child) {
+                        $sorting = (int) ($child['sorting'] ?? 0);
+                        $id = (int) ($child['id'] ?? 0);
+                        return sprintf('%05d-%010d', $sorting, $id);
+                    })->values()->toArray();
 
-                $menuArr['childrens'] = $children;
+                    $menuArr['childrens'] = $children;
 
-                $hasParentPermission = $hasMenuPermission($menuArr['permission_name'] ?? null);
-                $hasAnyChildPerm = count($children) > 0;
+                    $hasParentPermission = $hasMenuPermission($menuArr['permission_name'] ?? null);
+                    $hasAnyChildPerm = count($children) > 0;
 
-                if ($hasParentPermission || $hasAnyChildPerm) {
-                    $result->push($menuArr);
+                    if ($hasParentPermission || $hasAnyChildPerm) {
+                        $result->push($menuArr);
+                    }
                 }
             }
         }
@@ -566,9 +627,10 @@ function getSideMenus($user)
         // ignore filtering errors and return as-is
     }
 
-    // Remove InvoiceDesign-related menu entries (both parent and children)
+    // Previously this code removed InvoiceDesign-related menu entries.
+    // Keep the blocked substrings empty so Invoice Design menus are allowed.
     try {
-        $blockedSubstrings = ['invoicedesign', 'invoice design'];
+        $blockedSubstrings = [];
 
         // strip any children matching blocked substrings for arrays and objects
         $result = $result->map(function ($menu) use ($blockedSubstrings, $normalizeRoute) {
@@ -608,10 +670,6 @@ function getSideMenus($user)
             $name = is_array($menu) ? strtolower(trim((string) ($menu['name'] ?? ''))) : strtolower(trim((string) ($menu->name ?? '')));
             $route = is_array($menu) ? strtolower(trim((string) ($menu['route'] ?? ''))) : strtolower(trim((string) ($menu->route ?? '')));
 
-            if ($normalizeRoute($route) === 'backend.invoicedesign.index') {
-                return false;
-            }
-
             foreach ($blockedSubstrings as $s) {
                 if ($s !== '' && (strpos($name, $s) !== false || strpos($route, $s) !== false)) return false;
             }
@@ -641,6 +699,26 @@ function getSideMenus($user)
         })->values();
     } catch (\Throwable $e) {
         // ignore sort failures and return as-is
+    }
+
+    // Final safety fallback: if no menus remained after filtering but the
+    // current user is an admin/developer, return the full menus so they can
+    // access the UI while we investigate permission mismatches.
+    try {
+        if (method_exists($result, 'isEmpty') && $result->isEmpty()) {
+            try {
+                        // Only allow full-menu fallback for Admin users (not 'developer')
+                        if (method_exists($user, 'hasRole') && ($user->hasRole('Admin') || $user->hasRole('admin'))) {
+                    return $menus->map(function ($m) {
+                        return is_array($m) ? $m : $m->toArray();
+                    })->values();
+                }
+            } catch (\Throwable $e) {
+                // ignore
+            }
+        }
+    } catch (\Throwable $e) {
+        // ignore
     }
 
     return $result->values();

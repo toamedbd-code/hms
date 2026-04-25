@@ -40,13 +40,29 @@ class HandleInertiaRequests extends Middleware
         $sideMenus = [];
         $companyInfo = [];
 
+        // Load cached web setting early so we can prefer it for company info
+        // when session fallback is not present.
+        $webSetting = get_cached_web_setting();
+
+        // In local / debug environments, force a fresh read to avoid stale
+        // cached values during active development. This prevents a saved
+        // WebSetting from reverting on a full page reload while developing.
+        if (app()->environment('local') && config('app.debug')) {
+            try {
+                get_cached_web_setting(true);
+                $webSetting = get_cached_web_setting();
+            } catch (\Throwable $_) {
+                // ignore cache refresh failures in dev
+            }
+        }
+
         // Try to detect the admin user from the request (explicit guard) first,
         // fall back to the default auth guard accessor. This ensures that the
         // side menus are available even when route-level middleware hasn't yet
         // called Auth::shouldUse('admin').
         $adminUser = $request->user('admin') ?? auth()->guard('admin')->user();
 
-        if ($adminUser && ($adminUser->status ?? '') == 'Active') {
+        if ($adminUser && strcasecmp(trim((string) ($adminUser->status ?? '')), 'Active') === 0) {
             // Force a fresh role/permission snapshot so recent role changes reflect instantly.
             try {
                 $adminUser = Admin::query()
@@ -91,9 +107,30 @@ class HandleInertiaRequests extends Middleware
             })
             ->values();
 
-        $companyInfo = (session()->has('companyInfo')) ? session()->get('companyInfo') : Company::first();
-
-        $webSetting = get_cached_web_setting();
+        // Prefer the active `WebSetting` so updates in WebSetting take
+        // precedence and propagate immediately to Inertia shared props.
+        // Fall back to an explicit session override when present, then
+        // to the legacy `Company::first()`.
+        if (!empty($webSetting)) {
+            $companyInfo = [
+                'id' => $webSetting->id ?? null,
+                'name' => $webSetting->company_name ?? null,
+                'short_name' => $webSetting->company_short_name ?? null,
+                'phone' => $webSetting->phone ?? null,
+                'email' => $webSetting->email ?? null,
+                'logo' => $webSetting->logo ?? null,
+                'favicon' => $webSetting->icon ?? null,
+                'address' => $webSetting->address ?? null,
+                'sorting' => 0,
+                'status' => $webSetting->status ?? 'Active',
+                'created_at' => $webSetting->created_at ?? null,
+                'updated_at' => $webSetting->updated_at ?? null,
+            ];
+        } elseif (session()->has('companyInfo')) {
+            $companyInfo = session()->get('companyInfo');
+        } else {
+            $companyInfo = Company::first();
+        }
 
         $medicineExpiryAlert = [
             'expired_count' => 0,
@@ -155,7 +192,13 @@ class HandleInertiaRequests extends Middleware
 
         $adminPermissions = collect();
         if ($adminUser) {
-            $adminPermissions = $adminUser->getAllPermissions()->pluck('name')->unique()->values();
+            // Normalize permissions to lowercase trimmed strings for consistency
+            $adminPermissions = $adminUser->getAllPermissions()
+                ->pluck('name')
+                ->filter()
+                ->map(function ($n) {
+                    return strtolower(trim((string) $n));
+                })->unique()->values();
         }
 
 
@@ -178,7 +221,11 @@ class HandleInertiaRequests extends Middleware
             ],
 
             'companyInfo' => $companyInfo,
+            // Provide both `webSetting` and lowercase `websetting` keys so Inertia
+            // partial reloads requesting `only: ['websetting']` will receive
+            // the updated settings regardless of casing used by the client.
             'webSetting' => $webSetting,
+            'websetting' => $webSetting,
             'pharmacyAlerts' => [
                 'medicineExpiry' => $medicineExpiryAlert,
             ],

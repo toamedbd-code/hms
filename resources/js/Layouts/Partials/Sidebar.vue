@@ -288,7 +288,7 @@ onMounted(() => {
             const walk = (menus) => {
               (menus || []).forEach((m) => {
                 const p = m?.permission_name ?? m?.permission ?? null;
-                if (p) perms.add(String(p).trim());
+                if (p) perms.add(String(p).trim().toLowerCase());
                 const children = m?.childrens ?? m?.child ?? [];
                 if (Array.isArray(children) && children.length) walk(children);
               });
@@ -557,23 +557,30 @@ const canAccessAnyMenuRoute = (routeNames = []) => {
 
 const userPermissions = computed(() => {
   // Prefer an explicit override when remote side-menus were fetched
+  let list = [];
   if (Array.isArray(overrideUserPermissions.value) && overrideUserPermissions.value.length > 0) {
-    return overrideUserPermissions.value;
-  }
-
-  const raw = page.props.auth?.permissions ?? [];
-  if (Array.isArray(raw)) return raw;
-  if (raw && typeof raw === 'object') {
-    try {
-      return Object.values(raw);
-    } catch (e) {
-      return [];
+    list = overrideUserPermissions.value.map((p) => String(p ?? '').trim().toLowerCase());
+  } else {
+    const raw = page.props.auth?.permissions ?? [];
+    if (Array.isArray(raw)) {
+      list = raw.map((p) => String(p ?? '').trim().toLowerCase());
+    } else if (raw && typeof raw === 'object') {
+      try {
+        list = Object.values(raw).map((p) => String(p ?? '').trim().toLowerCase());
+      } catch (e) {
+        list = [];
+      }
     }
   }
-  return [];
+
+  // dedupe
+  return Array.from(new Set(list.filter(Boolean)));
 });
 
-const hasPermission = (permissionName) => userPermissions.value.includes(permissionName);
+const hasPermission = (permissionName) => {
+  if (!permissionName) return false;
+  return userPermissions.value.includes(String(permissionName).trim().toLowerCase());
+};
 const canManageAllWebSettings = computed(() => hasPermission('websetting-add'));
 const canManageCmsSettings = computed(() => canManageAllWebSettings.value || hasPermission('cms-setting'));
 const canManageGeneralSettings = computed(() => canManageAllWebSettings.value || hasPermission('general-setting-add'));
