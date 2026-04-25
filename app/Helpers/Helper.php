@@ -333,6 +333,19 @@ function getSideMenus($user)
         ->orderBy('sorting', 'ASC')
         ->orderBy('id', 'ASC')
         ->get();
+    // Per-user strict filtering control. When an admin's email appears in
+    // the `SIDEBAR_STRICT_EMAILS` env list, we disable any "show-everything"
+    // fallbacks so that the returned menus strictly reflect assigned
+    // permissions/modules for that user.
+    $strictEmailsEnv = env('SIDEBAR_STRICT_EMAILS', '');
+    $strictEmails = array_filter(array_map('trim', explode(',', (string) $strictEmailsEnv)));
+    $userEmailLower = null;
+    try {
+        $userEmailLower = strtolower(trim((string) ($user->email ?? '')));
+    } catch (\Throwable $e) {
+        $userEmailLower = null;
+    }
+    $strictFiltering = $userEmailLower && in_array($userEmailLower, array_map('strtolower', $strictEmails), true);
     // Config-driven override: optionally force full unfiltered menus for
     // debugging or for specific users. Controlled via config/sidebar.php
     // or environment variables (FORCE_FULL_SIDEBAR, FORCE_FULL_SIDEBAR_EMAILS, etc.).
@@ -343,7 +356,7 @@ function getSideMenus($user)
         $emailsEnv = env('FORCE_FULL_SIDEBAR_EMAILS', '');
         $emails = array_filter(array_map('trim', explode(',', (string) $emailsEnv)));
 
-        if ($forceFull) {
+        if ($forceFull && !$strictFiltering) {
             $shouldReturn = false;
 
             if ($forceForAll) {
@@ -360,7 +373,7 @@ function getSideMenus($user)
                     $shouldReturn = true;
                 }
 
-                if (!$shouldReturn && $allowDevs) {
+                if (!$shouldReturn && $allowDevs && !$strictFiltering) {
                     try {
                         if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
                             $shouldReturn = true;
@@ -388,7 +401,7 @@ function getSideMenus($user)
             $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
             $allowDevs = config('sidebar.allow_developers', env('FORCE_FULL_SIDEBAR_ALLOW_DEVS', true));
 
-            if ($forceFull && $allowDevs && method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+            if ($forceFull && $allowDevs && !$strictFiltering && method_exists($user, 'hasRole') && $user->hasRole('developer')) {
                     // Allow developers to see all menus only when the override is active.
                     $blockedSubstrings = [];
 
@@ -555,7 +568,7 @@ function getSideMenus($user)
     // (e.g., Developer) from getting an always-visible Account Management
     // parent merely because they hold some child permissions.
     try {
-        if (method_exists($user, 'hasRole') && ($user->hasRole('Admin') || $user->hasRole('admin'))) {
+        if (!$strictFiltering && method_exists($user, 'hasRole') && ($user->hasRole('Admin') || $user->hasRole('admin'))) {
             $accountName = 'Account Management';
             $already = $result->first(function ($m) use ($accountName) {
                 $name = is_array($m) ? ($m['name'] ?? '') : ($m->name ?? '');
@@ -589,9 +602,16 @@ function getSideMenus($user)
         // ignore temporary override failures
     }
 
-    // If the current user is a developer, skip module filtering and show all menus
+    // Developer full-menu bypass: only apply when the sidebar debug override
+    // is explicitly enabled (config/sidebar.force_full_menus +
+    // config/sidebar.allow_developers). By default developers should see
+    // only the menus granted via permissions so role-created developer
+    // accounts behave like any other role.
     try {
-        if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+        $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
+        $allowDevs = config('sidebar.allow_developers', env('FORCE_FULL_SIDEBAR_ALLOW_DEVS', false));
+
+        if (!$strictFiltering && $forceFull && $allowDevs && method_exists($user, 'hasRole') && $user->hasRole('developer')) {
             return $result->values();
         }
     } catch (\Throwable $e) {
@@ -702,13 +722,16 @@ function getSideMenus($user)
     }
 
     // Final safety fallback: if no menus remained after filtering but the
-    // current user is an admin/developer, return the full menus so they can
-    // access the UI while we investigate permission mismatches.
+    // current user is an admin, only return the full menus when an explicit
+    // debug override is enabled (`force_full_menus`). This prevents admins
+    // from implicitly seeing all menus when their role/permissions are
+    // intended to limit visibility.
     try {
-        if (method_exists($result, 'isEmpty') && $result->isEmpty()) {
+        if (!$strictFiltering && method_exists($result, 'isEmpty') && $result->isEmpty()) {
             try {
-                        // Only allow full-menu fallback for Admin users (not 'developer')
-                        if (method_exists($user, 'hasRole') && ($user->hasRole('Admin') || $user->hasRole('admin'))) {
+                $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
+                // Only apply the fallback when the override is explicitly enabled.
+                if ($forceFull && method_exists($user, 'hasRole') && ($user->hasRole('Admin') || $user->hasRole('admin'))) {
                     return $menus->map(function ($m) {
                         return is_array($m) ? $m : $m->toArray();
                     })->values();
