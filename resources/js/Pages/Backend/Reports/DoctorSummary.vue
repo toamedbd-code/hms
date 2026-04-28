@@ -67,7 +67,8 @@ const applyFilter = () => {
             <option value="doctor">Report Summary</option>
             <option value="test">Test Name (e.g. CBC)</option>
             <option value="referrer">Referrer Doctor</option>
-            <option value="technologist">Technologist / Pathologist (reported)</option>
+            <option value="technologist">Technologist (reported)</option>
+            <option value="pathologist">Pathologist (reported)</option>
             <option value="collector">Sample Collector</option>
           </select>
 
@@ -115,7 +116,7 @@ const applyFilter = () => {
               <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">Reported At</th>
               <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">Case ID</th>
               <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">Patient</th>
-              <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">Reporter</th>
+              <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">{{ filters.mode === 'pathologist' ? 'Pathologist' : 'Technologist' }}</th>
               <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">Test</th>
               <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-right border-b border-gray-200">Price</th>
 

@@ -396,7 +396,8 @@ class DoctorSummaryController extends Controller
             return Inertia::render('Backend/Reports/DoctorSummary', [
                 'pageTitle' => fn () => 'Reporter Search Results',
                 'filters' => fn () => $request->only('q', 'from', 'to', 'numOfData', 'mode'),
-                'mode' => fn () => 'technologist',
+                // preserve the exact requested mode so the frontend can distinguish
+                'mode' => fn () => $mode ?? 'technologist',
                 'term' => fn () => $term,
                 'meta' => fn () => ['total_reports' => $total_reports, 'distinct_cases' => $distinctCases->count()],
                 'datas' => fn () => $paginator,
