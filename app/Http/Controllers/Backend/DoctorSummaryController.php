@@ -137,10 +137,6 @@ class DoctorSummaryController extends Controller
 
             return Inertia::render('Backend/Reports/DoctorSummary', [
                 'pageTitle' => fn () => 'Test Search Results',
-                'breadcrumbs' => fn () => [
-                    ['link' => null, 'title' => 'Reports'],
-                    ['link' => route('backend.report-summary.index'), 'title' => 'Report Summary'],
-                ],
                 'filters' => fn () => $request->only('q', 'from', 'to', 'numOfData', 'mode'),
                 'mode' => fn () => 'test',
                 'term' => fn () => $term,
@@ -619,10 +615,6 @@ class DoctorSummaryController extends Controller
 
         return Inertia::render('Backend/Reports/DoctorSummary', [
             'pageTitle' => fn () => 'Report Summary',
-            'breadcrumbs' => fn () => [
-                ['link' => null, 'title' => 'Reports'],
-                ['link' => route('backend.report-summary.index'), 'title' => 'Report Summary'],
-            ],
             'filters' => fn () => $request->only('q', 'from', 'to', 'numOfData'),
             'mode' => fn () => 'doctor',
             'term' => fn () => $term,

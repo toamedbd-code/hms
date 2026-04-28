@@ -126,7 +126,7 @@ const applyFilter = () => {
               <th v-if="filters.mode === 'collector'" class="px-3 py-2 text-left border-b border-gray-200">Test</th>
               <th v-if="filters.mode === 'collector'" class="px-3 py-2 text-right border-b border-gray-200">Price</th>
 
-              <th v-if="filters.mode === 'doctor'" class="px-3 py-2 text-left border-b border-gray-200">Doctor</th>
+              <th v-if="filters.mode === 'doctor'" class="px-3 py-2 text-left border-b border-gray-200">Report</th>
               <th v-if="filters.mode === 'doctor'" class="px-3 py-2 text-right border-b border-gray-200">Case Count</th>
               <th v-if="filters.mode === 'doctor'" class="px-3 py-2 text-right border-b border-gray-200">Pathology Items</th>
               <th v-if="filters.mode === 'doctor'" class="px-3 py-2 text-left border-b border-gray-200">Top Tests</th>
