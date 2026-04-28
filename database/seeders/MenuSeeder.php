@@ -1534,7 +1534,7 @@ class MenuSeeder extends Seeder
                     [
                         'name' => 'Report Summary',
                         'icon' => 'doctor',
-                        'route' => 'backend.doctor-summary.index',
+                        'route' => 'backend.report-summary.index',
                         'description' => null,
                         'sorting' => 2,
                         'permission_name' => 'report-management',

@@ -50,7 +50,7 @@ watch(
 );
 
 const applyFilter = () => {
-  router.get(route('backend.doctor-summary.index'), filters.value, { preserveState: true });
+  router.get(route('backend.report-summary.index'), filters.value, { preserveState: true });
 };
 </script>
 
@@ -107,7 +107,6 @@ const applyFilter = () => {
               <th v-if="filters.mode === 'test'" class="px-3 py-2 text-left border-b border-gray-200">Patient</th>
               <th v-if="filters.mode === 'test'" class="px-3 py-2 text-left border-b border-gray-200">Matched Tests</th>
               <th v-if="filters.mode === 'test'" class="px-3 py-2 text-right border-b border-gray-200">Price</th>
-              <th v-if="filters.mode === 'test'" class="px-3 py-2 text-left">Price</th>
 
               <th v-if="filters.mode === 'referrer'" class="px-3 py-2 text-left border-b border-gray-200">Case ID</th>
               <th v-if="filters.mode === 'referrer'" class="px-3 py-2 text-left border-b border-gray-200">Patient</th>

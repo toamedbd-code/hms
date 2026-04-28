@@ -139,7 +139,7 @@ class DoctorSummaryController extends Controller
                 'pageTitle' => fn () => 'Test Search Results',
                 'breadcrumbs' => fn () => [
                     ['link' => null, 'title' => 'Reports'],
-                    ['link' => route('backend.doctor-summary.index'), 'title' => 'Report Summary'],
+                    ['link' => route('backend.report-summary.index'), 'title' => 'Report Summary'],
                 ],
                 'filters' => fn () => $request->only('q', 'from', 'to', 'numOfData', 'mode'),
                 'mode' => fn () => 'test',
@@ -621,7 +621,7 @@ class DoctorSummaryController extends Controller
             'pageTitle' => fn () => 'Report Summary',
             'breadcrumbs' => fn () => [
                 ['link' => null, 'title' => 'Reports'],
-                ['link' => route('backend.doctor-summary.index'), 'title' => 'Report Summary'],
+                ['link' => route('backend.report-summary.index'), 'title' => 'Report Summary'],
             ],
             'filters' => fn () => $request->only('q', 'from', 'to', 'numOfData'),
             'mode' => fn () => 'doctor',

@@ -616,8 +616,12 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('reporting/item/{billItem}/file', [ReportingController::class, 'viewFile'])->name('reporting.item.file');
     Route::post('reporting/item/{billItem}/import-text', [ReportingController::class, 'importStoredFileText'])->name('reporting.item.import-text');
     Route::get('reporting/print/{billItem}', [ReportingController::class, 'print'])->name('reporting.print');
-    // Doctor summary (aggregate counts per doctor)
-    Route::get('doctor-summary', [DoctorSummaryController::class, 'index'])->name('doctor-summary.index');
+    // Report summary (formerly Doctor summary) — keep legacy URL redirect
+    Route::get('report-summary', [DoctorSummaryController::class, 'index'])->name('report-summary.index');
+    // Redirect old URL to new report-summary path
+    Route::get('doctor-summary', function () {
+        return redirect()->route('backend.report-summary.index');
+    });
 
     // for Report Delivery
     Route::get('report-delivery', [ReportDeliveryController::class, 'index'])->name('report-delivery.index');
