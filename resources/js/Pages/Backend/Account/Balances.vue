@@ -10,3 +10,5 @@ import BackendLayout from '@/Layouts/BackendLayout.vue';
     </div>
   </BackendLayout>
 </template>
+
+<style scoped></style>

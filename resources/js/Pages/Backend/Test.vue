@@ -30,7 +30,7 @@ const submit = () => {
         <div class="w-full bg-white dark:bg-slate-900 p-8 mt-3 transition duration-1000 ease-in-out">
             <div class=" grid xs:grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 <!--  Monthly card start  -->
-                <div class="pl-1 w-full h-20 bg-green-400 rounded-lg shadow-md">
+                <div class="pl-1 w-full h-20 bg-green-400 rounded-lg shadow-md text-white">
                     <div class="flex w-full h-full py-2 px-4 bg-gray-50 rounded-lg justify-between">
                         <div class="my-auto">
                             <p class="font-bold text-sm sm:text-md">EARNINGS (MONTHLY)</p>
@@ -66,7 +66,7 @@ const submit = () => {
                 </div>
                 <!--  Annual card end  -->
                 <!--  Tasks card start  -->
-                <div class="pl-1 w-full h-20 bg-purple-500 rounded-lg shadow-md">
+                <div class="pl-1 w-full h-20 bg-purple-500 rounded-lg shadow-md text-white">
                     <div class="flex w-full h-full py-2 px-4 bg-gray-100 rounded-lg justify-between">
                         <div class="my-auto">
                             <p class="font-bold text-sm sm:text-md">TASKS</p>
@@ -84,7 +84,7 @@ const submit = () => {
                 </div>
                 <!--  Tasks card end  -->
                 <!--  Pending requests card start  -->
-                <div class="pl-1 w-full h-20 bg-yellow-400 rounded-lg shadow-md">
+                <div class="pl-1 w-full h-20 bg-yellow-400 rounded-lg shadow-md text-white">
                     <div class="flex w-full h-full py-2 px-4 bg-gray-100 rounded-lg justify-between">
                         <div class="my-auto">
                             <p class="font-bold text-sm sm:text-md">PENDING REQUESTS</p>
@@ -278,7 +278,7 @@ const submit = () => {
                                             <span
                                                 class="relative inline-block px-3 py-1 font-semibold text-green-900 leading-tight">
                                                 <span aria-hidden
-                                                    class="absolute inset-0 bg-green-200 opacity-50 rounded-full"></span>
+                                                    class="absolute inset-0 bg-green-200 opacity-50 rounded-full text-white"></span>
                                                 <span class="relative">Paid</span>
                                             </span>
                                         </td>
@@ -319,7 +319,7 @@ const submit = () => {
                                             <span
                                                 class="relative inline-block px-3 py-1 font-semibold text-green-900 leading-tight">
                                                 <span aria-hidden
-                                                    class="absolute inset-0 bg-green-200 opacity-50 rounded-full"></span>
+                                                    class="absolute inset-0 bg-green-200 opacity-50 rounded-full text-white"></span>
                                                 <span class="relative">Paid</span>
                                             </span>
                                         </td>
@@ -360,7 +360,7 @@ const submit = () => {
                                             <span
                                                 class="relative inline-block px-3 py-1 font-semibold text-orange-900 leading-tight">
                                                 <span aria-hidden
-                                                    class="absolute inset-0 bg-orange-200 opacity-50 rounded-full"></span>
+                                                    class="absolute inset-0 bg-orange-200 opacity-50 rounded-full text-white"></span>
                                                 <span class="relative">Pending</span>
                                             </span>
                                         </td>
@@ -403,7 +403,7 @@ const submit = () => {
                                             <span
                                                 class="relative inline-block px-3 py-1 font-semibold text-red-900 leading-tight">
                                                 <span aria-hidden
-                                                    class="absolute inset-0 bg-red-200 opacity-50 rounded-full"></span>
+                                                    class="absolute inset-0 bg-red-200 opacity-50 rounded-full text-white"></span>
                                                 <span class="relative">Overdue</span>
                                             </span>
                                         </td>
@@ -573,7 +573,7 @@ const submit = () => {
                                             <span
                                                 class="relative inline-block px-3 py-1 font-semibold text-green-900 leading-tight">
                                                 <span aria-hidden
-                                                    class="absolute inset-0 bg-green-200 opacity-50 rounded-full"></span>
+                                                    class="absolute inset-0 bg-green-200 opacity-50 rounded-full text-white"></span>
                                                 <span class="relative">Activo</span>
                                             </span>
                                         </td>
@@ -605,7 +605,7 @@ const submit = () => {
                                             <span
                                                 class="relative inline-block px-3 py-1 font-semibold text-green-900 leading-tight">
                                                 <span aria-hidden
-                                                    class="absolute inset-0 bg-green-200 opacity-50 rounded-full"></span>
+                                                    class="absolute inset-0 bg-green-200 opacity-50 rounded-full text-white"></span>
                                                 <span class="relative">Activo</span>
                                             </span>
                                         </td>
@@ -637,7 +637,7 @@ const submit = () => {
                                             <span
                                                 class="relative inline-block px-3 py-1 font-semibold text-orange-900 leading-tight">
                                                 <span aria-hidden
-                                                    class="absolute inset-0 bg-orange-200 opacity-50 rounded-full"></span>
+                                                    class="absolute inset-0 bg-orange-200 opacity-50 rounded-full text-white"></span>
                                                 <span class="relative">Suspended</span>
                                             </span>
                                         </td>
@@ -667,7 +667,7 @@ const submit = () => {
                                             <span
                                                 class="relative inline-block px-3 py-1 font-semibold text-red-900 leading-tight">
                                                 <span aria-hidden
-                                                    class="absolute inset-0 bg-red-200 opacity-50 rounded-full"></span>
+                                                    class="absolute inset-0 bg-red-200 opacity-50 rounded-full text-white"></span>
                                                 <span class="relative">Inactive</span>
                                             </span>
                                         </td>
@@ -681,11 +681,11 @@ const submit = () => {
                                 </span>
                                 <div class="inline-flex mt-2 xs:mt-0">
                                     <button
-                                        class="text-sm bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-l">
+                                        class="text-white bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-l">
                                         Prev
                                     </button>
                                     <button
-                                        class="text-sm bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-r">
+                                        class="text-white bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-r">
                                         Next
                                     </button>
                                 </div>
@@ -697,7 +697,7 @@ const submit = () => {
         </div>
 
 
-        <div class="w-full bg-slate-400 p-8 mt-3">
+        <div class="w-full bg-slate-400 p-8 mt-3 text-white">
             <div class="flex flex-col">
                 <div class="my-2 overflow-x-auto sm:-max-6 lg:-mx-8">
                     <div class="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
@@ -752,7 +752,7 @@ const submit = () => {
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap">
                                             <span
-                                                class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
+                                                class="px-2 inline-flex text-white leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                             Admin
@@ -786,7 +786,7 @@ const submit = () => {
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap">
                                             <span
-                                                class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
+                                                class="px-2 inline-flex text-white leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                             Admin
@@ -804,7 +804,7 @@ const submit = () => {
         </div>
 
 
-        <div class="w-full bg-slate-400 p-8 mt-3">
+        <div class="w-full bg-slate-400 p-8 mt-3 text-white">
             <table class="border-collapse border border-slate-500 w-full">
                 <thead>
                     <tr class=" bg-gray-200">
@@ -849,9 +849,9 @@ const submit = () => {
             </table>
         </div>
 
-        <div class="w-full bg-slate-400 p-8 mt-3">
+        <div class="w-full bg-slate-400 p-8 mt-3 text-white">
             <!-- Content -->
-            <div class="w-full bg-grey-lightest" style="padding-top: 4rem;">
+            <div class="w-full bg-grey-lightest text-white" style="padding-top: 4rem;">
                 <div class="container mx-auto py-8">
                     <div class="w-5/6 lg:w-1/2 mx-auto bg-white rounded shadow">
                         <div class="py-4 px-8 text-black text-xl border-b border-grey-lighter">Register for a free account
@@ -899,7 +899,7 @@ const submit = () => {
             </div>
         </div>
 
-        <div class="w-full bg-slate-400 p-8 mt-3">
+        <div class="w-full bg-slate-400 p-8 mt-3 text-white">
             <div class="min-w-screen min-h-screen bg-gray-200 flex items-center justify-center px-5 py-5">
                 <div class="w-full max-w-3xl">
                     <div class="-mx-2 md:flex">
@@ -955,57 +955,57 @@ const submit = () => {
 
         <div class=" grid grid-cols-1 sm:grid-cols-2 gap-3 py-2">
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
         </div>
         <div class=" grid grid-cols-2 sm:grid-cols-3 gap-3 py-2">
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
         </div>
         <div class=" grid grid-cols-2 sm:grid-cols-4 gap-3 py-2">
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
         </div>
         <div class=" grid grid-cols-2 sm:grid-cols-3 gap-3 py-2">
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
             <div
-                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm">
+                class="bg-slate-300 hover:bg-slate-400 dark:bg-slate-900 dark:hover:bg-slate-800 transition duration-1000 ease-in-out h-64 w-full rounded-sm text-white">
                 <h1>Card</h1>
             </div>
         </div>

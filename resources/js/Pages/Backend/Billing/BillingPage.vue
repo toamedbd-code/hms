@@ -23,9 +23,9 @@ const props = defineProps({
 });
 
 const page = usePage();
-const unitCompanyName = computed(() => page.props.webSetting?.company_name || 'ToaMed.');
+const unitCompanyName = computed(() => (page.props.websetting ?? page.props.webSetting)?.company_name || 'ToaMed.');
 const maxBillingDiscountPercent = computed(() => {
-  const raw = Number(page.props?.webSetting?.max_billing_discount_percent ?? 100);
+  const raw = Number((page.props.websetting ?? page.props.webSetting)?.max_billing_discount_percent ?? 100);
   if (!Number.isFinite(raw)) return 100;
   return Math.min(100, Math.max(0, raw));
 });
@@ -2352,7 +2352,7 @@ const handleDoctorSearchInput = (event) => {
 <template>
 
   <Head :title="$page.props.pageTitle"/>
-  <div class="min-h-screen bg-gray-50 dark:bg-gray-900 overflow-y-auto">
+  <div class="min-h-screen bg-gray-50 dark:bg-gray-900 overflow-y-auto billing-uniform">
     <div class="w-full p-2">
       <div class="bg-white rounded-lg shadow-lg dark:bg-slate-900 mb-4">
         <div class="mb-3">
@@ -2466,11 +2466,15 @@ const handleDoctorSearchInput = (event) => {
               <div class="lg:col-span-2">
                 <InputLabel for="category" value="Category" class="text-xs mb-1" />
                 <select v-model="itemForm.category" id="category"
-                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200">
+                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200">
                   <option value="">Select</option>
                   <option value="Pathology">Pathology</option>
                   <option value="Radiology">Radiology</option>
                   <option value="Medicine">Medicine</option>
+                  <option value="OPD">OPD</option>
+                  <option value="IPD">IPD</option>
+                  <option value="Appointment">Appointment</option>
+                  <option value="Ambulance">Ambulance</option>
                 </select>
               </div>
               <div class="lg:col-span-2 relative">
@@ -2478,7 +2482,7 @@ const handleDoctorSearchInput = (event) => {
                 <div class="relative">
                   <input v-model="itemForm.itemName" @input="handleItemInput($event)"
                     @keydown="handleKeyDown($event, 'itemName')" @focus="selectedIndex = -1" id="itemName" type="text"
-                    class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                    class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     placeholder="Search items..." autocomplete="off" ref="itemNameInput" />
                   <div v-if="searchQuery || (itemForm.category && filteredItems.length > 0)"
                     class="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto dark:bg-slate-700 dark:border-gray-600">
@@ -2510,7 +2514,7 @@ const handleDoctorSearchInput = (event) => {
                 <InputLabel for="unitPrice" value="U/Price" class="text-xs mb-1" />
                 <div class="flex">
                   <input v-model="itemForm.unitPrice" type="number" step="1" id="unitPrice" readonly
-                    class="w-full px-2 py-1.5 border border-gray-300 rounded-l text-xs bg-yellow-100 focus:bg-yellow-200 focus:outline-none dark:bg-yellow-200 dark:text-gray-800" />
+                    class="w-full px-2 py-1.5 border border-gray-300 rounded-l text-gray-700 bg-yellow-100 focus:bg-yellow-200 focus:outline-none dark:bg-yellow-200 dark:text-gray-800" />
                   <span
                     class="px-2 py-1.5 bg-gray-200 border-t border-b border-r border-gray-300 rounded-r text-xs dark:bg-gray-600 dark:text-gray-200">৳</span>
                 </div>
@@ -2519,7 +2523,7 @@ const handleDoctorSearchInput = (event) => {
                 <InputLabel for="quantity" value="Qty" class="text-xs mb-1" />
                 <input v-model="itemForm.quantity" @keydown="handleKeyDown($event, 'quantity')" type="number" step="1"
                   min="1" id="quantity"
-                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                   ref="quantityInput" />
               </div>
               <div class="lg:col-span-2">
@@ -2615,7 +2619,7 @@ const handleDoctorSearchInput = (event) => {
                   <input v-model="patientSearchQuery" @input="showPatientDropdown = patientSearchQuery.trim() !== ''"
                     @keydown="handlePatientSearchKeyDown" @focus="handlePatientSearchFocus"
                     @blur="handlePatientSearchBlur" id="patientSearch" type="text"
-                    class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                    class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     placeholder="Search patient by name or phone" ref="patientSearchRef" />
 
                   <!-- Patient dropdown list -->
@@ -2667,7 +2671,7 @@ const handleDoctorSearchInput = (event) => {
                       @blur="handleDoctorSearchBlur" 
                       id="doctor_search" 
                       type="text"
-                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                       placeholder="Type doctor name and press Enter" 
                       autocomplete="off" 
                       ref="doctorSearchRef"
@@ -2728,7 +2732,7 @@ const handleDoctorSearchInput = (event) => {
                 <InputLabel for="patientMobile" value="Patient Mobile" class="text-xs" />
                 <input v-model="patientForm.patientMobile" type="text" id="patientMobile"
                   placeholder="Enter Patient Mobile"
-                  class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                  class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                   ref="patientMobileRef" @keydown="handlePatientMobileEnter" />
               </div>
 
@@ -2736,7 +2740,7 @@ const handleDoctorSearchInput = (event) => {
               <div class="grid grid-cols-3 gap-2 items-center">
                 <InputLabel for="gender" value="Gender" class="text-xs" />
                 <select v-model="patientForm.gender" id="gender"
-                  class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                  class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                   ref="genderSelectRef" @keydown="handleGenderEnter">
                   <option value="">Select</option>
                   <option value="Male">Male</option>
@@ -2749,7 +2753,7 @@ const handleDoctorSearchInput = (event) => {
               <div class="grid grid-cols-3 gap-2 items-center">
                 <InputLabel for="dob" value="Date of Birth" class="text-xs" />
                 <input v-model="patientForm.dob" type="date" id="dob"
-                  class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                  class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                   ref="dobInput" @keydown="handleDobEnter" />
               </div>
 
@@ -2759,19 +2763,19 @@ const handleDoctorSearchInput = (event) => {
                 <div class="col-span-2 flex items-center space-x-1">
                   <input ref="ageYearsInput" v-model="ageYears" @input="handleAgeInput(ageYearsInput, ageMonthsInput)"
                     @keydown="handleAgeYearsEnter" type="number" min="0" max="120"
-                    class="w-12 px-1 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                    class="w-12 px-1 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     placeholder="Y" @focus="$event.target.select()" />
                   <span class="text-xs text-gray-500">y</span>
 
                   <input ref="ageMonthsInput" v-model="ageMonths" @input="handleAgeInput(ageMonthsInput, ageDaysInput)"
                     @keydown="handleAgeMonthsEnter" type="number" min="0" max="11"
-                    class="w-12 px-1 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                    class="w-12 px-1 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     placeholder="M" @focus="$event.target.select()" />
                   <span class="text-xs text-gray-500">m</span>
 
                   <input ref="ageDaysInput" v-model="ageDays" @input="handleAgeInput(ageDaysInput, null)"
                     @keydown="handleAgeDaysEnter" type="number" min="0" max="30"
-                    class="w-12 px-1 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                    class="w-12 px-1 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     placeholder="D" @focus="$event.target.select()" />
                   <span class="text-xs text-gray-500">d</span>
                 </div>
@@ -2781,7 +2785,7 @@ const handleDoctorSearchInput = (event) => {
               <div class="grid grid-cols-3 gap-2 items-center">
                 <InputLabel for="payMode" value="Pay Mode" class="text-xs" />
                 <select v-model="patientForm.payMode" id="payMode"
-                  class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                  class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                   ref="payModeRef" @keydown="handlePayModeEnter">
                   <option value="Cash">Cash</option>
                   <option value="Card">Card</option>
@@ -2794,7 +2798,7 @@ const handleDoctorSearchInput = (event) => {
                 <InputLabel for="cardNumber" value="Card/Account No." class="text-xs" />
                 <input v-model="patientForm.cardNumber" type="text" id="cardNumber"
                   placeholder="Enter card/account number"
-                  class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                  class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                   ref="cardNumberRef" @keydown="handleCardNumberEnter" />
               </div>
             </div>
@@ -2824,14 +2828,14 @@ const handleDoctorSearchInput = (event) => {
                 <div class="grid grid-cols-2 gap-1 items-center">
                   <InputLabel for="discount" value="Discount" class="text-xs" />
                   <select v-model="summary.discountType"
-                    class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200">
+                    class="px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200">
                     <option value="percentage">Percentage (%)</option>
                     <option value="flat">Flat Amount (৳)</option>
                   </select>
                 </div>
                 <div class="flex">
                   <input v-model="summary.discount" type="number" step="1" min="0" :max="summary.discountType === 'percentage' ? maxBillingDiscountPercent : null" id="discount"
-                    class="w-full px-2 py-1.5 border border-gray-300 rounded-l text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                    class="w-full px-2 py-1.5 border border-gray-300 rounded-l text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     ref="discountRef" @keydown="handleDiscountEnter" />
                   <span
                     class="px-2 py-1.5 bg-gray-200 border-t border-b border-r border-gray-300 rounded-r text-xs dark:bg-gray-600 dark:text-gray-200">৳</span>
@@ -2842,7 +2846,7 @@ const handleDoctorSearchInput = (event) => {
                 <div class="flex">
                   <input v-model="summary.extraFlatDiscount" @input="updateSummary" type="number" step="1" min="0"
                     id="extraFlatDiscount"
-                    class="w-full px-2 py-1.5 border border-gray-300 rounded-l text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                    class="w-full px-2 py-1.5 border border-gray-300 rounded-l text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     placeholder="Additional flat discount" ref="extraDiscountRef" @keydown="handleExtraDiscountEnter" />
                   <span
                     class="px-2 py-1.5 bg-gray-200 border-t border-b border-r border-gray-300 rounded-r text-xs dark:bg-gray-600 dark:text-gray-200">৳</span>
@@ -2853,9 +2857,9 @@ const handleDoctorSearchInput = (event) => {
                   class="text-xs font-semibold text-green-700 dark:text-green-400" />
                 <div class="flex">
                   <input v-model="summary.payableAmount" type="number" step="0.01" id="payableAmount" readonly
-                    class="w-full px-2 py-1.5 border border-green-500 rounded-l text-xs bg-green-50 font-semibold dark:bg-green-900 dark:text-green-100" />
+                    class="w-full px-2 py-1.5 border border-green-500 rounded-l text-green-800 bg-green-50 font-semibold dark:bg-green-900 dark:text-green-100" />
                   <span
-                    class="px-2 py-1.5 bg-green-200 border-t border-b border-r border-green-500 rounded-r text-xs font-semibold dark:bg-green-700 dark:text-green-100">৳</span>
+                    class="px-2 py-1.5 bg-green-200 border-t border-b border-r border-green-500 rounded-r text-green-800 font-semibold dark:bg-green-700 dark:text-green-100">৳</span>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2 items-center">
@@ -2866,7 +2870,7 @@ const handleDoctorSearchInput = (event) => {
                     class="w-full px-2 py-1.5 border border-blue-500 rounded-l text-xs focus:border-blue-700 focus:outline-none bg-blue-50 dark:bg-blue-900 dark:border-blue-400 dark:text-blue-100"
                     placeholder="Amount given by customer" ref="receivingAmtRef" @keydown="handleReceivingAmtEnter" />
                   <span
-                    class="px-2 py-1.5 bg-blue-200 border-t border-b border-r border-blue-500 rounded-r text-xs font-semibold dark:bg-blue-700 dark:text-blue-100">৳</span>
+                    class="px-2 py-1.5 bg-blue-200 border-t border-b border-r border-blue-500 rounded-r text-blue-800 font-semibold dark:bg-blue-700 dark:text-blue-100">৳</span>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2 items-center" v-if="summary.returnAmt > 0">
@@ -2876,7 +2880,7 @@ const handleDoctorSearchInput = (event) => {
                   <input v-model="summary.returnAmt" type="number" step="0.01" id="returnAmt" readonly
                     class="w-full px-2 py-1.5 border border-amber-500 rounded-l text-xs bg-amber-50 font-semibold dark:bg-amber-900 dark:text-amber-100" />
                   <span
-                    class="px-2 py-1.5 bg-amber-200 border-t border-b border-r border-amber-500 rounded-r text-xs font-semibold dark:bg-amber-700 dark:text-amber-100">৳</span>
+                    class="px-2 py-1.5 bg-amber-200 border-t border-b border-r border-amber-500 rounded-r text-amber-700 font-semibold dark:bg-amber-700 dark:text-amber-100">৳</span>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2 items-center">
@@ -2893,9 +2897,9 @@ const handleDoctorSearchInput = (event) => {
                   class="text-xs font-semibold text-purple-700 dark:text-purple-400" />
                 <div class="flex">
                   <input v-model="summary.changeAmt" type="number" step="0.01" id="changeAmt" readonly
-                    class="w-full px-2 py-1.5 border border-purple-500 rounded-l text-xs bg-purple-50 font-semibold dark:bg-purple-900 dark:text-purple-100" />
+                    class="w-full px-2 py-1.5 border border-purple-500 rounded-l text-purple-800 bg-purple-50 font-semibold dark:bg-purple-900 dark:text-purple-100" />
                   <span
-                    class="px-2 py-1.5 bg-purple-200 border-t border-b border-r border-purple-500 rounded-r text-xs font-semibold dark:bg-purple-700 dark:text-purple-100">৳</span>
+                    class="px-2 py-1.5 bg-purple-200 border-t border-b border-r border-purple-500 rounded-r text-purple-800 font-semibold dark:bg-purple-700 dark:text-purple-100">৳</span>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2 items-center" v-if="summary.dueAmount > 0">
@@ -2903,15 +2907,15 @@ const handleDoctorSearchInput = (event) => {
                   class="text-xs font-semibold text-red-700 dark:text-red-400" />
                 <div class="flex">
                   <input v-model="summary.dueAmount" type="number" step="0.01" id="dueAmount" readonly
-                    class="w-full px-2 py-1.5 border border-red-500 rounded-l text-xs bg-red-50 font-semibold dark:bg-red-900 dark:text-red-100" />
+                    class="w-full px-2 py-1.5 border border-red-500 rounded-l text-red-800 bg-red-50 font-semibold dark:bg-red-900 dark:text-red-100" />
                   <span
-                    class="px-2 py-1.5 bg-red-200 border-t border-b border-r border-red-500 rounded-r text-xs font-semibold dark:bg-red-700 dark:text-red-100">৳</span>
+                    class="px-2 py-1.5 bg-red-200 border-t border-b border-r border-red-500 rounded-r text-red-800 font-semibold dark:bg-red-700 dark:text-red-100">৳</span>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2 items-center">
                 <InputLabel for="deliveryDate" value="Delivery Date" class="text-xs" />
                 <input v-model="summary.deliveryDate" type="datetime-local" id="deliveryDate"
-                  class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                  class="px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                   ref="deliveryDateRef" @keydown="handleDeliveryDateEnter" @focus="ensureDeliveryDateTime"
                   @input="handleDeliveryDateInput" />
                 <!-- delivery date display moved to invoice page -->
@@ -2919,7 +2923,7 @@ const handleDoctorSearchInput = (event) => {
               <div>
                 <InputLabel for="remarks" value="Remarks" class="text-xs mb-1" />
                 <textarea v-model="summary.remarks" id="remarks" rows="2"
-                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                   placeholder="Additional notes or remarks" ref="remarksRef" @keydown="handleRemarksEnter"></textarea>
               </div>
             </div>
@@ -2936,7 +2940,7 @@ const handleDoctorSearchInput = (event) => {
                 <div class="flex justify-between items-center">
                   <InputLabel for="referrer_id" value="Referrer Name" class="text-xs" />
                   <select v-model="commission.referrer_id" id="referrer_id"
-                    class="w-32 px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                    class="w-32 px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     ref="referrerSelectRef" @keydown="handleReferrerEnter">
                     <option value="">Select Referrer</option>
                     <option v-for="data in referrers" :key="data.id" :value="data.id">
@@ -2975,7 +2979,7 @@ const handleDoctorSearchInput = (event) => {
                 <div class="flex justify-between items-center">
                   <InputLabel for="physystAmt" value="Physyst Amt:" class="text-xs" />
                   <input v-model="commission.physystAmt" type="number" step="1" id="physystAmt"
-                    class="w-24 px-2 py-1 border border-gray-300 rounded text-xs bg-green-100 text-right font-semibold dark:bg-green-200 dark:text-gray-800"
+                    class="w-24 px-2 py-1 border border-gray-300 rounded text-green-800 bg-green-100 text-right font-semibold dark:bg-green-200 dark:text-gray-800"
                     readonly />
                 </div>
                 <div class="space-y-1">
@@ -3092,6 +3096,27 @@ td:last-child {
 
 .bg-green-200 {
   background-color: #bbf7d0 !important;
+}
+
+/* Make inputs/selects/textarea inside billing page match green Add button (h-8) */
+.billing-uniform input[type="text"],
+.billing-uniform input[type="number"],
+.billing-uniform input[type="date"],
+.billing-uniform input[type="time"],
+.billing-uniform input[type="datetime-local"],
+.billing-uniform select {
+  padding: 0 0.5rem;
+  height: 2rem; /* h-8 (32px) to match Add button */
+  line-height: 2rem;
+  font-size: 0.875rem; /* text-sm */
+  box-sizing: border-box;
+}
+
+.billing-uniform textarea {
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  box-sizing: border-box;
 }
 
 .bg-red-100 {

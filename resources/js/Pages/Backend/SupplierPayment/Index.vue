@@ -216,7 +216,7 @@ const purchaseNumberFromNotes = (notes) => {
               </td>
               <td class="px-3 py-2 border">
                 <div class="flex flex-wrap gap-2">
-                  <Link :href="route('backend.supplierpayment.edit', payment.id)" class="px-2 py-1 text-xs text-black bg-yellow-400 rounded hover:bg-yellow-500">
+                  <Link :href="route('backend.supplierpayment.edit', payment.id)" class="px-2 py-1 text-white text-black bg-yellow-400 rounded hover:bg-yellow-500">
                     Edit
                   </Link>
                   <button
@@ -244,7 +244,7 @@ const purchaseNumberFromNotes = (notes) => {
     </div>
 
     <div v-if="showPartialModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div class="w-full max-w-md rounded-lg bg-white shadow-xl">
+      <div class="w-full max-w-md rounded-lg bg-white shadow-xl text-gray-800">
         <div class="flex items-center justify-between border-b px-5 py-3">
           <h3 class="text-base font-semibold text-gray-800">Add Partial Payment</h3>
           <button

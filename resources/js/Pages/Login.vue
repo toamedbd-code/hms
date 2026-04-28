@@ -46,11 +46,11 @@ const renew = (period = null) => {
 <template>
     <Head title="Log in" />
 
-    <div class="relative min-h-screen overflow-hidden bg-[#f6f3ee]">
+    <div class="relative min-h-screen overflow-hidden bg-[#f6f3ee] text-white">
         <div class="pointer-events-none absolute inset-0">
-            <div class="absolute -top-20 -left-24 h-80 w-80 rounded-full bg-[#d96f32]/20 blur-3xl"></div>
-            <div class="absolute top-1/3 -right-16 h-96 w-96 rounded-full bg-[#1f5f5b]/15 blur-3xl"></div>
-            <div class="absolute -bottom-20 left-1/3 h-72 w-72 rounded-full bg-[#e2b95f]/20 blur-3xl"></div>
+            <div class="absolute -top-20 -left-24 h-80 w-80 rounded-full bg-[#d96f32]/20 blur-3xl text-white"></div>
+            <div class="absolute top-1/3 -right-16 h-96 w-96 rounded-full bg-[#1f5f5b]/15 blur-3xl text-white"></div>
+            <div class="absolute -bottom-20 left-1/3 h-72 w-72 rounded-full bg-[#e2b95f]/20 blur-3xl text-white"></div>
         </div>
 
         <div class="relative z-10 grid min-h-screen grid-cols-1 lg:grid-cols-2">
@@ -87,17 +87,17 @@ const renew = (period = null) => {
                     </div>
 
                     <div class="rounded-3xl border border-[#d5d0c7] bg-white/90 p-6 sm:p-8 shadow-[0_20px_70px_-35px_rgba(20,33,31,0.45)] backdrop-blur">
-                        <div v-if="errorMessage" class="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+                        <div v-if="errorMessage" class="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-white font-medium text-red-700">
                             {{ errorMessage }}
                         </div>
-                        <div v-if="successMessage" class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+                        <div v-if="successMessage" class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-white font-medium text-emerald-700">
                             {{ successMessage }}
                         </div>
                         <div v-if="warningMessage" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
                             {{ warningMessage }}
                         </div>
 
-                        <div v-if="(showSubscriptionRenewal || (subscriptionEnforced && !subscriptionActive)) && bkashEnabled" class="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700">
+                        <div v-if="(showSubscriptionRenewal || (subscriptionEnforced && !subscriptionActive)) && bkashEnabled" class="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-white text-rose-700">
                             <div class="flex items-center justify-between">
                                 <div>
                                     <p class="font-medium">Subscription required</p>
@@ -125,7 +125,7 @@ const renew = (period = null) => {
                                     autofocus
                                     autocomplete="username"
                                     placeholder="admin@hospital.com"
-                                    class="block w-full rounded-xl border border-[#d2cbc0] bg-[#fcfbf9] px-4 py-2.5 text-sm text-[#1d2b28] outline-none transition focus:border-[#1f5f5b] focus:ring-4 focus:ring-[#1f5f5b]/15"
+                                    class="block w-full rounded-xl border border-[#d2cbc0] bg-[#fcfbf9] px-4 py-2.5 text-white text-[#1d2b28] outline-none transition focus:border-[#1f5f5b] focus:ring-4 focus:ring-[#1f5f5b]/15"
                                 >
                                 <InputError class="mt-2" :message="form.errors.email" />
                             </div>
@@ -139,7 +139,7 @@ const renew = (period = null) => {
                                     required
                                     autocomplete="current-password"
                                     placeholder="Your password"
-                                    class="block w-full rounded-xl border border-[#d2cbc0] bg-[#fcfbf9] px-4 py-2.5 text-sm text-[#1d2b28] outline-none transition focus:border-[#1f5f5b] focus:ring-4 focus:ring-[#1f5f5b]/15"
+                                    class="block w-full rounded-xl border border-[#d2cbc0] bg-[#fcfbf9] px-4 py-2.5 text-white text-[#1d2b28] outline-none transition focus:border-[#1f5f5b] focus:ring-4 focus:ring-[#1f5f5b]/15"
                                 >
                                 <InputError class="mt-2" :message="form.errors.password" />
                             </div>

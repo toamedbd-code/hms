@@ -217,10 +217,10 @@ const exportExcel = () => {
               <td class="px-3 py-2 border text-right">{{ formatMoney(item.medicine_unit_selling_price) }}</td>
               <td class="px-3 py-2 border text-center">{{ formatDateOnly(item.expiry_date) }}</td>
               <td class="px-3 py-2 border text-center">
-                <span class="px-2 py-1 text-xs rounded" :class="item.status === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'">{{ item.status }}</span>
+                <span class="px-2 py-1 text-xs rounded" :class="item.status === 'Active' ? 'bg-emerald-100 text-white' : 'bg-rose-100 text-rose-700'">{{ item.status }}</span>
               </td>
             </tr>
-            <tr v-if="rows.length > 0" class="bg-slate-50 font-semibold">
+            <tr v-if="rows.length > 0" class="bg-slate-50 font-semibold text-white">
               <td class="px-3 py-2 border" colspan="3">Grand Total</td>
               <td class="px-3 py-2 border text-center">{{ Number(props.summary?.total_qty ?? 0).toFixed(2) }}</td>
               <td class="px-3 py-2 border text-right">{{ formatMoney(props.summary?.total_purchase_value) }}</td>

@@ -25,10 +25,10 @@ class ChargeUnitTypeController extends Controller
 
         $this->middleware('auth:admin');
         $this->middleware('permission:charge-unit-type-list');
-        $this->middleware('permission:charge-unit-type-create', ['only' => ['create', 'store']]);
-        $this->middleware('permission:charge-unit-type-edit', ['only' => ['edit', 'update']]);
-        $this->middleware('permission:charge-unit-type-delete', ['only' => ['destroy']]);
-        $this->middleware('permission:charge-unit-type-status', ['only' => ['changeStatus']]);
+        $this->middleware('permission:charge-unit-type-list-create', ['only' => ['create', 'store']]);
+        $this->middleware('permission:charge-unit-type-list-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:charge-unit-type-list-delete', ['only' => ['destroy']]);
+        $this->middleware('permission:charge-unit-type-list-status', ['only' => ['changeStatus']]);
     }
 
 

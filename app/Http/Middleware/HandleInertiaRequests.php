@@ -201,6 +201,19 @@ class HandleInertiaRequests extends Middleware
                 })->unique()->values();
         }
 
+        // Per-user strict sidebar filtering flag (controlled by SIDEBAR_STRICT_EMAILS)
+        $strictSidebarFiltering = false;
+        try {
+            if ($adminUser) {
+                $strictEmailsEnv = env('SIDEBAR_STRICT_EMAILS', '');
+                $strictEmails = array_filter(array_map('trim', explode(',', (string) $strictEmailsEnv)));
+                $adminEmailLower = strtolower(trim((string) ($adminUser->email ?? '')));
+                $strictSidebarFiltering = $adminEmailLower && in_array($adminEmailLower, array_map('strtolower', $strictEmails), true);
+            }
+        } catch (\Throwable $_) {
+            $strictSidebarFiltering = false;
+        }
+
 
         return array_merge(parent::share($request), [
             'ziggy' => function () use ($request) {
@@ -218,6 +231,7 @@ class HandleInertiaRequests extends Middleware
                 'admin' => fn () => auth('admin')->user(),
                 'permissions' => $adminPermissions,
                 'sideMenus' => $sideMenus,
+                'strictSidebarFiltering' => $strictSidebarFiltering,
             ],
 
             'companyInfo' => $companyInfo,

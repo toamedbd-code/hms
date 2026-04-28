@@ -94,14 +94,14 @@ const goToLeaveTypeList = () => {
           <div class="col-span-1 md:col-span-2">
             <InputLabel for="type_name" value="Type name" />
             <input id="type_name"
-              class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+              class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
               v-model="form.type_name" type="text" placeholder="Type name" />
             <InputError class="mt-2" :message="form.errors.type_name" />
           </div>
           <div class="col-span-1 md:col-span-2">
             <InputLabel for="days" value="Days" />
             <input id="days"
-              class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+              class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
               v-model="form.days" type="text" placeholder="Days" />
             <InputError class="mt-2" :message="form.errors.days" />
           </div>

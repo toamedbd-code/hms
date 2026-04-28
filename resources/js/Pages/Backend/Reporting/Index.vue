@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
+import ActionButton from '@/Components/ActionButton.vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { warningMessage } from '@/responseMessage.js';
@@ -51,12 +52,7 @@ const submitSearch = () => {
       <div class="flex items-center justify-between p-4 bg-gray-100 rounded">
         <h1 class="text-lg font-semibold text-gray-800">{{ pageTitle }}</h1>
         <div class="flex items-center gap-3">
-          <Link
-            :href="route('backend.dashboard')"
-            class="px-3 py-1 text-xs text-white bg-slate-600 rounded hover:bg-slate-700"
-          >
-            Back
-          </Link>
+          <ActionButton :href="route('backend.dashboard')" class="bg-white text-gray-700 border border-slate-200 hover:bg-gray-50">Back</ActionButton>
           <form @submit.prevent="submitSearch" class="flex items-center gap-2">
             <input
               v-model="searchBillNumber"

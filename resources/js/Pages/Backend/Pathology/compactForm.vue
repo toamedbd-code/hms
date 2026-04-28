@@ -292,7 +292,7 @@ watch(() => form.net_amount, (newVal) => {
                 <div class="flex items-center space-x-3">
                     <div class="relative min-w-[260px]">
                         <select id="patient_id" v-model="form.patient_id"
-                            class="block w-full p-1 text-xs rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            class="block w-full p-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                             <option value="">Select Patient</option>
                             <option v-for="data in patients" :key="data.id" :value="data.id">{{ data.name }}</option>
                         </select>
@@ -359,12 +359,12 @@ watch(() => form.net_amount, (newVal) => {
                         <div class="grid grid-cols-5 gap-3">
                             <div>
                                 <div class="mb-1">
-                                    <span class="text-xs font-medium text-black">Test Name</span>
+                                    <span class="text-xs font-medium text-black">Item Name</span>
                                     <span class="text-red-500 ml-0.5 text-xs">*</span>
                                 </div>
                                 <select v-model="test.testId" @change="onTestChange(index, test.testId)"
                                     class="block w-full px-2 py-1 text-xs border border-gray-300 rounded focus:border-blue-500 focus:outline-none bg-white">
-                                    <option value="">Select Test</option>
+                                    <option value="">Select Item</option>
                                     <option v-for="pathTest in pathologyTests" :key="pathTest.id" :value="pathTest.id">
                                         {{ pathTest.test_name }}
                                     </option>
@@ -422,7 +422,7 @@ watch(() => form.net_amount, (newVal) => {
                 <div class="mb-3">
                     <button type="button" @click="addTest"
                         class="inline-flex items-center px-3 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700">
-                        <span class="mr-0.5">+</span> Add Test
+                        <span class="mr-0.5">+</span> Add Item
                     </button>
                 </div>
 

@@ -6,8 +6,35 @@
     <title>Billing Invoice</title>
     <style>
         <?php
-            $__inv_header_h = (int) ($header_height ?? 115);
-            $__inv_footer_h = (int) ($footer_height ?? 70);
+            // Determine whether to show header/footer; prefer controller-provided variable
+            $__inv_show = isset($showHeaderFooter) ? (bool) $showHeaderFooter : (isset($show_header_footer) ? (bool) $show_header_footer : null);
+            if ($__inv_show === null) {
+                $__ws = function_exists('get_cached_web_setting') ? get_cached_web_setting() : null;
+                $__attendance = is_array($__ws?->attendance_device_options) ? $__ws->attendance_device_options : (is_string($__ws?->attendance_device_options) && trim($__ws?->attendance_device_options) !== '' ? json_decode($__ws?->attendance_device_options, true) : []);
+                $__reporting = is_array($__attendance) ? data_get($__attendance, 'reporting', []) : [];
+                $__settingShowHeader = array_key_exists('show_header', $__reporting) ? (bool) $__reporting['show_header'] : null;
+                $__settingShowFooter = array_key_exists('show_footer', $__reporting) ? (bool) $__reporting['show_footer'] : null;
+                if ($__settingShowHeader !== null || $__settingShowFooter !== null) {
+                    $__inv_show = ($__settingShowHeader ?? true) && ($__settingShowFooter ?? true);
+                } else {
+                    $__inv_show = array_key_exists('show_header_footer', $__reporting) ? (bool) $__reporting['show_header_footer'] : true;
+                }
+                $__layout = data_get($__reporting, 'layout', []);
+            } else {
+                $__layout = [];
+            }
+
+            // Prefer reporting layout heights if controller passed them, otherwise fall back to template vars
+            $__inv_reportHeaderH = isset($reportHeaderHeight) ? (int) $reportHeaderHeight : null;
+            $__inv_reportFooterH = isset($reportFooterHeight) ? (int) $reportFooterHeight : null;
+
+            $__inv_header_h = $__inv_reportHeaderH ?? (int) ($header_height ?? ($__layout['header_height'] ?? 115));
+            $__inv_footer_h = $__inv_reportFooterH ?? (int) ($footer_height ?? ($__layout['footer_height'] ?? 70));
+
+            if (! $__inv_show) {
+                $__inv_header_h = 0;
+                $__inv_footer_h = 0;
+            }
         ?>
         * {
             margin: 0;
@@ -162,6 +189,33 @@
             display: inline;
             word-wrap: break-word;
             overflow-wrap: break-word;
+        }
+
+        /* IPD-style info table (match IPD invoice alignment) */
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+
+        .info-table td {
+            padding: 2px 0;
+            vertical-align: top;
+        }
+
+        .info-table .label {
+            font-weight: bold;
+            width: 18%;
+            white-space: nowrap;
+        }
+
+        .info-table .colon {
+            width: 2%;
+            text-align: center;
+        }
+
+        .info-table .value {
+            width: 30%;
         }
 
         /* Items table */
@@ -528,11 +582,13 @@
             'headerHeight' => $__inv_header_h,
             'footerHeight' => $__inv_footer_h,
             'printed_at' => $invoiceDateTime ?? ($printed_at ?? null),
+            'showHeaderFooter' => $__inv_show,
         ])) echo $__env->make('prints.partials._header', [
             'header_image' => $header_image ?? null,
             'headerHeight' => $__inv_header_h,
             'footerHeight' => $__inv_footer_h,
             'printed_at' => $invoiceDateTime ?? ($printed_at ?? null),
+            'showHeaderFooter' => $__inv_show,
         ], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
 
         <div class="content-section">
@@ -552,38 +608,53 @@
                 </tr>
             </table>
 
-            <!-- Patient Details Section -->
-            <table class="patient-details-table" style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
+            <!-- Patient / IPD Details Section (aligned like IPD invoice) -->
+            <?php if(!empty($ipd_id)): ?>
+            <table class="info-table">
                 <tr>
-                    <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Bill No</td>
-                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
-                    <td style="width: 28%; vertical-align: top; padding: 2px 0;"><?php echo e($bill_number); ?></td>
-                    <td style="width: 20%; vertical-align: top; padding: 2px 0; font-weight: bold;">Date & Time</td>
-                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
-                    <td style="width: 28%; vertical-align: top; padding: 2px 0;"><?php echo e($invoiceDateTime); ?></td>
+                    <td class="label">IPD ID</td><td class="colon">:</td><td class="value"><?php echo e($ipd_id); ?></td>
+                    <td class="label">Printed At</td><td class="colon">:</td><td class="value"><?php echo e($printed_at ?? $invoiceDateTime ?? ''); ?></td>
                 </tr>
                 <tr>
-                    <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Name</td>
-                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
-                    <td style="width: 28%; vertical-align: top; padding: 2px 0;"><?php echo e($patient_name); ?></td>
-                    <td style="width: 20%; vertical-align: top; padding: 2px 0; font-weight: bold;">Age</td>
-                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
-                    <td style="width: 28%; vertical-align: top; padding: 2px 0;"><?php echo e($age); ?></td>
+                    <td class="label">Patient Name</td><td class="colon">:</td><td class="value"><?php echo e($patient_name); ?></td>
+                    <td class="label">Age</td><td class="colon">:</td><td class="value"><?php echo e($age); ?></td>
                 </tr>
                 <tr>
-                    <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Contact No</td>
-                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
-                    <td style="width: 28%; vertical-align: top; padding: 2px 0;"><?php echo e($contact_no); ?></td>
-                    <td style="width: 20%; vertical-align: top; padding: 2px 0; font-weight: bold;">Gender</td>
-                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
-                    <td style="width: 28%; vertical-align: top; padding: 2px 0;"><?php echo e($gender); ?></td>
+                    <td class="label">Gender</td><td class="colon">:</td><td class="value"><?php echo e($gender); ?></td>
+                    <td class="label">Phone</td><td class="colon">:</td><td class="value"><?php echo e($contact_no); ?></td>
                 </tr>
                 <tr>
-                    <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Refd. By</td>
-                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
-                    <td colspan="4" style="width: 78%; vertical-align: top; padding: 2px 0;"><?php echo e($refd_by); ?></td>
+                    <td class="label">Credit Limit</td><td class="colon">:</td><td class="value">Tk <?php echo e(number_format((float) ($credit_limit ?? 0), 2)); ?></td>
+                    <td class="label">Consultant</td><td class="colon">:</td><td class="value"><?php echo e($consultant ?? $refd_by ?? ''); ?></td>
+                </tr>
+                <tr>
+                    <td class="label">Bed</td><td class="colon">:</td><td class="value"><?php echo e($bed ?? ''); ?></td>
+                    <td class="label">Admission</td><td class="colon">:</td><td class="value"><?php echo e($admission ?? ''); ?></td>
+                </tr>
+                <tr>
+                    <td class="label">Discharge</td><td class="colon">:</td><td class="value"><?php echo e($discharge ?? ''); ?></td>
+                    <td class="label">Case</td><td class="colon">:</td><td class="value"><?php echo e($case ?? ''); ?></td>
                 </tr>
             </table>
+            <?php else: ?>
+            <table class="info-table">
+                <tr>
+                    <td class="label">Bill No</td><td class="colon">:</td><td class="value"><?php echo e($bill_number); ?></td>
+                    <td class="label">Date & Time</td><td class="colon">:</td><td class="value"><?php echo e($invoiceDateTime); ?></td>
+                </tr>
+                <tr>
+                    <td class="label">Name</td><td class="colon">:</td><td class="value"><?php echo e($patient_name); ?></td>
+                    <td class="label">Age</td><td class="colon">:</td><td class="value"><?php echo e($age); ?></td>
+                </tr>
+                <tr>
+                    <td class="label">Contact No</td><td class="colon">:</td><td class="value"><?php echo e($contact_no); ?></td>
+                    <td class="label">Gender</td><td class="colon">:</td><td class="value"><?php echo e($gender); ?></td>
+                </tr>
+                <tr>
+                    <td class="label">Refd. By</td><td class="colon">:</td><td class="value" colspan="3"><?php echo e($refd_by); ?></td>
+                </tr>
+            </table>
+            <?php endif; ?>
 
             <!-- NEW: Full line for Refd. By -->
             <!-- <div class="full-line-detail-row">
@@ -660,10 +731,19 @@ $portalLoginUrl = $portalToken !== ''
 $portalQrCode = $portalLoginUrl !== ''
     ? 'data:image/png;base64,' . (new \Milon\Barcode\DNS2D())->getBarcodePNG($portalLoginUrl, 'QRCODE', 5, 5)
     : '';
+// Compute Medicine and Laboratory subtotals if bill items provide category
+$billItemsCollection = collect($bill_items ?? []);
+$medicineTotal = $billItemsCollection->filter(function($it){
+    return strtolower(trim($it->category ?? '')) === 'medicine';
+})->sum('total_amount');
+$labTotal = $billItemsCollection->filter(function($it){
+    $c = strtolower(trim($it->category ?? ''));
+    return in_array($c, ['pathology','radiology']);
+})->sum('total_amount');
 ?>
 
 
-<?php if($delivery_date): ?>
+<?php if(!isset($ipd_id) && $delivery_date): ?>
 <div class="delivery-date">
     Delivery Date & Time:
     <?php echo e(Carbon::parse($delivery_date)->format('d-M-Y, h:i A')); ?>
@@ -719,6 +799,20 @@ $portalQrCode = $portalLoginUrl !== ''
 <strong><?php echo e(number_format($total_amount, 2)); ?></strong>
 </td>
 </tr>
+
+<?php if((float) ($medicineTotal ?? 0) > 0): ?>
+<tr>
+<td class="label-col">Medicine Bill</td>
+<td class="amount-col"><?php echo e(number_format($medicineTotal, 2)); ?></td>
+</tr>
+<?php endif; ?>
+
+<?php if((isset($ipd_id) && (float) ($labTotal ?? 0) > 0)): ?>
+<tr>
+<td class="label-col">Laboratory Bill</td>
+<td class="amount-col"><?php echo e(number_format($labTotal, 2)); ?></td>
+</tr>
+<?php endif; ?>
 
 <tr>
 <td class="label-col">Vat Tk.</td>
@@ -832,6 +926,7 @@ Discount (<?php echo e(number_format($discount, 2)); ?>%)
 </div>
 
         <!-- Footer Section -->
+        <?php if($__inv_show): ?>
         <div class="footer-section">
             <?php
                 $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
@@ -872,6 +967,7 @@ Discount (<?php echo e(number_format($discount, 2)); ?>%)
                 <?php endif; ?>
             <?php endif; ?>
         </div>
+        <?php endif; ?>
     </div>
 </body>
 </html><?php /**PATH C:\laragon\www\hms\resources\views/frontend/invoice/pdf.blade.php ENDPATH**/ ?>

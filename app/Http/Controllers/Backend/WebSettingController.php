@@ -134,12 +134,38 @@ class WebSettingController extends Controller
 
     public function store(WebSettingRequest $request)
     {
+
         DB::beginTransaction();
         try {
             $data = $request->validated();
+            $section = $request->input('activeSection') ?? $request->input('section') ?? null;
+            // General ও CMS ফিল্ড লিস্ট
+            $generalFields = [
+                'company_name','company_short_name','hospital_code','address','phone','email','logo','icon','language','date_format','time_zone','currency','currency_symbol','credit_limit','max_billing_discount_percent','low_stock_threshold','time_format','mobile_app_api_url','mobile_app_primary_color_code','mobile_app_secondary_color_code','mobile_app_logo','doctor_restriction_mode','superadmin_visibility','patient_panel','opd_invoice_header_footer','ipd_invoice_header_footer','opd_prescription_header_footer','ipd_prescription_header_footer','scan_type','current_theme','sms_enabled','sms_api_url','sms_api_key','sms_sender_id','sms_route','sms_is_unicode','sms_additional_params','personal_bkash_number','personal_nagad_number','ipd_no_prefix','opd_no_prefix','ipd_prescription_prefix','opd_prescription_prefix','appointment_prefix','pharmacy_bill_prefix','billing_bill_prefix','operation_reference_no_prefix','blood_bank_bill_prefix','ambulance_call_bill_prefix','radiology_bill_prefix','pathology_bill_prefix','opd_checkup_id_prefix','pharmacy_purchase_no_prefix','transaction_id_prefix','birth_record_reference_no_prefix','death_record_reference_no_prefix','report_title','attendance_device_enabled','attendance_device_type','attendance_device_identifier','attendance_device_ip','attendance_device_port','attendance_device_secret','attendance_device_options',
+            ];
+            $cmsFields = [
+                'website_hero_title','website_hero_subtitle','website_about_text','website_emergency_phone','website_enabled','website_cta_text','website_featured_doctors_json','website_featured_doctor_images','website_services_json','website_facilities_json','website_testimonials_en_json','website_testimonials_bn_json','website_template',
+            ];
 
+            // ফিল্টারিং ও merge
+            if ($section === 'cms' || $section === 'general') {
+                $settings = $this->websettingService->first();
+                $old = $settings ? $settings->toArray() : [];
+                if ($section === 'cms') {
+                    $data = array_intersect_key($data, array_flip($cmsFields));
+                    // পুরাতন ডাটা merge—শুধু CMS ফিল্ড replace
+                    $data = array_merge($old, $data);
+                } elseif ($section === 'general') {
+                    $data = array_intersect_key($data, array_flip($generalFields));
+                    // পুরাতন ডাটা merge—শুধু General ফিল্ড replace
+                    $data = array_merge($old, $data);
+                }
+            }
+
+            // নিচের কোড অপরিবর্তিত থাকবে (ফাইল আপলোড, doctor image, template ইত্যাদি)
             // If a website_template was provided, persist it inside attendance_device_options
             // to avoid requiring a DB migration for a dedicated column.
+            $settings = $this->websettingService->first();
             if (isset($data['website_template'])) {
                 $existingOptions = $settings?->attendance_device_options ?? [];
                 if (is_string($existingOptions)) {
@@ -185,8 +211,6 @@ class WebSettingController extends Controller
             }
 
             unset($data['website_featured_doctor_images']);
-
-            $settings = $this->websettingService->first();
 
             if ($request->hasFile('logo')) {
                 $data['logo'] = $this->imageUpload($request->file('logo'), 'webSetting');
@@ -364,12 +388,36 @@ class WebSettingController extends Controller
                 // non-fatal: ignore sync errors
             }
 
-            // Make sure subsequent requests see fresh settings immediately.
-            get_cached_web_setting(true);
+            // Refresh cache will be executed after transaction commit to
+            // ensure DB changes are visible to all connections.
+            // (moved to after DB::commit below)
 
             $this->storeAdminWorkLog($dataInfo ? $dataInfo->id : WebSetting::latest()->first()->id, 'web_settings', $message);
 
             DB::commit();
+
+            // After commit, refresh cached web setting and clear any
+            // session fallback that might cause stale company info to appear.
+            try {
+                get_cached_web_setting(true);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to refresh websetting cache after commit: ' . $e->getMessage());
+            }
+
+            try {
+                session()->forget('companyInfo');
+            } catch (\Throwable $e) {
+                Log::warning('Failed to forget companyInfo session after websetting update: ' . $e->getMessage());
+            }
+
+            try {
+                Log::info('WebSetting updated: cache refreshed and companyInfo cleared', [
+                    'company_name' => $settingsAfter->company_name ?? null,
+                    'id' => $settingsAfter->id ?? null,
+                ]);
+            } catch (\Throwable $_) {
+                // ignore logging failures
+            }
 
             // Persist optional login texts into .env so admin can edit them from WebSetting form
             try {

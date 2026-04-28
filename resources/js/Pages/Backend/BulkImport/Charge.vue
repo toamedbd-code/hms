@@ -67,13 +67,13 @@ const handleFileChange = (event) => {
             <div class="w-full p-4 bg-white rounded-md dark:bg-slate-800 dark:text-gray-200 shadow-gray-800/50">
                 <!-- Success Message -->
                 <div v-if="success"
-                    class="p-4 mb-4 text-green-800 bg-green-100 rounded-md dark:bg-green-900 dark:text-green-200">
+                    class="p-4 mb-4 text-white bg-green-100 rounded-md dark:bg-green-900 dark:text-green-200">
                     {{ success }}
                 </div>
 
                 <!-- Import Errors -->
                 <div v-if="importErrors && importErrors.length"
-                    class="p-4 mb-4 text-yellow-800 bg-yellow-100 rounded-md dark:bg-yellow-900 dark:text-yellow-200">
+                    class="p-4 mb-4 text-white bg-yellow-100 rounded-md dark:bg-yellow-900 dark:text-yellow-200">
                     <h5 class="font-bold">Import completed with errors:</h5>
                     <ul class="mt-2 ml-4 list-disc">
                         <li v-for="error in importErrors" :key="error">{{ error }}</li>
@@ -82,7 +82,7 @@ const handleFileChange = (event) => {
 
                 <!-- Validation Errors -->
                 <div v-if="errors && Object.keys(errors).length"
-                    class="p-4 mb-4 text-red-800 bg-red-100 rounded-md dark:bg-red-900 dark:text-red-200">
+                    class="p-4 mb-4 text-white bg-red-100 rounded-md dark:bg-red-900 dark:text-red-200">
                     <h5 class="font-bold">Validation Errors:</h5>
                     <ul class="mt-2 ml-4 list-disc">
                         <li v-for="(error, field) in errors" :key="field">{{ error[0] }}</li>
@@ -94,7 +94,7 @@ const handleFileChange = (event) => {
                         <label for="csv_file"
                             class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">CSV File</label>
                         <input id="csv_file" type="file" accept=".csv" @change="handleFileChange" required
-                            class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                            class="block w-full p-2 text-white rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Please upload a CSV file with the
                             correct format.</p>
                     </div>

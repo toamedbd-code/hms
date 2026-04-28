@@ -107,7 +107,7 @@ const clearPhotoFileInput = () => {
                 <!-- New Profile Photo Preview -->
                 <div v-show="photoPreview" class="mt-2">
                     <span
-                        class="block rounded-full w-20 h-20 bg-cover bg-no-repeat bg-center"
+                        class="block rounded-full w-20 h-20 bg-cover bg-no-repeat bg-center text-white"
                         :style="'background-image: url(\'' + photoPreview + '\');'"
                     />
                 </div>

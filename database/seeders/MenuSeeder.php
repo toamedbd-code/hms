@@ -21,28 +21,46 @@ class MenuSeeder extends Seeder
 
     private function createMenu($data, $parent_id = null)
     {
-        $attributes = [
-            'name' => $data['name'],
-            'parent_id' => $parent_id,
-        ];
-
         $values = [
-            'icon' => $data['icon'],
-            'route' => $data['route'],
-            'description' => $data['description'],
-            'sorting' => $data['sorting'],
-            'permission_name' => $data['permission_name'],
-            'status' => $data['status'],
-            'deleted_at' => null,
+            'icon' => $data['icon'] ?? null,
+            'route' => $data['route'] ?? null,
+            'description' => $data['description'] ?? null,
+            'sorting' => $data['sorting'] ?? null,
+            'permission_name' => $data['permission_name'] ?? null,
+            'status' => $data['status'] ?? 'Active',
+            'deleted_at' => $data['deleted_at'] ?? null,
         ];
 
-        $menu = Menu::updateOrCreate($attributes, $values);
+        // If a route is provided, prefer using the route as the unique attribute
+        // to avoid creating duplicate menu rows for the same named route.
+        if (!empty($data['route'])) {
+            $attributes = ['route' => $data['route']];
+            $menu = Menu::updateOrCreate($attributes, array_merge($values, [
+                'name' => $data['name'],
+                'parent_id' => $parent_id,
+            ]));
+
+            // Ensure parent is set to the expected parent if needed.
+            if ($parent_id && $menu->parent_id !== $parent_id) {
+                $menu->parent_id = $parent_id;
+                $menu->save();
+            }
+        } else {
+            $attributes = [
+                'name' => $data['name'],
+                'parent_id' => $parent_id,
+            ];
+
+            $menu = Menu::updateOrCreate($attributes, $values);
+        }
 
         if (isset($data['children']) && is_array($data['children'])) {
             foreach ($data['children'] as $child) {
                 $this->createMenu($child, $menu->id);
             }
         }
+
+        return $menu;
     }
 
     private function datas()
@@ -1257,7 +1275,7 @@ class MenuSeeder extends Seeder
             ],
 
             [
-                'name' => 'Hospital Test',
+                'name' => 'Item Charge',
                 'icon' => 'layers',
                 'route' => null,
                 'description' => null,
@@ -1275,9 +1293,9 @@ class MenuSeeder extends Seeder
                     //     'status' => 'Active',
                     // },
                     [
-                        'name' => 'Test List',
+                        'name' => 'Item List',
                         'icon' => 'list',
-                        'route' => 'backend.testpathology.index',
+                        'route' => 'backend.itemcharge.index',
                         'description' => null,
                         'sorting' => 1,
                         'permission_name' => 'test-list',
@@ -1293,7 +1311,7 @@ class MenuSeeder extends Seeder
                     //     'status' => 'Active',
                     // },
                     [
-                        'name' => 'Test Category List',
+                        'name' => 'Item Category List',
                         'icon' => 'list',
                         'route' => 'backend.pathologycategory.index',
                         'description' => null,
@@ -1311,7 +1329,7 @@ class MenuSeeder extends Seeder
                     //     'status' => 'Active',
                     // },
                     [
-                        'name' => 'Test Unit List',
+                        'name' => 'Item Unit List',
                         'icon' => 'list',
                         'route' => 'backend.pathologyunit.index',
                         'description' => null,
@@ -1329,7 +1347,7 @@ class MenuSeeder extends Seeder
                     //     'status' => 'Active',
                     // },
                     [
-                        'name' => 'Test Parameter List',
+                        'name' => 'Item Parameter List',
                         'icon' => 'list',
                         'route' => 'backend.parameterofpathology.index',
                         'description' => null,
@@ -1511,6 +1529,15 @@ class MenuSeeder extends Seeder
                         'description' => null,
                         'sorting' => 1,
                         'permission_name' => 'report-delivery',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Report Summary',
+                        'icon' => 'doctor',
+                        'route' => 'backend.doctor-summary.index',
+                        'description' => null,
+                        'sorting' => 2,
+                        'permission_name' => 'report-management',
                         'status' => 'Active',
                     ],
                 ],

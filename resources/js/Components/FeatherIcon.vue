@@ -58,6 +58,7 @@ export default {
       const aliasMap = {
         'balance': 'finance',
         'activity-log': 'activity',
+        'doctor': 'stethoscope',
       };
 
       const lucideIcons = {

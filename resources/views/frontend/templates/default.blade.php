@@ -30,7 +30,7 @@
             <h2>{{ $setting->website_hero_title ?? ($setting->company_name ?? 'Welcome') }}</h2>
             <p style="color:#444">{{ $setting->website_hero_subtitle ?? '' }}</p>
             @if(!empty($setting->website_cta_text))
-                <p><a href="/" style="display:inline-block;padding:8px 12px;background:#0ea5a1;color:#fff;border-radius:4px;text-decoration:none">{{ $setting->website_cta_text }}</a></p>
+                <p><a href="/" style="display:inline-block;padding:8px 12px;background:#0ea5a1;color:#ffffff !important;border-radius:4px;text-decoration:none">{{ $setting->website_cta_text }}</a></p>
             @endif
         </section>
 

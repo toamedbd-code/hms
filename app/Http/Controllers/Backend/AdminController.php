@@ -187,9 +187,17 @@ class AdminController extends Controller
                     $user = auth()->guard('admin')->user();
                     $roles = $this->roleService->all();
                     try {
-                        if ($user && method_exists($user, 'hasRole') && !$user->hasRole('developer')) {
-                            $roles = collect($roles)->filter(function ($r) use ($user) {
-                                return empty($r->is_private) || $r->id == $user->role_id;
+                        if ($user) {
+                            // Allow non-private roles always. Allow private roles to be visible
+                            // when the current user is the role owner, a developer, or has
+                            // explicit role-creation permission so they can assign roles they manage.
+                            $canSeePrivate = $user->can('role-list-create') || (method_exists($user, 'hasRole') && $user->hasRole('developer'));
+
+                            $roles = collect($roles)->filter(function ($r) use ($user, $canSeePrivate) {
+                                if (empty($r->is_private)) return true;
+                                if ($r->id == $user->role_id) return true;
+                                if ($canSeePrivate) return true;
+                                return false;
                             })->values();
                         }
                     } catch (\Throwable $e) {
@@ -225,8 +233,38 @@ class AdminController extends Controller
                 'photo' => $data['photo'] ?? null,
             ];
 
+            // Prevent assigning private roles (like `developer`) to newly created users.
+            try {
+                $selectedRole = \Spatie\Permission\Models\Role::find($adminData['role_id']);
+                if ($selectedRole && !empty($selectedRole->is_private)) {
+                    // Do not allow assigning a private role (e.g., `developer`) during user creation.
+                    $fallback = \Spatie\Permission\Models\Role::where('name', 'Admin')->where('guard_name', 'admin')->first();
+                    if ($fallback) {
+                        $adminData['role_id'] = $fallback->id;
+                    } else {
+                        // keep as null if no fallback
+                        $adminData['role_id'] = null;
+                    }
+                }
+            } catch (\Throwable $e) {
+                // ignore and proceed
+            }
+
             $admin = $this->adminService->create($adminData);
-            $admin->assignRole($admin->role->name);
+
+            // Safely assign role: only when a valid role_id exists and the role can be found.
+            try {
+                $roleToAssign = null;
+                if (!empty($adminData['role_id'])) {
+                    $roleToAssign = \Spatie\Permission\Models\Role::find($adminData['role_id']);
+                }
+
+                if ($roleToAssign) {
+                    $admin->assignRole($roleToAssign->name);
+                }
+            } catch (\Throwable $e) {
+                // ignore role assignment failures to avoid breaking the create flow
+            }
 
             if (!$admin) {
                 throw new Exception("Failed to create admin record");
@@ -319,13 +357,25 @@ class AdminController extends Controller
                 'pageTitle' => fn() => 'Staff Edit',
                 'user' => fn() => $user,
                 'id' => fn() => $id,
+                'previewSideMenus' => fn() => (function () use ($user) {
+                    try {
+                        return getSideMenus($user);
+                    } catch (\Throwable $e) {
+                        return [];
+                    }
+                })(),
                 'roles' => fn() => (function () {
                     $user = auth()->guard('admin')->user();
                     $roles = $this->roleService->all();
                     try {
-                        if ($user && method_exists($user, 'hasRole') && !$user->hasRole('developer')) {
-                            $roles = collect($roles)->filter(function ($r) use ($user) {
-                                return empty($r->is_private) || $r->id == $user->role_id;
+                        if ($user) {
+                            $canSeePrivate = $user->can('role-list-create') || (method_exists($user, 'hasRole') && $user->hasRole('developer'));
+
+                            $roles = collect($roles)->filter(function ($r) use ($user, $canSeePrivate) {
+                                if (empty($r->is_private)) return true;
+                                if ($r->id == $user->role_id) return true;
+                                if ($canSeePrivate) return true;
+                                return false;
                             })->values();
                         }
                     } catch (\Throwable $e) {
@@ -387,8 +437,40 @@ class AdminController extends Controller
                 $adminData['password'] = $data['password'];
             }
 
+            // Prevent assigning private roles (like `developer`) to other users.
+            try {
+                $actor = auth()->guard('admin')->user();
+                $selectedRole = \Spatie\Permission\Models\Role::find($adminData['role_id']);
+                if ($selectedRole && !empty($selectedRole->is_private)) {
+                    // Only allow assigning the private role if the actor is updating their own account.
+                    if (!($actor && isset($actor->id) && $actor->id == (int) $id)) {
+                        $fallback = \Spatie\Permission\Models\Role::where('name', 'Admin')->where('guard_name', 'admin')->first();
+                        if ($fallback) {
+                            $adminData['role_id'] = $fallback->id;
+                        } else {
+                            $adminData['role_id'] = $actor?->role_id ?? $admin->role_id;
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                // ignore and proceed
+            }
+
             $adminUpdated = $this->adminService->update($adminData, $id);
-            $adminUpdated->assignRole($adminUpdated->role->name);
+
+            // Safely assign updated role if applicable
+            try {
+                $roleToAssign = null;
+                if (!empty($adminData['role_id'])) {
+                    $roleToAssign = \Spatie\Permission\Models\Role::find($adminData['role_id']);
+                }
+
+                if ($roleToAssign) {
+                    $adminUpdated->assignRole($roleToAssign->name);
+                }
+            } catch (\Throwable $e) {
+                // ignore role assignment failures
+            }
 
             if (!$adminUpdated) {
                 throw new Exception("Failed to update staff record");

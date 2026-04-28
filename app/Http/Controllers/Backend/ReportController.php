@@ -1210,15 +1210,51 @@ class ReportController extends Controller
     {
         $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
 
+        // parse attendance_device_options and reporting layout
+        $attendanceOptions = $websetting?->attendance_device_options ?? [];
+        if (!is_array($attendanceOptions)) {
+            try {
+                $attendanceOptions = is_string($attendanceOptions) && trim($attendanceOptions) !== '' ? json_decode($attendanceOptions, true) : [];
+            } catch (\Throwable $e) {
+                $attendanceOptions = [];
+            }
+        }
+        $attendanceOptions = is_array($attendanceOptions) ? $attendanceOptions : [];
+
+        $reporting = data_get($attendanceOptions, 'reporting', []);
+        // Respect separate show_header/show_footer flags when configured
+        $settingShowHeader = array_key_exists('show_header', $reporting) ? (bool) $reporting['show_header'] : null;
+        $settingShowFooter = array_key_exists('show_footer', $reporting) ? (bool) $reporting['show_footer'] : null;
+        if ($settingShowHeader !== null || $settingShowFooter !== null) {
+            $showHeader = $settingShowHeader !== null ? $settingShowHeader : true;
+            $showFooter = $settingShowFooter !== null ? $settingShowFooter : true;
+            $showHeaderFooter = $showHeader && $showFooter;
+        } else {
+            $showHeaderFooter = array_key_exists('show_header_footer', $reporting) ? (bool) $reporting['show_header_footer'] : true;
+        }
+        $layout = data_get($reporting, 'layout', []);
+        $reportHeaderHeightPx = max(0, (int) ($layout['header_height'] ?? 115));
+        $reportFooterHeightPx = max(0, (int) ($layout['footer_height'] ?? 70));
+        $pageMarginTop = isset($layout['page_margin_top']) ? (int) $layout['page_margin_top'] : 10;
+        $pageMarginBottom = isset($layout['page_margin_bottom']) ? (int) $layout['page_margin_bottom'] : 10;
+
+        // convert px to mm for mPDF margins (approx, assuming 96dpi)
+        $pxToMm = function ($px) {
+            return round(((float) $px) * 25.4 / 96, 2);
+        };
+
+        $marginHeaderMm = $showHeaderFooter ? $pxToMm($reportHeaderHeightPx) : 0;
+        $marginFooterMm = $showHeaderFooter ? $pxToMm($reportFooterHeightPx) : 0;
+
         $mpdf = new Mpdf([
             'mode' => 'utf-8',
             'format' => 'A4',
             'margin_left' => 8,
             'margin_right' => 8,
-            'margin_top' => 10,
-            'margin_bottom' => 10,
-            'margin_header' => 5,
-            'margin_footer' => 5,
+            'margin_top' => max(0, (int) $pageMarginTop),
+            'margin_bottom' => max(0, (int) $pageMarginBottom),
+            'margin_header' => $marginHeaderMm,
+            'margin_footer' => $marginFooterMm,
             'default_font' => 'dejavusanscondensed',
             'default_font_size' => 9,
             'orientation' => 'P',
@@ -1253,6 +1289,10 @@ class ReportController extends Controller
             'opdTotals' => $data['opdTotals'] ?? [],
             'allModuleTotals' => $data['allModuleTotals'] ?? [],
             'websetting' => $websetting,
+            // pass reporting flags/heights to view so templates can conditionally render
+            'show_header_footer' => $showHeaderFooter,
+            'reportHeaderHeight' => $reportHeaderHeightPx,
+            'reportFooterHeight' => $reportFooterHeightPx,
         ])->render();
 
         $mpdf->WriteHTML($html);

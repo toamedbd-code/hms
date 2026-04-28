@@ -212,11 +212,11 @@ const submitPartialPayment = () => {
         <div class="w-full p-2 duration-1000 ease-in-out bg-white rounded-md dark:bg-slate-900">
 
             <div v-if="$page.props.flash?.successMessage"
-                class="mb-3 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+                class="mb-3 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-green-700">
                 {{ $page.props.flash.successMessage }}
             </div>
             <div v-if="$page.props.flash?.errorMessage"
-                class="mb-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                class="mb-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-red-700">
                 {{ $page.props.flash.errorMessage }}
             </div>
             <div v-if="isProcessing"
@@ -224,7 +224,7 @@ const submitPartialPayment = () => {
                 Processing commission payment...
             </div>
             <div v-if="toastMessage"
-                class="fixed right-6 top-20 z-50 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 shadow">
+                class="fixed right-6 top-20 z-50 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-white text-green-700 shadow">
                 {{ toastMessage }}
             </div>
 
@@ -259,13 +259,13 @@ const submitPartialPayment = () => {
                     <div class="flex space-x-2">
                         <div class="w-full">
                             <input id="name" v-model="filters.name"
-                                class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-white rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 type="text" placeholder="Name" @input="applyFilter" />
                         </div>
 
                         <div class="block min-w-24 md:hidden">
                             <select v-model="filters.numOfData" @change="applyFilter"
-                                class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="10">Show 10</option>
                                 <option value="20">Show 20</option>
                                 <option value="30">Show 30</option>
@@ -280,7 +280,7 @@ const submitPartialPayment = () => {
 
                 <div class="hidden min-w-24 md:block">
                     <select v-model="filters.numOfData" @change="applyFilter"
-                        class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                        class="w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                         <option value="10">show 10</option>
                         <option value="20">show 20</option>
                         <option value="30">show 30</option>
@@ -299,7 +299,7 @@ const submitPartialPayment = () => {
         </div>
 
         <div v-if="showPartialModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div class="w-full max-w-md rounded-lg bg-white shadow-xl">
+            <div class="w-full max-w-md rounded-lg bg-white shadow-xl text-gray-800">
                 <div class="flex items-center justify-between border-b px-5 py-3">
                     <h3 class="text-base font-semibold text-gray-800">Partial Commission Payment</h3>
                     <button type="button" class="text-gray-500 hover:text-gray-700" @click="closePartialModal">✕</button>

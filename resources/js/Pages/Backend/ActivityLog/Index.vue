@@ -144,7 +144,7 @@ const exportUrl = computed(() => route('backend.activity-logs.export', filterFor
               <td class="px-3 py-2 border">{{ item.description || '-' }}</td>
               <td class="px-3 py-2 border">{{ item.meta?.session_duration_human || '-' }}</td>
               <td class="px-3 py-2 border">
-                <span class="px-2 py-1 text-xs rounded uppercase" :class="item.status === 'failed' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'">
+                <span class="px-2 py-1 text-xs rounded uppercase" :class="item.status === 'failed' ? 'bg-rose-100 text-white' : 'bg-emerald-100 text-emerald-700'">
                   {{ item.status }}
                 </span>
               </td>

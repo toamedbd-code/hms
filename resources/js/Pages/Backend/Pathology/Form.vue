@@ -688,7 +688,7 @@ const nextCaseId = computed(() => {
                             <!-- Searchable Test Name Field -->
                             <div class="relative">
                                 <div class="mb-2">
-                                    <span class="text-sm font-medium text-black">Test Name</span>
+                                    <span class="text-sm font-medium text-black">Item Name</span>
                                     <span class="text-red-500 ml-1">*</span>
                                 </div>
                                 <input :id="`testSearch_${index}`" v-model="searchQueries[test.id]"
@@ -696,7 +696,7 @@ const nextCaseId = computed(() => {
                                     @focus="handleTestFocus(index)" @blur="handleTestBlur(index)"
                                     @keydown.enter.prevent="handleTestSearchEnter(index)"
                                     @keydown="handleTestSearchKeyDown(index, $event)" type="text"
-                                    placeholder="Search test..."
+                                    placeholder="Search item..."
                                     class="block w-full px-3 py-2 text-sm border border-gray-300 rounded focus:border-blue-500 focus:outline-none"
                                     autocomplete="off" />
 
@@ -713,7 +713,7 @@ const nextCaseId = computed(() => {
                                     </div>
                                     <div v-if="getFilteredTests(test.id).length === 0"
                                         class="px-3 py-2 text-sm text-gray-500 text-center">
-                                        No tests found
+                                        No items found
                                     </div>
                                 </div>
 
@@ -771,7 +771,7 @@ const nextCaseId = computed(() => {
                 <div class="mb-8">
                     <button type="button" @click="addTest"
                         class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700">
-                        <span class="mr-1">+</span> Add Test
+                        <span class="mr-1">+</span> Add Item
                     </button>
                 </div>
 

@@ -4,7 +4,9 @@ import { useForm, usePage } from '@inertiajs/vue3';
 
 const page = usePage();
 
-const webSetting = computed(() => page.props.webSetting ?? {});
+// Prefer page-specific `websetting` when present (used by WebSetting form partials),
+// otherwise fall back to the shared `webSetting` shared prop.
+const webSetting = computed(() => page.props.websetting ?? page.props.webSetting ?? {});
 const doctors = computed(() => page.props.featuredDoctors ?? []);
 const bookingDoctors = computed(() => page.props.bookingDoctors ?? []);
 const serviceItems = computed(() => page.props.serviceItems ?? []);
@@ -346,7 +348,7 @@ watch(currentLang, (lang) => {
 }
 
 .top-actions a {
-    color: #fff;
+    color: inherit;
     text-decoration: none;
     font-weight: 700;
 }
@@ -428,7 +430,7 @@ watch(currentLang, (lang) => {
     border: 0;
     border-radius: 999px;
     background: #1ad3b5;
-    color: #083957;
+    color: #ffffff;
     font-weight: 800;
     padding: 11px 18px;
     text-decoration: none;

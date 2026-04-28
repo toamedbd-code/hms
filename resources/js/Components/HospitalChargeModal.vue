@@ -34,6 +34,11 @@ const props = defineProps({
         type: Array,
         default: () => []
     }
+    ,
+    initialChargeCategoryId: {
+        type: [String, Number],
+        default: ''
+    }
 });
 
 const emit = defineEmits(['close', 'created', 'updated']);
@@ -82,6 +87,13 @@ watch(() => props.charge, (newCharge) => {
     } else {
         form.reset();
         form._method = 'post';
+    }
+}, { immediate: true });
+
+// When opened from another form, prefill charge_category_id if we have a matching id
+watch(() => props.initialChargeCategoryId, (val) => {
+    if (!props.charge) {
+        form.charge_category_id = val || '';
     }
 }, { immediate: true });
 

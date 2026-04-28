@@ -91,7 +91,7 @@ const goToTestCategoryList = () => {
                                     d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z">
                                 </path>
                             </svg>
-                            Test Category List
+                            Item Category List
                         </button>
                     </div>
                 </div>
@@ -107,7 +107,7 @@ const goToTestCategoryList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="name" value="Name" />
                         <input id="name"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" type="text" placeholder="Category Name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -115,7 +115,7 @@ const goToTestCategoryList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="parent_id" value="Parent Category (optional)" />
                         <select id="parent_id" v-model="form.parent_id"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                             <option value="">-- No Parent (Top Level) --</option>
                             <option v-for="option in treeOptions" :key="option.id" :value="option.id">
                                 {{ option.name }}

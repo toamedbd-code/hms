@@ -38,7 +38,7 @@ class PathologyCategoryController extends Controller
         return Inertia::render(
             'Backend/PathologyCategory/Index',
             [
-                'pageTitle' => fn() => 'Test Category List',
+                'pageTitle' => fn() => 'Item Category List',
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
@@ -134,7 +134,7 @@ class PathologyCategoryController extends Controller
         return Inertia::render(
             'Backend/PathologyCategory/Form',
             [
-                'pageTitle' => fn() => 'Test Category Create',
+                'pageTitle' => fn() => 'Item Category Create',
                 'categories' => fn() => $this->testCategoryService->activeList()
             ]
         );
@@ -152,7 +152,7 @@ class PathologyCategoryController extends Controller
             $dataInfo = $this->testCategoryService->create($data);
 
             if ($dataInfo) {
-                $message = 'Test Category created successfully';
+                $message = 'Item Category created successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'pathologycategories', $message);
 
                 DB::commit();
@@ -163,7 +163,7 @@ class PathologyCategoryController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To create Test Category.";
+                $message = "Failed To create Item Category.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -189,7 +189,7 @@ class PathologyCategoryController extends Controller
         return Inertia::render(
             'Backend/PathologyCategory/Form',
             [
-                'pageTitle' => fn() => 'Test Category Edit',
+                'pageTitle' => fn() => 'Item Category Edit',
                 'pathologycategory' => fn() => $pathologycategory,
                 'id' => fn() => $id,
                 'categories' => fn() => $this->testCategoryService->activeList()
@@ -207,8 +207,8 @@ class PathologyCategoryController extends Controller
 
             $dataInfo = $this->testCategoryService->update($data, $id);
 
-            if ($dataInfo->save()) {
-                $message = 'Test Category updated successfully';
+                if ($dataInfo->save()) {
+                $message = 'Item Category updated successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'pathologycategories', $message);
 
                 DB::commit();
@@ -242,8 +242,8 @@ class PathologyCategoryController extends Controller
 
         try {
 
-            if ($this->testCategoryService->delete($id)) {
-                $message = 'Test Category deleted successfully';
+                if ($this->testCategoryService->delete($id)) {
+                $message = 'Item Category deleted successfully';
                 $this->storeAdminWorkLog($id, 'pathologycategories', $message);
 
                 DB::commit();
@@ -254,7 +254,7 @@ class PathologyCategoryController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To Delete Test Category.";
+                $message = "Failed To Delete Item Category.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -279,7 +279,7 @@ class PathologyCategoryController extends Controller
             $dataInfo = $this->testCategoryService->changeStatus($id, $status);
 
             if ($dataInfo->wasChanged()) {
-                $message = 'Test Category ' . request()->status . ' Successfully';
+                $message = 'Item Category ' . request()->status . ' Successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'pathologycategories', $message);
 
                 DB::commit();
@@ -290,7 +290,7 @@ class PathologyCategoryController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To " . request()->status . "Test Category.";
+                $message = "Failed To " . request()->status . " Item Category.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);

@@ -42,23 +42,23 @@ const applyPerPage = () => {
       </div>
 
       <div class="grid grid-cols-1 gap-3 mt-3 md:grid-cols-2 xl:grid-cols-5">
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded">
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded text-white">
           <p class="text-xs text-slate-500">Total Items</p>
           <p class="mt-1 text-lg font-semibold text-slate-800">{{ summary.total_items ?? 0 }}</p>
         </div>
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded">
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded text-white">
           <p class="text-xs text-slate-500">Active Items</p>
           <p class="mt-1 text-lg font-semibold text-slate-800">{{ summary.active_items ?? 0 }}</p>
         </div>
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded">
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded text-white">
           <p class="text-xs text-slate-500">Total Quantity</p>
           <p class="mt-1 text-lg font-semibold text-slate-800">{{ Number(summary.total_quantity ?? 0).toFixed(0) }}</p>
         </div>
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded">
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded text-white">
           <p class="text-xs text-slate-500">Inventory Value</p>
           <p class="mt-1 text-lg font-semibold text-slate-800">{{ formatMoney(summary.inventory_value) }}</p>
         </div>
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded">
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded text-white">
           <p class="text-xs text-slate-500">Low Stock Items</p>
           <p class="mt-1 text-lg font-semibold text-slate-800">{{ Number(summary.low_stock_items ?? 0) }}</p>
         </div>
@@ -98,7 +98,7 @@ const applyPerPage = () => {
               <td class="px-3 py-2 border text-right">{{ formatMoney(item.unit_cost) }}</td>
               <td class="px-3 py-2 border text-right">{{ Number(item.reorder_level ?? 0).toFixed(2) }}</td>
               <td class="px-3 py-2 border text-center">
-                <span class="px-2 py-1 text-xs rounded" :class="item.status === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'">{{ item.status }}</span>
+                <span class="px-2 py-1 text-xs rounded" :class="item.status === 'Active' ? 'bg-emerald-100 text-white' : 'bg-rose-100 text-rose-700'">{{ item.status }}</span>
               </td>
             </tr>
             <tr v-if="rows.length === 0">

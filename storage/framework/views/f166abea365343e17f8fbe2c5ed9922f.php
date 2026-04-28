@@ -1,4 +1,5 @@
 <?php
+    $showHeaderFooter = isset($showHeaderFooter) ? (bool) $showHeaderFooter : (isset($show_header_footer) ? (bool) $show_header_footer : true);
     $ftr = $footer_image ?? $footerImage ?? $footerSrc ?? $footer ?? '';
     $footerContentVal = $footer_content ?? $footerContent ?? $footerHtml ?? $footer_html ?? config('app.invoice_footer_fallback_line', '');
     $footerHeight = (int) ($footerHeight ?? $footer_height ?? $reportFooterHeight ?? ($invoiceDesign?->footer_height ?? 70));
@@ -6,6 +7,12 @@
     $footerContentPosition = strtolower(trim((string) ($footer_content_position ?? $footerContentPosition ?? ($invoiceDesign?->footer_content_position ?? 'above'))));
     if (!in_array($footerContentPosition, ['above', 'below'])) {
         $footerContentPosition = 'above';
+    }
+
+    if (!$showHeaderFooter) {
+        $footerHeight = 0;
+        $ftr = '';
+        $footerContentVal = '';
     }
 ?>
 
@@ -16,13 +23,16 @@
     .content-section, .sheet, .invoice-container, .page, .card, .container { padding-bottom: calc(var(--report-footer-height) + 12px) !important; }
 
     .footer-wrapper {
-        position: fixed;
+        /* Default: non-fixed so footer remains in normal document flow
+           and scrolls with the page in the browser. The print media
+           query below will switch this to fixed positioning for printed
+           pages so the footer appears at the bottom of each page. */
+        position: relative;
         left: 0;
         right: 0;
-        bottom: 0;
         height: var(--report-footer-height);
         overflow: visible; /* allow content to be visible above image */
-        z-index: 9999;
+        z-index: 1;
         background: transparent;
         box-sizing: border-box;
     }
@@ -84,7 +94,8 @@
     .footer-placeholder { width: 100%; height: var(--report-footer-height); visibility: hidden; }
 
     @media print {
-        .footer-wrapper { position: fixed !important; }
+        /* On print, make footer stick to bottom of each printed page */
+        .footer-wrapper { position: fixed !important; left:0; right:0; bottom:0; }
         .footer-wrapper .footer-image-area img.footer-image { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         .footer-content-area { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     }

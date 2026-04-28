@@ -16,9 +16,26 @@ class AuthCheck
      */
     public function handle(Request $request, Closure $next)
     {
-        if(auth()->guard('admin')->check() && auth()->guard('admin')->user()->status=='Active')
-            return redirect()->route('backend.dashboard');
-        else
-            return $next($request);
+        if (auth()->guard('admin')->check() && strcasecmp(trim((string) (auth()->guard('admin')->user()->status ?? '')), 'Active') === 0) {
+            // Try several likely dashboard route names (RouteServiceProvider prefixes
+            // backend routes with 'backend.'). Redirect to the first one that exists
+            // to avoid RouteNotFound exceptions when route names vary.
+            $routeCandidates = [
+                'backend.dashboard',
+                'admin.dashboard',
+                'dashboard',
+            ];
+
+            foreach ($routeCandidates as $candidate) {
+                if (\Illuminate\Support\Facades\Route::has($candidate)) {
+                    return redirect()->route($candidate);
+                }
+            }
+
+            // Fallback to root if no named dashboard is available
+            return redirect('/');
+        }
+
+        return $next($request);
     }
 }

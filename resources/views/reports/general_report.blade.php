@@ -108,7 +108,9 @@
     }
     @endphp
 
-    @includeIf('prints.partials._header')
+        @if(!isset($show_header_footer) || $show_header_footer)
+            @includeIf('prints.partials._header')
+        @endif
 
     <div class="header">
         <div class="hospital-name">{{ optional($websetting)->company_name ?? config('app.name', 'Hospital') }}</div>
@@ -201,6 +203,7 @@
     }
     @endphp
 
+                        
     @if ($selectedModuleKey === 'opd' && !empty($opdRows))
     <table class="module-details-table">
         <colgroup>
@@ -795,6 +798,12 @@
 
     @else
         <div class="section-title center">No data found for this report.</div>
+    @endif
+
+    @if(!isset($show_header_footer) || $show_header_footer)
+        <div class="page-footer">
+            <span class="page-count">Page {PAGENO} of {nbpg}</span>
+        </div>
     @endif
 
 </body>

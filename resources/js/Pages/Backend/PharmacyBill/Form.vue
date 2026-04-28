@@ -473,28 +473,28 @@ const goToProductReturn = () => {
                     <div>
                         <InputLabel for="pharmacy_no" value="Pharmacy No" />
                         <input id="pharmacy_no"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.pharmacy_no" type="text" placeholder="Pharmacy No" readonly />
                         <InputError class="mt-2" :message="form.errors.pharmacy_no" />
                     </div>
                     <div>
                         <InputLabel for="bill_no" value="Bill No" />
                         <input id="bill_no"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.bill_no" type="text" placeholder="Bill No" readonly />
                         <InputError class="mt-2" :message="form.errors.bill_no" />
                     </div>
                     <div>
                         <InputLabel for="case_id" value="Case ID" />
                         <input id="case_id"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.case_id" type="text" placeholder="Case ID" />
                         <InputError class="mt-2" :message="form.errors.case_id" />
                     </div>
                     <div>
                         <InputLabel for="date" value="Date" />
                         <input id="date"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.date" type="date" />
                         <InputError class="mt-2" :message="form.errors.date" />
                     </div>
@@ -620,7 +620,7 @@ const goToProductReturn = () => {
                         <div>
                             <InputLabel for="note" value="Note" />
                             <textarea v-model="form.note" rows="3"
-                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
+                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
                             <InputError class="mt-2" :message="form.errors.note" />
                         </div>
                     </div>
@@ -675,7 +675,7 @@ const goToProductReturn = () => {
                                 <div>
                                     <InputLabel for="payment_mode" value="Payment Mode" />
                                     <select v-model="form.payment_mode"
-                                        class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                        class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                         <option>Cash</option>
                                         <option>Card</option>
                                         <option>Bank Transfer</option>
@@ -685,14 +685,14 @@ const goToProductReturn = () => {
                                 <div>
                                     <InputLabel for="payment_amount" value="Payment Amount (Tk.)" />
                                     <input v-model="form.payment_amount" type="number" step="0.01"
-                                        class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                        class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                 </div>
 
                                 <div v-if="shouldShowReturnAmount">
                                     <InputLabel for="return_amount" value="Return Amount (Tk.)" />
                                     <input v-model="form.return_amount" type="number" step="0.01" min="0"
                                         :max="overPaymentAmount"
-                                        class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                        class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
 
                                     <div class="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                                         Return Preview: {{ ensureNumber(form.return_amount, 0).toFixed(2) }} Tk.
@@ -707,7 +707,7 @@ const goToProductReturn = () => {
                     <button type="button"
                         @click="submit(true)"
                         class="inline-flex items-center px-6 py-2 font-semibold text-white rounded shadow-sm transition-colors"
-                        :class="form.processing ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'"
+                        :class="form.processing ? 'bg-blue-300 cursor-not-allowed text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'"
                         :disabled="form.processing">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M6 9V4h12v5M6 18h12M8 14h8M6 9h12a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z" />

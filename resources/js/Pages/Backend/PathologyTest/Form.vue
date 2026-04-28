@@ -10,18 +10,28 @@ import CategoryModal from '@/Components/CategoryModal.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 import HospitalChargeModal from '@/Components/HospitalChargeModal.vue';
 import ChargeParameterModal from '@/Components/ChargeParameterModal.vue';
+import UnitModal from '@/Components/UnitModal.vue';
 
-const props = defineProps([
-    'pathologytest',
-    'id',
-    'testCategories',
-    'charges',
-    'pathologyUnits',
-    'testParameters',
-    'chargeTypes',
-    'chargeCategories',
-    'chargeUnits',
-    'taxCategories']);
+const props = defineProps({
+    pathologytest: { type: Object, default: () => ({}) },
+    id: { type: [String, Number, null], default: null },
+    testCategories: { type: Array, default: () => [] },
+    charges: { type: Array, default: () => [] },
+    pathologyUnits: { type: Array, default: () => [] },
+    testParameters: { type: Array, default: () => [] },
+    chargeTypes: { type: Array, default: () => [] },
+    chargeCategories: { type: Array, default: () => [] },
+    chargeUnits: { type: Array, default: () => [] },
+    taxCategories: { type: Array, default: () => [] },
+    // When embedded=true the component will render without the outer BackendLayout
+    embedded: { type: Boolean, default: false },
+    // Optional ipd id to auto-add created charge to an IPD when used embedded
+    ipdId: { type: [String, Number, null], default: null },
+});
+
+const emit = defineEmits(['created']);
+const page = usePage();
+const pageTitle = computed(() => (page && page.props && page.props.pageTitle) ? page.props.pageTitle : (props.id ? 'Update Item' : 'Create Item'));
 
 // Modal state
 const showCategoryModal = ref(false);
@@ -139,6 +149,14 @@ watch(() => form.test_category_id, (newCategoryId) => {
 
 watch(() => props.charges, (newCharges) => {
     charges.value = [...(newCharges || [])];
+});
+
+// Compute a default charge category id matching the selected category_type (case-insensitive)
+const selectedChargeCategoryId = computed(() => {
+    const catType = (form.category_type || '').toString().trim().toLowerCase();
+    if (!catType) return '';
+    const found = (props.chargeCategories || []).find(c => (c.name || '').toString().trim().toLowerCase() === catType);
+    return found ? found.id : '';
 });
 
 watch(() => props.testParameters, (newParameters) => {
@@ -401,6 +419,33 @@ const closeParameterModal = () => {
     showParameterModal.value = false;
 };
 
+// Unit modal state and helpers
+const showUnitModal = ref(false);
+const unitTargetIndex = ref(null);
+
+const openUnitModal = (index) => {
+    unitTargetIndex.value = index;
+    showUnitModal.value = true;
+};
+
+const closeUnitModal = () => {
+    unitTargetIndex.value = null;
+    showUnitModal.value = false;
+};
+
+const handleUnitCreated = (response) => {
+    router.reload({
+        only: ['pathologyUnits'],
+        onSuccess: () => {
+            const newUnitId = response.data?.id;
+            if (newUnitId && unitTargetIndex.value !== null) {
+                // assign the new unit to the parameter row that requested it
+                form.parameters[unitTargetIndex.value].pathology_unit_id = newUnitId;
+            }
+        }
+    });
+};
+
 const handleParameterCreated = (response) => {
     const previousParameterIds = new Set((testParameters.value || []).map(param => String(param.id)));
 
@@ -440,17 +485,50 @@ const handleParameterCreated = (response) => {
 
 const submit = () => {
     const routeName = props.id
-        ? route('backend.testpathology.update', props.id)
-        : route('backend.testpathology.store');
+        ? route('backend.itemcharge.update', props.id)
+        : route('backend.itemcharge.store');
 
     form.transform(data => ({
         ...data,
         remember: '',
         isDirty: false,
     })).post(routeName, {
-        onSuccess: (response) => {
+        onSuccess: async (response) => {
+            // reset form when created (not editing)
             if (!props.id) form.reset();
             displayResponse(response);
+            // If the page was opened with an ipd_id query param OR ipdId prop provided, add the created item's charge to that IPD
+            try {
+                const url = new URL(window.location.href);
+                const ipdId = props.ipdId || url.searchParams.get('ipd_id') || url.searchParams.get('ipd');
+                if (ipdId) {
+                    // Try to find the created test/charge by name
+                    const q = (form.test_name || form.charge_name || '').toString().trim();
+                    if (q) {
+                        const searchRes = await window.axios.get(route('backend.itemcharge.search'), { params: { q } });
+                        const results = (searchRes?.data?.results) || [];
+                        // Prefer exact test_name match, fallback to first result
+                        let chosen = results.find(r => (r.test_name || '').toString().toLowerCase() === q.toLowerCase()) || results[0];
+                        const chargeId = chosen?.charge_id || null;
+                        if (chargeId) {
+                            // Post as hospital charge to the IPD
+                            await window.axios.post(route('backend.ipdpatient.charges.hospital.store', ipdId), { hospital_charge_ids: [chargeId] });
+                            // Navigate to IPD show so overview/running bill is visible
+                            try { router.visit(route('backend.ipdpatient.show', ipdId)); } catch (e) { /* ignore */ }
+                        }
+                    }
+                }
+            } catch (e) {
+                // non-blocking: ignore any errors here but log to console for debugging
+                console.error('IPD auto-add failed:', e);
+            }
+
+            // Emit created event when embedded so parent can react (close modal / refresh)
+            try {
+                if (props.embedded) {
+                    emit('created', response);
+                }
+            } catch (e) {}
         },
         onError: (errorObject) => {
             displayWarning(errorObject);
@@ -458,23 +536,25 @@ const submit = () => {
     });
 };
 
-const goToTestList = () => {
-    router.visit(route('backend.testpathology.index'));
+    const goToTestList = () => {
+    router.visit(route('backend.itemcharge.index'));
 };
 
 </script>
 
 <template>
-    <BackendLayout>
+    <component :is="props.embedded ? 'div' : BackendLayout">
         <div class="w-full transition duration-1000 ease-in-out transform bg-white rounded-md">
 
             <div class="flex items-center justify-between w-full text-gray-700 bg-gray-100 rounded-md">
                 <div>
-                    <h1 class="p-4 text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
+                    <h1 class="p-4 text-xl font-bold dark:text-white">{{ pageTitle }}</h1>
                 </div>
 
-                <div class="p-2 py-2 flex items-center space-x-2">
+                    <div class="p-2 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <!-- Header Add-to-IPD removed per UX request -->
+
                         <button @click="goToTestList"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-400 to-blue-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-blue-500 hover:to-blue-700 ml-2">
                             <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -483,7 +563,7 @@ const goToTestList = () => {
                                     d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z">
                                 </path>
                             </svg>
-                            Test List
+                            Item List
                         </button>
                     </div>
                 </div>
@@ -496,31 +576,36 @@ const goToTestList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="category_type" value="Category Type" />
                         <select id="category_type" v-model="form.category_type"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                             <option value="">-- Select Type --</option>
+                            <option value="Appointment">Appointment</option>
+                            <option value="OPD">OPD</option>
+                            <option value="IPD">IPD</option>
                             <option value="Pathology">Pathology</option>
                             <option value="Radiology">Radiology</option>
+                            <option value="Blood Bank">Blood Bank</option>
+                            <option value="Ambulance">Ambulance</option>
                         </select>
                         <InputError class="mt-2" :message="form.errors.category_type" />
                     </div>
 
-                    <!-- Test Name -->
+                    <!-- Item Name -->
                     <div>
-                        <InputLabel for="test_name" value="Test Name" />
+                        <InputLabel for="test_name" value="Item Name" />
                         <input id="test_name" v-model="form.test_name" type="text" class="form-input" />
                         <InputError :message="form.errors.test_name" />
                     </div>
 
-                    <!-- Test Short Name -->
+                    <!-- Item Short Name -->
                     <div>
-                        <InputLabel for="test_short_name" value="Test Short Name" />
+                        <InputLabel for="test_short_name" value="Item Short Name" />
                         <input id="test_short_name" v-model="form.test_short_name" type="text" class="form-input" />
                         <InputError :message="form.errors.test_short_name" />
                     </div>
 
-                    <!-- Test Type -->
+                    <!-- Item Type -->
                     <div>
-                        <InputLabel for="test_type" value="Test Type" />
+                        <InputLabel for="test_type" value="Item Type" />
                         <input id="test_type" v-model="form.test_type" type="text" class="form-input" />
                         <InputError :message="form.errors.test_type" />
                     </div>
@@ -579,39 +664,14 @@ const goToTestList = () => {
                         <InputError :message="form.errors.report_days" />
                     </div>
 
-                    <!-- Charge Selection -->
-                    <div>
-                        <InputLabel for="charge_id" value="Select Charge" />
-                        <div class="flex items-center space-x-2">
-                            <select id="charge_id" v-model="form.charge_id" class="form-input flex-1"
-                                @change="onChargeSelect(form.charge_id)">
-                                <option value="">Select Charge</option>
-                                <option v-for="charge in charges" :key="charge.id" :value="charge.id">
-                                    {{ charge.name }}
-                                </option>
-                            </select>
-                            <button type="button" @click="openChargeModal"
-                                class="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200"
-                                title="Add New Charge">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                                    stroke-width="2">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6">
-                                    </path>
-                                </svg>
-                            </button>
-                        </div>
-                        <InputError :message="form.errors.charge_id" />
-
-                        <!-- Debug info for charges -->
-                        <small v-if="!charges?.length" class="text-red-500">
-                            No charges available. Check if charges prop is passed correctly.
-                        </small>
-                    </div>
+                    <!-- Charge Selection removed as requested -->
 
                     <!-- Charge Name (Auto-populated but editable) -->
                     <div>
                         <InputLabel for="charge_name" value="Charge Name" />
-                        <input id="charge_name" v-model="form.charge_name" type="text" class="form-input" />
+                        <div class="flex items-center space-x-2">
+                            <input id="charge_name" v-model="form.charge_name" type="text" class="form-input flex-1" />
+                        </div>
                         <InputError :message="form.errors.charge_name" />
                     </div>
 
@@ -638,13 +698,13 @@ const goToTestList = () => {
                 </div>
 
                 <!-- Parameters Section -->
-                <div class="mt-8">
+                    <div class="mt-8">
                     <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300">Test Parameters</h3>
+                        <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300">Item Parameters</h3>
                                         <div class="flex items-center space-x-2">
-                                            <button type="button" @click="openParameterModal"
+                                            <button type="button" @click="addParameter"
                                                 class="px-4 py-2 text-sm text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500">
-                                                Add New Parameter
+                                                Add Parameter
                                             </button>
                                         </div>
                     </div>
@@ -694,9 +754,9 @@ const goToTestList = () => {
 
                         <!-- Action Buttons -->
                         <div class="flex items-end gap-2">
-                            <button type="button" @click="addParameter"
-                                class="px-3 py-2 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                title="Add Parameter">
+                            <button type="button" @click="openUnitModal(index)"
+                                class="px-3 py-2 text-sm text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                title="Add New Unit">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
@@ -734,13 +794,13 @@ const goToTestList = () => {
 
                     <!-- Show message if no parameters -->
                     <div v-if="!form.parameters?.length" class="text-center py-4 text-gray-500">
-                        No parameters added yet. Click "Add New Parameter" to add one.
+                        No parameters added yet. Click "Add Parameter" to add one.
                     </div>
                 </div>
 
-                <div class="flex justify-end mt-6">
+                    <div class="flex justify-end mt-6">
                     <PrimaryButton type="submit" :class="{ 'opacity-25': form.processing }" :disabled="form.processing">
-                        {{ props.id ? 'Update Test' : 'Create Test' }}
+                        {{ props.id ? 'Update Item' : 'Create Item' }}
                     </PrimaryButton>
                 </div>
             </form>
@@ -752,13 +812,16 @@ const goToTestList = () => {
 
         <HospitalChargeModal :isOpen="showChargeModal" :charge="null" :chargeTypes="props.chargeTypes || []"
             :chargeCategories="props.chargeCategories || []" :chargeUnits="props.chargeUnits || []"
-            :taxCategories="props.taxCategories || []" @close="closeChargeModal" @created="handleChargeCreated" />
+            :taxCategories="props.taxCategories || []" :initialChargeCategoryId="selectedChargeCategoryId"
+            @close="closeChargeModal" @created="handleChargeCreated" />
 
         <ChargeParameterModal :show="showParameterModal" :units="props.pathologyUnits"
             :existing-parameters="testParameters" @close="closeParameterModal"
             @parameter-created="handleParameterCreated" />
 
-    </BackendLayout>
+        <UnitModal :show="showUnitModal" :existing-units="props.pathologyUnits" @close="closeUnitModal" @unit-created="handleUnitCreated" />
+
+    </component>
 </template>
 
 <style scoped>

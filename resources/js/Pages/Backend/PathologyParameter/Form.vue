@@ -85,7 +85,7 @@ const goToTestParameterList = () => {
                                     d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z">
                                 </path>
                             </svg>
-                            Test Parameter List
+                            Item Parameter List
                         </button>
                     </div>
                 </div>
@@ -98,7 +98,7 @@ const goToTestParameterList = () => {
                     <div class="col-span-1 sm:col-span-2">
                         <InputLabel for="name" value="Parameter Name*" />
                         <input id="name" type="text" required
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -107,7 +107,7 @@ const goToTestParameterList = () => {
                     <div class="col-span-1">
                         <InputLabel for="referance_from" value="Reference Range From*" />
                         <input id="referance_from" type="text" required
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.referance_from" />
                         <InputError class="mt-2" :message="form.errors.referance_from" />
                     </div>
@@ -115,7 +115,7 @@ const goToTestParameterList = () => {
                     <div class="col-span-1">
                         <InputLabel for="referance_to" value="Reference Range To*" />
                         <input id="referance_to" type="text" required
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.referance_to" />
                         <InputError class="mt-2" :message="form.errors.referance_to" />
                     </div>
@@ -125,7 +125,7 @@ const goToTestParameterList = () => {
                         <InputLabel for="pathology_unit_id" value="Unit*" />
                         <div class="flex items-center space-x-2">
                             <select id="pathology_unit_id" required
-                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 v-model="form.pathology_unit_id">
                                 <option value="">Select Unit</option>
                                 <option v-for="unit in units" :key="unit.id" :value="unit.id">{{ unit.name }}</option>
@@ -147,7 +147,7 @@ const goToTestParameterList = () => {
                     <div class="col-span-1 sm:col-span-2">
                         <InputLabel for="description" value="Description" />
                         <textarea id="description"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.description" rows="3"></textarea>
                         <InputError class="mt-2" :message="form.errors.description" />
                     </div>

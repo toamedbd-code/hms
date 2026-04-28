@@ -118,7 +118,7 @@ const submit = () => {
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="name" value="Permission Name" />
                         <input id="name"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" type="text" placeholder="Permission Name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -126,14 +126,14 @@ const submit = () => {
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="guard_name" value="Guard Name" />
                         <input id="guard_name"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.guard_name" type="text" readonly placeholder="Guard Name" />
                         <InputError class="mt-2" :message="form.errors.bn_name" />
                     </div>
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="permission_module" value="Module" />
                         <select id="permission_module"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="selectedModule">
                             <template v-for="module in moduleOptions" :key="module.value">
                                 <option :value="module.value">{{ module.label }}</option>
@@ -145,7 +145,7 @@ const submit = () => {
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="parent_id" value="Parent Permission " />
                         <select id="parent_id"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.parent_id" placeholder="Select Permission">
                             <option value="">--Select Parent Permission--</option>
                             <template v-for="permissionInfo in filteredParentPermissions" :key="permissionInfo.id">

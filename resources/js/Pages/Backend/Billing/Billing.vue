@@ -96,7 +96,7 @@ const debouncedSearch = () => {
 // Main search function
 const performSearch = async () => {
     if (!filters.value.case_id.trim()) {
-        errorMessage.value = 'Please enter a Case ID';
+        errorMessage.value = 'Please enter a Case ID or Bill ID';
         searchResults.value = null;
         return;
     }
@@ -106,7 +106,8 @@ const performSearch = async () => {
 
     try {
         const response = await axios.get(route('backend.billing.search'), {
-            params: { case_id: filters.value.case_id }
+            // send both keys so backend can match on case_id or bill_id
+            params: { case_id: filters.value.case_id, bill_id: filters.value.case_id }
         });
 
         searchResults.value = response.data;
@@ -233,12 +234,12 @@ const clearSearch = () => {
                         <div class="p-6">
                             <form @submit.prevent="searchByCase" class="space-y-4">
                                 <div>
-                                    <InputLabel for="case_id" value="Case ID" />
+                                    <InputLabel for="case_id" value="Case ID / Bill ID" />
                                     <div class="flex mt-2">
                                         <div class="relative flex-1">
-                                            <input id="case_id" type="text" placeholder="Enter Case ID "
+                                            <input id="case_id" type="text" placeholder="Enter Case ID or Bill ID"
                                                 v-model="filters.case_id"
-                                                class="block w-full px-3 py-2 pr-8 text-sm rounded-l-md border border-gray-300 dark:border-gray-600 dark:bg-slate-700 dark:text-slate-200 focus:border-blue-500 focus:outline-none"
+                                                class="block w-full px-3 py-2 pr-8 rounded-l-md border border-gray-300 dark:border-gray-600 dark:bg-slate-700 dark:text-slate-200 focus:border-blue-500 focus:outline-none"
                                                 autocomplete="off" />
 
                                             <!-- Clear button -->
@@ -280,7 +281,7 @@ const clearSearch = () => {
 
                                 <!-- Error message if no results found -->
                                 <div v-if="searchResults.length === 0"
-                                    class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4 dark:bg-yellow-900/20 dark:border-yellow-500">
+                                    class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4 dark:bg-yellow-900/20 dark:border-yellow-500 text-white">
                                     <div class="flex">
                                         <div class="flex-shrink-0">
                                             <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg"
@@ -292,7 +293,7 @@ const clearSearch = () => {
                                         </div>
                                         <div class="ml-3">
                                             <p class="text-sm text-yellow-700 dark:text-yellow-300">
-                                                No records found for Case ID: "{{ filters.case_id }}"
+                                                No records found for Case/Bill ID: "{{ filters.case_id }}"
                                             </p>
                                         </div>
                                     </div>
@@ -347,7 +348,7 @@ const clearSearch = () => {
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm">
                                                     <span :class="{
-                                                        'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200': result.status === 'Active',
+                                                        'bg-green-100 text-white dark:bg-green-900 dark:text-green-200': result.status === 'Active',
                                                         'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200': result.status === 'Pending',
                                                         'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200': result.status === 'Inactive'
                                                     }"

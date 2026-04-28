@@ -42,7 +42,7 @@ const pendingQty = (item) => {
       <div class="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">Purchase Product Details</h1>
         <div class="flex items-center gap-2">
-          <Link :href="route('backend.medicinepurchase.edit', purchase.id)" class="px-3 py-2 text-sm text-black bg-yellow-400 rounded hover:bg-yellow-500">
+          <Link :href="route('backend.medicinepurchase.edit', purchase.id)" class="px-3 py-2 text-white text-black bg-yellow-400 rounded hover:bg-yellow-500">
             Edit
           </Link>
           <Link :href="route('backend.medicinepurchase.index')" class="px-3 py-2 text-sm text-white bg-gray-600 rounded hover:bg-gray-700">

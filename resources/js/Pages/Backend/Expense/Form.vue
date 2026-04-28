@@ -126,7 +126,7 @@ const goToExpenseList = () => {
                     <div class="col-span-1">
                         <InputLabel for="expense_header_id" value="Expense Head *" />
                         <select id="expense_header_id" v-model="form.expense_header_id"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                             <option value="">Select Expense Head</option>
                             <option v-for="head in expenseHeads" :key="head.id" :value="head.id">
                                 {{ head.name }}
@@ -139,7 +139,7 @@ const goToExpenseList = () => {
                     <div class="col-span-1">
                         <InputLabel for="name" value="Name *" />
                         <input id="name" v-model="form.name" type="text" placeholder="Expense Name"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
 
@@ -148,7 +148,7 @@ const goToExpenseList = () => {
                         <InputLabel for="bill_number" value="Bill Number" />
                         <input id="bill_number" v-model="form.bill_number" type="text"
                             placeholder="Bill Number"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                         <InputError class="mt-2" :message="form.errors.bill_number" />
                     </div>
 
@@ -156,7 +156,7 @@ const goToExpenseList = () => {
                     <div class="col-span-1">
                         <InputLabel for="date" value="Date *" />
                         <input id="date" v-model="form.date" type="date" :max="new Date().toISOString().split('T')[0]"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300
                         dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200
                         focus:border-indigo-300 dark:focus:border-slate-600" />
                         <InputError class="mt-2" :message="form.errors.date" />
@@ -169,7 +169,7 @@ const goToExpenseList = () => {
                     <div class="col-span-1">
                         <InputLabel for="amount" value="Amount (TK.) *" />
                         <input id="amount" v-model="form.amount" @input="formatAmount" type="text" placeholder="0.00"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                         <InputError class="mt-2" :message="form.errors.amount" />
                     </div>
 
@@ -194,7 +194,7 @@ const goToExpenseList = () => {
 
                         <div class="relative">
                             <input id="document" type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 @change="handleDocumentChange" />
                             <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                                 <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor"
@@ -218,7 +218,7 @@ const goToExpenseList = () => {
                         <InputLabel for="description" value="Description" />
                         <textarea id="description" v-model="form.description" rows="4"
                             placeholder="Enter description..."
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
                         <InputError class="mt-2" :message="form.errors.description" />
                     </div>
                 </div>

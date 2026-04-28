@@ -541,7 +541,7 @@ const goBack = () => {
           <input
             v-model="search"
             type="text"
-            placeholder="Bill no / patient / test"
+            placeholder="Bill no / patient / item"
             class="w-56 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-200"
             @keyup.enter="handleSearch"
           />
@@ -578,7 +578,7 @@ const goBack = () => {
             <tr>
               <th class="px-3 py-2 border">Bill No</th>
               <th class="px-3 py-2 border">Patient</th>
-              <th class="px-3 py-2 border">Tests</th>
+              <th class="px-3 py-2 border">Items</th>
               <th class="px-3 py-2 border">Collected By</th>
               <th class="px-3 py-2 border">Reported By</th>
               <th class="px-3 py-2 border">Status</th>
@@ -636,8 +636,8 @@ const goBack = () => {
 
       <!-- Print picker modal -->
       <div v-if="showPrintPicker" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div class="w-full max-w-2xl p-4 bg-white rounded shadow-lg" @click.self="showPrintPicker = false">
-          <h3 class="mb-3 text-lg font-semibold">Print Reports</h3>
+        <div class="w-full max-w-2xl p-4 bg-white rounded shadow-lg text-gray-800" @click.self="showPrintPicker = false">
+          <h3 class="mb-3 text-lg font-semibold text-gray-900">Print Reports</h3>
           <p class="text-sm text-gray-600 mb-3">Bill: {{ printBilling?.bill_number ?? '' }} — Patient: {{ getPatientName(printBilling) }}</p>
 
           <div class="mb-3 max-h-64 overflow-auto">
@@ -690,8 +690,8 @@ const goBack = () => {
       </div>
 
       <div v-if="showDueModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div class="w-full max-w-md p-4 bg-white rounded shadow-lg" @click.self="showDueModal = false">
-          <h3 class="mb-3 text-lg font-semibold">Collect Due</h3>
+        <div class="w-full max-w-md p-4 bg-white rounded shadow-lg text-gray-800" @click.self="showDueModal = false">
+          <h3 class="mb-3 text-lg font-semibold text-gray-900">Collect Due</h3>
 
           <table class="w-full mb-3 text-sm table-auto">
             <tr>
@@ -731,8 +731,8 @@ const goBack = () => {
             </label>
 
             <div class="mt-2">
-              <span v-if="isReady" class="text-green-700 bg-green-100 px-2 py-1 rounded text-sm">Ready</span>
-              <span v-else class="text-red-700 bg-red-100 px-2 py-1 rounded text-sm">Not Ready</span>
+              <span v-if="isReady" class="text-green-800 bg-green-100 px-2 py-1 rounded text-sm">Ready</span>
+              <span v-else class="text-red-800 bg-red-100 px-2 py-1 rounded text-sm">Not Ready</span>
             </div>
 
             <div v-if="partialCollected" class="mt-2 text-sm text-yellow-700">Partial payment collected — print blocked until fully paid.</div>

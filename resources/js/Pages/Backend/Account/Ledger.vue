@@ -134,14 +134,14 @@ function goto(page) {
         </div>
       </div>
 
-      <div v-if="selectedTx" class="fixed inset-0 bg-black/50 flex items-center justify-center">
+      <div v-if="selectedTx" class="fixed inset-0 bg-black/50 flex items-center justify-center text-white">
         <div class="bg-white rounded p-4 w-2/3 max-h-[80vh] overflow-auto">
           <div class="flex justify-between items-center mb-3">
             <div>
               <div class="font-semibold">Transaction: {{ selectedTx.uuid }}</div>
               <div class="text-sm text-gray-600">{{ selectedTx.description }} — {{ formatDate(selectedTx.date) }}</div>
             </div>
-            <div><button @click="closeModal" class="px-2 py-1 bg-gray-300 rounded">Close</button></div>
+            <div><button @click="closeModal" class="px-2 py-1 bg-gray-300 rounded text-white">Close</button></div>
           </div>
 
           <table class="w-full table-auto border-collapse">
@@ -161,3 +161,5 @@ function goto(page) {
     </div>
   </BackendLayout>
 </template>
+
+<style scoped></style>

@@ -133,7 +133,7 @@ const goToStaffAttendanceList = () => {
             <form @submit.prevent="submit" class="p-4">
                 <InputLabel for="attendance_date" value="Attendance Date" />
                 <input id="attendance_date"
-                    class="block p-2 mb-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                    class="block p-2 mb-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                     v-model="form.attendance_date" type="date" />
                 <table
                     class="w-full grid-cols-1 gap-3 text-xs text-gray-700 border border-gray-300 rid sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-4">
@@ -156,7 +156,7 @@ const goToStaffAttendanceList = () => {
                                 <td class="px-2 py-1 text-center border border-gray-300">{{ record.name }}</td>
                                 <td class="px-2 py-1 border border-gray-300">
                                     <select
-                                        class="w-full block p-2 mb-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                        class="w-full block p-2 mb-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                         v-model="record.attendance_status">
                                         <option value="">Select Attendance</option>
                                         <option value="Present">Present</option>
@@ -169,17 +169,17 @@ const goToStaffAttendanceList = () => {
                                     <input v-model="record.in_time" type="time"
                                         :disabled="!isTimeFieldsActive(record.attendance_status)"
                                         @click="setCurrentTime(record, 'in_time')"
-                                        class="w-full block p-2 mb-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                        class="w-full block p-2 mb-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                 </td>
                                 <td class="px-2 py-1 border border-gray-300">
                                     <input v-model="record.out_time" type="time"
                                         :disabled="!isTimeFieldsActive(record.attendance_status)"
                                         @click="setCurrentTime(record, 'out_time')"
-                                        class="w-full block p-2 mb-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                        class="w-full block p-2 mb-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                 </td>
                                 <td class="px-2 py-1 border border-gray-300">
                                     <textarea v-model="record.note" placeholder="Note"
-                                        class="w-full block p-2 mb-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
+                                        class="w-full block p-2 mb-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
                                 </td>
                             </tr>
                         </template>

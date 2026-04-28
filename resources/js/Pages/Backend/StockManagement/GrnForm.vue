@@ -81,7 +81,7 @@ const submit = () => {
           </div>
 
           <div class="space-y-2">
-            <div v-for="(row, idx) in form.items" :key="idx" class="grid grid-cols-1 md:grid-cols-12 gap-2 bg-slate-50 p-2 rounded border">
+            <div v-for="(row, idx) in form.items" :key="idx" class="grid grid-cols-1 md:grid-cols-12 gap-2 bg-slate-50 p-2 rounded border text-white">
               <div class="md:col-span-6">
                 <select v-model="row.store_item_id" class="w-full p-2 text-sm border rounded" @change="onItemChange(row)">
                   <option value="">Select Item</option>

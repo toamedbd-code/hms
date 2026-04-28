@@ -120,4 +120,37 @@ class LedgerService
 
         return $this->recordTransaction($lines, $description, $date, $referenceType, $referenceId, $createdBy);
     }
+
+    /**
+     * Delete (reverse) a previously recorded transaction and adjust balances.
+     * Returns true on success, false if transaction not found.
+     */
+    public function deleteTransaction($transactionId)
+    {
+        return DB::transaction(function () use ($transactionId) {
+            $tx = LedgerTransaction::with('entries')->find($transactionId);
+            if (! $tx) {
+                return false;
+            }
+
+            foreach ($tx->entries as $entry) {
+                $balance = AccountBalance::firstOrCreate(['account_id' => $entry->account_id], ['balance' => 0]);
+
+                // Reverse the original delta: debit had increased balance, so subtract it; credit had decreased balance, so add it back
+                if ($entry->entry_type === 'debit') {
+                    $balance->balance = (float) $balance->balance - (float) $entry->amount;
+                } else {
+                    $balance->balance = (float) $balance->balance + (float) $entry->amount;
+                }
+
+                $balance->save();
+            }
+
+            // Remove entries and transaction
+            $tx->entries()->delete();
+            $tx->delete();
+
+            return true;
+        });
+    }
 }

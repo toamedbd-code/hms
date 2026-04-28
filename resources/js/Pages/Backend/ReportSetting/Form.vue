@@ -44,7 +44,8 @@ const form = useForm({
   barcode_height: props.settings?.barcode_height ?? 52,
   report_header_html: props.settings?.report_header_html ?? '',
   report_footer_html: props.settings?.report_footer_html ?? '',
-  report_show_header_footer: props.settings?.attendance_device_options?.reporting?.show_header_footer ?? true,
+  report_show_header: props.settings?.attendance_device_options?.reporting?.show_header ?? props.settings?.attendance_device_options?.reporting?.show_header_footer ?? true,
+  report_show_footer: props.settings?.attendance_device_options?.reporting?.show_footer ?? props.settings?.attendance_device_options?.reporting?.show_header_footer ?? true,
   report_margin_top: props.settings?.attendance_device_options?.reporting?.layout?.page_margin_top ?? 0,
   report_margin_bottom: props.settings?.attendance_device_options?.reporting?.layout?.page_margin_bottom ?? 0,
   report_header_height: props.settings?.attendance_device_options?.reporting?.layout?.header_height ?? 115,
@@ -209,8 +210,13 @@ const submit = () => {
 
         <div class="grid grid-cols-1 gap-4 mt-4 sm:grid-cols-3">
           <div class="flex items-center gap-2">
-            <input id="report_show_header_footer" type="checkbox" v-model="form.report_show_header_footer" class="w-4 h-4" />
-            <label for="report_show_header_footer" class="text-sm text-gray-700">Show header/footer</label>
+            <input id="report_show_header" type="checkbox" v-model="form.report_show_header" class="w-4 h-4" />
+            <label for="report_show_header" class="text-sm text-gray-700">Show header</label>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <input id="report_show_footer" type="checkbox" v-model="form.report_show_footer" class="w-4 h-4" />
+            <label for="report_show_footer" class="text-sm text-gray-700">Show footer</label>
           </div>
 
           <div>

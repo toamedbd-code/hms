@@ -70,7 +70,7 @@
             <thead>
                 <tr>
                     <th class="sl">SL</th>
-                    <th class="test">Test Name</th>
+                    <th class="test">Item Name</th>
                     <th>Result</th>
                     <th class="range">Normal Range</th>
                 </tr>

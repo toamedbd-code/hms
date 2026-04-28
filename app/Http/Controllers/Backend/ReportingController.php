@@ -49,6 +49,11 @@ class ReportingController extends Controller
 
         $datas = Billing::query()
             ->where('status', 'Active')
+            // Exclude IPD-generated billings (case_number starting with 'IPD-')
+            ->where(function ($q) {
+                $q->whereNull('case_number')
+                    ->orWhere('case_number', 'not like', 'IPD-%');
+            })
             ->when($billNumber !== '', function ($query) use ($billNumber) {
                 $query->where('bill_number', 'like', '%' . $billNumber . '%');
             })
@@ -97,6 +102,11 @@ class ReportingController extends Controller
 
         $query = Billing::query()
             ->where('status', 'Active')
+            // Exclude IPD-generated billings from reporting searches
+            ->where(function ($q) {
+                $q->whereNull('case_number')
+                    ->orWhere('case_number', 'not like', 'IPD-%');
+            })
             ->whereHas('billItems', function ($query) use ($allowedCategories) {
                 $query->whereIn('category', $allowedCategories)
                     ->whereNotNull('sample_collected_at')
@@ -118,6 +128,12 @@ class ReportingController extends Controller
 
     public function edit(Billing $billing)
     {
+        // Prevent reporting operations on IPD-generated billings
+        if (str_starts_with((string) ($billing->case_number ?? ''), 'IPD-')) {
+            return redirect()->route('backend.reporting.index')
+                ->with('warning', 'Reporting is not available for IPD invoices.');
+        }
+
         $allowedCategories = $this->resolveDepartmentCategories();
         $includeReported = request()->boolean('include_reported');
 
@@ -476,6 +492,12 @@ class ReportingController extends Controller
 
     public function update(Request $request, Billing $billing)
     {
+        // Disallow saving reports for IPD-generated billings
+        if (str_starts_with((string) ($billing->case_number ?? ''), 'IPD-')) {
+            return redirect()->route('backend.reporting.index')
+                ->with('warning', 'Reporting is not available for IPD invoices.');
+        }
+
         $allowedCategories = $this->resolveDepartmentCategories();
         $validated = $request->validate([
             'report_notes' => ['array'],
@@ -512,6 +534,11 @@ class ReportingController extends Controller
 
     public function updateItem(Request $request, BillItem $billItem)
     {
+        // Disallow reporting actions for IPD-generated bill items
+        if (str_starts_with((string) ($billItem->billing->case_number ?? ''), 'IPD-')) {
+            return back()->with('warning', 'Reporting is not available for IPD invoices.');
+        }
+
         $allowedCategories = $this->resolveDepartmentCategories();
         $request->validate([
             'report_note' => ['nullable', 'string'],
@@ -572,6 +599,12 @@ class ReportingController extends Controller
             Log::info('ReportingController::print called', ['bill_item_id' => $billItem->id ?? null, 'category' => $billItem->category ?? null]);
         } catch (\Throwable $e) {
             // ignore logging failures
+        }
+
+        // Disallow printing reports for IPD-generated bill items
+        if (str_starts_with((string) ($billItem->billing->case_number ?? ''), 'IPD-')) {
+            return redirect()->route('backend.reporting.index')
+                ->with('warning', 'Reporting/print not available for IPD invoices.');
         }
 
         $allowedCategories = $this->resolveDepartmentCategories();
@@ -683,15 +716,38 @@ class ReportingController extends Controller
         $hasHeader = $headerImageBase64 !== '' || $headerHtml !== '';
         $hasFooter = $footerImageBase64 !== '' || $footerContent !== '' || $footerHtml !== '';
 
-        // respect admin option to show/hide header & footer for reporting
-        $showHeaderFooter = data_get($attendanceOptions, 'reporting.show_header_footer', true);
-        if (!$showHeaderFooter) {
-            // When header/footer display is disabled in settings, keep footer
-            // variables intact so a footer image or content can still render.
+        // respect admin option(s) to show/hide header & footer for reporting
+        // Backwards-compatible: support either a single `show_header_footer` boolean
+        // or separate `show_header` / `show_footer` booleans in the reporting settings.
+        $settingShowHeaderFooter = data_get($attendanceOptions, 'reporting.show_header_footer', null);
+        $settingShowHeader = data_get($attendanceOptions, 'reporting.show_header', null);
+        $settingShowFooter = data_get($attendanceOptions, 'reporting.show_footer', null);
+
+        $showHeader = $settingShowHeader !== null
+            ? (bool) $settingShowHeader
+            : ($settingShowHeaderFooter !== null ? (bool) $settingShowHeaderFooter : true);
+
+        $showFooter = $settingShowFooter !== null
+            ? (bool) $settingShowFooter
+            : ($settingShowHeaderFooter !== null ? (bool) $settingShowHeaderFooter : true);
+
+        // If header is disabled, clear header data so view won't render or reserve space.
+        if (!$showHeader) {
             $headerImageBase64 = '';
             $headerHtml = '';
             $hasHeader = false;
         }
+
+        // If footer is disabled, clear footer data so view won't render or reserve space.
+        if (!$showFooter) {
+            $footerImageBase64 = '';
+            $footerHtml = '';
+            $footerContent = '';
+            $hasFooter = false;
+        }
+
+        // Provide a combined flag for older templates that expect a single boolean.
+        $showHeaderFooter = ($showHeader && $showFooter);
 
         // apply page bottom margin if provided (already set above)
         $reportFooterHeight = max((int) ($layoutSettings['footer_height'] ?? 70), 0); // px
@@ -989,6 +1045,12 @@ class ReportingController extends Controller
         if (!$billItem) {
             return redirect()->route('backend.reporting.index')
                 ->with('warning', 'No report found for this id.');
+        }
+
+        // Prevent downloading reports for IPD-generated billings
+        if (str_starts_with((string) ($billItem->billing->case_number ?? ''), 'IPD-')) {
+            return redirect()->route('backend.reporting.index')
+                ->with('warning', 'Reporting is not available for IPD invoices.');
         }
 
         return redirect()->route('backend.reporting.print', $billItem->id);

@@ -231,7 +231,7 @@ const getReturnDateTime = (item) => {
                   <Link :href="route('backend.productreturn.show', item.id)" class="px-2 py-1 text-xs text-white bg-teal-600 rounded hover:bg-teal-700">
                     View
                   </Link>
-                  <Link :href="route('backend.productreturn.edit', item.id)" class="px-2 py-1 text-xs text-black bg-yellow-400 rounded hover:bg-yellow-500">
+                  <Link :href="route('backend.productreturn.edit', item.id)" class="px-2 py-1 text-white text-black bg-yellow-400 rounded hover:bg-yellow-500">
                     Edit
                   </Link>
                   <button type="button" class="px-2 py-1 text-xs text-white bg-red-600 rounded hover:bg-red-700" @click="deleteReturn(item.id)">
@@ -279,7 +279,7 @@ const getReturnDateTime = (item) => {
     </div>
 
     <div v-if="showPayModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div class="w-full max-w-md rounded-lg bg-white shadow-xl">
+      <div class="w-full max-w-md rounded-lg bg-white shadow-xl text-gray-800">
         <div class="flex items-center justify-between border-b px-5 py-3">
           <h3 class="text-base font-semibold text-gray-800">Product Return Payment</h3>
           <button

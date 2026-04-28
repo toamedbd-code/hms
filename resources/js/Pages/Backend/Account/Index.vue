@@ -89,7 +89,7 @@ async function deleteAccount(id) {
                   </div>
                 </div>
                 <div class="space-x-2">
-                  <button @click="editAccount(acc)" class="px-2 py-1 bg-yellow-400 text-black rounded text-sm">Edit</button>
+                  <button @click="editAccount(acc)" class="px-2 py-1 bg-yellow-400 text-white rounded text-sm">Edit</button>
                   <button @click="deleteAccount(acc.id)" class="px-2 py-1 bg-red-500 text-white rounded text-sm">Delete</button>
                 </div>
               </div>
@@ -126,7 +126,7 @@ async function deleteAccount(id) {
             </div>
             <div class="flex items-center gap-2">
               <button :disabled="loading" @click.prevent="saveAccount" class="px-4 py-2 bg-blue-600 text-white rounded">{{ isEditing ? 'Save' : 'Create' }}</button>
-              <button v-if="isEditing" @click.prevent="cancelEdit" class="px-4 py-2 bg-gray-300 text-black rounded">Cancel</button>
+              <button v-if="isEditing" @click.prevent="cancelEdit" class="px-4 py-2 bg-gray-300 text-white rounded">Cancel</button>
             </div>
           </div>
         </div>

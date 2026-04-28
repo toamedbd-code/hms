@@ -35,6 +35,8 @@
             --report-header-height: <?php echo e($reportHeaderHeight ?? 115); ?>px;
             --report-footer-height: <?php echo e($reportFooterHeight ?? 70); ?>px;
             --report-page-top-margin: <?php echo e($pageMarginTop ?? 0); ?>px;
+            --signature-top-margin: <?php echo e(isset($signatureMarginTop) ? (int) $signatureMarginTop : 160); ?>px;
+            --signature-left-margin: <?php echo e(isset($signatureMarginLeft) ? (int) $signatureMarginLeft : 96); ?>px;
         }
         * { box-sizing: border-box; }
         @page { size: A4; margin: 0; }
@@ -105,7 +107,11 @@
             padding-bottom: 110px;
         }
         .footer-section {
-            position: fixed;
+            /* Keep footer in normal flow on-screen so it scrolls with the page
+               and does not overlay content. For print, `@media print` will
+               switch this to `position: fixed` so the footer sticks to the
+               bottom of each printed page. */
+            position: relative;
             width: 100%;
             padding-left: 0;
             padding-right: 0;
@@ -279,7 +285,7 @@
                     <img src="<?php echo e($barcodeDataUri); ?>" alt="Barcode Left" class="barcode-image" />
                 </div>
                 <div class="header-center">
-                    <div class="receipt-title"><?php echo e(strtoupper((string) ($reportTitle ?? 'Test Report'))); ?></div>
+                    <div class="receipt-title"><?php echo e(strtoupper((string) ($reportTitle ?? 'Item Report'))); ?></div>
                     <?php if(!empty($headerHtml)): ?>
                         <div class="meta" style="margin-top:4px; font-size:12px;"><?php echo $headerHtml; ?></div>
                     <?php endif; ?>
@@ -297,7 +303,7 @@
                     </div>
 
                     <div class="title-cell-center">
-                        <div class="receipt-title"><?php echo e(strtoupper((string) ($reportTitle ?? 'Test Report'))); ?></div>
+                        <div class="receipt-title"><?php echo e(strtoupper((string) ($reportTitle ?? 'Item Report'))); ?></div>
                     </div>
 
                     <div class="barcode-cell-right">
@@ -350,7 +356,7 @@
                 <thead>
                     <tr>
                         <th class="sn-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; width:6%;">S/N</th>
-                            <th class="testname-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:left; width:44%;">Test Name</th>
+                            <th class="testname-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:left; width:44%;">Item Name</th>
                             <th class="result-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; width:25%;">Result</th>
                             <th class="range-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; width:25%;">Normal Range</th>
                     </tr>

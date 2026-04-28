@@ -82,42 +82,42 @@ const goToTpaList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="name" value="Name" />
                         <input id="name"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" type="text" placeholder="Name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="code" value="Code" />
                         <input id="code"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.code" type="text" placeholder="Code" />
                         <InputError class="mt-2" :message="form.errors.code" />
                     </div>
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="contact_number" value="Contact Number" />
                         <input id="contact_number"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.contact_number" type="text" placeholder="Contact Number" />
                         <InputError class="mt-2" :message="form.errors.contact_number" />
                     </div>
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="address" value="Address" />
                         <textarea id="address"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.address" type="text" placeholder="Address" />
                         <InputError class="mt-2" :message="form.errors.address" />
                     </div>
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="contact_person_name" value="Contact Person Name" />
                         <input id="contact_person_name"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.contact_person_name" type="text" placeholder="Contact Person Name" />
                         <InputError class="mt-2" :message="form.errors.contact_person_name" />
                     </div>
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="contact_person_phone" value="Contact Person Phone" />
                         <input id="contact_person_phone"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.contact_person_phone" type="text" placeholder="Contact Person Phone" />
                         <InputError class="mt-2" :message="form.errors.contact_person_phone" />
                     </div>

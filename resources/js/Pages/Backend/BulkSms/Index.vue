@@ -73,7 +73,7 @@ const visitPage = (url) => {
             </div>
 
             <div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
-                <div class="rounded-md border bg-slate-50 p-3">
+                <div class="rounded-md border bg-slate-50 p-3 text-white">
                     <div class="text-[11px] font-medium text-slate-500">Total</div>
                     <div class="mt-1 text-lg font-bold text-slate-800">{{ summary.total ?? 0 }}</div>
                 </div>
@@ -81,15 +81,15 @@ const visitPage = (url) => {
                     <div class="text-[11px] font-medium text-amber-700">Queued</div>
                     <div class="mt-1 text-lg font-bold text-amber-800">{{ summary.queued ?? 0 }}</div>
                 </div>
-                <div class="rounded-md border bg-yellow-50 p-3">
+                <div class="rounded-md border bg-yellow-50 p-3 text-white">
                     <div class="text-[11px] font-medium text-yellow-700">Retrying</div>
                     <div class="mt-1 text-lg font-bold text-yellow-800">{{ summary.retrying ?? 0 }}</div>
                 </div>
-                <div class="rounded-md border bg-emerald-50 p-3">
+                <div class="rounded-md border bg-emerald-50 p-3 text-white">
                     <div class="text-[11px] font-medium text-emerald-700">Sent</div>
                     <div class="mt-1 text-lg font-bold text-emerald-800">{{ summary.sent ?? 0 }}</div>
                 </div>
-                <div class="rounded-md border bg-rose-50 p-3">
+                <div class="rounded-md border bg-rose-50 p-3 text-white">
                     <div class="text-[11px] font-medium text-rose-700">Failed</div>
                     <div class="mt-1 text-lg font-bold text-rose-800">{{ summary.failed ?? 0 }}</div>
                 </div>
@@ -144,7 +144,7 @@ const visitPage = (url) => {
             <div class="mt-6 rounded-md border p-4">
                 <h2 class="text-sm font-semibold text-slate-800">Recent SMS History</h2>
 
-                <form @submit.prevent="applyFilters" class="mt-3 rounded-md border bg-slate-50 p-3">
+                <form @submit.prevent="applyFilters" class="mt-3 rounded-md border bg-slate-50 p-3 text-white">
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-5">
                         <div>
                             <label class="mb-1 block text-[11px] font-medium text-slate-600">Status</label>

@@ -271,7 +271,11 @@ $customData->links = $links;
         };
 
         $results = Billing::query()
-            ->where('case_number', 'like', '%' . $caseId . '%')
+            ->where(function ($q) use ($caseId) {
+                $q->where('case_number', 'like', '%' . $caseId . '%')
+                  ->orWhere('bill_number', 'like', '%' . $caseId . '%')
+                  ->orWhere('invoice_number', 'like', '%' . $caseId . '%');
+            })
             ->with(['patient', 'doctor'])
             ->limit(10)
             ->get()

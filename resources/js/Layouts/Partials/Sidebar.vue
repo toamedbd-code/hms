@@ -10,6 +10,7 @@ const sideBar = ref(false);
 const brandingOverride = ref(null);
 let brandingHandler = null;
 let remoteUpdateHandler = null;
+let remoteForceHandler = null;
 // Accept both Inertia shared prop `webSetting` and page-specific `websetting`
 // (the WebSetting form returns `websetting` on partial reloads).
 // Prefer any client-side branding override so runtime updates persist
@@ -125,6 +126,9 @@ const webSetting = computed(() => {
 });
 const sidebarScrollContainer = ref(null);
 const lastClickedRoute = ref(null);
+// Timestamps to avoid older remote snapshots overriding newer server props
+const lastServerSnapshotAt = ref(0);
+const lastRemoteSnapshotAt = ref(0);
 
 const handleResize = () => {
   screenWidth.value = window.innerWidth;
@@ -178,61 +182,12 @@ onMounted(() => {
     // ignore
   }
 
-  // Client-side injection: if permissions indicate Account Management should
-  // be visible but the server-side menus are missing it (stale Inertia props),
-  // insert a minimal Account Management menu so the sidebar shows it immediately.
-  try {
-    const perms = userPermissions.value || [];
-    const accountPerms = ['account-management', 'chart-of-accounts', 'ledger', 'account-balances', 'activity-log-view'];
-    const hasAnyAccountPerm = accountPerms.some((p) => perms.includes(p));
-    const alreadyPresent = (sourceMenus.value || []).some((m) => String(m?.name ?? '').trim().toLowerCase() === 'account management');
-    const isAdminPresent = Boolean(page.props?.auth?.admin) || (typeof window !== 'undefined' && Boolean(window.__inertia?.page?.props?.auth?.admin));
-
-    // Only auto-inject Account Management when the user has any account-related
-    // permission. Don't rely on the admin flag alone, otherwise disabling all
-    // account permissions won't hide the menu.
-    if (hasAnyAccountPerm && !alreadyPresent) {
-      const possibleChildren = [
-        { name: 'Chart of Accounts', icon: 'list', route: 'backend.accounts.index', permission: 'chart-of-accounts' },
-        { name: 'Ledger', icon: 'book', route: 'backend.ledger.index', permission: 'ledger' },
-        { name: 'Account Balances', icon: 'balance', route: 'backend.accounts.balances', permission: 'account-balances' },
-        { name: 'Audit Log', icon: 'activity-log', route: 'backend.accounts.audit', permission: 'activity-log-view' },
-      ];
-
-      const children = possibleChildren.filter((c) => {
-        if (c.permission && !perms.includes(c.permission)) return false;
-        return hasRoute(c.route);
-      }).map((c) => ({
-        id: null,
-        name: c.name,
-        icon: c.icon,
-        route: c.route,
-        permission_name: c.permission,
-        status: 'Active',
-      }));
-
-      // Only add the parent if we have at least one visible child or the user
-      // explicitly has the parent permission.
-      if (children.length > 0 || perms.includes('account-management')) {
-        const accountMenu = {
-          id: null,
-          name: 'Account Management',
-          icon: 'dollar-sign',
-          route: null,
-          description: 'Ledger, accounts and audit',
-          sorting: 1,
-          parent_id: null,
-          permission_name: 'account-management',
-          status: 'Active',
-          childrens: children,
-        };
-
-        remoteSideMenus.value = Array.isArray(remoteSideMenus.value) ? [...remoteSideMenus.value, accountMenu] : [accountMenu];
-      }
-    }
-  } catch (err) {
-    // ignore
-  }
+  // NOTE: Client-side auto-injection of menu entries (e.g. Account Management)
+  // was removed to ensure the server-provided `sideMenus` are authoritative.
+  // Sidebars must reflect the permissions returned by the server's
+  // `getSideMenus()` snapshot so role/permission changes take effect
+  // deterministically after Inertia prop reloads or the explicit fallback
+  // fetch performed by the role editor.
 
   // Expose debug hooks for developer inspection in browser console
   try {
@@ -251,6 +206,16 @@ onMounted(() => {
       window.__sidebar_debug.remoteSideMenus = v;
       if (__sidebar_is_dev) console.log('[sidebar debug] remoteSideMenus updated', v);
     }, { deep: true });
+    // Track when the server-provided auth.sideMenus last updated so we can
+    // avoid applying older remote snapshots that would reintroduce removed
+    // menus (race condition between role save and fallback fetch).
+    try {
+      watch(() => page.props?.auth?.sideMenus, (v) => {
+        try { lastServerSnapshotAt.value = Date.now(); } catch (e) { /* ignore */ }
+      }, { immediate: true });
+    } catch (e) {
+      // ignore
+    }
     watch(sourceMenus, (v) => {
       window.__sidebar_debug.sourceMenus = v;
       if (__sidebar_is_dev) console.log('[sidebar debug] sourceMenus updated', v);
@@ -266,7 +231,7 @@ onMounted(() => {
     // ignore
   }
 
-  try {
+    try {
     brandingHandler = (payload) => {
       try {
         brandingOverride.value = payload ?? null;
@@ -279,7 +244,46 @@ onMounted(() => {
     remoteUpdateHandler = (payload) => {
       try {
         if (Array.isArray(payload)) {
-          remoteSideMenus.value = payload;
+          // mark remote snapshot arrival time
+          try { lastRemoteSnapshotAt.value = Date.now(); } catch (e) { /* ignore */ }
+
+          // Only apply remote snapshot to the UI when it appears to be
+          // newer than the last server snapshot. This prevents older
+          // fallback responses from momentarily reintroducing menus that
+          // were just removed by a role update.
+          const preferRemote = (Array.isArray(payload) && payload.length > 0)
+            && (lastRemoteSnapshotAt.value > (lastServerSnapshotAt.value || 0));
+
+          // Special-case: if the server snapshot currently includes the
+          // "Account Management" parent but the remote payload does not,
+          // prefer the remote payload (apply it) so that removals of the
+          // Account Management parent take effect immediately. This avoids
+          // the UX where Account Management disappears only after a full
+          // page reload.
+          let applied = false;
+          try {
+            const payloadHasAccount = (Array.isArray(payload) && payload.some((m) => String(m?.name ?? '').trim().toLowerCase() === 'account management'));
+            const serverMenus = page.props?.auth?.sideMenus ?? [];
+            const serverHasAccount = (Array.isArray(serverMenus) && serverMenus.some((m) => String(m?.name ?? '').trim().toLowerCase() === 'account management'));
+
+            if (serverHasAccount && !payloadHasAccount) {
+              // force-apply removal
+              remoteSideMenus.value = payload;
+              applied = true;
+            }
+          } catch (e) {
+            // ignore
+          }
+
+          if (!applied) {
+            if (preferRemote) {
+              remoteSideMenus.value = payload;
+            } else {
+              // keep existing remoteSideMenus (if any) and do not overwrite with
+              // an older snapshot; still derive permissions for debug views
+              // from the payload but do not replace the active menu list.
+            }
+          }
 
           // Derive permission names from the payload so client-side
           // filtering aligns with the server-provided snapshot.
@@ -304,6 +308,38 @@ onMounted(() => {
       }
     };
     eventBus.on('sidebar.remoteUpdated', remoteUpdateHandler);
+    // Force-apply handler: updates sidebar immediately when a role editor
+    // emits an authoritative snapshot. This bypasses timestamp ordering to
+    // ensure UI reflects permission removals instantly without reload.
+    remoteForceHandler = (payload) => {
+      try {
+        if (!Array.isArray(payload)) return;
+        try { lastRemoteSnapshotAt.value = Date.now(); } catch (e) { /* ignore */ }
+
+        // Immediately replace remoteSideMenus with the authoritative payload
+        remoteSideMenus.value = payload;
+
+        // Also update derived permissions used for client-side filtering
+        try {
+          const perms = new Set();
+          const walk = (menus) => {
+            (menus || []).forEach((m) => {
+              const p = m?.permission_name ?? m?.permission ?? null;
+              if (p) perms.add(String(p).trim().toLowerCase());
+              const children = m?.childrens ?? m?.child ?? [];
+              if (Array.isArray(children) && children.length) walk(children);
+            });
+          };
+          walk(payload);
+          overrideUserPermissions.value = Array.from(perms);
+        } catch (e) {
+          // ignore
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    eventBus.on('sidebar.remoteUpdatedForce', remoteForceHandler);
   } catch (e) {
     // ignore
   }
@@ -317,6 +353,9 @@ onBeforeUnmount(() => {
     }
     if (remoteUpdateHandler && eventBus && typeof eventBus.off === 'function') {
       eventBus.off('sidebar.remoteUpdated', remoteUpdateHandler);
+    }
+    if (remoteForceHandler && eventBus && typeof eventBus.off === 'function') {
+      eventBus.off('sidebar.remoteUpdatedForce', remoteForceHandler);
     }
   } catch (e) {
     // ignore
@@ -356,6 +395,17 @@ const sourceMenus = computed(() => {
   }
 
   const serverMenus = page.props.auth?.sideMenus ?? [];
+
+  // Prefer an explicit remote snapshot when present. This helps avoid a
+  // race where the local Inertia shared `auth.sideMenus` prop is still
+  // stale immediately after a role/permission update even though the
+  // `/admin/side-menus` fallback returns the updated snapshot. Using the
+  // remote snapshot ensures the sidebar reflects permission changes
+  // immediately without requiring a full page reload.
+  if (Array.isArray(remoteSideMenus.value) && remoteSideMenus.value.length > 0) {
+    return remoteSideMenus.value;
+  }
+
   return (Array.isArray(serverMenus) && serverMenus.length > 0) ? serverMenus : remoteSideMenus.value;
 });
 
@@ -966,54 +1016,9 @@ const filteredMenus = computed(() => {
     return null;
   }).filter(Boolean);
 
-  // Ensure Account Management is visible only when the user has account-related permissions
-  try {
-    const hasAccount = base.some((m) => String(m?.name ?? '').trim().toLowerCase() === 'account management');
-    const perms = userPermissions.value || [];
-    const accountPerms = ['account-management', 'chart-of-accounts', 'ledger', 'account-balances', 'activity-log-view'];
-    const hasAnyAccountPerm = accountPerms.some((p) => perms.includes(p));
-    // Show Account Management only when the user has any account-related permission
-    if (hasAnyAccountPerm && !hasAccount) {
-      const possibleChildren = [
-        { name: 'Chart of Accounts', icon: 'list', route: 'backend.accounts.index', permission: 'chart-of-accounts' },
-        { name: 'Ledger', icon: 'book', route: 'backend.ledger.index', permission: 'ledger' },
-        { name: 'Account Balances', icon: 'balance', route: 'backend.accounts.balances', permission: 'account-balances' },
-        { name: 'Audit Log', icon: 'activity-log', route: 'backend.accounts.audit', permission: 'activity-log-view' },
-      ];
-
-      const children = possibleChildren.filter((c) => {
-        if (!hasRoute(c.route)) return false;
-        // Require explicit permissions to show children. If the permissions list
-        // is empty, treat it as 'no permissions' and do not show.
-        if (!perms || perms.length === 0) return false;
-        return perms.includes(c.permission) || perms.includes('account-management');
-      }).map((c) => ({
-        id: null,
-        name: c.name,
-        icon: c.icon,
-        route: c.route,
-        permission_name: c.permission,
-        status: 'Active',
-      }));
-
-      const accountMenu = {
-        id: null,
-        name: 'Account Management',
-        icon: 'dollar-sign',
-        route: null,
-        description: 'Ledger, accounts and audit',
-        sorting: 1,
-        parent_id: null,
-        permission_name: 'account-management',
-        status: 'Active',
-        childrens: children,
-      };
-
-      base.push(accountMenu);
-    }
-  } catch (err) {
-    // ignore
-  }
+  // NOTE: Do not synthesize top-level menus on the client. The server's
+  // `sideMenus` should fully determine what appears in the sidebar so that
+  // role/permission changes are accurately represented after a save.
 
   // Deduplicate top-level menus that are also listed as children
   try {

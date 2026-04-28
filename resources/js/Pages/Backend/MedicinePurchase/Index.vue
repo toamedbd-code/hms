@@ -81,7 +81,7 @@ const statusClass = (purchase) => {
                   >
                     Add Payment
                   </Link>
-                  <Link :href="route('backend.medicinepurchase.edit', purchase.id)" class="px-2 py-1 text-xs text-black bg-yellow-400 rounded hover:bg-yellow-500">
+                  <Link :href="route('backend.medicinepurchase.edit', purchase.id)" class="px-2 py-1 text-white text-black bg-yellow-400 rounded hover:bg-yellow-500">
                     Edit
                   </Link>
                   <button type="button" class="px-2 py-1 text-xs text-white bg-red-600 rounded hover:bg-red-700" @click="deletePurchase(purchase.id)">

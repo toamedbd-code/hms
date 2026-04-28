@@ -394,7 +394,7 @@ const searchTest = (query, rowIndex) => {
     }
 
     testSearchTimers[rowIndex] = setTimeout(async () => {
-        const url = route("backend.testpathology.search", { q: term });
+        const url = route("backend.itemcharge.search", { q: term });
         try {
             const response = await fetch(url, { headers: { Accept: "application/json" } });
             if (!response.ok) {
@@ -425,7 +425,8 @@ const scrollToHighlighted = (rowIndex) => {
     });
 };
 
-const selectTestFromSuggestion = async (rowIndex, name) => {
+const selectTestFromSuggestion = async (rowIndex, item) => {
+    const name = (typeof item === 'string') ? item : (item?.test_name ?? item?.name ?? '');
     form.tests[rowIndex] = name || '';
     showTestDropdown.value = false;
     highlightedIndex.value = -1;
@@ -456,8 +457,26 @@ const onTestBlur = (rowIndex) => {
     }, 180);
 };
 
+const flattenTestSuggestionsArr = (rowIndex) => {
+    return Array.isArray(testSuggestionsMap[rowIndex]) ? testSuggestionsMap[rowIndex] : [];
+};
+
+const groupSuggestions = (rowIndex) => {
+    const groups = {};
+    flattenTestSuggestionsArr(rowIndex).forEach((item) => {
+        const key = (typeof item === 'string') ? 'Other' : ((item?.category_type ?? 'Other') || 'Other');
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(item);
+    });
+    return groups;
+};
+
+const flatIndexOf = (rowIndex, item) => {
+    return flattenTestSuggestionsArr(rowIndex).indexOf(item);
+};
+
 const onTestKeyDown = (rowIndex, event) => {
-    const list = testSuggestionsMap[rowIndex] || [];
+    const list = flattenTestSuggestionsArr(rowIndex);
     if (event.key === 'ArrowDown') {
         event.preventDefault();
         highlightedIndex.value = Math.min((highlightedIndex.value || -1) + 1, list.length - 1);
@@ -470,7 +489,7 @@ const onTestKeyDown = (rowIndex, event) => {
 };
 
 const onTestEnter = async (rowIndex) => {
-    const list = testSuggestionsMap[rowIndex] || [];
+    const list = flattenTestSuggestionsArr(rowIndex);
     if (showTestDropdown.value && list.length > 0) {
         const pick = (highlightedIndex.value >= 0) ? highlightedIndex.value : 0;
         await selectTestFromSuggestion(rowIndex, list[pick]);
@@ -543,7 +562,7 @@ const onTestEnter = async (rowIndex) => {
                 </div>
                 
                 <div v-if="$page.props.flash?.errorMessage"
-                    class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-white text-red-700">
                     {{ $page.props.flash.errorMessage }}
                 </div>
                 <div class="mb-3 no-print">
@@ -551,7 +570,7 @@ const onTestEnter = async (rowIndex) => {
                     <input
                         v-model="form.nibp"
                         type="text"
-                        class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                        class="w-full px-2 py-1.5 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                         placeholder="e.g. 120/80"
                     />
                     <p v-if="form.errors.nibp" class="mt-1 text-xs text-red-600">
@@ -569,7 +588,7 @@ const onTestEnter = async (rowIndex) => {
                             type="file"
                             accept="image/*"
                             @change="handleDoctorSealChange"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                         />
                         <p v-if="form.errors.doctor_seal" class="mt-1 text-xs text-red-600">
                             {{ form.errors.doctor_seal }}
@@ -585,7 +604,7 @@ const onTestEnter = async (rowIndex) => {
                             type="file"
                             accept="image/*"
                             @change="handleDoctorSignatureChange"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                         />
                         <p v-if="form.errors.doctor_signature" class="mt-1 text-xs text-red-600">
                             {{ form.errors.doctor_signature }}
@@ -597,7 +616,7 @@ const onTestEnter = async (rowIndex) => {
                         <textarea
                             v-model="form.doctor_designation"
                             rows="4"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                             placeholder="e.g. Consultant Medicine&#10;MBBS, FCPS"
                         ></textarea>
                         <p v-if="form.errors.doctor_designation" class="mt-1 text-xs text-red-600">
@@ -611,7 +630,7 @@ const onTestEnter = async (rowIndex) => {
                     <textarea
                         v-model="form.notes"
                         rows="2"
-                        class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                        class="w-full px-2 py-1.5 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                         placeholder="Additional notes"
                     ></textarea>
                     <p v-if="form.errors.notes" class="mt-1 text-xs text-red-600">
@@ -619,7 +638,7 @@ const onTestEnter = async (rowIndex) => {
                     </p>
                 </div>
 
-                <div v-if="saveError" class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <div v-if="saveError" class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-white text-red-700">
                     {{ saveError }}
                 </div>
 
@@ -643,7 +662,7 @@ const onTestEnter = async (rowIndex) => {
                                             v-model="row.medicine_name"
                                             type="text"
                                             :ref="el => medicineInputs.value[index] = el"
-                                            class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                            class="w-full px-2 py-1 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                             placeholder="Medicine name"
                                             @input="onMedicineInput(index)"
                                             @change="onMedicineChange(index)"
@@ -670,7 +689,7 @@ const onTestEnter = async (rowIndex) => {
                                     <input
                                         v-model="row.dose"
                                         type="text"
-                                        class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                        class="w-full px-2 py-1 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="e.g. 1 tab"
                                     />
                                     <p v-if="form.errors[`items.${index}.dose`]" class="mt-1 text-xs text-red-600">
@@ -681,7 +700,7 @@ const onTestEnter = async (rowIndex) => {
                                     <input
                                         v-model="row.duration"
                                         type="text"
-                                        class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                        class="w-full px-2 py-1 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="e.g. 7 days"
                                     />
                                     <p v-if="form.errors[`items.${index}.duration`]" class="mt-1 text-xs text-red-600">
@@ -692,7 +711,7 @@ const onTestEnter = async (rowIndex) => {
                                     <input
                                         v-model="row.frequency"
                                         type="text"
-                                        class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                        class="w-full px-2 py-1 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="e.g. 1-0-1"
                                     />
                                 </td>
@@ -700,7 +719,7 @@ const onTestEnter = async (rowIndex) => {
                                     <input
                                         v-model="row.instructions"
                                         type="text"
-                                        class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                        class="w-full px-2 py-1 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="After meal"
                                     />
                                 </td>
@@ -730,7 +749,7 @@ const onTestEnter = async (rowIndex) => {
                 </div>
 
                 <div class="mt-3 border border-gray-200 rounded-md p-2 dark:border-gray-700">
-                    <div class="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Recommended Tests</div>
+                    <div class="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Recommended Items</div>
                     <div class="space-y-1.5">
                         <div
                             v-for="(testName, index) in form.tests"
@@ -746,8 +765,8 @@ const onTestEnter = async (rowIndex) => {
                                     :id="`testSearch_${index}`"
                                     v-model="form.tests[index]"
                                     type="text"
-                                    class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                                    placeholder="Test name"
+                                    class="w-full px-2 py-1 border border-gray-300 rounded text-white focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                    placeholder="Item name"
                                     @input="e => { searchTest(e.target.value, index); resetTestHighlight(); }"
                                     @focus="onTestFocus(index)"
                                     @blur="onTestBlur(index)"
@@ -756,12 +775,16 @@ const onTestEnter = async (rowIndex) => {
                                     autocomplete="off"
                                 />
 
-                                <!-- Custom dropdown for test suggestions -->
+                                <!-- Custom dropdown for test suggestions (grouped by category_type) -->
                                 <div v-if="focusedTestIndex === index && showTestDropdown" :id="`testDropdown_${index}`" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
-                                    <div v-for="(name, sIndex) in (testSuggestionsMap[index] || [])" :key="sIndex" @click="selectTestFromSuggestion(index, name)" :class="{ 'bg-blue-100': highlightedIndex === sIndex, 'highlighted': highlightedIndex === sIndex }" class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-700 border-b border-gray-100 last:border-b-0">
-                                        <div class="font-medium">{{ name }}</div>
-                                    </div>
-                                    <div v-if="(testSuggestionsMap[index] || []).length === 0" class="px-3 py-2 text-sm text-gray-500 text-center">
+                                    <template v-for="(items, group) in groupSuggestions(index)" :key="group">
+                                        <div class="px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700">{{ group }}</div>
+                                        <div v-for="(item, sIndex) in items" :key="group + '-' + sIndex" @click="selectTestFromSuggestion(index, item)" @mouseenter="highlightedIndex = flatIndexOf(index, item)" :class="flatIndexOf(index, item) === highlightedIndex ? 'bg-blue-100 highlighted' : ''" class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-700 border-b border-gray-100 last:border-b-0">
+                                            <div class="font-medium">{{ typeof item === 'string' ? item : (item.test_name ?? item.name ?? '') }}</div>
+                                            <div v-if="typeof item !== 'string' && (item.amount || item.standard_charge)" class="text-[11px] text-gray-500">৳{{ item.amount ?? item.standard_charge }}</div>
+                                        </div>
+                                    </template>
+                                    <div v-if="flattenTestSuggestionsArr(index).length === 0" class="px-3 py-2 text-sm text-gray-500 text-center">
                                         No tests found
                                     </div>
                                 </div>
@@ -782,7 +805,7 @@ const onTestEnter = async (rowIndex) => {
                             class="px-3 py-1.5 text-xs bg-gray-600 text-white rounded"
                             @click="addTestRow"
                         >
-                            Add Test
+                            Add Item
                         </button>
                     </div>
                     <p v-if="form.errors.tests" class="mt-1 text-xs text-red-600">

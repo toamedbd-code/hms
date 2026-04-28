@@ -418,6 +418,20 @@
                     <td>Total Paid</td>
                     <td class="amount">Tk {{ number_format((float) ($total_paid ?? 0), 2) }}</td>
                 </tr>
+
+                @if(isset($medicineTotal) && (float) $medicineTotal > 0)
+                <tr>
+                    <td>Medicine Bill</td>
+                    <td class="amount">Tk {{ number_format((float) $medicineTotal, 2) }}</td>
+                </tr>
+                @endif
+
+                @if(isset($labTotal) && (float) $labTotal > 0)
+                <tr>
+                    <td>Laboratory Bill</td>
+                    <td class="amount">Tk {{ number_format((float) $labTotal, 2) }}</td>
+                </tr>
+                @endif
             </table>
         </div>
 

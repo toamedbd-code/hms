@@ -127,7 +127,7 @@ const goToInvoiceDesignList = () => {
                     <div class="col-span-3 md:col-span-3">
                         <InputLabel for="module" value="Module *" />
                         <select id="module" v-model="form.module"
-                            class="w-[20%] p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:focus:ring-slate-500 dark:focus:border-slate-500">
+                            class="w-[20%] p-2 mt-1 text-white border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:focus:ring-slate-500 dark:focus:border-slate-500">
                             <option value="">Select Module</option>
                             <option value="opd">OPD</option>
                             <option value="ipd">IPD</option>
@@ -161,7 +161,7 @@ const goToInvoiceDesignList = () => {
                         </div>
 
                         <input id="headerPhoto" type="file" accept="image/*"
-                            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-gray-600 dark:file:text-gray-200"
+                            class="block w-full text-white text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-gray-600 dark:file:text-gray-200"
                             @change="(e) => handlePhotoChange(e, 'headerPhoto')" />
 
                         <InputError class="mt-1" :message="form.errors.headerPhoto" />
@@ -171,7 +171,7 @@ const goToInvoiceDesignList = () => {
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="footer_content" value="Footer Content *" />
                         <textarea id="footer_content" v-model="form.footer_content" rows="4"
-                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:focus:ring-slate-500 dark:focus:border-slate-500"
+                            class="w-full p-2 mt-1 text-white border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:focus:ring-slate-500 dark:focus:border-slate-500"
                             placeholder="Enter Footer Contents"></textarea>
                         <InputError class="mt-1" :message="form.errors.footer_content" />
                     </div>
@@ -180,7 +180,7 @@ const goToInvoiceDesignList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="footer_content_position" value="Footer Content Position" />
                         <select id="footer_content_position" v-model="form.footer_content_position"
-                            class="w-[40%] p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                            class="w-[40%] p-2 mt-1 text-white border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                             <option value="above">Above Image</option>
                             <option value="below">Below Image</option>
                         </select>
@@ -191,14 +191,14 @@ const goToInvoiceDesignList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="header_height" value="Header Height (px)" />
                         <input id="header_height" type="number" min="0" max="1000" step="1" v-model.number="form.header_height"
-                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                            class="w-full p-2 mt-1 text-white border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
                         <InputError class="mt-1" :message="form.errors.header_height" />
                     </div>
 
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="footer_height" value="Footer Height (px)" />
                         <input id="footer_height" type="number" min="0" max="1000" step="1" v-model.number="form.footer_height"
-                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                            class="w-full p-2 mt-1 text-white border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
                         <InputError class="mt-1" :message="form.errors.footer_height" />
                     </div>
 
@@ -222,7 +222,7 @@ const goToInvoiceDesignList = () => {
                         </div>
 
                         <input id="footerPhoto" type="file" accept="image/*"
-                            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-gray-600 dark:file:text-gray-200"
+                            class="block w-full text-white text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-gray-600 dark:file:text-gray-200"
                             @change="(e) => handlePhotoChange(e, 'footerPhoto')" />
 
                         <InputError class="mt-1" :message="form.errors.footerPhoto" />

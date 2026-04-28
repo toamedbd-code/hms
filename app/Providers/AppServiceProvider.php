@@ -187,7 +187,7 @@ class AppServiceProvider extends ServiceProvider
         // Share side menus for admin users with Inertia so frontend can render sidebar
         Inertia::share('auth.sideMenus', function () {
             try {
-                if (auth()->guard('admin')->check() && auth()->guard('admin')->user()->status == 'Active') {
+                if (auth()->guard('admin')->check() && strcasecmp(trim((string) (auth()->guard('admin')->user()->status ?? '')), 'Active') === 0) {
                     return getSideMenus(auth()->guard('admin')->user());
                 }
             } catch (\Throwable $e) {

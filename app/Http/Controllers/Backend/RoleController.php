@@ -13,6 +13,7 @@ use App\Traits\SystemTrait;
 use Spatie\Permission\Models\Permission as SpatiePermission;
 use Spatie\Permission\PermissionRegistrar;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Exception;
 
 class RoleController extends Controller
@@ -57,6 +58,7 @@ class RoleController extends Controller
 
         // Apply visibility rules: if current actor is NOT developer, hide private roles
         try {
+            $allowedModuleSlugs = $allowedModuleSlugs ?? collect();
             $actor = auth()->guard('admin')->user();
             if ($actor && method_exists($actor, 'hasRole') && !$actor->hasRole('developer')) {
                 $currentRoleId = $actor->role_id;
@@ -190,6 +192,100 @@ class RoleController extends Controller
             $filtered = collect();
         }
 
+        // Trim role's initial permission_ids to what the current actor is allowed to see/assign.
+        try {
+            if (isset($role->permission_ids) && is_array($role->permission_ids)) {
+                if (!($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer'))) {
+                    $submittedPermissionIds = $role->permission_ids;
+
+                    $permissionQuery = SpatiePermission::whereIn('id', $submittedPermissionIds)->where('guard_name', 'admin');
+
+                    $actorPermissionIds = collect();
+                    try {
+                        if ($actor) {
+                            $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
+                                return (int) $i;
+                            })->filter()->values();
+                        }
+                    } catch (\Throwable $e) {
+                        $actorPermissionIds = collect();
+                    }
+
+                    // compute allowed module slugs for actor
+                    $allowedModuleSlugs = collect();
+                    try {
+                        if ($actor) {
+                            $allowedModuleSlugs = $actor->modules()->pluck('slug')->map(function ($s) {
+                                return trim(strtolower((string) $s));
+                            })->filter()->values();
+                        }
+                    } catch (\Throwable $e) {
+                        $allowedModuleSlugs = collect();
+                    }
+
+                    if (!($allowedModuleSlugs->count() || $actorPermissionIds->count())) {
+                        $allowedPermissionIds = [];
+                    } else {
+                        $permissionQuery->where(function ($q) use ($allowedModuleSlugs, $actorPermissionIds) {
+                            if ($allowedModuleSlugs->count()) {
+                                $q->whereIn('module_slug', $allowedModuleSlugs->toArray());
+                            }
+                            if ($actorPermissionIds->count()) {
+                                $q->orWhereIn('id', $actorPermissionIds->toArray());
+                            }
+                        });
+
+                        $allowedPermissionIds = $permissionQuery->pluck('id')->toArray();
+                    }
+
+                    $role->permission_ids = array_values(array_intersect($role->permission_ids, $allowedPermissionIds));
+                }
+            }
+        } catch (\Throwable $e) {
+            // ignore trimming errors and keep original permission_ids
+        }
+
+        // Ensure role's initial permission_ids are limited to what the current actor is allowed to see/assign.
+        try {
+            if (isset($role->permission_ids) && is_array($role->permission_ids)) {
+                if (!($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer'))) {
+                    $submittedPermissionIds = $role->permission_ids;
+
+                    $permissionQuery = SpatiePermission::whereIn('id', $submittedPermissionIds)->where('guard_name', 'admin');
+
+                    $actorPermissionIds = collect();
+                    try {
+                        if ($actor) {
+                            $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
+                                return (int) $i;
+                            })->filter()->values();
+                        }
+                    } catch (\Throwable $e) {
+                        $actorPermissionIds = collect();
+                    }
+
+                    if (!($allowedModuleSlugs->count() || $actorPermissionIds->count())) {
+                        $allowedPermissionIds = [];
+                    } else {
+                        $permissionQuery->where(function ($q) use ($allowedModuleSlugs, $actorPermissionIds) {
+                            if ($allowedModuleSlugs->count()) {
+                                $q->whereIn('module_slug', $allowedModuleSlugs->toArray());
+                            }
+                            if ($actorPermissionIds->count()) {
+                                $q->orWhereIn('id', $actorPermissionIds->toArray());
+                            }
+                        });
+
+                        $allowedPermissionIds = $permissionQuery->pluck('id')->toArray();
+                    }
+
+                    $role->permission_ids = array_values(array_intersect($role->permission_ids, $allowedPermissionIds));
+                }
+            }
+        } catch (\Throwable $e) {
+            // ignore trimming errors and keep original permission_ids
+        }
+
         return Inertia::render(
             'Backend/Role/Form',
             [
@@ -268,6 +364,13 @@ class RoleController extends Controller
                 }
 
                 app(PermissionRegistrar::class)->forgetCachedPermissions();
+                Log::info('RoleController@store: syncPermissions', [
+                    'actor_id' => $actor->id ?? null,
+                    'role_id' => $dataInfo->id ?? null,
+                    'submitted' => $submittedPermissionIds,
+                    'allowed' => $allowedPermissionIds,
+                ]);
+
                 $this->roleService->syncPermissions($dataInfo->id, $allowedPermissionIds);
                 $message = 'Role created successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'roles', $message);
@@ -362,80 +465,101 @@ class RoleController extends Controller
                 'id' =>  $id,
             ]
         );
+
     }
 
     public function update(RoleRequest $request, $id)
     {
         DB::beginTransaction();
         try {
-
             $data = $request->validated();
-            if ($this->roleService->update($data, $id)) {
-                // Restrict permissions to actor's modules (same logic as store)
-                $actor = auth()->guard('admin')->user();
+
+            // Compute allowed permissions BEFORE updating the role to avoid side-effects
+            $actor = auth()->guard('admin')->user();
+            $allowedModuleSlugs = collect();
+            try {
+                if ($actor) {
+                    $allowedModuleSlugs = $actor->modules()->pluck('slug')->map(function ($s) {
+                        return trim(strtolower((string) $s));
+                    })->filter()->values();
+                }
+            } catch (\Throwable $e) {
                 $allowedModuleSlugs = collect();
+            }
+
+            $submittedPermissionIds = is_array($request->permission_ids) ? $request->permission_ids : (array) ($request->permission_ids ?? []);
+            // sanitize ids to integers and remove falsy values
+            $submittedPermissionIds = array_values(array_filter(array_map(function ($v) {
+                return is_numeric($v) ? (int) $v : null;
+            }, $submittedPermissionIds)));
+
+            $permissionQuery = SpatiePermission::whereIn('id', $submittedPermissionIds)->where('guard_name', 'admin');
+            if (!($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer'))) {
+                $actorPermissionIds = collect();
                 try {
                     if ($actor) {
-                        $allowedModuleSlugs = $actor->modules()->pluck('slug')->map(function ($s) {
-                            return trim(strtolower((string) $s));
+                        $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
+                            return (int) $i;
                         })->filter()->values();
                     }
                 } catch (\Throwable $e) {
-                    $allowedModuleSlugs = collect();
+                    $actorPermissionIds = collect();
                 }
 
-                $submittedPermissionIds = is_array($request->permission_ids) ? $request->permission_ids : (array) ($request->permission_ids ?? []);
-
-                $permissionQuery = SpatiePermission::whereIn('id', $submittedPermissionIds)->where('guard_name', 'admin');
-                if (!($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer'))) {
-                    $actorPermissionIds = collect();
-                    try {
-                        if ($actor) {
-                            $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
-                                return (int) $i;
-                            })->filter()->values();
-                        }
-                    } catch (\Throwable $e) {
-                        $actorPermissionIds = collect();
-                    }
-
-                    if (!($allowedModuleSlugs->count() || $actorPermissionIds->count())) {
-                        $allowedPermissionIds = [];
-                    } else {
-                        $permissionQuery->where(function ($q) use ($allowedModuleSlugs, $actorPermissionIds) {
-                            if ($allowedModuleSlugs->count()) {
-                                $q->whereIn('module_slug', $allowedModuleSlugs->toArray());
-                            }
-                            if ($actorPermissionIds->count()) {
-                                $q->orWhereIn('id', $actorPermissionIds->toArray());
-                            }
-                        });
-
-                        $allowedPermissionIds = $permissionQuery->pluck('id')->toArray();
-                    }
+                if (!($allowedModuleSlugs->count() || $actorPermissionIds->count())) {
+                    $allowedPermissionIds = [];
                 } else {
+                    $permissionQuery->where(function ($q) use ($allowedModuleSlugs, $actorPermissionIds) {
+                        if ($allowedModuleSlugs->count()) {
+                            $q->whereIn('module_slug', $allowedModuleSlugs->toArray());
+                        }
+                        if ($actorPermissionIds->count()) {
+                            $q->orWhereIn('id', $actorPermissionIds->toArray());
+                        }
+                    });
+
                     $allowedPermissionIds = $permissionQuery->pluck('id')->toArray();
                 }
+            } else {
+                $allowedPermissionIds = $permissionQuery->pluck('id')->toArray();
+            }
 
-                try {
-                    if (!($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer'))) {
-                        $unauthorized = array_values(array_diff($submittedPermissionIds, $allowedPermissionIds));
-                        if (count($unauthorized) > 0) {
-                            DB::rollBack();
-                            return redirect()->back()->with('errorMessage', 'Unauthorized permission selection detected.');
-                        }
+            // Unauthorized check (performed BEFORE persisting role changes)
+            try {
+                if (!($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer'))) {
+                    $unauthorized = array_values(array_diff($submittedPermissionIds, $allowedPermissionIds));
+                    if (count($unauthorized) > 0) {
+                        Log::warning('RoleController@update: unauthorized permission selection', [
+                            'actor_id' => $actor->id ?? null,
+                            'role_id' => $id,
+                            'submitted' => $submittedPermissionIds,
+                            'allowed' => $allowedPermissionIds,
+                            'unauthorized' => $unauthorized,
+                        ]);
+
+                        DB::rollBack();
+                        return redirect()->back()->with('errorMessage', 'Unauthorized permission selection detected.');
                     }
-                } catch (\Throwable $e) {
-                    DB::rollBack();
-                    return redirect()->back()->with('errorMessage', 'Unauthorized permission selection detected.');
                 }
+            } catch (\Throwable $e) {
+                Log::error('RoleController@update: exception during unauthorized check', [
+                    'actor_id' => $actor->id ?? null,
+                    'role_id' => $id,
+                    'error' => substr($e->getMessage(), 0, 1000),
+                ]);
 
+                DB::rollBack();
+                return redirect()->back()->with('errorMessage', 'Unauthorized permission selection detected.');
+            }
+
+            // All good — persist role update and sync permissions
+            if ($this->roleService->update($data, $id)) {
                 app(PermissionRegistrar::class)->forgetCachedPermissions();
                 $role = $this->roleService->syncPermissions($id, $allowedPermissionIds);
                 $users = $this->AdminService->list()->where('status', 'Active')->where('role_id', $id)->get();
-                //dd($permissions);
-                foreach ($users as $key => $user)
+                foreach ($users as $key => $user) {
                     $user->syncRoles($role->id);
+                }
 
                 $message = 'Role updated successfully';
                 $this->storeAdminWorkLog($id, 'roles', $message);

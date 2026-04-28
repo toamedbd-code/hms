@@ -15,6 +15,7 @@ use App\Services\TestService;
 use App\Models\Test;
 use App\Models\TestCategory;
 use App\Models\Charge;
+use App\Models\ChargeCategory;
 use App\Models\PathologyUnit;
 use App\Models\PathologyParameter;
 use Illuminate\Support\Facades\DB;
@@ -66,7 +67,7 @@ class PathologyTestController extends Controller
         return Inertia::render(
             'Backend/PathologyTest/Index',
             [
-                'pageTitle' => fn() => 'Test List',
+                    'pageTitle' => fn() => 'Item List',
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
@@ -82,13 +83,40 @@ class PathologyTestController extends Controller
             return response()->json(['results' => []]);
         }
 
-        $results = Test::query()
+        $tests = Test::query()
             ->where('status', 'Active')
             ->where('test_name', 'like', '%' . $query . '%')
             ->orderBy('test_name')
-            ->limit(15)
-            ->pluck('test_name')
-            ->values();
+            ->limit(30)
+            ->get([
+                'id',
+                'test_name',
+                'category_type',
+                'charge_name',
+                'standard_charge',
+                'amount',
+                'tax',
+                'charge_category_id',
+            ]);
+
+        $results = $tests->map(function ($t) {
+            $charge = null;
+            if (!empty($t->charge_name)) {
+                $charge = Charge::query()->whereRaw('LOWER(name) = ?', [strtolower($t->charge_name)])->first();
+            }
+
+            return [
+                'id' => $t->id,
+                'test_name' => $t->test_name,
+                'category_type' => $t->category_type,
+                'charge_id' => $charge?->id ?? null,
+                'charge_name' => $t->charge_name,
+                'amount' => $t->amount !== null ? (float) $t->amount : (($t->standard_charge !== null) ? (float) $t->standard_charge : null),
+                'standard_charge' => $t->standard_charge !== null ? (float) $t->standard_charge : null,
+                'tax' => $t->tax !== null ? (float) $t->tax : 0,
+                'charge_category_id' => $t->charge_category_id ?? null,
+            ];
+        })->values();
 
         return response()->json(['results' => $results]);
     }
@@ -239,7 +267,8 @@ class PathologyTestController extends Controller
                         ->first();
 
                     if ($matchedCharge) {
-                        $chargeCategoryId = $matchedCharge->id;
+                        // matchedCharge->id is the charge id; we need the charge's category id
+                        $chargeCategoryId = $matchedCharge->charge_category_id ?? $chargeCategoryId;
                         $tax = $tax ?? $matchedCharge->tax;
                         $standardCharge = $standardCharge ?? $matchedCharge->standard_charge;
 
@@ -373,6 +402,56 @@ class PathologyTestController extends Controller
                     'status' => 'Active',
                 ]);
 
+                // Ensure a corresponding Charge exists so this test appears in IPD hospital charges
+                try {
+                    $resolvedChargeName = trim((string)($chargeName ?? $testName));
+                    if ($resolvedChargeName !== '') {
+                        // ensure we have a valid charge_category_id (create one if needed)
+                        $targetChargeCategoryId = $chargeCategoryId;
+                        if (empty($targetChargeCategoryId)) {
+                            $preferredName = $categoryType ? ucfirst($categoryType) : ($chargeName ?? $testName);
+                            $foundCategory = ChargeCategory::query()->whereRaw('LOWER(name) = ?', [strtolower($preferredName)])->first();
+                            if ($foundCategory) {
+                                $targetChargeCategoryId = $foundCategory->id;
+                            } else {
+                                $chargeTypeId = \App\Models\ChargeType::query()->value('id') ?? 1;
+                                $newCategory = ChargeCategory::create([
+                                    'charge_type_id' => $chargeTypeId,
+                                    'name' => $preferredName,
+                                    'description' => $preferredName,
+                                    'status' => 'Active',
+                                ]);
+                                $targetChargeCategoryId = $newCategory->id;
+                            }
+                        }
+
+                        // include required foreign keys with sensible defaults
+                        $chargeTypeId = \App\Models\ChargeType::query()->value('id') ?? 1;
+                        $unitTypeId = \App\Models\ChargeUnitType::query()->value('id') ?? 1;
+                        $taxCategoryId = \App\Models\ChargeTaxCategory::query()->value('id') ?? 1;
+
+                        $chargePayload = [
+                            'name' => $resolvedChargeName,
+                            'charge_type_id' => $chargeTypeId,
+                            'charge_category_id' => $targetChargeCategoryId,
+                            'unit_type_id' => $unitTypeId,
+                            'tax_category_id' => $taxCategoryId,
+                            'tax' => $tax ?? null,
+                            'standard_charge' => $standardCharge ?? null,
+                            'status' => 'Active',
+                        ];
+
+                        $existingCharge = Charge::query()->whereRaw('LOWER(name) = ?', [strtolower($resolvedChargeName)])->first();
+                        if ($existingCharge) {
+                            $existingCharge->update($chargePayload);
+                        } else {
+                            Charge::create($chargePayload);
+                        }
+                    }
+                } catch (Exception $e) {
+                    $this->storeSystemError('Backend', 'PathologyTestController', 'importCsv_create_charge', substr($e->getMessage(), 0, 1000));
+                }
+
                 foreach ($parameterPayloads as $parameterPayload) {
                     DB::table('pathology_test_parameters')->insert([
                         'pathology_test_id' => $test->id,
@@ -389,7 +468,7 @@ class PathologyTestController extends Controller
 
             fclose($handle);
 
-            $message = 'Tests imported: ' . $imported . '. Skipped: ' . $skipped . '. Duplicates: ' . $duplicates . '.';
+            $message = 'Items imported: ' . $imported . '. Skipped: ' . $skipped . '. Duplicates: ' . $duplicates . '.';
             $this->storeAdminWorkLog(0, 'tests', $message);
 
             DB::commit();
@@ -436,7 +515,7 @@ class PathologyTestController extends Controller
             if ($user->can('test-list-status')) {
                 $customData->links[] = [
                     'linkClass' => 'semi-bold text-white statusChange ' . (($data->status == 'Active') ? "bg-gray-500" : "bg-green-500"),
-                    'link' => route('backend.testpathology.status.change', ['id' => $data->id, 'status' => $data->status == 'Active' ? 'Inactive' : 'Active']),
+                    'link' => route('backend.itemcharge.status.change', ['id' => $data->id, 'status' => $data->status == 'Active' ? 'Inactive' : 'Active']),
                     'linkLabel' => getLinkLabel((($data->status == 'Active') ? "Inactive" : "Active"), null, null)
                 ];
             }
@@ -444,7 +523,7 @@ class PathologyTestController extends Controller
             if ($user->can('test-list-edit')) {
                 $customData->links[] = [
                     'linkClass' => 'bg-yellow-400 text-black semi-bold',
-                    'link' => route('backend.testpathology.edit',  $data->id),
+                    'link' => route('backend.itemcharge.edit',  $data->id),
                     'linkLabel' => getLinkLabel('Edit', null, null)
                 ];
             }
@@ -452,7 +531,7 @@ class PathologyTestController extends Controller
             if ($user->can('test-list-delete')) {
                 $customData->links[] = [
                     'linkClass' => 'deleteButton bg-red-500 text-white semi-bold',
-                    'link' => route('backend.testpathology.destroy', $data->id),
+                    'link' => route('backend.itemcharge.destroy', $data->id),
                     'linkLabel' => getLinkLabel('Delete', null, null)
                 ];
             }
@@ -482,9 +561,9 @@ class PathologyTestController extends Controller
         return [
             'Sl/No',
             'Category',
-            'Test Name',
+            'Item Name',
             'Short Name',
-            'Test Type',
+            'Item Type',
             'Category',
             'Amount',
             'Status',
@@ -497,7 +576,7 @@ class PathologyTestController extends Controller
         return Inertia::render(
             'Backend/PathologyTest/Form',
             [
-                'pageTitle' => fn() => 'Test Create',
+                'pageTitle' => fn() => 'Item Create',
                 'testCategories' => fn() => $this->testCategoryService->activeList(),
                 'charges' => fn() => $this->chargeService->activeList(),
                 'pathologyUnits' => fn() => $this->pathologyUnitService->activeList(),
@@ -557,7 +636,58 @@ class PathologyTestController extends Controller
                         }
                     }
                 }
-                $message = 'Test created successfully';
+                // Create or update a Charge record so the test shows up in IPD charges search
+                try {
+                    $resolvedChargeName = trim((string)($pathologyTestData['charge_name'] ?? $pathologyTestData['test_name']));
+                    if ($resolvedChargeName !== '') {
+                        // Resolve or create a valid charge_category_id to satisfy DB constraints
+                        $incomingCategoryId = $pathologyTestData['charge_category_id'] ?? ($data['charge_category_id'] ?? null);
+                        $targetChargeCategoryId = $incomingCategoryId;
+                        if (empty($targetChargeCategoryId)) {
+                            $preferredName = $pathologyTestData['category_type'] ?? ($pathologyTestData['test_category_id'] ? null : ($pathologyTestData['test_name'] ?? 'Service'));
+                            if (!$preferredName) $preferredName = 'Service';
+                            $foundCategory = ChargeCategory::query()->whereRaw('LOWER(name) = ?', [strtolower($preferredName)])->first();
+                            if ($foundCategory) {
+                                $targetChargeCategoryId = $foundCategory->id;
+                            } else {
+                                $chargeTypeId = \App\Models\ChargeType::query()->value('id') ?? 1;
+                                $newCategory = ChargeCategory::create([
+                                    'charge_type_id' => $chargeTypeId,
+                                    'name' => $preferredName,
+                                    'description' => $preferredName,
+                                    'status' => 'Active',
+                                ]);
+                                $targetChargeCategoryId = $newCategory->id;
+                            }
+                        }
+
+
+                        $chargeTypeId = \App\Models\ChargeType::query()->value('id') ?? 1;
+                        $unitTypeId = \App\Models\ChargeUnitType::query()->value('id') ?? 1;
+                        $taxCategoryId = \App\Models\ChargeTaxCategory::query()->value('id') ?? 1;
+
+                        $chargePayload = [
+                            'name' => $resolvedChargeName,
+                            'charge_type_id' => $chargeTypeId,
+                            'charge_category_id' => $targetChargeCategoryId,
+                            'unit_type_id' => $unitTypeId,
+                            'tax_category_id' => $taxCategoryId,
+                            'tax' => $pathologyTestData['tax'] ?? ($data['tax'] ?? null),
+                            'standard_charge' => $pathologyTestData['standard_charge'] ?? ($data['standard_charge'] ?? null),
+                            'status' => 'Active',
+                        ];
+
+                        $existingCharge = Charge::query()->whereRaw('LOWER(name) = ?', [strtolower($resolvedChargeName)])->first();
+                        if ($existingCharge) {
+                            $existingCharge->update($chargePayload);
+                        } else {
+                            Charge::create($chargePayload);
+                        }
+                    }
+                } catch (Exception $e) {
+                    $this->storeSystemError('Backend', 'PathologyTestController', 'store_create_charge', substr($e->getMessage(), 0, 1000));
+                }
+                $message = 'Item created successfully';
                 $this->storeAdminWorkLog($pathologyTest->id, 'tests', $message);
 
                 DB::commit();
@@ -567,7 +697,7 @@ class PathologyTestController extends Controller
                     ->with('successMessage', $message);
             } else {
                 DB::rollBack();
-                $message = "Failed To create Test.";
+                $message = "Failed To create Item.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -623,7 +753,7 @@ class PathologyTestController extends Controller
         return Inertia::render(
             'Backend/PathologyTest/Form',
             [
-                'pageTitle' => fn() => 'Test Edit',
+                'pageTitle' => fn() => 'Item Edit',
                 'pathologytest' => fn() => $formattedTest,
                 'id' => fn() => $id,
                 'testCategories' => fn() => $this->testCategoryService->activeList(),
@@ -688,7 +818,7 @@ class PathologyTestController extends Controller
                     }
                 }
 
-                $message = 'Test updated successfully';
+                $message = 'Item updated successfully';
                 $this->storeAdminWorkLog($id, 'tests', $message);
 
                 DB::commit();
@@ -698,7 +828,7 @@ class PathologyTestController extends Controller
                     ->with('successMessage', $message);
             } else {
                 DB::rollBack();
-                $message = "Failed To update tests.";
+                $message = "Failed To update items.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -720,7 +850,7 @@ class PathologyTestController extends Controller
 
         try {
             if ($this->testService->delete($id)) {
-                $message = 'Test deleted successfully';
+                $message = 'Item deleted successfully';
                 $this->storeAdminWorkLog($id, 'tests', $message);
 
                 DB::commit();
@@ -730,7 +860,7 @@ class PathologyTestController extends Controller
                     ->with('successMessage', $message);
             } else {
                 DB::rollBack();
-                $message = "Failed To Delete Test.";
+                $message = "Failed To Delete Item.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -754,7 +884,7 @@ class PathologyTestController extends Controller
             $dataInfo = $this->testService->changeStatus($id, $status);
 
             if ($dataInfo->wasChanged()) {
-                $message = 'Test ' . $status . ' Successfully';
+                $message = 'Item ' . $status . ' Successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'tests', $message);
 
                 DB::commit();
@@ -765,7 +895,7 @@ class PathologyTestController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To " . $status . " Test.";
+                $message = "Failed To " . $status . " Item.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);

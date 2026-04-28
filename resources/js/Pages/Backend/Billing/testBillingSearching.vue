@@ -1424,11 +1424,15 @@ const openListBillButton = () => {
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-2 items-end">
               <div class="lg:col-span-2">
                 <InputLabel for="category" value="Category" class="text-xs mb-1" />
-                <select v-model="itemForm.category" id="category" class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300">
+                <select v-model="itemForm.category" id="category" class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300">
                   <option value="" disabled>Select Category</option>
                   <option value="Pathology">Pathology</option>
                   <option value="Radiology">Radiology</option>
                   <option value="Medicine">Medicine</option>
+                  <option value="OPD">OPD</option>
+                  <option value="IPD">IPD</option>
+                  <option value="Appointment">Appointment</option>
+                  <option value="Ambulance">Ambulance</option>
                 </select>
               </div>
               <div class="lg:col-span-5 relative">
@@ -1442,7 +1446,7 @@ const openListBillButton = () => {
                   id="itemName"
                   ref="itemNameInput"
                   autocomplete="off"
-                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                   placeholder="Search for item..."
                 />
                 <ul
@@ -1471,7 +1475,7 @@ const openListBillButton = () => {
                   v-model="itemForm.unitPrice"
                   type="number"
                   id="unitPrice"
-                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                   readonly
                 />
               </div>
@@ -1485,7 +1489,7 @@ const openListBillButton = () => {
                   id="quantity"
                   ref="quantityInput"
                   min="0"
-                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                 />
               </div>
               <div class="lg:col-span-2">
@@ -1494,7 +1498,7 @@ const openListBillButton = () => {
                   v-model="itemForm.totalAmount"
                   type="number"
                   id="totalAmount"
-                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                  class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                   readonly
                 />
               </div>
@@ -1591,7 +1595,7 @@ const openListBillButton = () => {
                       id="patientSearch"
                       ref="patientSearchInput"
                       autocomplete="off"
-                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                       placeholder="Search or create new patient..."
                     />
                     <ul
@@ -1625,7 +1629,7 @@ const openListBillButton = () => {
                       @change="handleDoctorChange"
                       @focus="isDoctorDropdownOpen = true"
                       @blur="isDoctorDropdownOpen = false"
-                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                     >
                       <option value="" disabled>Select Doctor</option>
                       <option v-for="doctor in doctors" :key="doctor.id" :value="doctor.id">
@@ -1642,7 +1646,7 @@ const openListBillButton = () => {
                       id="patientMobile"
                       ref="patientMobileInput"
                       autocomplete="off"
-                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                       :readonly="patientForm.patient_id ? true : false"
                     />
                   </div>
@@ -1656,7 +1660,7 @@ const openListBillButton = () => {
                       @change="handleGenderChange"
                       @focus="isGenderDropdownOpen = true"
                       @blur="isGenderDropdownOpen = false"
-                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                       :readonly="patientForm.patient_id ? true : false"
                     >
                       <option value="" disabled>Select Gender</option>
@@ -1672,7 +1676,7 @@ const openListBillButton = () => {
                       id="payMode"
                       ref="payModeSelectRef"
                       @keydown="handlePayModeKeyDown"
-                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                     >
                       <option value="Cash">Cash</option>
                       <option value="Card">Card</option>
@@ -1687,7 +1691,7 @@ const openListBillButton = () => {
                       type="text"
                       id="cardNumber"
                       ref="cardNumberInputRef"
-                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                     />
                   </div>
                 </div>
@@ -1706,7 +1710,7 @@ const openListBillButton = () => {
                       id="referrer"
                       ref="referrerSelectRef"
                       @keydown="handleReferrerKeyDown"
-                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                     >
                       <option value="">No Referrer</option>
                       <option v-for="referrer in referrers" :key="referrer.id" :value="referrer.id">
@@ -1730,7 +1734,7 @@ const openListBillButton = () => {
                       v-model="commission.commissionRate"
                       type="number"
                       id="commissionRate"
-                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                       :readonly="!commissionDetails.manualCommissionEnabled"
                     />
                   </div>
@@ -1772,7 +1776,7 @@ const openListBillButton = () => {
                   <div class="flex items-center gap-2">
                     <InputLabel for="discount" value="Discount" class="flex-1" />
                     <div class="flex-1">
-                      <select v-model="summary.discountType" id="discountType" ref="discountTypeSelectRef" @keydown="handleDiscountTypeKeyDown" @change="handleDiscountTypeChange" class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300">
+                      <select v-model="summary.discountType" id="discountType" ref="discountTypeSelectRef" @keydown="handleDiscountTypeKeyDown" @change="handleDiscountTypeChange" class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300">
                         <option value="percentage">%</option>
                         <option value="flat">Flat</option>
                       </select>
@@ -1785,7 +1789,7 @@ const openListBillButton = () => {
                         min="0"
                         id="discount"
                         ref="discountInputRef"
-                        class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs text-right focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                        class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 text-right focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                       />
                     </div>
                   </div>
@@ -1798,7 +1802,7 @@ const openListBillButton = () => {
                       min="0"
                       id="extraFlatDiscount"
                       ref="extraFlatDiscountInputRef"
-                      class="w-2/3 px-2 py-1.5 border border-gray-300 rounded text-xs text-right focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-2/3 px-2 py-1.5 border border-gray-300 rounded text-gray-700 text-right focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                     />
                   </div>
                   <div class="flex justify-between items-center py-1 font-semibold text-base">
@@ -1820,7 +1824,7 @@ const openListBillButton = () => {
                       min="0"
                       id="takingAmt"
                       ref="takingAmtInputRef"
-                      class="w-2/3 px-2 py-1.5 border border-gray-300 rounded text-xs text-right focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-2/3 px-2 py-1.5 border border-gray-300 rounded text-gray-700 text-right focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                     />
                   </div>
                   <div class="flex justify-between items-center py-1">
@@ -1832,7 +1836,7 @@ const openListBillButton = () => {
                       min="0"
                       id="receivingAmt"
                       ref="receivingAmtInputRef"
-                      class="w-2/3 px-2 py-1.5 border border-gray-300 rounded text-xs text-right focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-2/3 px-2 py-1.5 border border-gray-300 rounded text-gray-700 text-right focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                       :readonly="props.id && props.editData && summary.dueAmount === 0"
                     />
                   </div>
@@ -1874,7 +1878,7 @@ const openListBillButton = () => {
                       type="date"
                       id="deliveryDate"
                       ref="deliveryDateInputRef"
-                      class="w-2/3 px-2 py-1.5 border border-gray-300 rounded text-xs text-right focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-2/3 px-2 py-1.5 border border-gray-300 rounded text-gray-700 text-right focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                     />
                   </div>
                   <div class="flex flex-col py-1">
@@ -1885,7 +1889,7 @@ const openListBillButton = () => {
                       id="remarks"
                       ref="remarksTextareaRef"
                       rows="2"
-                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-gray-700 focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-300"
                     ></textarea>
                   </div>
                   <div class="mt-4">

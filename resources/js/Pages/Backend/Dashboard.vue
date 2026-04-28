@@ -91,7 +91,7 @@ onUnmounted(() => {
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
         <a v-if="canViewExpiredMedicines" :href="route('backend.medicineinventory.index', { expiry_filter: 'expired' })" target="_blank"
-          class="bg-rose-50 border border-rose-200 rounded-lg shadow-sm hover:shadow-md transition-all p-4 flex items-center hover:-translate-y-1">
+          class="bg-rose-50 border border-rose-200 rounded-lg shadow-sm hover:shadow-md transition-all p-4 flex items-center hover:-translate-y-1 text-white">
           <div class="w-12 h-12 bg-rose-500 text-white text-xl rounded-lg flex items-center justify-center mr-3">
             !
           </div>

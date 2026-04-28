@@ -1,0 +1,51 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run remote deploy script via SSH
+        uses: appleboy/ssh-action@v0.1.8
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          port: ${{ secrets.PROD_PORT || '22' }}
+          key: ${{ secrets.SSH_KEY }}
+          # Set timeout high enough for composer/migrations
+          timeout: 30m
+          script: |
+            set -e
+            echo "Deploy started on $(date)"
+            cd ${{ secrets.PROD_PATH }}
+            # ensure repo up to date
+            git fetch --all --prune
+            git reset --hard origin/main
+            # install php deps (optional, safe to run)
+            if command -v composer >/dev/null 2>&1; then
+              composer install --no-dev --prefer-dist --optimize-autoloader
+            fi
+            # run project-specific safe scripts
+            if [ -f scripts/disable_subscription_enforce.php ]; then
+              php scripts/disable_subscription_enforce.php || true
+            fi
+            if [ -f scripts/activate_subscription_db.php ]; then
+              php scripts/activate_subscription_db.php || true
+            fi
+            # clear caches
+            php artisan config:clear || true
+            php artisan cache:clear || true
+            php artisan route:clear || true
+            php artisan view:clear || true
+            # restart php-fpm if service name provided
+            if [ -n "${{ secrets.PHP_FPM_SERVICE }}" ]; then
+              sudo systemctl restart "${{ secrets.PHP_FPM_SERVICE }}" || true
+            fi
+            echo "Deploy finished on $(date)"

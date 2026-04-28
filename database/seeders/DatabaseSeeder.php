@@ -16,13 +16,18 @@ class DatabaseSeeder extends Seeder
      */
     public function run()
     {
-        // \App\Models\User::factory(10)->create();
+        // Default behavior for fresh databases: create a single developer account
+        // with all permissions. Set SINGLE_DEVELOPER_SEED=false in your .env
+        // if you want the original full seeding behavior.
+        if (env('SINGLE_DEVELOPER_SEED', true)) {
+            $this->call([
+                SingleDeveloperSeeder::class,
+            ]);
 
-        // \App\Models\User::factory()->create([
-        //     'name' => 'Test User',
-        //     'email' => 'test@example.com',
-        // ]);
+            return;
+        }
 
+        // Full seed (legacy)
         $this->call([
             MenuSeeder::class,
             SettingsMenuSyncSeeder::class,
@@ -34,7 +39,7 @@ class DatabaseSeeder extends Seeder
             MenuPermissionCoverageSeeder::class,
             DutyRosterPermissionSeeder::class,
             SalarySheetPermissionSeeder::class,
-          
+
             CompanySeeder::class,
 
             AdminSeeder::class,
@@ -44,7 +49,7 @@ class DatabaseSeeder extends Seeder
             SpecialistSeeder::class,
 
             PatientSeeder::class,
-            
+
             ChargeSystemSeeder::class,
             PathologySeeder::class,
             TestSeeder::class,
@@ -53,7 +58,7 @@ class DatabaseSeeder extends Seeder
             AttendanceSeeder::class,
                 SalarySheetMenuSeeder::class,
             ChartOfAccountsSeeder::class,
-          
+
         ]);
     }
 }

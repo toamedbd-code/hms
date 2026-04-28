@@ -32,7 +32,7 @@ const getCurrentDateTimeForInput = () => {
     return `${getPart('year')}-${getPart('month')}-${getPart('day')}T${getPart('hour')}:${getPart('minute')}`;
 };
 
-const props = defineProps(['ipdpatient', 'id', 'patients', 'doctors', 'bedGroups', 'beds', 'symptomTypes']);
+const props = defineProps(['ipdpatient', 'id', 'patients', 'doctors', 'bedGroups', 'beds', 'symptomTypes', 'charges']);
 
 const form = useForm({
     patient_id: props.ipdpatient?.patient_id ?? '',
@@ -56,8 +56,20 @@ const form = useForm({
     bed_group_id: props.ipdpatient?.bed_group_id ?? '',
     bed_id: props.ipdpatient?.bed_id ?? '',
     live_consultation: props.ipdpatient?.live_consultation ?? 'no',
+    hospital_charge_ids: props.ipdpatient?.hospital_charge_ids ?? [],
 
     _method: props.ipdpatient?.id ? 'put' : 'post',
+});
+
+const selectedCharges = computed({
+    get() {
+        const charges = props.charges || [];
+        const ids = form.hospital_charge_ids || [];
+        return charges.filter((c) => ids.includes(c.id));
+    },
+    set(val) {
+        form.hospital_charge_ids = (val || []).map((v) => v.id);
+    },
 });
 
 const allBeds = computed(() => props.beds ?? []);
@@ -415,7 +427,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                                 <InputLabel for="symptom_type" value="Symptoms Type" />
                                 <div class="flex items-center space-x-2">
                                     <select id="symptom_type" v-model="form.symptom_type"
-                                        class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                        class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                         <option value="">Select</option>
                                         <option v-for="type in normalizedSymptomTypes" :key="type.id" :value="type.name">
                                             {{ type.name }}
@@ -437,7 +449,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="symptom_title" value="Symptoms Title" />
                                 <input id="symptom_title" v-model="form.symptom_title" type="text"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                     placeholder="Enter symptom title" />
                                 <InputError class="mt-1" :message="form.errors.symptom_title" />
                             </div>
@@ -447,7 +459,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                         <div>
                             <InputLabel for="symptom_description" value="Symptoms Description" />
                             <textarea id="symptom_description" v-model="form.symptom_description" rows="2"
-                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 placeholder="Describe symptoms in detail"></textarea>
                             <InputError class="mt-1" :message="form.errors.symptom_description" />
                         </div>
@@ -456,7 +468,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                         <div>
                             <InputLabel for="note" value="Note" />
                             <textarea id="note" v-model="form.note" rows="2"
-                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 placeholder="Additional notes"></textarea>
                             <InputError class="mt-1" :message="form.errors.note" />
                         </div>
@@ -470,7 +482,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                                 <InputLabel for="admission_date" value="Admission Date" class="required" />
                                 <input id="admission_date" v-model="form.admission_date" type="datetime-local"
                                     @focus="handleAdmissionDateFocus"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                     required />
                                 <InputError class="mt-1" :message="form.errors.admission_date" />
                             </div>
@@ -480,7 +492,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="case" value="Case" />
                                 <select id="case" v-model="form.case"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                     <option value="">Select</option>
                                     <option value="new">New Case</option>
                                     <option value="followup">Follow-up</option>
@@ -491,7 +503,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="tpa" value="Tpa" />
                                 <input id="tpa" v-model="form.tpa" type="text"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                     placeholder="tpa" />
                                 <InputError class="mt-1" :message="form.errors.tpa" />
                             </div>
@@ -502,7 +514,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="casualty" value="Casualty" />
                                 <select id="casualty" v-model="form.casualty"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                     <option value="no">No</option>
                                     <option value="yes">Yes</option>
                                 </select>
@@ -511,7 +523,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="old_patient" value="Old Patient" />
                                 <select id="old_patient" v-model="form.old_patient"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                     <option value="no">No</option>
                                     <option value="yes">Yes</option>
                                 </select>
@@ -524,7 +536,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="credit_limit" value="Credit Limit" />
                                 <input id="credit_limit" v-model="form.credit_limit" type="text"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                     placeholder="Credit Limit" />
                                 <InputError class="mt-1" :message="form.errors.credit_limit" />
                             </div>
@@ -537,7 +549,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="reference" value="Reference" />
                                 <input id="reference" v-model="form.reference" type="text"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                     placeholder="Reference" />
                                 <InputError class="mt-1" :message="form.errors.reference" />
                             </div>
@@ -557,7 +569,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="bed_group_id" value="Bed Group" class="required" />
                                 <select id="bed_group_id" v-model="form.bed_group_id"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                     required>
                                     <option value="">Select Group</option>
                                     <option v-for="data in bedGroups" :key="data.id" :value="data.id">{{ data.name }}
@@ -572,7 +584,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="bed_id" value="Bed Number" class="required" />
                                 <select id="bed_id" v-model="form.bed_id"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                     required :disabled="!form.bed_group_id">
                                     <option value="">Select Bed</option>
                                     <option v-for="bed in filteredBeds" :key="bed.id" :value="bed.id"
@@ -585,7 +597,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="live_consultation" value="Live Consultation" />
                                 <select id="live_consultation" v-model="form.live_consultation"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                    class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                     <option value="no">No</option>
                                     <option value="yes">Yes</option>
                                 </select>
@@ -593,6 +605,37 @@ const handleDoctorSelect = (selectedDoctor) => {
                             </div>
                         </div>
                     </div>
+                </div>
+
+
+                <div class="mt-3">
+                    <InputLabel for="hospital_charges" value="Hospital Charges" />
+                    <div class="flex items-center gap-2">
+                        <Multiselect
+                            v-model="selectedCharges"
+                            :options="props.charges || []"
+                            :track-by="'id'"
+                            :label="'name'"
+                            placeholder="Search & select hospital charges (type & press enter)"
+                            class="w-full text-sm rounded-md border border-slate-300"
+                            :searchable="true"
+                            :allow-empty="true"
+                            :close-on-select="false"
+                            :clear-on-select="false"
+                            :hide-selected="true"
+                            @keydown.enter.native.prevent
+                        />
+                        <button type="button"
+                            class="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                            title="Add Hospital Charge"
+                            @click="() => $emit && $emit('add-hospital-charge')"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <InputError class="mt-1" :message="form.errors.hospital_charge_ids" />
                 </div>
 
                 <!-- Form Actions -->

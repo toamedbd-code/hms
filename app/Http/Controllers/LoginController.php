@@ -11,6 +11,7 @@ use App\Models\Subscription;
 use App\Models\BkashSetting;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 class LoginController extends Controller
@@ -56,9 +57,21 @@ class LoginController extends Controller
                 session(['admin_login_started_at' => $loginStartedAt]);
                 ActivityLogService::logLogin($userInfo->email ?? $userInfo->name ?? 'admin', $loginStartedAt);
 
-                // session()->flash('message', 'Logged In Successfully');
-                return redirect()->route('backend.dashboard')->with('successMessage', 'Logged In Successfully');
-                // return Inertia::render('Backend/Dashboard')->with('warningMessage', 'Logged In Successfully');
+                // Try several likely dashboard route names to avoid RouteNotFound exceptions
+                $routeCandidates = [
+                    'backend.dashboard',
+                    'admin.dashboard',
+                    'dashboard',
+                ];
+
+                foreach ($routeCandidates as $candidate) {
+                    if (Route::has($candidate)) {
+                        return redirect()->route($candidate)->with('successMessage', 'Logged In Successfully');
+                    }
+                }
+
+                // Fallback to root if no named dashboard is available
+                return redirect('/')->with('successMessage', 'Logged In Successfully');
             } else {
                 return Inertia::render('Login')->with('warningMessage', 'Wrong Password. Please Enter Valid Password.');
             }

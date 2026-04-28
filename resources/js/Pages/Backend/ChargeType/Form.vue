@@ -100,7 +100,7 @@ const goToChargeTypeList = () => {
                     <div>
                         <InputLabel for="name" value="Charge Type *" />
                         <input id="name"
-                            class="block w-full p-2 mt-1 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 mt-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" type="text" placeholder="Charge Type Name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -111,7 +111,7 @@ const goToChargeTypeList = () => {
                             <div v-for="(module, index) in moduleOptions" :key="module" class="flex items-center">
                                 <input type="checkbox" :id="'module_' + module" :value="module"
                                     :checked="form.modules.includes(module)" @change="toggleModule(module)"
-                                    class="w-4 h-4 text-black text-black rounded focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:ring-offset-gray-800 dark:focus:ring-indigo-600" />
+                                    class="w-4 h-4 text-white text-black rounded focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:ring-offset-gray-800 dark:focus:ring-indigo-600" />
                                 <label :for="'module_' + module"
                                     class="ml-2 text-sm font-medium text-black dark:text-gray-300">
                                     {{ module }}

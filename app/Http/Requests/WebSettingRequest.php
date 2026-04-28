@@ -13,6 +13,20 @@ class WebSettingRequest extends FormRequest
      */
     public function rules()
     {
+        $section = $this->input('activeSection') ?? $this->input('section') ?? null;
+        if ($section === 'cms') {
+            // Only CMS fields required, rest nullable
+            return [
+                'website_hero_title' => 'required|string|max:255',
+                'website_hero_subtitle' => 'nullable|string',
+                'website_cta_text' => 'required|string|max:255',
+                'website_services_json' => 'nullable|string',
+                'website_facilities_json' => 'nullable|string',
+                'website_testimonials_en_json' => 'nullable|string',
+                'website_testimonials_bn_json' => 'nullable|string',
+                'website_featured_doctors_json' => 'nullable|string',
+            ];
+        }
         switch ($this->method()) {
             case 'POST':
                 return [
@@ -78,7 +92,7 @@ class WebSettingRequest extends FormRequest
                     'website_hero_subtitle' => 'nullable|string',
                     'login_banner' => 'nullable|string|max:255',
                     'login_title' => 'nullable|string|max:255',
-                    'login_subtitle' => 'nullable|string|max:500',
+                    'login_subtitle' => 'nullable|string|max:255',
                     'website_about_text' => 'nullable|string',
                     'website_emergency_phone' => 'nullable|string|max:100',
                     'website_enabled' => 'nullable|boolean',
@@ -91,14 +105,14 @@ class WebSettingRequest extends FormRequest
                     'website_facilities_json' => 'nullable|string',
                     'website_testimonials_en_json' => 'nullable|string',
                     'website_testimonials_bn_json' => 'nullable|string',
-                        // Attendance device settings
-                        'attendance_device_enabled' => 'nullable|boolean',
-                        'attendance_device_type' => 'nullable|in:face,fingerprint,both',
-                        'attendance_device_identifier' => 'nullable|string|max:255',
-                        'attendance_device_ip' => 'nullable|ip',
-                        'attendance_device_port' => 'nullable|string|max:20',
-                        'attendance_device_secret' => 'nullable|string|max:255',
-                        'attendance_device_options' => 'nullable|string',
+                    // Attendance device settings
+                    'attendance_device_enabled' => 'nullable|boolean',
+                    'attendance_device_type' => 'nullable|in:face,fingerprint,both',
+                    'attendance_device_identifier' => 'nullable|string|max:255',
+                    'attendance_device_ip' => 'nullable|ip',
+                    'attendance_device_port' => 'nullable|string|max:20',
+                    'attendance_device_secret' => 'nullable|string|max:255',
+                    'attendance_device_options' => 'nullable|string',
                 ];
                 break;
 

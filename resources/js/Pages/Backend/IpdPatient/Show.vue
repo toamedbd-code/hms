@@ -1,7 +1,13 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, nextTick } from "vue";
 import BackendLayout from "@/Layouts/BackendLayout.vue";
 import { Link, router, useForm } from "@inertiajs/vue3";
+import Multiselect from 'vue-multiselect';
+import HospitalChargeModal from '@/Components/HospitalChargeModal.vue';
+import Modal from '@/Components/Modal.vue';
+import PathologyForm from '@/Pages/Backend/PathologyTest/Form.vue';
+import 'vue-multiselect/dist/vue-multiselect.css';
+import ActionButton from '@/Components/ActionButton.vue';
 
 const APP_TIMEZONE = "Asia/Dhaka";
 
@@ -28,6 +34,11 @@ const props = defineProps({
   payments: Array,
   overviewTotals: Object,
   runningBill: Object,
+  charges: Array,
+  chargeTypes: Array,
+  chargeCategories: Array,
+  chargeUnits: Array,
+  taxCategories: Array,
 });
 
 const tabs = [
@@ -108,6 +119,23 @@ const refreshRunningBill = () => {
   router.reload({ preserveScroll: true });
 };
 
+const goToCreateItem = () => {
+  // Open embedded create form modal for quick item creation
+  showItemModal.value = true;
+};
+
+const showItemModal = ref(false);
+
+const onItemCreated = (response) => {
+  try {
+    showItemModal.value = false;
+  } catch (e) {}
+  try {
+    // refresh running bill and overview totals
+    router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'overviewTotals'], preserveState: true });
+  } catch (e) {}
+};
+
 const roomRentForm = useForm({
   bed_id: props.ipdpatient?.bed_id ?? null,
   started_at: "",
@@ -148,20 +176,863 @@ const paymentForm = useForm({
   notes: '',
 });
 
-const submitPayment = () => {
+const discountForm = useForm({
+  discount: '',
+  discount_type: 'flat',
+  extra_flat_discount: '',
+});
+
+const collectAmount = async (amount, label = 'Payment') => {
   if (!props.ipdpatient?.id) return;
-  paymentForm.post(route('backend.ipdpatient.payments.store', props.ipdpatient.id), {
-    preserveScroll: true,
-    onSuccess: () => paymentForm.reset('amount', 'payment_method', 'transaction_id', 'notes'),
-  });
+  amount = Number(amount) || 0;
+  if (amount <= 0) {
+    if (typeof window?.toast === 'function') window.toast('No amount to collect.', { type: 'error' });
+    return;
+  }
+  try {
+    const res = await window.axios.post(route('backend.ipdpatient.payments.store', props.ipdpatient.id), {
+      amount,
+      payment_method: 'Cash',
+      notes: `Collected via quick action (${label})`,
+    });
+    const msg = res?.data?.message || 'Payment recorded';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'success' });
+    router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'payments', 'overviewTotals'], preserveState: true });
+  } catch (err) {
+    const msg = err?.response?.data?.message || 'Failed to record payment';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+  }
 };
 
-const submitRoomRent = () => {
+const collectDue = () => {
+  const amount = Number(localRunningBill?.value?.due ?? runningBill.due ?? 0);
+  collectAmount(amount, 'Due');
+};
+
+const collectFullBill = () => {
+  const amount = Number(localRunningBill?.value?.total ?? runningBill.total ?? 0);
+  collectAmount(amount, 'Full Bill');
+};
+
+const applyDiscount = async () => {
   if (!props.ipdpatient?.id) return;
-  roomRentForm.post(route("backend.ipdpatient.charges.room-rent.store", props.ipdpatient.id), {
-    preserveScroll: true,
-    onSuccess: () => roomRentForm.reset("started_at", "ended_at", "rate_per_day", "notes"),
+  try {
+    const payload = {
+      discount: discountForm.discount || 0,
+      discount_type: discountForm.discount_type,
+      extra_flat_discount: discountForm.extra_flat_discount || 0,
+    };
+    const res = await window.axios.post(route('backend.ipdpatient.billing.apply_discount', props.ipdpatient.id), payload);
+    const msg = res?.data?.message || 'Discount applied';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'success' });
+    router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'payments', 'overviewTotals'], preserveState: true });
+  } catch (err) {
+    const msg = err?.response?.data?.message || 'Failed to apply discount';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+  }
+};
+
+const editPayment = async (payment) => {
+  if (!props.ipdpatient?.id || !payment) return;
+  try {
+    const newAmount = window.prompt('Amount', String(payment.amount || ''));
+    if (newAmount === null) return;
+    const newMethod = window.prompt('Method', payment.payment_method ?? '');
+    const newNotes = window.prompt('Notes', payment.notes ?? '');
+    const payload = {
+      amount: Number(newAmount),
+      payment_method: newMethod,
+      notes: newNotes,
+    };
+    const res = await window.axios.post(route('backend.ipdpatient.payments.update', { id: props.ipdpatient.id, paymentId: payment.id }), payload);
+    const msg = res?.data?.message || 'Payment updated';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'success' });
+    router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'payments', 'overviewTotals'], preserveState: true });
+  } catch (err) {
+    const msg = err?.response?.data?.message || 'Failed to update payment';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+  }
+};
+
+
+// Hospital charges quick-add form
+const hospitalChargesForm = useForm({ hospital_charge_ids: [] });
+const selectedHospitalCharges = ref(null); // single selection (object) for UI
+const localRunningBill = ref(null); // for instant UI update
+const showChargeModal = ref(false);
+const invoiceReady = ref(false); // mark invoice ready when Add to Invoice clicked
+
+// refs for Multiselect native input listener
+const hospitalChargeMultiselectRef = ref(null);
+const hospitalChargeInputListener = ref({ input: null, listener: null });
+// lock to prevent duplicate rapid submissions
+const addLock = ref(false);
+// external search term for Multiselect (we'll disable internal search)
+const hospitalChargeSearch = ref('');
+// flag set when Enter pressed inside multiselect input to block native form submit
+const multiselectEnterFlag = ref(false);
+// flag set when Enter pressed inside manual item input to block native form submit
+const manualEnterFlag = ref(false);
+
+const normalizeSearch = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+const filteredCharges = computed(() => {
+  const q = normalizeSearch(hospitalChargeSearch.value);
+  const list = props.charges || [];
+  if (!q) return list;
+  return list.filter((c) => {
+    const code = (c.code ?? c.charge_code ?? c.item_code ?? '');
+    const hay = `${c.name ?? ''} ${String(c.id ?? '')} ${code}`;
+    return normalizeSearch(hay).includes(q);
   });
+});
+
+function handleHospitalChargeSearchChange(val) {
+  hospitalChargeSearch.value = val || '';
+}
+
+async function addSelectedHospitalCharges() {
+  // Normalize selection: support single-object or array (robust against component state)
+  const selection = Array.isArray(selectedHospitalCharges.value)
+    ? selectedHospitalCharges.value
+    : (selectedHospitalCharges.value ? [selectedHospitalCharges.value] : []);
+
+  // Add only new charges (by id)
+  const existingIds = new Set(addedHospitalCharges.value.map(c => c.id));
+  const toAdd = selection.filter(c => c && !existingIds.has(c.id));
+  if (toAdd.length === 0) {
+    if (typeof window?.toast === 'function') window.toast('Selected charge(s) already in Charges', { type: 'warning' });
+    // clear selection/search for UX
+    selectedHospitalCharges.value = null;
+    hospitalChargeSearch.value = '';
+    return;
+  }
+  // Optimistic UI update: apply client-side changes immediately, then notify server.
+  if (toAdd.length === 0) return;
+  // apply optimistic changes
+  addedHospitalCharges.value.push(...toAdd);
+  persistAddedHospitalCharges();
+  if (!localRunningBill.value) localRunningBill.value = { ...runningBill.value };
+  toAdd.forEach(charge => {
+    localRunningBill.value.total = Number(localRunningBill.value.total || 0) + Number(charge.standard_charge || 0);
+    localRunningBill.value.due = Number(localRunningBill.value.due || 0) + Number(charge.standard_charge || 0);
+  });
+  // clear selection/search for UX
+  selectedHospitalCharges.value = null;
+  hospitalChargeSearch.value = '';
+  if (typeof window?.toast === 'function') window.toast('Added to Charges', { type: 'success' });
+
+  // notify server (Inertia visit). If it fails, revert optimistic changes.
+  try {
+    await router.get(route('backend.ipdpatient.show', props.ipdpatient.id), { _added_hospital_charge_ids: JSON.stringify(toAdd.map(c => c.id)) }, {
+      preserveState: true,
+      preserveScroll: true,
+      only: [],
+    });
+  } catch (e) {
+    try {
+      toAdd.forEach((charge) => {
+        const idx = addedHospitalCharges.value.findIndex(c => c.id === charge.id);
+        if (idx !== -1) addedHospitalCharges.value.splice(idx, 1);
+      });
+      persistAddedHospitalCharges();
+      if (localRunningBill.value) {
+        toAdd.forEach(charge => {
+          localRunningBill.value.total = Number(localRunningBill.value.total || 0) - Number(charge.standard_charge || 0);
+          localRunningBill.value.due = Number(localRunningBill.value.due || 0) - Number(charge.standard_charge || 0);
+        });
+      }
+    } catch (err) {}
+    if (typeof window?.toast === 'function') window.toast('Failed to add charges (server error)', { type: 'error' });
+  }
+}
+
+function removeAddedHospitalCharge(chargeIdOrObj) {
+  let idx = -1;
+  if (chargeIdOrObj && typeof chargeIdOrObj === 'object') {
+    idx = addedHospitalCharges.value.findIndex(c => c === chargeIdOrObj || c.id === chargeIdOrObj.id);
+  } else {
+    idx = addedHospitalCharges.value.findIndex(c => c.id === chargeIdOrObj);
+  }
+  if (idx !== -1) {
+    const charge = addedHospitalCharges.value[idx];
+    if (localRunningBill.value) {
+      localRunningBill.value.total = Number(localRunningBill.value.total || 0) - Number(charge.standard_charge || 0);
+      localRunningBill.value.due = Number(localRunningBill.value.due || 0) - Number(charge.standard_charge || 0);
+    }
+    addedHospitalCharges.value.splice(idx, 1);
+    persistAddedHospitalCharges();
+  }
+}
+
+async function handleHospitalChargeEnter(e) {
+  // Ensure v-model selection is applied, then add to UI and submit immediately
+  await nextTick();
+  // Selection is handled by Multiselect '@select' event.
+  return;
+}
+
+function openChargeModal() {
+  showChargeModal.value = true;
+}
+
+function closeChargeModal() {
+  showChargeModal.value = false;
+}
+
+function handleHospitalChargeSelect(option) {
+  if (!option) return;
+
+  // avoid duplicates in the UI list
+  const exists = addedHospitalCharges.value.some(c => c.id === option.id);
+  if (exists) {
+    if (typeof window?.toast === 'function') window.toast('Charge already in Charges', { type: 'warning' });
+  } else {
+    addedHospitalCharges.value.push(option);
+    persistAddedHospitalCharges();
+    if (!localRunningBill.value) localRunningBill.value = { ...runningBill.value };
+    localRunningBill.value.total = Number(localRunningBill.value.total || 0) + Number(option.standard_charge || 0);
+    localRunningBill.value.due = Number(localRunningBill.value.due || 0) + Number(option.standard_charge || 0);
+  }
+
+  // clear selection and search so input visually resets
+  selectedHospitalCharges.value = null;
+  hospitalChargeSearch.value = '';
+  // return focus to search input so user can continue typing
+  nextTick(() => {
+    try {
+      const inp = hospitalChargeInputListener.value && hospitalChargeInputListener.value.input;
+      if (inp && typeof inp.focus === 'function') inp.focus();
+    } catch (e) {}
+  });
+
+  // NOTE: do NOT auto-submit here. User requested Enter should add to the "Charges to Add" field below.
+}
+
+function handleChargeCreated(response) {
+  const previousChargeIds = new Set((props.charges || []).map(c => String(c.id)));
+
+  router.reload({
+    only: ['charges'],
+    preserveState: true,
+    preserveScroll: true,
+    onSuccess: (page) => {
+      const latestCharges = page.props.charges || [];
+      const createdCharge = latestCharges.find(ch => !previousChargeIds.has(String(ch.id))) || latestCharges[latestCharges.length - 1];
+      if (createdCharge) {
+        // add the created charge to the UI 'Charges to Add' list (same behavior as Pathology Test flow)
+        handleHospitalChargeSelect(createdCharge);
+      }
+      try {
+        const msg = response?.message || (response && response.data && response.data.message) || 'Charge created';
+        if (typeof window?.toast === 'function') window.toast(msg, { type: 'success' });
+      } catch (e) {}
+    }
+  });
+
+  closeChargeModal();
+}
+
+const submitHospitalCharges = async (markReady = false) => {
+  if (!props.ipdpatient?.id) {
+    addLock.value = false;
+    return false;
+  }
+  if (addLock.value) return false;
+  // lock to prevent duplicate rapid submissions
+  addLock.value = true;
+  if (hospitalChargesForm.processing) {
+    addLock.value = false;
+    return false;
+  }
+  // If nothing to add, optionally mark invoice ready and skip POST
+  if (!Array.isArray(addedHospitalCharges.value) || addedHospitalCharges.value.length === 0) {
+    if (markReady) invoiceReady.value = true;
+    addLock.value = false;
+    return false;
+  }
+
+  // snapshot UI state so we can revert on failure
+  const snapshotAdded = Array.isArray(addedHospitalCharges.value) ? [...addedHospitalCharges.value] : [];
+  const snapshotLocalRunning = localRunningBill.value ? JSON.parse(JSON.stringify(localRunningBill.value)) : null;
+
+  // Send only the added charges
+  const payload = { hospital_charge_ids: addedHospitalCharges.value.map(c => c.id) };
+  // Use axios to avoid Inertia redirect behaviour on server redirects for XHR requests
+  try {
+    const res = await window.axios.post(route('backend.ipdpatient.charges.hospital.store', props.ipdpatient.id), payload);
+    // success
+    hospitalChargesForm.reset('hospital_charge_ids');
+    addedHospitalCharges.value = [];
+    persistAddedHospitalCharges();
+    hospitalChargeSearch.value = '';
+    // clear optimistic local running bill; server will provide authoritative values
+    localRunningBill.value = null;
+    try {
+      router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['ipdpatient', 'runningBill', 'charges', 'overviewTotals'], preserveState: true });
+    } catch (e) {}
+    if (markReady) invoiceReady.value = true;
+  } catch (err) {
+    // map validation/server error to form errors if available
+    try {
+      const data = err?.response?.data;
+      if (data && data.errors) {
+        hospitalChargesForm.errors = data.errors;
+      } else if (data && data.message) {
+        hospitalChargesForm.errors.hospital_charge_ids = data.message;
+      }
+    } catch (e) {}
+
+    // revert optimistic UI state
+    try {
+      addedHospitalCharges.value = snapshotAdded;
+      if (snapshotLocalRunning) {
+        localRunningBill.value = snapshotLocalRunning;
+      } else {
+        localRunningBill.value = null;
+      }
+    } catch (e) {}
+
+    // lightweight user feedback
+    try {
+      const data = err?.response?.data;
+      const msg = data && data.message ? data.message : 'Failed to add charges. Please try again.';
+      if (typeof window?.toast === 'function') {
+        window.toast(msg, { type: 'error' });
+      } else {
+        // fallback
+        window.alert(msg);
+      }
+    } catch (e) {}
+  } finally {
+    // keep a short buffer to avoid immediate double submits
+    setTimeout(() => { addLock.value = false; }, 300);
+  }
+  return true;
+};
+
+// Manual quick-add form (ad-hoc item entry) for IPD
+const manualChargeForm = useForm({ item_name: '', unit_price: '', quantity: 1, category: '' });
+
+// Client-side list of manual items the user has added (before submitting to invoice)
+const addedManualItems = ref([]);
+
+// Client-side list of hospital charges the user has added (before submitting to invoice)
+const addedHospitalCharges = ref([]);
+
+// Server-side bill items (after submit these will be present in ipdpatient.billing.billItems)
+const serverBillItems = computed(() => props.ipdpatient?.billing?.billItems ?? []);
+
+// Filter server bill items so we don't duplicate items already present in client-side preview lists
+const serverBillItemsFiltered = computed(() => {
+  const srv = serverBillItems.value || [];
+  return srv.filter((sb) => {
+    try {
+      const sbName = normalizeSearch(sb.item_name || '');
+      const sbPrice = Number(sb.unit_price ?? sb.net_amount ?? 0);
+      const inManual = Array.isArray(addedManualItems.value) && addedManualItems.value.some(m => normalizeSearch(m.item_name) === sbName && Number(m.unit_price) === sbPrice);
+      const inHosp = Array.isArray(addedHospitalCharges.value) && addedHospitalCharges.value.some(h => (h.id && sb.item_id && String(h.id) === String(sb.item_id)) || (normalizeSearch(h.name || h.charge_name || '') === sbName && Number(h.standard_charge || h.unit_price || 0) === sbPrice));
+      return !(inManual || inHosp);
+    } catch (e) { return true; }
+  });
+});
+
+const storageKey = (type) => `ipd:${props.ipdpatient?.id || 'unknown'}:${type}`;
+
+const persistAddedManualItems = () => {
+  try {
+    if (typeof window !== 'undefined' && props.ipdpatient?.id) {
+      sessionStorage.setItem(storageKey('manual'), JSON.stringify(addedManualItems.value || []));
+    }
+  } catch (e) {}
+};
+
+const persistAddedHospitalCharges = () => {
+  try {
+    if (typeof window !== 'undefined' && props.ipdpatient?.id) {
+      sessionStorage.setItem(storageKey('hospital'), JSON.stringify(addedHospitalCharges.value || []));
+    }
+  } catch (e) {}
+};
+
+const loadAddedItemsFromStorage = () => {
+  try {
+    if (!props.ipdpatient?.id) return;
+    const m = sessionStorage.getItem(storageKey('manual'));
+    if (m) {
+      const parsed = JSON.parse(m);
+      if (Array.isArray(parsed)) addedManualItems.value = parsed;
+    }
+    const h = sessionStorage.getItem(storageKey('hospital'));
+    if (h) {
+      const parsed = JSON.parse(h);
+      if (Array.isArray(parsed)) addedHospitalCharges.value = parsed;
+    }
+
+    // If the server reports no active Room Rent and no active Bed charges,
+    // clear any persisted client-side 'Charges To Add' state so UI stays in sync.
+    try {
+      const hasServerRoom = Array.isArray(props.ipdpatient?.room_rent_charges) && props.ipdpatient.room_rent_charges.length > 0;
+      const hasServerBed = Array.isArray(props.ipdpatient?.bed_charges) && props.ipdpatient.bed_charges.length > 0;
+      if (!hasServerRoom && !hasServerBed) {
+        try { sessionStorage.removeItem(storageKey('manual')); } catch (err) {}
+        try { sessionStorage.removeItem(storageKey('hospital')); } catch (err) {}
+        addedManualItems.value = [];
+        addedHospitalCharges.value = [];
+      }
+    } catch (err) {}
+  } catch (e) {}
+};
+
+// Parse query params for quick-add links like ?_added_manual_item={...}
+const parseAddedManualQuery = () => {
+  try {
+    if (typeof window === 'undefined') return;
+    const qs = new URLSearchParams(window.location.search || '');
+    const m = qs.get('_added_manual_item');
+    if (m) {
+      try {
+        const parsed = JSON.parse(m);
+        if (parsed && parsed.item_name) {
+          // avoid duplicates
+          const exists = Array.isArray(addedManualItems.value) && addedManualItems.value.some((it) => {
+            return normalizeSearch(it.item_name) === normalizeSearch(parsed.item_name) && Number(it.unit_price) === Number(parsed.unit_price || 0);
+          });
+          if (!exists) {
+            addedManualItems.value.push({
+              item_name: String(parsed.item_name || ''),
+              unit_price: Number(parsed.unit_price || 0),
+              quantity: Math.max(1, Number(parsed.quantity || 1)),
+              category: parsed.category || '',
+            });
+            persistAddedManualItems();
+          }
+        }
+      } catch (err) {
+        // ignore parse errors
+      }
+    }
+
+    // support list of hospital charge ids from query (comma separated)
+    const h = qs.get('_added_hospital_charge_ids');
+    if (h) {
+      try {
+        const ids = Array.isArray(h) ? h : String(h).split(',').map(x => x.trim()).filter(x => x !== '').map(x => Number(x));
+        const toAdd = (props.charges || []).filter(c => ids.includes(Number(c.id))).filter(c => !addedHospitalCharges.value.some(a => Number(a.id) === Number(c.id)));
+        if (toAdd.length > 0) {
+          addedHospitalCharges.value.push(...toAdd);
+          persistAddedHospitalCharges();
+        }
+      } catch (err) {}
+    }
+  } catch (e) {}
+};
+
+// Populate running IPD charges (room rent, bed charge, OT, doctor visit)
+// into the client-side "Charges To Add" preview as manual items so they
+// can be submitted to invoice via the existing manual submit flow.
+const populateAutoCharges = () => {
+  try {
+    if (!props.ipdpatient?.id) return;
+
+    // helper to compute inclusive days like backend
+    const calcDays = (startStr, endStr) => {
+      try {
+        const s = new Date(startStr);
+        const e = endStr ? new Date(endStr) : new Date();
+        // normalize to start of day
+        s.setHours(0,0,0,0);
+        e.setHours(0,0,0,0);
+        const diff = Math.floor((e.getTime() - s.getTime()) / (1000*60*60*24));
+        return Math.max(diff + 1, 1);
+      } catch (err) { return 1; }
+    };
+
+    const pushIfNotExists = (item) => {
+      try {
+        const exists = Array.isArray(addedManualItems.value) && addedManualItems.value.some((m) => {
+          return normalizeSearch(m.item_name) === normalizeSearch(item.item_name) && Number(m.unit_price) === Number(item.unit_price) && Number(m.quantity) === Number(item.quantity);
+        });
+        if (!exists) {
+          addedManualItems.value.push(item);
+        }
+      } catch (err) {}
+    };
+
+    // Room rent charges
+    for (const c of (props.ipdpatient.room_rent_charges || [])) {
+      const started = c.started_at || c.startedAt || null;
+      const ended = c.ended_at || c.endedAt || null;
+      const days = calcDays(started, ended);
+      const rate = Number(c.rate_per_day || c.ratePerDay || 0);
+      const bedName = (c.bed && c.bed.name) ? c.bed.name : (props.ipdpatient?.bed?.name ?? '');
+      const label = `Room Rent${bedName ? ' (Bed: ' + bedName + ')' : ''} [${started ? String(started).split('T')[0] : ''} to ${ended ? String(ended).split('T')[0] : 'Now'}]`;
+      pushIfNotExists({ item_name: label, unit_price: rate, quantity: days, category: 'Room Rent' });
+    }
+
+    // Bed charges
+    for (const c of (props.ipdpatient.bed_charges || [])) {
+      const started = c.started_at || c.startedAt || null;
+      const ended = c.ended_at || c.endedAt || null;
+      const days = calcDays(started, ended);
+      const rate = Number(c.rate_per_day || c.ratePerDay || 0);
+      const bedName = (c.bed && c.bed.name) ? c.bed.name : (props.ipdpatient?.bed?.name ?? '');
+      const label = `Bed Charge${bedName ? ' (Bed: ' + bedName + ')' : ''} [${started ? String(started).split('T')[0] : ''} to ${ended ? String(ended).split('T')[0] : 'Now'}]`;
+      pushIfNotExists({ item_name: label, unit_price: rate, quantity: days, category: 'Bed Charge' });
+    }
+
+    // OT charges (treat as manual items: unit_price x qty)
+    for (const c of (props.ipdpatient.ot_charges || [])) {
+      const unit = Number(c.unit_price || c.unitPrice || 0);
+      const qty = Number(c.quantity || 1);
+      const name = (c.charge_name || c.procedure_name || 'OT Charge') + (c.performed_at ? (' (' + String(c.performed_at).split('T')[0] + ')') : '');
+      pushIfNotExists({ item_name: name, unit_price: unit, quantity: qty, category: 'OT' });
+    }
+
+    // Doctor visit charges
+    for (const c of (props.ipdpatient.doctor_visit_charges || [])) {
+      const fee = Number(c.fee_per_visit || c.feePerVisit || 0);
+      const qty = Number(c.visit_count || c.visitCount || 1);
+      const dname = c.doctor_name || (c.doctor && c.doctor.name) || props.ipdpatient?.doctor?.name || 'Doctor Visit';
+      const label = `Doctor Visit - ${dname}` + (c.visited_at ? (' (' + String(c.visited_at).split('T')[0] + ')') : '');
+      pushIfNotExists({ item_name: label, unit_price: fee, quantity: qty, category: 'Doctor Visit' });
+    }
+
+    persistAddedManualItems();
+  } catch (err) {
+    // ignore
+  }
+};
+
+const addManualToList = async () => {
+  const name = String(manualChargeForm.item_name || '').trim();
+  const price = Number(manualChargeForm.unit_price || 0);
+  const qty = Math.max(1, Number(manualChargeForm.quantity || 1));
+  const category = manualChargeForm.category || '';
+
+  if (!name) {
+    if (typeof window?.toast === 'function') window.toast('Item name required.', { type: 'error' });
+    return;
+  }
+  if (price <= 0) {
+    if (typeof window?.toast === 'function') window.toast('Price must be greater than 0.', { type: 'error' });
+    return;
+  }
+
+  const item = { item_name: name, unit_price: price, quantity: qty, category };
+
+  // Prevent duplicate manual items in the client-side "Charges To Add" list
+  const alreadyExists = Array.isArray(addedManualItems.value) && addedManualItems.value.some((m) => {
+    return normalizeSearch(m.item_name) === normalizeSearch(name) && Number(m.unit_price) === price;
+  });
+  if (alreadyExists) {
+    if (typeof window?.toast === 'function') window.toast('Item already in Charges', { type: 'warning' });
+    return;
+  }
+
+  // Use Inertia visit so response is a valid Inertia response (no plain JSON)
+  // Optimistic UI update: push immediately, then notify server; revert on failure.
+  const existsNow = Array.isArray(addedManualItems.value) && addedManualItems.value.some((m) => {
+    return normalizeSearch(m.item_name) === normalizeSearch(item.item_name) && Number(m.unit_price) === Number(item.unit_price);
+  });
+  if (!existsNow) {
+    addedManualItems.value.push(item);
+    persistAddedManualItems();
+    manualChargeForm.reset('item_name', 'unit_price', 'quantity', 'category');
+    if (typeof window?.toast === 'function') window.toast('Added to Charges', { type: 'success' });
+  }
+
+  try {
+    await router.get(route('backend.ipdpatient.show', props.ipdpatient.id), { _added_manual_item: JSON.stringify(item) }, {
+      preserveState: true,
+      preserveScroll: true,
+      only: [],
+    });
+  } catch (e) {
+    // revert optimistic add on server failure
+    try {
+      const idx = addedManualItems.value.findIndex((m) => normalizeSearch(m.item_name) === normalizeSearch(item.item_name) && Number(m.unit_price) === Number(item.unit_price));
+      if (idx !== -1) addedManualItems.value.splice(idx, 1);
+      persistAddedManualItems();
+    } catch (err) {}
+    if (typeof window?.toast === 'function') window.toast('Failed to add item (server error)', { type: 'error' });
+  }
+};
+
+const removeManualItem = (index) => {
+  if (index == null || index < 0 || index >= addedManualItems.value.length) return;
+  addedManualItems.value.splice(index, 1);
+  persistAddedManualItems();
+};
+
+const submitManualItems = async () => {
+  if (!props.ipdpatient?.id) return;
+  if (!Array.isArray(addedManualItems.value) || addedManualItems.value.length === 0) {
+    if (typeof window?.toast === 'function') window.toast('No items to submit.', { type: 'error' });
+    return;
+  }
+  if (addLock.value) return;
+  addLock.value = true;
+
+  const snapshot = [...addedManualItems.value];
+  const results = [];
+  try {
+    for (const item of snapshot) {
+      try {
+        const res = await window.axios.post(route('backend.ipdpatient.charges.hospital.manual.store', props.ipdpatient.id), {
+          item_name: item.item_name,
+          unit_price: item.unit_price,
+          quantity: item.quantity,
+          category: item.category,
+        });
+        results.push({ ok: true, msg: res?.data?.message || 'Added' });
+      } catch (err) {
+        const msg = err?.response?.data?.message || 'Failed to add item';
+        results.push({ ok: false, msg });
+      }
+    }
+
+    // Remove successfully added items from list
+    const failures = [];
+    let idx = 0;
+    for (const r of results) {
+      if (!r.ok) failures.push({ index: idx, msg: r.msg });
+      idx++;
+    }
+
+    if (failures.length === 0) {
+      addedManualItems.value = [];
+    } else {
+      // keep only failed ones
+      const keep = [];
+      results.forEach((r, i) => { if (!r.ok) keep.push(snapshot[i]); });
+      addedManualItems.value = keep;
+    }
+    // persist updated manual list (cleared or kept failures)
+    persistAddedManualItems();
+
+    // Show a summary toast
+    const successCount = results.filter(r => r.ok).length;
+    const failCount = results.length - successCount;
+    if (successCount > 0) {
+      if (typeof window?.toast === 'function') window.toast(`${successCount} item(s) added.`, { type: 'success' });
+    }
+    if (failCount > 0) {
+      if (typeof window?.toast === 'function') window.toast(`${failCount} item(s) failed: ${failures.map(f => f.msg).join('; ')}`, { type: 'error' });
+    }
+
+    // Refresh running bill, payments and charges so submitted items appear in charges list
+    try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['ipdpatient', 'runningBill', 'overviewTotals', 'payments', 'charges'], preserveState: true }); } catch (e) {}
+  } finally {
+    setTimeout(() => { addLock.value = false; }, 400);
+  }
+};
+
+// Manual item search/autocomplete
+const manualSearchResults = ref([]);
+const manualSearchLoading = ref(false);
+const showManualSearch = ref(false);
+// index of the currently highlighted suggestion (-1 = none)
+const manualSelectedIndex = ref(-1);
+let manualSearchTimer = null;
+
+const searchManualItems = async (q) => {
+  if (!q || String(q).trim().length < 2) {
+    manualSearchResults.value = [];
+    manualSelectedIndex.value = -1;
+    showManualSearch.value = false;
+    return;
+  }
+  manualSearchLoading.value = true;
+  try {
+    const res = await window.axios.get(route('backend.itemcharge.search'), { params: { q } });
+    manualSearchResults.value = res?.data?.results || [];
+    manualSelectedIndex.value = manualSearchResults.value.length > 0 ? 0 : -1;
+    showManualSearch.value = manualSearchResults.value.length > 0;
+  } catch (e) {
+    manualSearchResults.value = [];
+    manualSelectedIndex.value = -1;
+    showManualSearch.value = false;
+  } finally {
+    manualSearchLoading.value = false;
+  }
+};
+
+const onManualItemInput = (e) => {
+  const q = e?.target?.value ?? '';
+  if (manualSearchTimer) clearTimeout(manualSearchTimer);
+  if (!q || String(q).trim().length < 2) {
+    manualSearchResults.value = [];
+    manualSelectedIndex.value = -1;
+    showManualSearch.value = false;
+    return;
+  }
+  manualSearchTimer = setTimeout(() => searchManualItems(q), 250);
+};
+
+// keyboard navigation for manual suggestions
+const manualSelectNext = (e) => {
+  if (!Array.isArray(manualSearchResults.value) || manualSearchResults.value.length === 0) return;
+  const len = manualSearchResults.value.length;
+  let idx = Number(manualSelectedIndex.value);
+  if (!Number.isFinite(idx) || idx < 0) idx = -1;
+  idx = (idx + 1) % len;
+  manualSelectedIndex.value = idx;
+};
+
+const manualSelectPrev = (e) => {
+  if (!Array.isArray(manualSearchResults.value) || manualSearchResults.value.length === 0) return;
+  const len = manualSearchResults.value.length;
+  let idx = Number(manualSelectedIndex.value);
+  if (!Number.isFinite(idx)) idx = 0;
+  idx = (idx - 1 + len) % len;
+  manualSelectedIndex.value = idx;
+};
+
+const onManualEnter = async (e) => {
+  try { if (e && typeof e.preventDefault === 'function') e.preventDefault(); } catch (err) {}
+  try { if (e && typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation(); } catch (err) {}
+
+  // If suggestion list is visible, pick highlighted suggestion and submit once
+    if (showManualSearch.value && Array.isArray(manualSearchResults.value) && manualSearchResults.value.length > 0) {
+      manualEnterFlag.value = true;
+      let idx = Number(manualSelectedIndex.value);
+      if (!Number.isFinite(idx) || idx < 0 || idx >= manualSearchResults.value.length) idx = 0;
+      const item = manualSearchResults.value[idx];
+      if (item) selectManualItem(item);
+      await nextTick();
+      // Add to client-side 'Charges to Add' list (do NOT submit to invoice)
+      addManualToList();
+      setTimeout(() => { manualEnterFlag.value = false; }, 500);
+      return;
+    }
+
+    // Otherwise, treat Enter as adding the manual form item to the list
+    addManualToList();
+};
+
+const selectManualItem = (item) => {
+  if (!item) return;
+  manualChargeForm.item_name = item.test_name ?? item.charge_name ?? item.name ?? '';
+  manualChargeForm.unit_price = (item.amount ?? item.standard_charge ?? 0);
+  manualChargeForm.category = item.category_type ?? '';
+  manualSearchResults.value = [];
+  manualSelectedIndex.value = -1;
+  showManualSearch.value = false;
+};
+
+const submitManualCharge = async () => {
+  if (!props.ipdpatient?.id) return;
+  if (addLock.value) return;
+  addLock.value = true;
+
+  try {
+    const payload = {
+      item_name: manualChargeForm.item_name,
+      unit_price: manualChargeForm.unit_price,
+      quantity: manualChargeForm.quantity,
+      category: manualChargeForm.category,
+    };
+
+    const res = await window.axios.post(route('backend.ipdpatient.charges.hospital.manual.store', props.ipdpatient.id), payload);
+
+    // refresh running bill and clear form
+    manualChargeForm.reset('item_name', 'unit_price', 'quantity', 'category');
+
+    // show toast immediately so Enter-triggered adds still surface feedback
+    try {
+      const msg = res?.data?.message || 'Successfully added';
+      let toastType = 'success';
+      try {
+        if (typeof msg === 'string') {
+          const lower = msg.toLowerCase();
+          if (lower.includes('already added') || lower.includes('recently') || lower.includes('already')) {
+            toastType = 'error';
+          }
+        }
+      } catch (e) {}
+      if (typeof window?.toast === 'function') {
+        window.toast(msg, { type: toastType });
+      }
+    } catch (e) {}
+
+    // delay the partial Inertia reload slightly so the toast is visible
+        try {
+          setTimeout(() => {
+            try {
+              router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['ipdpatient', 'runningBill', 'overviewTotals', 'charges'], preserveState: true });
+            } catch (e) {}
+          }, 350);
+        } catch (e) {}
+  } catch (err) {
+    try {
+      const data = err?.response?.data;
+      if (data && data.errors) manualChargeForm.errors = data.errors;
+      else if (data && data.message) manualChargeForm.errors.item_name = data.message;
+    } catch (e) {}
+
+    try {
+      const msg = err?.response?.data?.message || 'Failed to add item. Please try again.';
+      if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+      else window.alert(msg);
+    } catch (e) {}
+  } finally {
+    // keep a slightly longer buffer to avoid immediate double submits
+    setTimeout(() => { addLock.value = false; }, 500);
+  }
+};
+
+const submitPayment = async () => {
+  if (!props.ipdpatient?.id) return;
+  if (addLock.value) return;
+  addLock.value = true;
+  try {
+    const payload = {
+      amount: paymentForm.amount,
+      payment_method: paymentForm.payment_method,
+      transaction_id: paymentForm.transaction_id,
+      notes: paymentForm.notes,
+    };
+    const res = await window.axios.post(route('backend.ipdpatient.payments.store', props.ipdpatient.id), payload);
+    const msg = res?.data?.message || 'Payment recorded';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'success' });
+    paymentForm.reset('amount', 'payment_method', 'transaction_id', 'notes');
+    try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'payments', 'overviewTotals'], preserveState: true }); } catch (e) {}
+  } catch (err) {
+    try {
+      const data = err?.response?.data;
+      if (data && data.errors) paymentForm.errors = data.errors;
+      const msg = data && data.message ? data.message : 'Failed to submit payment';
+      if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+    } catch (e) {}
+  } finally {
+    setTimeout(() => { addLock.value = false; }, 300);
+  }
+};
+
+const submitRoomRent = async () => {
+  if (!props.ipdpatient?.id) return;
+  if (addLock.value) return;
+  addLock.value = true;
+  try {
+    const content = `Room Rent: Start ${formatDateTime(roomRentForm.started_at)}; End ${roomRentForm.ended_at ? formatDateTime(roomRentForm.ended_at) : 'N/A'}; Rate/day ${roomRentForm.rate_per_day || 0}; Bed ${props.ipdpatient?.bed?.name ?? ''}; Notes: ${roomRentForm.notes ?? ''}`;
+    bedHistoryForm.content = content;
+    bedHistoryForm.type = 'bed_history';
+    await bedHistoryForm.post(route('backend.ipdpatient.notes.store', props.ipdpatient.id), {
+      preserveScroll: true,
+      onSuccess: () => {
+        roomRentForm.reset('started_at', 'ended_at', 'rate_per_day', 'notes');
+        bedHistoryForm.reset('content', 'type');
+        if (typeof window?.toast === 'function') window.toast('Added to Bed History', { type: 'success' });
+        try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { preserveState: true, preserveScroll: true }); } catch (e) {}
+      }
+    });
+  } catch (err) {
+    const msg = err?.response?.data?.message || 'Failed to add room rent to Bed History';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+  } finally {
+    setTimeout(() => { addLock.value = false; }, 300);
+  }
 };
 
 const deleteRoomRent = (chargeId) => {
@@ -178,12 +1049,73 @@ const deleteRoomRent = (chargeId) => {
   );
 };
 
-const submitBedCharge = () => {
+const moveAllRoomRentsToBedHistory = async () => {
   if (!props.ipdpatient?.id) return;
-  bedChargeForm.post(route("backend.ipdpatient.charges.bed.store", props.ipdpatient.id), {
-    preserveScroll: true,
-    onSuccess: () => bedChargeForm.reset("started_at", "ended_at", "rate_per_day", "notes"),
-  });
+  if (!Array.isArray(props.ipdpatient?.room_rent_charges) || props.ipdpatient.room_rent_charges.length === 0) return;
+  const ok = window.confirm('Move all Room Rent charges to Bed History? This will remove them from Charges.');
+  if (!ok) return;
+  if (addLock.value) return;
+  addLock.value = true;
+  try {
+    for (const c of (props.ipdpatient.room_rent_charges || [])) {
+      const content = `Moved Room Rent: Start ${formatDateTime(c.started_at)}; End ${c.ended_at ? formatDateTime(c.ended_at) : 'N/A'}; Rate/day ${c.rate_per_day}; Bed ${c.bed?.name ?? ''}; Notes: ${c.notes ?? ''}`;
+      await window.axios.post(route('backend.ipdpatient.notes.store', props.ipdpatient.id), { content, type: 'bed_history' });
+      try { await window.axios.delete(route('backend.ipdpatient.charges.room-rent.destroy', { id: props.ipdpatient.id, chargeId: c.id })); } catch (e) {}
+    }
+    if (typeof window?.toast === 'function') window.toast('All Room Rent moved to Bed History', { type: 'success' });
+    try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { preserveState: true, preserveScroll: true }); } catch (e) {}
+  } catch (err) {
+    const msg = err?.response?.data?.message || 'Failed to move all room rents';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+  } finally {
+    setTimeout(() => { addLock.value = false; }, 400);
+  }
+};
+
+const moveRoomRentToBedHistory = async (charge) => {
+  if (!props.ipdpatient?.id || !charge) return;
+  const ok = window.confirm('Move this room rent to Bed History? This will remove it from Charges.');
+  if (!ok) return;
+  if (addLock.value) return;
+  addLock.value = true;
+  try {
+    const content = `Moved Room Rent: Start ${formatDateTime(charge.started_at)}; End ${charge.ended_at ? formatDateTime(charge.ended_at) : 'N/A'}; Rate/day ${charge.rate_per_day}; Bed ${charge.bed?.name ?? ''}; Notes: ${charge.notes ?? ''}`;
+    // create a bed_history note then delete the room rent charge
+    await window.axios.post(route('backend.ipdpatient.notes.store', props.ipdpatient.id), { content, type: 'bed_history' });
+    await window.axios.delete(route('backend.ipdpatient.charges.room-rent.destroy', { id: props.ipdpatient.id, chargeId: charge.id }));
+    if (typeof window?.toast === 'function') window.toast('Moved to Bed History', { type: 'success' });
+    try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { preserveState: true, preserveScroll: true }); } catch (e) {}
+  } catch (err) {
+    const msg = err?.response?.data?.message || 'Failed to move room rent';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+  } finally {
+    setTimeout(() => { addLock.value = false; }, 300);
+  }
+};
+
+const submitBedCharge = async () => {
+  if (!props.ipdpatient?.id) return;
+  if (addLock.value) return;
+  addLock.value = true;
+  try {
+    const content = `Bed Charge: Start ${formatDateTime(bedChargeForm.started_at)}; End ${bedChargeForm.ended_at ? formatDateTime(bedChargeForm.ended_at) : 'N/A'}; Rate/day ${bedChargeForm.rate_per_day || 0}; Bed ${props.ipdpatient?.bed?.name ?? ''}; Notes: ${bedChargeForm.notes ?? ''}`;
+    bedHistoryForm.content = content;
+    bedHistoryForm.type = 'bed_history';
+    await bedHistoryForm.post(route('backend.ipdpatient.notes.store', props.ipdpatient.id), {
+      preserveScroll: true,
+      onSuccess: () => {
+        bedChargeForm.reset('started_at', 'ended_at', 'rate_per_day', 'notes');
+        bedHistoryForm.reset('content', 'type');
+        if (typeof window?.toast === 'function') window.toast('Added to Bed History', { type: 'success' });
+        try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { preserveState: true, preserveScroll: true }); } catch (e) {}
+      }
+    });
+  } catch (err) {
+    const msg = err?.response?.data?.message || 'Failed to add bed charge to Bed History';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+  } finally {
+    setTimeout(() => { addLock.value = false; }, 300);
+  }
 };
 
 const deleteBedCharge = (chargeId) => {
@@ -198,6 +1130,85 @@ const deleteBedCharge = (chargeId) => {
     }),
     { preserveScroll: true }
   );
+};
+
+const moveAllBedChargesToBedHistory = async () => {
+  if (!props.ipdpatient?.id) return;
+  if (!Array.isArray(props.ipdpatient?.bed_charges) || props.ipdpatient.bed_charges.length === 0) return;
+  const ok = window.confirm('Move all Bed charges to Bed History? This will remove them from Charges.');
+  if (!ok) return;
+  if (addLock.value) return;
+  addLock.value = true;
+  try {
+    for (const c of (props.ipdpatient.bed_charges || [])) {
+      const content = `Moved Bed Charge: Start ${formatDateTime(c.started_at)}; End ${c.ended_at ? formatDateTime(c.ended_at) : 'N/A'}; Rate/day ${c.rate_per_day}; Bed ${c.bed?.name ?? ''}; Notes: ${c.notes ?? ''}`;
+      await window.axios.post(route('backend.ipdpatient.notes.store', props.ipdpatient.id), { content, type: 'bed_history' });
+      try { await window.axios.delete(route('backend.ipdpatient.charges.bed.destroy', { id: props.ipdpatient.id, chargeId: c.id })); } catch (e) {}
+    }
+    if (typeof window?.toast === 'function') window.toast('All Bed charges moved to Bed History', { type: 'success' });
+    try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { preserveState: true, preserveScroll: true }); } catch (e) {}
+  } catch (err) {
+    const msg = err?.response?.data?.message || 'Failed to move all bed charges';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+  } finally {
+    setTimeout(() => { addLock.value = false; }, 400);
+  }
+};
+
+const moveBedChargeToBedHistory = async (charge) => {
+  if (!props.ipdpatient?.id || !charge) return;
+  const ok = window.confirm('Move this bed charge to Bed History? This will remove it from Charges.');
+  if (!ok) return;
+  if (addLock.value) return;
+  addLock.value = true;
+  try {
+    const content = `Moved Bed Charge: Start ${formatDateTime(charge.started_at)}; End ${charge.ended_at ? formatDateTime(charge.ended_at) : 'N/A'}; Rate/day ${charge.rate_per_day}; Bed ${charge.bed?.name ?? ''}; Notes: ${charge.notes ?? ''}`;
+    await window.axios.post(route('backend.ipdpatient.notes.store', props.ipdpatient.id), { content, type: 'bed_history' });
+    await window.axios.delete(route('backend.ipdpatient.charges.bed.destroy', { id: props.ipdpatient.id, chargeId: charge.id }));
+    if (typeof window?.toast === 'function') window.toast('Moved to Bed History', { type: 'success' });
+    try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { preserveState: true, preserveScroll: true }); } catch (e) {}
+  } catch (err) {
+    const msg = err?.response?.data?.message || 'Failed to move bed charge';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+  } finally {
+    setTimeout(() => { addLock.value = false; }, 300);
+  }
+};
+
+const moveHospitalChargeToBedHistory = (charge) => {
+  if (!props.ipdpatient?.id || !charge) return;
+  if (addLock.value) return;
+  addLock.value = true;
+  try {
+    // Prefill bedChargeForm with sensible defaults
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const isoLocal = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+    bedChargeForm.bed_id = charge.bed_id ?? props.ipdpatient?.bed_id ?? bedChargeForm.bed_id;
+    bedChargeForm.started_at = charge.started_at ?? props.ipdpatient?.admission_date ?? isoLocal;
+    bedChargeForm.ended_at = charge.ended_at ?? '';
+    bedChargeForm.rate_per_day = charge.standard_charge ?? charge.unit_price ?? 0;
+    bedChargeForm.notes = `Moved from Charges To Add${charge.name ? ': ' + charge.name : ''}`;
+
+    bedChargeForm.post(route('backend.ipdpatient.charges.bed.store', props.ipdpatient.id), {
+      preserveScroll: true,
+      onSuccess: () => {
+        removeAddedHospitalCharge(charge);
+        bedChargeForm.reset('started_at', 'ended_at', 'rate_per_day', 'notes');
+        if (typeof window?.toast === 'function') window.toast('Moved to Bed History', { type: 'success' });
+        try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'overviewTotals', 'charges'], preserveState: true }); } catch (e) {}
+      },
+      onError: (err) => {
+        const msg = err?.response?.data?.message || 'Failed to move to Bed History';
+        if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+      }
+    });
+  } catch (e) {
+    if (typeof window?.toast === 'function') window.toast('Failed to move charge', { type: 'error' });
+  } finally {
+    addLock.value = false;
+  }
 };
 
 const submitOtCharge = () => {
@@ -270,10 +1281,130 @@ const handleOutsideClick = (event) => {
 
 onMounted(() => {
   window.addEventListener("click", handleOutsideClick);
+
+  // attach native keydown listener to internal multiselect input
+  nextTick(() => {
+    try {
+      const ms = hospitalChargeMultiselectRef.value;
+      const el = ms && (ms.$el || ms);
+      const input = el && el.querySelector ? el.querySelector('input') : null;
+      if (input) {
+        const listener = (e) => {
+          if (e.key === 'Enter') {
+            // mark that Enter was pressed inside multiselect input
+            multiselectEnterFlag.value = true;
+            // reset flag shortly after to avoid blocking unrelated submits
+            setTimeout(() => { multiselectEnterFlag.value = false; }, 500);
+            // prevent default browser form submission/navigation on Enter
+            try { e.preventDefault(); } catch (err) {}
+            try { if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation(); } catch (err) {}
+          }
+        };
+        // If Enter is pressed, after component handles selection, auto-select first option (if none) and submit
+        const enterAutoSubmit = (e) => {
+          if (e.key !== 'Enter') return;
+          // wait for v-model/@select to update/emit
+          nextTick(() => {
+            // If nothing was added by @select, pick the first filtered option
+            if (!Array.isArray(addedHospitalCharges.value) || addedHospitalCharges.value.length === 0) {
+              const first = (filteredCharges.value && filteredCharges.value.length > 0) ? filteredCharges.value[0] : null;
+              if (first) handleHospitalChargeSelect(first);
+            }
+
+            // Add selected charges to the client-side list via Inertia (do NOT auto-submit invoice)
+            if (Array.isArray(addedHospitalCharges.value) && addedHospitalCharges.value.length > 0) {
+              try { addSelectedHospitalCharges(); } catch (err) {}
+            }
+          });
+        };
+        // attach on keydown — capture for preventing default, bubble for auto-submit
+        input.addEventListener('keydown', listener, true);
+        input.addEventListener('keydown', enterAutoSubmit, false);
+        hospitalChargeInputListener.value.input = input;
+        hospitalChargeInputListener.value.listener = listener;
+        hospitalChargeInputListener.value.enterAutoSubmit = enterAutoSubmit;
+        hospitalChargeInputListener.value.type = 'keydown';
+      }
+    } catch (err) {
+      // ignore
+    }
+  });
+
+  // Document-level submit blocker: if a form submit is triggered by pressing Enter inside multiselect
+  const docSubmitHandler = (ev) => {
+    if (multiselectEnterFlag.value || manualEnterFlag.value) {
+      try {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+      } catch (err) {}
+      multiselectEnterFlag.value = false;
+      manualEnterFlag.value = false;
+    }
+  };
+  document.addEventListener('submit', docSubmitHandler, true);
+  // store handler so we can remove on unmount
+  hospitalChargeInputListener.value.docSubmitHandler = docSubmitHandler;
+  // Global keydown capture: if Enter pressed while focus is inside multiselect, prevent native submit and trigger add+submit flow
+  const globalKeydown = (ev) => {
+    if (ev.key !== 'Enter') return;
+    try {
+      const ms = hospitalChargeMultiselectRef.value;
+      const el = ms && (ms.$el || ms);
+      if (!el) return;
+      let active = document.activeElement;
+      while (active) {
+        if (active === el || el.contains && el.contains(active)) {
+          // mark Enter inside multiselect so any native submit is blocked
+          multiselectEnterFlag.value = true;
+          setTimeout(() => { multiselectEnterFlag.value = false; }, 500);
+          ev.preventDefault();
+          if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+          if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+          // emulate enterAutoSubmit behaviour
+            nextTick(() => {
+              if (!Array.isArray(addedHospitalCharges.value) || addedHospitalCharges.value.length === 0) {
+                const first = (filteredCharges.value && filteredCharges.value.length > 0) ? filteredCharges.value[0] : null;
+                if (first) handleHospitalChargeSelect(first);
+              }
+              if (Array.isArray(addedHospitalCharges.value) && addedHospitalCharges.value.length > 0) {
+                try { addSelectedHospitalCharges(); } catch (err) {}
+              }
+            });
+          break;
+        }
+        active = active.parentElement;
+      }
+    } catch (err) {
+      // ignore
+    }
+  };
+  document.addEventListener('keydown', globalKeydown, true);
+  hospitalChargeInputListener.value.globalKeydown = globalKeydown;
+  // Load any persisted client-side "Charges To Add" state for this IPD patient,
+  // then parse possible quick-add query params and populate auto charges.
+  try { loadAddedItemsFromStorage(); parseAddedManualQuery(); populateAutoCharges(); } catch (e) {}
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("click", handleOutsideClick);
+  try {
+    const rec = hospitalChargeInputListener.value;
+    if (rec && rec.input && rec.listener) {
+      const t = rec.type || 'keydown';
+      rec.input.removeEventListener(t, rec.listener);
+      if (rec.enterAutoSubmit) {
+        rec.input.removeEventListener('keydown', rec.enterAutoSubmit);
+      }
+      if (rec.docSubmitHandler) {
+        document.removeEventListener('submit', rec.docSubmitHandler, true);
+      }
+        if (rec.globalKeydown) {
+          try { document.removeEventListener('keydown', rec.globalKeydown, true); } catch (err) {}
+        }
+    }
+  } catch (err) {
+    // ignore
+  }
 });
 </script>
 
@@ -298,9 +1429,9 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex items-center gap-2 flex-wrap">
-          <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2">
             <Link :href="route('backend.ipdpatient.index')"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-700 text-white rounded">
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12l7.5-7.5M3 12h18" />
@@ -320,38 +1451,34 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="flex items-center gap-2">
-            <a v-if="props.ipdpatient?.id" :href="route('backend.download.ipd.invoice', { id: props.ipdpatient.id })"
-              target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-rose-600 text-white rounded">
+            <ActionButton v-if="props.ipdpatient?.id" :href="route('backend.download.ipd.invoice', { id: props.ipdpatient.id })" external variant="rose" title="IPD Invoice">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round"
                   d="M9 12h6m-6 4h6M7.5 3.75h9A2.25 2.25 0 0 1 18.75 6v12A2.25 2.25 0 0 1 16.5 20.25h-9A2.25 2.25 0 0 1 5.25 18V6A2.25 2.25 0 0 1 7.5 3.75Z" />
               </svg>
-              IPD Invoice
-            </a>
+              <span>IPD Invoice</span>
+            </ActionButton>
 
-            <a v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id"
-              :href="route('backend.download.ipd.final-bill', { id: props.ipdpatient.id })" target="_blank" rel="noopener"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-fuchsia-700 text-white rounded">
+            <ActionButton v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id" :href="route('backend.download.ipd.final-bill', { id: props.ipdpatient.id })" external variant="fuchsia" title="Final Bill">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round"
                   d="M9 12h6m-6 4h6M7.5 3.75h9A2.25 2.25 0 0 1 18.75 6v12A2.25 2.25 0 0 1 16.5 20.25h-9A2.25 2.25 0 0 1 5.25 18V6A2.25 2.25 0 0 1 7.5 3.75Z" />
               </svg>
-              Final Bill
-            </a>
+              <span>Final Bill</span>
+            </ActionButton>
           </div>
 
           <div class="flex items-center gap-2">
-            <button v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id" type="button"
-              @click="regenerateBilling" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-orange-600 text-white rounded">
+            <ActionButton v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id" variant="orange" @click="regenerateBilling" title="Regenerate">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round"
                   d="M16.023 9.348h4.992m0 0v4.992m0-4.992-4.992 4.992M7.977 14.652H3m0 0v-4.992m0 4.992 4.992-4.992" />
               </svg>
-              Regenerate
-            </button>
+              <span>Regenerate</span>
+            </ActionButton>
 
             <div class="relative" ref="printMenuRef">
               <button type="button" @click="togglePrintMenu"
@@ -390,9 +1517,112 @@ onBeforeUnmount(() => {
                 </a>
               </div>
             </div>
+
+            <ActionButton type="button" @click="goToCreateItem" variant="success" title="Create Item">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+              <span>Create Item</span>
+            </ActionButton>
+            <Modal :show="showItemModal" @close="() => { showItemModal = false }" maxWidth="2xl">
+              <div class="p-4">
+                <PathologyForm
+                  embedded
+                  :charges="props.charges"
+                  :chargeTypes="props.chargeTypes"
+                  :chargeCategories="props.chargeCategories"
+                  :chargeUnits="props.chargeUnits"
+                  :taxCategories="props.taxCategories"
+                  :testCategories="[]"
+                  :pathologyUnits="[]"
+                  :testParameters="[]"
+                  :ipdId="props.ipdpatient?.id"
+                  @created="onItemCreated"
+                />
+              </div>
+            </Modal>
           </div>
         </div>
       </div>
+
+
+        <!-- 'Add from Hospital Charges' controls removed per user request -->
+        <div class="border border-gray-200 dark:border-gray-700 rounded p-3">
+          <!-- Manual quick-add: simple item name + price -->
+          <div class="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+            <div>
+              <label class="block text-xs text-gray-600 mb-1">Item Name</label>
+              <div class="relative">
+                <input v-model="manualChargeForm.item_name" @input="onManualItemInput" @focus="() => { if (manualChargeForm.item_name && String(manualChargeForm.item_name).length >= 2) searchManualItems(manualChargeForm.item_name); }" @keydown.enter.prevent="onManualEnter" @keydown.down.prevent="manualSelectNext" @keydown.up.prevent="manualSelectPrev" type="text" placeholder="Item name"
+                  class="block w-full p-2 text-white rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200" />
+
+                <div v-if="showManualSearch" class="absolute left-0 right-0 z-50 mt-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded shadow max-h-60 overflow-auto text-sm">
+                  <div v-if="manualSearchLoading" class="p-2 text-xs text-gray-500">Searching...</div>
+                  <div v-else>
+                    <div v-for="(item, idx) in manualSearchResults" :key="item.id" @mousedown.prevent="selectManualItem(item)" @mouseover="manualSelectedIndex = idx"
+                      :class="[ 'p-2 cursor-pointer', idx === manualSelectedIndex ? 'bg-gray-100 dark:bg-slate-700 font-semibold' : 'hover:bg-gray-100 dark:hover:bg-slate-700' ]">
+                      <div class="font-medium text-xs text-gray-800 dark:text-gray-200">{{ item.test_name ?? item.charge_name ?? item.name }}</div>
+                      <div class="text-xs text-gray-500">{{ item.category_type ?? '' }} &middot; Tk {{ Number(item.amount ?? item.standard_charge ?? 0).toFixed(2) }}</div>
+                    </div>
+                    <div v-if="manualSearchResults.length === 0" class="p-2 text-xs text-gray-500">No matches</div>
+                  </div>
+                </div>
+              </div>
+              <div v-if="manualChargeForm.errors.item_name" class="text-xs text-red-600">{{ manualChargeForm.errors.item_name }}</div>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-600 mb-1">Price (Tk.)</label>
+              <input v-model="manualChargeForm.unit_price" type="number" step="0.01" min="0" placeholder="0.00"
+                class="block w-full p-2 text-white rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200" />
+              <div v-if="manualChargeForm.errors.unit_price" class="text-xs text-red-600">{{ manualChargeForm.errors.unit_price }}</div>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-600 mb-1">Qty</label>
+              <input v-model="manualChargeForm.quantity" type="number" min="1" step="1"
+                class="block w-full p-2 text-white rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200" />
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" @click="addManualToList" :disabled="addLock || manualChargeForm.processing"
+                class="px-3 py-2 text-xs bg-emerald-600 text-white rounded">Add to Charges</button>
+            </div>
+          </div>
+            <div class="mt-2 text-xs text-red-600" v-if="hospitalChargesForm.errors.hospital_charge_ids">{{ hospitalChargesForm.errors.hospital_charge_ids }}</div>
+
+          <!-- Client-side 'Charges to Add' list for manual items -->
+          <div v-if="addedManualItems.length" class="mt-3">
+            <div class="text-xs font-semibold mb-2">Charges To Add</div>
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-xs border-collapse">
+                <thead>
+                  <tr class="bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-gray-200">
+                    <th class="px-2 py-2 border">Item</th>
+                    <th class="px-2 py-2 border">Price</th>
+                    <th class="px-2 py-2 border">Qty</th>
+                    <th class="px-2 py-2 border">Category</th>
+                    <th class="px-2 py-2 border">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(it, idx) in addedManualItems" :key="idx">
+                    <td class="px-2 py-2 border">{{ it.item_name }}</td>
+                    <td class="px-2 py-2 border">Tk {{ Number(it.unit_price || 0).toFixed(2) }}</td>
+                    <td class="px-2 py-2 border">{{ it.quantity }}</td>
+                    <td class="px-2 py-2 border">{{ it.category ?? '' }}</td>
+                    <td class="px-2 py-2 border">
+                      <button type="button" @click="removeManualItem(idx)" class="px-2 py-1 text-[11px] bg-red-600 text-white rounded">Delete</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="mt-2">
+              <button type="button" @click="submitManualItems" :disabled="addLock || addedManualItems.length===0" class="px-3 py-2 text-xs bg-emerald-600 text-white rounded">Submit Items to Invoice</button>
+            </div>
+          </div>
+        
+          <HospitalChargeModal :isOpen="showChargeModal" :charge="null"
+            :chargeTypes="props.chargeTypes || []" :chargeCategories="props.chargeCategories || []"
+            :chargeUnits="props.chargeUnits || []" :taxCategories="props.taxCategories || []"
+            @close="closeChargeModal" @created="handleChargeCreated" />
+        </div>
 
       <div class="mb-3 overflow-x-auto">
         <div class="inline-flex gap-2 border-b border-gray-200 dark:border-gray-700 min-w-full">
@@ -458,6 +1688,28 @@ onBeforeUnmount(() => {
             <div class="p-2 border rounded md:col-span-2">
               <div class="font-semibold">Live Consultation</div>
               <div class="text-sm">{{ overviewTotals.live_consultation ?? 'Not set' }}</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs mt-2">
+            <div class="p-2 border rounded">
+              <div class="font-semibold">Total</div>
+              <div class="text-sm">Tk {{ Number((localRunningBill?.value?.total ?? runningBill.total ?? runningBill.value?.total ?? 0)).toFixed(2) }}</div>
+            </div>
+            <div class="p-2 border rounded">
+              <div class="font-semibold">Paid</div>
+              <div class="text-sm">Tk {{ Number((localRunningBill?.value?.paid ?? runningBill.paid ?? runningBill.value?.paid ?? 0)).toFixed(2) }}</div>
+            </div>
+            <div class="p-2 border rounded">
+              <div class="font-semibold">Due</div>
+              <div class="text-sm">Tk {{ Number((localRunningBill?.value?.due ?? runningBill.due ?? runningBill.value?.due ?? 0)).toFixed(2) }}</div>
+            </div>
+            <div class="p-2 border rounded">
+              <div class="font-semibold">Change</div>
+              <div class="text-sm">Tk {{ Number((localRunningBill?.value?.change ?? runningBill.change ?? runningBill.value?.change ?? 0)).toFixed(2) }}</div>
+            </div>
+            <div class="p-2 border rounded">
+              <div class="font-semibold">Status</div>
+              <div class="text-sm">{{ (localRunningBill?.value?.payment_status ?? runningBill.payment_status ?? runningBill.value?.payment_status ?? 'N/A') }}</div>
             </div>
           </div>
         </div>
@@ -554,11 +1806,11 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="border border-gray-200 dark:border-gray-700 rounded p-3">
-          <div class="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">Recommended Tests</div>
+          <div class="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">Recommended Items</div>
           <ul v-if="testItems.length" class="list-disc ml-5 text-xs text-gray-700 dark:text-gray-200">
             <li v-for="test in testItems" :key="test.id">{{ test.test_name ?? 'N/A' }}</li>
           </ul>
-          <div v-else class="text-xs text-gray-600 dark:text-gray-300">No tests found.</div>
+          <div v-else class="text-xs text-gray-600 dark:text-gray-300">No items found.</div>
         </div>
       </div>
 
@@ -596,118 +1848,62 @@ onBeforeUnmount(() => {
 
       <!-- Charges -->
       <div v-else-if="activeTab === 'charges'" class="space-y-4">
-        <!-- Room Rent -->
+        <!-- Client-side combined 'Charges To Add' preview (only) -->
         <div class="border border-gray-200 dark:border-gray-700 rounded p-3">
-          <div class="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">Room Rent</div>
+          <div class="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">Invoice Added</div>
 
-          <form @submit.prevent="submitRoomRent" class="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
-            <input v-model="roomRentForm.started_at" type="datetime-local" class="p-2 text-xs border rounded"
-              placeholder="Start" />
-            <input v-model="roomRentForm.ended_at" type="datetime-local" class="p-2 text-xs border rounded"
-              placeholder="End" />
-            <input v-model="roomRentForm.rate_per_day" type="number" step="0.01" class="p-2 text-xs border rounded"
-              placeholder="Rate/day" />
-            <input v-model="roomRentForm.notes" type="text" class="p-2 text-xs border rounded"
-              placeholder="Notes" />
-            <button type="submit" :disabled="roomRentForm.processing"
-              class="px-3 py-2 text-xs bg-blue-600 text-white rounded">
-              Add
-            </button>
-          </form>
+          <div v-if="(addedHospitalCharges && addedHospitalCharges.length) || (addedManualItems && addedManualItems.length) || (serverBillItemsFiltered && serverBillItemsFiltered.length)">
+            <div class="mt-3 overflow-x-auto">
+              <table class="min-w-full text-xs border-collapse">
+                <thead>
+                  <tr class="bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-gray-200">
+                    <th class="px-2 py-2 border">Item</th>
+                    <th class="px-2 py-2 border">Rate</th>
+                    <th class="px-2 py-2 border">Qty</th>
+                    <th class="px-2 py-2 border">Type</th>
+                    <th class="px-2 py-2 border">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(c, idx) in addedHospitalCharges" :key="'h-'+(c.id||idx)">
+                    <td class="px-2 py-2 border">{{ c.name ?? c.charge_name ?? 'Charge' }}</td>
+                    <td class="px-2 py-2 border">{{ c.standard_charge ?? c.unit_price ?? '0.00' }}</td>
+                    <td class="px-2 py-2 border">1</td>
+                    <td class="px-2 py-2 border">Hospital Charge</td>
+                    <td class="px-2 py-2 border">
+                      <button type="button" @click="moveHospitalChargeToBedHistory(c)" class="px-2 py-1 text-[11px] bg-yellow-500 text-white rounded mr-2">Move</button>
+                      <button type="button" @click="removeAddedHospitalCharge(c.id)" class="px-2 py-1 text-[11px] bg-red-600 text-white rounded">Delete</button>
+                    </td>
+                  </tr>
 
-          <div v-if="roomRentForm.errors.started_at || roomRentForm.errors.rate_per_day" class="mt-2 text-xs text-red-600">
-            <div v-if="roomRentForm.errors.started_at">{{ roomRentForm.errors.started_at }}</div>
-            <div v-if="roomRentForm.errors.rate_per_day">{{ roomRentForm.errors.rate_per_day }}</div>
+                  <tr v-for="(m, idx2) in addedManualItems" :key="'m-'+idx2">
+                    <td class="px-2 py-2 border">{{ m.item_name }}</td>
+                    <td class="px-2 py-2 border">{{ m.unit_price }}</td>
+                    <td class="px-2 py-2 border">{{ m.quantity }}</td>
+                    <td class="px-2 py-2 border">Manual Item</td>
+                    <td class="px-2 py-2 border">
+                      <button type="button" @click="removeManualItem(idx2)" class="px-2 py-1 text-[11px] bg-red-600 text-white rounded">Delete</button>
+                    </td>
+                  </tr>
+
+                  <tr v-for="(b, idx3) in serverBillItemsFiltered" :key="'s-'+(b.id||idx3)">
+                    <td class="px-2 py-2 border">{{ b.item_name }}</td>
+                    <td class="px-2 py-2 border">{{ b.unit_price ?? b.net_amount ?? 0 }}</td>
+                    <td class="px-2 py-2 border">{{ b.quantity ?? 1 }}</td>
+                    <td class="px-2 py-2 border">Invoice Item</td>
+                    <td class="px-2 py-2 border">
+                      <span class="text-xs text-gray-600">Server</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-
-          <div class="mt-3 overflow-x-auto" v-if="roomRentCharges.length">
-            <table class="min-w-full text-xs border-collapse">
-              <thead>
-                <tr class="bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-gray-200">
-                  <th class="px-2 py-2 border">Start</th>
-                  <th class="px-2 py-2 border">End</th>
-                  <th class="px-2 py-2 border">Rate/day</th>
-                  <th class="px-2 py-2 border">Bed</th>
-                  <th class="px-2 py-2 border">Notes</th>
-                  <th class="px-2 py-2 border">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="c in roomRentCharges" :key="c.id">
-                  <td class="px-2 py-2 border">{{ formatDateTime(c.started_at) }}</td>
-                  <td class="px-2 py-2 border">{{ c.ended_at ? formatDateTime(c.ended_at) : '' }}</td>
-                  <td class="px-2 py-2 border">{{ c.rate_per_day }}</td>
-                  <td class="px-2 py-2 border">{{ c.bed?.name ?? '' }}</td>
-                  <td class="px-2 py-2 border">{{ c.notes ?? '' }}</td>
-                  <td class="px-2 py-2 border">
-                    <button type="button" @click="deleteRoomRent(c.id)" class="px-2 py-1 text-[11px] bg-red-600 text-white rounded">
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="mt-2 text-xs text-gray-600 dark:text-gray-300">No room rent charges.</div>
+          <div v-else class="mt-2 text-xs text-gray-600 dark:text-gray-300">No items in Charges To Add.</div>
         </div>
 
-        <!-- Bed Charge -->
-        <div class="border border-gray-200 dark:border-gray-700 rounded p-3">
-          <div class="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">Bed Charge</div>
-
-          <form @submit.prevent="submitBedCharge" class="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
-            <input v-model="bedChargeForm.started_at" type="datetime-local" class="p-2 text-xs border rounded"
-              placeholder="Start" />
-            <input v-model="bedChargeForm.ended_at" type="datetime-local" class="p-2 text-xs border rounded"
-              placeholder="End" />
-            <input v-model="bedChargeForm.rate_per_day" type="number" step="0.01" class="p-2 text-xs border rounded"
-              placeholder="Rate/day" />
-            <input v-model="bedChargeForm.notes" type="text" class="p-2 text-xs border rounded"
-              placeholder="Notes" />
-            <button type="submit" :disabled="bedChargeForm.processing"
-              class="px-3 py-2 text-xs bg-blue-600 text-white rounded">
-              Add
-            </button>
-          </form>
-
-          <div v-if="bedChargeForm.errors.started_at || bedChargeForm.errors.rate_per_day" class="mt-2 text-xs text-red-600">
-            <div v-if="bedChargeForm.errors.started_at">{{ bedChargeForm.errors.started_at }}</div>
-            <div v-if="bedChargeForm.errors.rate_per_day">{{ bedChargeForm.errors.rate_per_day }}</div>
-          </div>
-
-          <div class="mt-3 overflow-x-auto" v-if="bedCharges.length">
-            <table class="min-w-full text-xs border-collapse">
-              <thead>
-                <tr class="bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-gray-200">
-                  <th class="px-2 py-2 border">Start</th>
-                  <th class="px-2 py-2 border">End</th>
-                  <th class="px-2 py-2 border">Rate/day</th>
-                  <th class="px-2 py-2 border">Bed</th>
-                  <th class="px-2 py-2 border">Notes</th>
-                  <th class="px-2 py-2 border">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="c in bedCharges" :key="c.id">
-                  <td class="px-2 py-2 border">{{ formatDateTime(c.started_at) }}</td>
-                  <td class="px-2 py-2 border">{{ c.ended_at ? formatDateTime(c.ended_at) : '' }}</td>
-                  <td class="px-2 py-2 border">{{ c.rate_per_day }}</td>
-                  <td class="px-2 py-2 border">{{ c.bed?.name ?? '' }}</td>
-                  <td class="px-2 py-2 border">{{ c.notes ?? '' }}</td>
-                  <td class="px-2 py-2 border">
-                    <button type="button" @click="deleteBedCharge(c.id)" class="px-2 py-1 text-[11px] bg-red-600 text-white rounded">
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="mt-2 text-xs text-gray-600 dark:text-gray-300">No bed charges.</div>
-        </div>
-
-        <!-- Doctor Visit / Consultation Fee -->
-        <div class="border border-gray-200 dark:border-gray-700 rounded p-3">
+        <!-- Doctor Visit / Consultation Fee (hidden per request) -->
+        <div v-if="false" class="border border-gray-200 dark:border-gray-700 rounded p-3">
           <div class="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">Consultation / Doctor Visit Fee</div>
 
           <form @submit.prevent="submitDoctorVisitCharge" class="grid grid-cols-1 md:grid-cols-6 gap-2 items-end">
@@ -759,8 +1955,8 @@ onBeforeUnmount(() => {
           <div v-else class="mt-2 text-xs text-gray-600 dark:text-gray-300">No doctor visit charges.</div>
         </div>
 
-        <!-- OT / Operation / Professional Fee -->
-        <div class="border border-gray-200 dark:border-gray-700 rounded p-3">
+        <!-- OT / Operation / Professional Fee (hidden per request) -->
+        <div v-if="false" class="border border-gray-200 dark:border-gray-700 rounded p-3">
           <div class="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">OT / Operation / Professional Fees</div>
 
           <form @submit.prevent="submitOtCharge" class="grid grid-cols-1 md:grid-cols-6 gap-2 items-end">
@@ -821,6 +2017,21 @@ onBeforeUnmount(() => {
 
       <div v-else-if="activeTab === 'payments'" class="border border-gray-200 dark:border-gray-700 rounded p-3">
         <div class="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2">Payments</div>
+
+        <div class="flex items-center gap-2 mb-2">
+          <button type="button" @click="collectDue" class="px-3 py-2 text-xs bg-emerald-600 text-white rounded">Collect Due</button>
+          <button type="button" @click="collectFullBill" class="px-3 py-2 text-xs bg-emerald-600 text-white rounded">Collect Full Bill</button>
+
+          <div class="flex items-center gap-2 ml-3">
+            <input v-model="discountForm.discount" type="number" step="0.01" placeholder="Discount" class="p-2 text-xs border rounded" />
+            <select v-model="discountForm.discount_type" class="p-2 text-xs border rounded">
+              <option value="flat">Flat</option>
+              <option value="percentage">Percentage</option>
+            </select>
+            <button type="button" @click="applyDiscount" :disabled="discountForm.processing" class="px-3 py-2 text-white bg-yellow-500 text-black rounded">Apply Discount</button>
+          </div>
+        </div>
+
         <form @submit.prevent="submitPayment" class="grid grid-cols-1 md:grid-cols-6 gap-2 items-end mb-3">
           <input v-model="paymentForm.amount" type="number" step="0.01" class="p-2 text-xs border rounded" placeholder="Amount" />
           <input v-model="paymentForm.payment_method" type="text" class="p-2 text-xs border rounded" placeholder="Method" />
@@ -834,13 +2045,14 @@ onBeforeUnmount(() => {
           <table class="min-w-full text-xs border-collapse">
             <thead>
               <tr class="bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-gray-200">
-                <th class="px-2 py-2 border">Date</th>
-                <th class="px-2 py-2 border">Amount</th>
-                <th class="px-2 py-2 border">Method</th>
-                <th class="px-2 py-2 border">Transaction ID</th>
-                <th class="px-2 py-2 border">Payment Status</th>
-                <th class="px-2 py-2 border">Notes</th>
-              </tr>
+                  <th class="px-2 py-2 border">Date</th>
+                  <th class="px-2 py-2 border">Amount</th>
+                  <th class="px-2 py-2 border">Method</th>
+                  <th class="px-2 py-2 border">Transaction ID</th>
+                  <th class="px-2 py-2 border">Payment Status</th>
+                  <th class="px-2 py-2 border">Notes</th>
+                  <th class="px-2 py-2 border">Action</th>
+                </tr>
             </thead>
             <tbody>
               <tr v-for="payment in props.payments" :key="payment.id">
@@ -852,6 +2064,9 @@ onBeforeUnmount(() => {
                 <td class="px-2 py-2 border">{{ payment.transaction_id ?? '' }}</td>
                 <td class="px-2 py-2 border">{{ payment.payment_status ?? '' }}</td>
                 <td class="px-2 py-2 border">{{ payment.notes ?? '' }}</td>
+                <td class="px-2 py-2 border">
+                  <button type="button" @click="editPayment(payment)" class="px-2 py-1 text-white] bg-yellow-400 text-black rounded">Edit</button>
+                </td>
               </tr>
             </tbody>
           </table>

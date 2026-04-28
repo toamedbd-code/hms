@@ -1,5 +1,5 @@
 <script setup>
-import { ref, nextTick } from "vue";
+import { ref, nextTick, computed } from "vue";
 import BackendLayout from "@/Layouts/BackendLayout.vue";
 import InputLabel from "@/Components/InputLabel.vue";
 import { useForm } from "@inertiajs/vue3";
@@ -148,6 +148,20 @@ const fetchSuggestions = async (url, target) => {
     }
 };
 
+const flattenTestSuggestions = computed(() => {
+    return Array.isArray(testSuggestions.value) ? [...testSuggestions.value] : [];
+});
+
+const groupedTestSuggestions = computed(() => {
+    const groups = {};
+    (testSuggestions.value || []).forEach((item) => {
+        const key = (typeof item === 'string') ? 'Other' : ((item?.category_type ?? 'Other') || 'Other');
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(item);
+    });
+    return groups;
+});
+
 const normalizeMedicineResults = (results) => {
     if (!Array.isArray(results)) {
         return [];
@@ -278,7 +292,7 @@ const searchTest = (query) => {
     }
 
     testSearchTimer = setTimeout(() => {
-        const url = route("backend.testpathology.search", { q: term });
+        const url = route("backend.itemcharge.search", { q: term });
         fetchSuggestions(url, testSuggestions);
     }, 250);
 };
@@ -317,7 +331,7 @@ const onTestKeydown = (index, event) => {
     } else if (event.key === 'Enter') {
         event.preventDefault();
         const item = list[highlightedIndex.value];
-        const name = typeof item === 'string' ? item : (item?.name ?? item?.test_name ?? '');
+        const name = typeof item === 'string' ? item : (item?.test_name ?? item?.name ?? '');
         if (name) {
             form.tests[index] = name;
             suggestionsVisible.value = false;
@@ -330,7 +344,7 @@ const onTestKeydown = (index, event) => {
 };
 
 const selectTestSuggestion = (index, item) => {
-    const name = typeof item === 'string' ? item : (item?.name ?? item?.test_name ?? '');
+    const name = typeof item === 'string' ? item : (item?.test_name ?? item?.name ?? '');
     if (!name) return;
     form.tests[index] = name;
     suggestionsVisible.value = false;
@@ -468,11 +482,11 @@ const downloadPrescriptionPdf = () => {
             <div class="border border-gray-200 rounded-md p-3 dark:border-gray-700">
                 <!-- successMessage displayed via toast; inline success removed -->
                 <div v-if="$page.props.flash?.errorMessage"
-                    class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-white text-red-700">
                     {{ $page.props.flash.errorMessage }}
                 </div>
 
-                <div v-if="saveError" class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                <div v-if="saveError" class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-white text-red-700">
                     {{ saveError }}
                 </div>
 
@@ -480,7 +494,7 @@ const downloadPrescriptionPdf = () => {
                     <InputLabel value="Doctor" class="text-xs mb-1" />
                     <select
                         v-model="form.doctor_id"
-                        class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                        class="w-full px-2 py-1.5 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                     >
                         <option value="">Select doctor</option>
                         <option v-for="doctor in props.doctors ?? []" :key="doctor.id" :value="doctor.id">
@@ -500,7 +514,7 @@ const downloadPrescriptionPdf = () => {
                             type="file"
                             accept="image/*"
                             @change="handleDoctorSealChange"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                         />
                         <p v-if="form.errors.doctor_seal" class="mt-1 text-xs text-red-600">{{ form.errors.doctor_seal }}</p>
                     </div>
@@ -514,7 +528,7 @@ const downloadPrescriptionPdf = () => {
                             type="file"
                             accept="image/*"
                             @change="handleDoctorSignatureChange"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                         />
                         <p v-if="form.errors.doctor_signature" class="mt-1 text-xs text-red-600">{{ form.errors.doctor_signature }}</p>
                     </div>
@@ -524,7 +538,7 @@ const downloadPrescriptionPdf = () => {
                         <textarea
                             v-model="form.doctor_designation"
                             rows="4"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                             placeholder="e.g. Consultant Medicine&#10;MBBS, FCPS"
                         ></textarea>
                         <p v-if="form.errors.doctor_designation" class="mt-1 text-xs text-red-600">{{ form.errors.doctor_designation }}</p>
@@ -535,7 +549,7 @@ const downloadPrescriptionPdf = () => {
                     <div>
                         <InputLabel value="Complaints" class="text-xs mb-1" />
                         <textarea v-model="form.complaints" rows="3"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                             placeholder="Chief complaints"></textarea>
                         <p v-if="form.errors.complaints" class="mt-1 text-xs text-red-600">{{ form.errors.complaints }}</p>
                     </div>
@@ -543,7 +557,7 @@ const downloadPrescriptionPdf = () => {
                     <div>
                         <InputLabel value="Diagnosis" class="text-xs mb-1" />
                         <textarea v-model="form.diagnosis" rows="3"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                             placeholder="Diagnosis"></textarea>
                         <p v-if="form.errors.diagnosis" class="mt-1 text-xs text-red-600">{{ form.errors.diagnosis }}</p>
                     </div>
@@ -551,7 +565,7 @@ const downloadPrescriptionPdf = () => {
                     <div>
                         <InputLabel value="Advice" class="text-xs mb-1" />
                         <textarea v-model="form.advice" rows="3"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                             placeholder="Advice"></textarea>
                         <p v-if="form.errors.advice" class="mt-1 text-xs text-red-600">{{ form.errors.advice }}</p>
                     </div>
@@ -559,7 +573,7 @@ const downloadPrescriptionPdf = () => {
                     <div>
                         <InputLabel value="Follow Up Date" class="text-xs mb-1" />
                         <input v-model="form.follow_up_date" type="date"
-                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200" />
+                            class="w-full px-2 py-1.5 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200" />
                         <p v-if="form.errors.follow_up_date" class="mt-1 text-xs text-red-600">{{ form.errors.follow_up_date }}</p>
                     </div>
                 </div>
@@ -585,7 +599,7 @@ const downloadPrescriptionPdf = () => {
                                             v-model="row.medicine_name"
                                             type="text"
                                             :ref="el => medicineInputs.value[index] = el"
-                                            class="w-full px-2 py-1 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                            class="w-full px-2 py-1 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                             placeholder="Medicine name"
                                             @input="onMedicineInput(index)"
                                             @change="onMedicineChange(index)"
@@ -605,22 +619,22 @@ const downloadPrescriptionPdf = () => {
                                 </td>
                                 <td class="px-2 py-2 border">
                                     <input v-model="row.dose" type="text"
-                                        class="w-full px-2 py-1 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                        class="w-full px-2 py-1 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="e.g. 1 tab" />
                                 </td>
                                 <td class="px-2 py-2 border">
                                     <input v-model="row.frequency" type="text"
-                                        class="w-full px-2 py-1 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                        class="w-full px-2 py-1 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="e.g. 1-0-1" />
                                 </td>
                                 <td class="px-2 py-2 border">
                                     <input v-model="row.duration" type="text"
-                                        class="w-full px-2 py-1 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                        class="w-full px-2 py-1 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="e.g. 7 days" />
                                 </td>
                                 <td class="px-2 py-2 border">
                                     <input v-model="row.instructions" type="text"
-                                        class="w-full px-2 py-1 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                        class="w-full px-2 py-1 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="After meal" />
                                 </td>
                                 <td class="px-2 py-2 border text-center">
@@ -644,7 +658,7 @@ const downloadPrescriptionPdf = () => {
                 </div>
 
                 <div class="mt-4 border border-gray-200 rounded-md p-2 dark:border-gray-700">
-                    <div class="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Recommended Tests</div>
+                    <div class="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Recommended Items</div>
 
                     <div class="space-y-1.5">
                         <div v-for="(testName, index) in form.tests" :key="`test-${index}`" class="flex items-start gap-2">
@@ -657,17 +671,21 @@ const downloadPrescriptionPdf = () => {
                                     v-model="form.tests[index]"
                                     type="text"
                                     :ref="el => testInputs[index] = el"
-                                    class="w-full px-2 py-1 border border-gray-300 rounded text-xs dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                                    placeholder="Test name"
+                                    class="w-full px-2 py-1 border border-gray-300 rounded text-white dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                                    placeholder="Item name"
                                     @input="onTestInput(index)"
                                     @keydown="onTestKeydown(index, $event)"
                                     @blur="onTestBlur(index)"
                                     @focus="activeTestRowIndex = index; if (String(form.tests[index] ?? '').trim().length >= 2) { suggestionsVisible = true; searchTest(form.tests[index]); }"
                                 />
 
-                                <div v-if="activeTestRowIndex === index && suggestionsVisible && testSuggestions.length" class="absolute z-50 left-0 right-0 mt-1 bg-white border rounded shadow max-h-48 overflow-auto text-xs">
-                                    <div v-for="(item, sIndex) in testSuggestions" :key="sIndex" :class="highlightedIndex === sIndex ? 'bg-blue-100' : ''" @mousedown.prevent="selectTestSuggestion(index, item)" @mouseenter="highlightedIndex = sIndex" class="px-2 py-1 cursor-pointer">
-                                        {{ typeof item === 'string' ? item : (item.name ?? item.test_name ?? '') }}
+                                <div v-if="activeTestRowIndex === index && suggestionsVisible && flattenTestSuggestions.length" class="absolute z-50 left-0 right-0 mt-1 bg-white border rounded shadow max-h-48 overflow-auto text-xs">
+                                    <div v-for="(items, group) in groupedTestSuggestions" :key="group">
+                                        <div class="px-2 py-1 text-xs font-semibold bg-gray-100 text-gray-700">{{ group }}</div>
+                                        <div v-for="(item, sIndex) in items" :key="group + '-' + sIndex" @mousedown.prevent="selectTestSuggestion(index, item)" @mouseenter="highlightedIndex = flattenTestSuggestions.indexOf(item)" :class="flattenTestSuggestions.indexOf(item) === highlightedIndex ? 'bg-blue-100' : ''" class="px-2 py-1 cursor-pointer">
+                                            {{ typeof item === 'string' ? item : (item.test_name ?? item.name ?? '') }}
+                                            <span v-if="typeof item !== 'string' && (item.amount || item.standard_charge)" class="ml-2 text-xs text-gray-500">– ৳{{ item.amount ?? item.standard_charge }}</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -682,7 +700,7 @@ const downloadPrescriptionPdf = () => {
 
                     <div class="mt-2">
                         <button type="button" class="px-3 py-1.5 text-xs bg-gray-600 text-white rounded" @click="addTestRow">
-                            Add Test
+                            Add Item
                         </button>
                     </div>
 

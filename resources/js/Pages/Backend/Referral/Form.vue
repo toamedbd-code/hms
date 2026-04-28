@@ -231,7 +231,7 @@ const goToRefferalList = () => {
                         <InputError class="mt-2" :message="form.errors.payee_id" />
                         
                         <!-- Selected Payee Commission Rates -->
-                        <div v-if="selectedPayee" class="mt-2 p-2 bg-green-50 rounded text-sm">
+                        <div v-if="selectedPayee" class="mt-2 p-2 bg-green-50 rounded text-white">
                             <p><strong>Name:</strong> {{ selectedPayee.name }}</p>
                             <p><strong>Phone:</strong> {{ selectedPayee.phone }}</p>
                             <div class="grid grid-cols-2 gap-1 mt-1 text-xs">
@@ -247,7 +247,7 @@ const goToRefferalList = () => {
                     <div class="col-span-1">
                         <InputLabel for="date" value="Date" />
                         <input id="date"
-                            class="block w-full p-2 mt-1 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 mt-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.date" type="date" required />
                         <InputError class="mt-2" :message="form.errors.date" />
                     </div>
@@ -256,7 +256,7 @@ const goToRefferalList = () => {
                     <div class="col-span-1">
                         <InputLabel for="status" value="Status" />
                         <select id="status"
-                            class="block w-full p-2 mt-1 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 mt-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.status" required>
                             <option value="Active">Active</option>
                             <option value="Inactive">Inactive</option>
@@ -268,7 +268,7 @@ const goToRefferalList = () => {
                     <div class="col-span-2">
                         <InputLabel for="remarks" value="Remarks (Optional)" />
                         <textarea id="remarks"
-                            class="block w-full p-2 mt-1 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 mt-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.remarks" 
                             rows="3"
                             placeholder="Enter any additional remarks..."></textarea>

@@ -263,7 +263,7 @@ const contextPreview = (context) => {
       </div>
 
       <div v-if="payloadModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-        <div class="w-full max-w-4xl p-4 bg-white rounded shadow-lg">
+        <div class="w-full max-w-4xl p-4 bg-white rounded shadow-lg text-gray-800">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-lg font-semibold text-gray-800">{{ payloadModalTitle }}</h2>
             <button type="button" class="px-3 py-1 text-sm text-white bg-gray-600 rounded hover:bg-gray-700" @click="closePayloadModal">Close</button>

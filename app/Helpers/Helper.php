@@ -465,7 +465,7 @@ function getSideMenus($user)
         return $aliases[$route] ?? $route;
     };
 
-    $result = $menus->filter(function ($menu) use ($normalizeRoute, $hasMenuPermission) {
+    $result = $menus->filter(function ($menu) use ($normalizeRoute, $hasMenuPermission, $strictFiltering) {
         $menuHasPermission = $hasMenuPermission($menu->permission_name ?? null);
 
         $menu->childrens = $menu->childrens->filter(function ($child) use ($hasMenuPermission) {
@@ -550,6 +550,14 @@ function getSideMenus($user)
             }
         }
 
+        // Strict filtering: when enabled for a user (via SIDEBAR_STRICT_EMAILS),
+        // treat the parent's permission as authoritative — hide the parent
+        // unless the parent permission itself is granted. This ensures the
+        // sidebar strictly reflects assigned permissions for targeted users.
+        if ($strictFiltering && !$menuHasPermission) {
+            return false;
+        }
+
         // If there are no permitted children and no route, hide the parent only
         // when the current user also doesn't have the parent's permission.
         if (!$hasChildren && $route === '' && !$menuHasPermission) {
@@ -562,45 +570,8 @@ function getSideMenus($user)
         return $route !== '' ? ('route:' . $route) : ('name:' . trim((string) ($menu->name ?? '')));
     })->values();
 
-    // Temporary safety: ensure Account Management parent menu appears only
-    // for Admin users when either the admin has the parent permission or at
-    // least one child permission is granted. This prevents non-admin roles
-    // (e.g., Developer) from getting an always-visible Account Management
-    // parent merely because they hold some child permissions.
-    try {
-        if (!$strictFiltering && method_exists($user, 'hasRole') && ($user->hasRole('Admin') || $user->hasRole('admin'))) {
-            $accountName = 'Account Management';
-            $already = $result->first(function ($m) use ($accountName) {
-                $name = is_array($m) ? ($m['name'] ?? '') : ($m->name ?? '');
-                return trim(strtolower((string) $name)) === trim(strtolower($accountName));
-            });
-
-            if (!$already) {
-                $accountMenuModel = Menu::with('childrens')->where('name', $accountName)->first();
-                if ($accountMenuModel) {
-                    $menuArr = $accountMenuModel->toArray();
-                    $children = collect($menuArr['childrens'] ?? [])->filter(function ($child) use ($hasMenuPermission) {
-                        return $hasMenuPermission($child['permission_name'] ?? null);
-                    })->sortBy(function ($child) {
-                        $sorting = (int) ($child['sorting'] ?? 0);
-                        $id = (int) ($child['id'] ?? 0);
-                        return sprintf('%05d-%010d', $sorting, $id);
-                    })->values()->toArray();
-
-                    $menuArr['childrens'] = $children;
-
-                    $hasParentPermission = $hasMenuPermission($menuArr['permission_name'] ?? null);
-                    $hasAnyChildPerm = count($children) > 0;
-
-                    if ($hasParentPermission || $hasAnyChildPerm) {
-                        $result->push($menuArr);
-                    }
-                }
-            }
-        }
-    } catch (\Throwable $e) {
-        // ignore temporary override failures
-    }
+    // NOTE: removed special-case injection for "Account Management" so that
+    // it follows the same permission-based visibility rules as other menus.
 
     // Developer full-menu bypass: only apply when the sidebar debug override
     // is explicitly enabled (config/sidebar.force_full_menus +
@@ -647,10 +618,14 @@ function getSideMenus($user)
         // ignore filtering errors and return as-is
     }
 
-    // Previously this code removed InvoiceDesign-related menu entries.
-    // Keep the blocked substrings empty so Invoice Design menus are allowed.
-    try {
-        $blockedSubstrings = [];
+        // Block specific menu entries by substring to remove them from sidebar.
+        // Add any menu name/route fragments here to hide them application-wide.
+        try {
+        $blockedSubstrings = [
+            'invoicedesign', // route slug used by InvoiceDesign resource
+            'invoice design',
+            'invoice-design',
+        ];
 
         // strip any children matching blocked substrings for arrays and objects
         $result = $result->map(function ($menu) use ($blockedSubstrings, $normalizeRoute) {

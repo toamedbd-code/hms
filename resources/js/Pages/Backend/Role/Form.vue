@@ -19,7 +19,7 @@ const form = useForm({
 });
 
 
-const submit = () => {
+const submit = async () => {
     const routeName = props.id ? route('backend.role.update', props.id) : route('backend.role.store');
     form.transform(data => ({
         ...data,
@@ -27,31 +27,71 @@ const submit = () => {
         isDirty: false,
     })).post(routeName, {
 
-        onSuccess: (response) => {
+        onSuccess: async (response) => {
             if (!props.id)
                 form.reset();
             displayResponse(response);
 
-            // Reload Inertia shared `auth` props so `auth.sideMenus` is recomputed
+            // Proactively fetch side-menus and emit to Sidebar so the UI
+            // updates immediately without requiring any Inertia reload.
+            // Emit both the normal `sidebar.remoteUpdated` (for compatibility)
+            // and `sidebar.remoteUpdatedForce` which the sidebar will apply
+            // immediately regardless of timestamp ordering.
             try {
-                router.reload({ only: ['auth'] });
-            } catch (e) {
-                // ignore reload failures
-            }
+                const applySnapshot = (data) => {
+                    try { eventBus.emit('sidebar.remoteUpdated', data); } catch (e) { /* ignore */ }
+                    try { eventBus.emit('sidebar.remoteUpdatedForce', data); } catch (e) { /* ignore */ }
+                };
 
-            // Also proactively fetch side-menus and emit to Sidebar as a fallback
-            try {
-                if (typeof window !== 'undefined' && window.axios && typeof window.axios.get === 'function') {
-                    window.axios.get('/admin/side-menus')
-                        .then((resp) => {
-                            if (resp && resp.data) eventBus.emit('sidebar.remoteUpdated', resp.data);
-                        }).catch(() => {});
-                } else if (typeof fetch === 'function') {
-                    fetch('/admin/side-menus', { credentials: 'include' })
-                        .then((r) => r.json())
-                        .then((data) => { if (data) eventBus.emit('sidebar.remoteUpdated', data); })
-                        .catch(() => {});
-                }
+                const fetchAndApply = (cb) => {
+                    if (typeof window !== 'undefined' && window.axios && typeof window.axios.get === 'function') {
+                        window.axios.get('/admin/side-menus')
+                            .then((resp) => {
+                                if (resp && resp.data) {
+                                    applySnapshot(resp.data);
+                                    if (typeof cb === 'function') cb(resp.data);
+                                }
+                            }).catch(() => { if (typeof cb === 'function') cb(null); });
+                    } else if (typeof fetch === 'function') {
+                        fetch('/admin/side-menus', { credentials: 'include' })
+                            .then((r) => r.json())
+                            .then((data) => {
+                                if (data) {
+                                    applySnapshot(data);
+                                    if (typeof cb === 'function') cb(data);
+                                } else if (typeof cb === 'function') cb(null);
+                            })
+                            .catch(() => { if (typeof cb === 'function') cb(null); });
+                    } else if (typeof cb === 'function') {
+                        cb(null);
+                    }
+                };
+
+                // Fetch and apply immediately
+                fetchAndApply((snapshot) => {
+                    // Also re-apply after any Inertia navigation finishes so that
+                    // the forced snapshot survives the Inertia visit that follows
+                    // the form POST (redirects update shared props and remount
+                    // the layout). Listen once and then remove the listener.
+                    try {
+                        const onInertiaFinish = () => {
+                            try {
+                                if (snapshot) applySnapshot(snapshot);
+                                else fetchAndApply();
+                            } catch (e) { /* ignore */ }
+                            try { window.removeEventListener('inertia:finish', onInertiaFinish); } catch (e) { /* ignore */ }
+                        };
+
+                        try { window.addEventListener('inertia:finish', onInertiaFinish, { passive: true }); } catch (e) { /* ignore */ }
+                        // Fallback: also re-apply after a short delay in case the
+                        // Inertia event isn't fired in some environments.
+                        setTimeout(() => {
+                            try { if (snapshot) applySnapshot(snapshot); else fetchAndApply(); } catch (e) { /* ignore */ }
+                        }, 500);
+                    } catch (e) {
+                        // ignore
+                    }
+                });
             } catch (e) {
                 // ignore
             }
@@ -300,7 +340,7 @@ const goToRoleList = () => {
                     <div class="w-full lg:max-w-md">
                         <InputLabel for="name" value="Role Edit | Role Name | Permissions" />
                         <input id="name"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" type="text" placeholder="Role Name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -311,7 +351,7 @@ const goToRoleList = () => {
                             v-model="permissionSearch"
                             type="text"
                             placeholder="Search permission (e.g. doctor portal, website inbox)"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                         />
                     </div>
                 </div>
@@ -321,7 +361,7 @@ const goToRoleList = () => {
                         Module-wise permission list: module এ ক্লিক করলে permission গুলো open হবে।
                     </div>
                     <div class="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-                        <div class="rounded-md border border-slate-200 bg-slate-50 p-2 max-h-[540px] overflow-y-auto">
+                        <div class="rounded-md border border-slate-200 bg-slate-50 p-2 max-h-[540px] overflow-y-auto text-white">
                             <template v-for="permissionInfo in sortedPermissionGroups" :key="permissionInfo.id">
                                 <button
                                     type="button"
@@ -372,7 +412,7 @@ const goToRoleList = () => {
 
                                         <ul v-if="activePermissionGroup.child" class="ml-1 mt-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                                             <template v-for="childInfo in activePermissionGroup.child" :key="childInfo.id">
-                                                <li class="rounded border border-slate-200 p-2 bg-slate-50">
+                                                <li class="rounded border border-slate-200 p-2 bg-slate-50 text-white">
                                                     <div class="flex items-center">
                                                         <input v-model="checkedPermissions" :value="childInfo.id"
                                                             type="checkbox" class="cursor-pointer"
@@ -408,7 +448,7 @@ const goToRoleList = () => {
                             </div>
                         </div>
 
-                        <div v-else class="rounded-md border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                        <div v-else class="rounded-md border border-dashed border-slate-300 bg-slate-50 p-6 text-white text-sm text-slate-500">
                             Permission group select করুন।
                         </div>
                     </div>

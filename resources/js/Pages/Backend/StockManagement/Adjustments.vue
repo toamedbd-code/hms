@@ -77,7 +77,7 @@ const applyPerPage = () => {
               <td class="px-3 py-2 border text-center">{{ formatDateTime(item.movement_date) }}</td>
               <td class="px-3 py-2 border">{{ item.store_item?.item_name || '-' }}</td>
               <td class="px-3 py-2 border text-center">
-                <span class="px-2 py-1 text-xs rounded uppercase" :class="item.movement_type === 'increase' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'">{{ item.movement_type }}</span>
+                <span class="px-2 py-1 text-xs rounded uppercase" :class="item.movement_type === 'increase' ? 'bg-emerald-100 text-white' : 'bg-rose-100 text-rose-700'">{{ item.movement_type }}</span>
               </td>
               <td class="px-3 py-2 border text-center">{{ item.quantity }}</td>
               <td class="px-3 py-2 border text-center">{{ Number(item.unit_price ?? 0).toFixed(2) }}</td>

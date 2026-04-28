@@ -669,13 +669,13 @@ const goToRadiologyList = () => {
                             <!-- Searchable Test Name Field -->
                             <div class="relative">
                                 <div class="mb-2">
-                                    <span class="text-sm font-medium text-black">Test Name</span>
+                                    <span class="text-sm font-medium text-black">Item Name</span>
                                     <span class="text-red-500 ml-1">*</span>
                                 </div>
                                 <input :id="`testSearch_${index}`" v-model="searchQueries[test.id]"
                                     @input="handleTestSearch(index, $event.target.value)"
                                     @focus="handleTestFocus(index)" @blur="handleTestBlur(index, $event)"
-                                    @keydown="handleTestKeydown(index, $event)" type="text" placeholder="Search test..."
+                                    @keydown="handleTestKeydown(index, $event)" type="text" placeholder="Search item..."
                                     class="block w-full px-3 py-2 text-sm border border-gray-300 rounded focus:border-blue-500 focus:outline-none"
                                     autocomplete="off" />
 
@@ -707,8 +707,8 @@ const goToRadiologyList = () => {
                                 <!-- No results found -->
                                 <div v-if="showDropdowns[test.id] && getFilteredTests(test.id).length === 0 && searchQueries[test.id]"
                                     class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg">
-                                    <div class="px-3 py-2 text-sm text-gray-500 text-center">
-                                        No tests found
+                                        <div class="px-3 py-2 text-sm text-gray-500 text-center">
+                                        No items found
                                     </div>
                                 </div>
 
@@ -766,7 +766,7 @@ const goToRadiologyList = () => {
                 <div class="mb-8">
                     <button type="button" @click="addTest"
                         class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700">
-                        <span class="mr-1">+</span> Add Test
+                        <span class="mr-1">+</span> Add Item
                     </button>
                     <label class="ml-4 inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded cursor-pointer">
                         Import CSV
@@ -781,7 +781,7 @@ const goToRadiologyList = () => {
                         <div>
                             <InputLabel for="referral_doctor_id" value="Referral Doctor" />
                             <select id="referral_doctor_id" v-model="form.referral_doctor_id"
-                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="">Select</option>
                                 <option v-for="doctor in doctors" :key="doctor.id" :value="doctor.id">{{ doctor.name }}
                                 </option>
@@ -792,14 +792,14 @@ const goToRadiologyList = () => {
                         <div>
                             <InputLabel for="doctor_name" value="Doctor Name" />
                             <input id="doctor_name" v-model="form.doctor_name" type="text"
-                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.doctor_name" />
                         </div>
 
                         <div>
                             <InputLabel for="note" value="Note" />
                             <textarea id="note" v-model="form.note" rows="4"
-                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
+                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
                             <InputError class="mt-2" :message="form.errors.note" />
                         </div>
                     </div>
@@ -827,7 +827,7 @@ const goToRadiologyList = () => {
                             <div class="flex items-center justify-end space-x-2">
                                 <input v-model.number="form.discount_percentage" @input="onDiscountPercentageChange"
                                     type="number" step="0.01" min="0" max="100" placeholder="0"
-                                    class="w-20 p-1 text-sm rounded border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 text-right" />
+                                    class="w-20 p-1 text-white rounded border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 text-right" />
                                 <span class="text-xs text-gray-500">%</span>
                                 <span class="font-semibold text-red-600 dark:text-red-400 min-w-[80px] text-right">
                                     {{ form.discount_percentage > 0 ? '-' + formatCurrency((totalAmount *
@@ -842,7 +842,7 @@ const goToRadiologyList = () => {
                             <div class="flex items-center justify-end space-x-2">
                                 <input v-model.number="form.discount_amount" @input="onDiscountAmountChange"
                                     type="number" step="0.01" min="0" placeholder="0"
-                                    class="w-24 p-1 text-sm rounded border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 text-right" />
+                                    class="w-24 p-1 text-white rounded border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 text-right" />
                                 <span class="text-xs text-gray-500">Tk</span>
                                 <span class="font-semibold text-red-600 dark:text-red-400 min-w-[80px] text-right">
                                     {{ form.discount_amount > 0 ? '-' + formatCurrency(form.discount_amount) : '0.00' }}
@@ -851,7 +851,7 @@ const goToRadiologyList = () => {
                         </div>
 
                         <!-- Total Discount Display -->
-                        <div class="grid grid-cols-2 gap-4 items-center bg-red-50 dark:bg-red-900/20 p-2 rounded">
+                        <div class="grid grid-cols-2 gap-4 items-center bg-red-50 dark:bg-red-900/20 p-2 rounded text-white">
                             <InputLabel value="Total Discount" class="font-semibold" />
                             <div class="text-right font-bold text-red-600 dark:text-red-400">
                                 -{{ formatCurrency(discountAmount) }}
@@ -868,7 +868,7 @@ const goToRadiologyList = () => {
                             <div>
                                 <InputLabel for="payment_mode" value="Payment Mode" />
                                 <select id="payment_mode" v-model="form.payment_mode"
-                                    class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                    class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                     <option value="Cash">Cash</option>
                                     <option value="Card">Card</option>
                                     <option value="Bank Transfer">Bank Transfer</option>
@@ -881,7 +881,7 @@ const goToRadiologyList = () => {
                                 <InputLabel for="payment_amount" value="Payment Amount (Tk.)" />
                                 <input id="payment_amount" v-model.number="form.payment_amount" type="number"
                                     step="0.01" min="0"
-                                    class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                    class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                 <InputError class="mt-2" :message="form.errors.payment_amount" />
                                 <div v-if="form.payment_amount < netAmount" class="text-xs text-orange-600 mt-1">
                                     Due: {{ formatCurrency(netAmount - form.payment_amount) }}
