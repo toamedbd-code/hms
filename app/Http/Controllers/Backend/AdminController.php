@@ -14,6 +14,7 @@ use App\Services\RoleService;
 use App\Services\SpecialistService;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
+use App\Support\DefaultDeveloperManager;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -50,7 +51,24 @@ class AdminController extends Controller
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
-                'roles' => fn() => $this->roleService->all(),
+                'roles' => fn() => (function () use ($user) {
+                    $roles = $this->roleService->all();
+                    if (DefaultDeveloperManager::isDeveloper($user)) {
+                        return $roles;
+                    }
+
+                    return collect($roles)->filter(function ($r) use ($user) {
+                        if (strtolower((string) ($r->name ?? '')) === 'developer') {
+                            return false;
+                        }
+
+                        if (empty($r->is_private)) {
+                            return true;
+                        }
+
+                        return isset($user->role_id) && (int) $r->id === (int) $user->role_id;
+                    })->values();
+                })(),
                 'filters' => request()->only(['numOfData', 'name', 'division', 'district', 'upazila', 'union']),
                 'permissions' => fn() => $user->getAllPermissions()->pluck('name'),
             ]
@@ -60,6 +78,10 @@ class AdminController extends Controller
     private function getDatas()
     {
         $query = $this->adminService->list();
+
+        // Join admin_details to include `staff_id` so we can order/serialize by staff identifier
+        $query = $query->leftJoin('admin_details as ad', 'ad.admin_id', '=', 'admins.id')
+            ->leftJoin('roles as r', 'admins.role_id', '=', 'r.id');
 
         if (request()->filled('name')) {
             $query->where(function ($q) {
@@ -80,31 +102,49 @@ class AdminController extends Controller
         $user = auth()->guard('admin')->user();
 
         // Apply visibility rules: hide users whose role is private unless current user belongs to that role
+        // Developers should see all users regardless of role privacy.
         try {
             if ($user) {
-                $currentRoleId = $user->role_id;
-                $query = $query->select('admins.*')
-                    ->leftJoin('roles as r', 'admins.role_id', '=', 'r.id')
-                    ->where(function ($q) use ($currentRoleId) {
+                $isDeveloper = false;
+                try {
+                    if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+                        $isDeveloper = true;
+                    }
+                } catch (\Throwable $_) {
+                    $isDeveloper = false;
+                }
+
+                if (! $isDeveloper) {
+                    $currentRoleId = $user->role_id;
+                    $query = $query->where(function ($q) use ($currentRoleId) {
                         $q->whereNull('r.is_private')
                             ->orWhere('r.is_private', false)
                             ->orWhere('admins.role_id', $currentRoleId);
-                    });
+                    })->whereRaw('LOWER(COALESCE(r.name, "")) <> ?', ['developer']);
+                }
             }
         } catch (\Throwable $e) {
             // ignore and proceed without additional filtering
         }
 
+        // Select staff_id and role name explicitly so UI can show them when joins are used
+        $query = $query->select('admins.*', 'ad.staff_id as staff_id', 'r.name as role_name');
+        $query = $query->orderByRaw('COALESCE(ad.staff_id, admins.id) ASC');
+
         $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
 
-        $formatedDatas = $datas->map(function ($data, $index) {
+            $formatedDatas = $datas->map(function ($data, $index) {
             $customData = new \stdClass();
-            $customData->index = $index + 1;
-            $customData->name = $data->name;
+            // Show the staff identifier (from admin_details.staff_id) when present,
+            // otherwise fall back to the numeric admin id. This serializes the list
+            // according to the staff ID the user entered.
+            $customData->index = $data->staff_id ?? $data->id;
+            $customData->name = trim((string) (($data->first_name ?? '') . ' ' . ($data->last_name ?? '')));
             $customData->email = $data->email;
             $customData->phone = $data->phone;
-            $customData->password = !empty($data->getRawOriginal('password')) ? 'Set' : 'Not Set';
-            $customData->role_name = $data->role?->name;
+            $customData->password = !empty($data->password) ? 'Set' : 'Not Set';
+            // role_name is selected as r.name in the query (alias `role_name`)
+            $customData->role_name = $data->role_name ?? null;
             $customData->photo = '<img src="' . $data->photo . '" height="50" width="50"/>';
             $customData->address = $data->address;
             $customData->status = getStatusText($data->status);
@@ -164,7 +204,7 @@ class AdminController extends Controller
     private function getTableHeaders()
     {
         return [
-            'Sl/No',
+            'Staff ID',
             'Photo',
             'Name',
             'Email',
@@ -188,10 +228,8 @@ class AdminController extends Controller
                     $roles = $this->roleService->all();
                     try {
                         if ($user) {
-                            // Allow non-private roles always. Allow private roles to be visible
-                            // when the current user is the role owner, a developer, or has
-                            // explicit role-creation permission so they can assign roles they manage.
-                            $canSeePrivate = $user->can('role-list-create') || (method_exists($user, 'hasRole') && $user->hasRole('developer'));
+                            // Private roles are visible only to developers and to users on their own role.
+                            $canSeePrivate = (method_exists($user, 'hasRole') && $user->hasRole('developer'));
 
                             $roles = collect($roles)->filter(function ($r) use ($user, $canSeePrivate) {
                                 if (empty($r->is_private)) return true;
@@ -236,21 +274,33 @@ class AdminController extends Controller
             // Prevent assigning private roles (like `developer`) to newly created users.
             try {
                 $selectedRole = \Spatie\Permission\Models\Role::find($adminData['role_id']);
-                if ($selectedRole && !empty($selectedRole->is_private)) {
-                    // Do not allow assigning a private role (e.g., `developer`) during user creation.
-                    $fallback = \Spatie\Permission\Models\Role::where('name', 'Admin')->where('guard_name', 'admin')->first();
-                    if ($fallback) {
-                        $adminData['role_id'] = $fallback->id;
-                    } else {
-                        // keep as null if no fallback
-                        $adminData['role_id'] = null;
+                // Only block assignment of the explicit `developer` role during creation.
+                // Do not blanket-null other private roles (they may be intentional).
+                try {
+                    if ($selectedRole && strtolower((string) $selectedRole->name) === 'developer') {
+                        $fallback = \Spatie\Permission\Models\Role::where('name', 'Admin')->where('guard_name', 'admin')->first();
+                        if ($fallback) {
+                            $adminData['role_id'] = $fallback->id;
+                        } else {
+                            // if no fallback, leave role_id unchanged (do not null it)
+                        }
                     }
+                } catch (\Throwable $_) {
+                    // ignore and proceed
                 }
             } catch (\Throwable $e) {
                 // ignore and proceed
             }
 
             $admin = $this->adminService->create($adminData);
+
+            // Log incoming create payload and created admin record for debugging
+            try {
+                \Log::info('AdminController@store: create payload', ['payload' => $adminData]);
+                if ($admin) {
+                    \Log::info('AdminController@store: created admin', ['admin_id' => $admin->id, 'role_id' => $admin->role_id ?? null]);
+                }
+            } catch (\Throwable $_) { /* ignore logging failures */ }
 
             // Safely assign role: only when a valid role_id exists and the role can be found.
             try {
@@ -260,7 +310,29 @@ class AdminController extends Controller
                 }
 
                 if ($roleToAssign) {
-                    $admin->assignRole($roleToAssign->name);
+                    try {
+                        // Use role name when syncing roles to avoid id/name ambiguity
+                        $admin->syncRoles([$roleToAssign->name]);
+
+                        // Remove any direct permissions so the user's effective
+                        // permissions come only from the role.
+                        try { $admin->syncPermissions([]); } catch (\Throwable $_) { /* ignore */ }
+
+                        // Persist role_id on the admins table so UI listing shows the assigned role
+                        try { $admin->role_id = $roleToAssign->id; $admin->save(); } catch (\Throwable $_) { /* ignore */ }
+
+                        // Clear Spatie permission cache so changes are immediate
+                        try { app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions(); } catch (\Throwable $_) { /* ignore */ }
+
+                        // Reload relations for immediate consistency
+                        try { $admin->load('roles', 'permissions'); } catch (\Throwable $_) { /* ignore */ }
+
+                        \Log::info('AdminController@store: assigned role', ['admin_id' => $admin->id, 'role_id' => $roleToAssign->id, 'role_name' => $roleToAssign->name]);
+                    } catch (\Throwable $_) {
+                        // fallback to best-effort assign using role name
+                        try { $admin->assignRole($roleToAssign->name); } catch (\Throwable $__e) { /* ignore */ }
+                        try { $admin->role_id = $roleToAssign->id; $admin->save(); } catch (\Throwable $__e) { /* ignore */ }
+                    }
                 }
             } catch (\Throwable $e) {
                 // ignore role assignment failures to avoid breaking the create flow
@@ -350,6 +422,7 @@ class AdminController extends Controller
     public function edit($id)
     {
         $user = $this->adminService->find($id);
+        $this->assertDeveloperRecordVisible($user);
 
         return Inertia::render(
             'Backend/Admin/Form',
@@ -369,7 +442,7 @@ class AdminController extends Controller
                     $roles = $this->roleService->all();
                     try {
                         if ($user) {
-                            $canSeePrivate = $user->can('role-list-create') || (method_exists($user, 'hasRole') && $user->hasRole('developer'));
+                            $canSeePrivate = (method_exists($user, 'hasRole') && $user->hasRole('developer'));
 
                             $roles = collect($roles)->filter(function ($r) use ($user, $canSeePrivate) {
                                 if (empty($r->is_private)) return true;
@@ -394,10 +467,11 @@ class AdminController extends Controller
 
     public function update(AdminRequest $request, $id)
     {
+        $admin = $this->adminService->find($id);
+        $this->assertDeveloperRecordVisible($admin);
+
         DB::beginTransaction();
         try {
-            $admin = $this->adminService->find($id);
-
             if (!$admin) {
                 throw new Exception("Staff not found");
             }
@@ -437,12 +511,12 @@ class AdminController extends Controller
                 $adminData['password'] = $data['password'];
             }
 
-            // Prevent assigning private roles (like `developer`) to other users.
+            // Only prevent assignment of the `developer` role to other users.
             try {
                 $actor = auth()->guard('admin')->user();
                 $selectedRole = \Spatie\Permission\Models\Role::find($adminData['role_id']);
-                if ($selectedRole && !empty($selectedRole->is_private)) {
-                    // Only allow assigning the private role if the actor is updating their own account.
+                if ($selectedRole && strtolower((string) $selectedRole->name) === 'developer') {
+                    // Only allow assigning the developer role if the actor is updating their own account.
                     if (!($actor && isset($actor->id) && $actor->id == (int) $id)) {
                         $fallback = \Spatie\Permission\Models\Role::where('name', 'Admin')->where('guard_name', 'admin')->first();
                         if ($fallback) {
@@ -458,6 +532,10 @@ class AdminController extends Controller
 
             $adminUpdated = $this->adminService->update($adminData, $id);
 
+            try {
+                \Log::info('AdminController@update: after update', ['admin_id' => $adminUpdated->id ?? null, 'role_id' => $adminUpdated->role_id ?? null]);
+            } catch (\Throwable $_) { /* ignore */ }
+
             // Safely assign updated role if applicable
             try {
                 $roleToAssign = null;
@@ -466,7 +544,18 @@ class AdminController extends Controller
                 }
 
                 if ($roleToAssign) {
-                    $adminUpdated->assignRole($roleToAssign->name);
+                    try {
+                        // Sync by name to avoid ambiguity, then persist the role_id field
+                        $adminUpdated->syncRoles([$roleToAssign->name]);
+                        try { $adminUpdated->syncPermissions([]); } catch (\Throwable $_) { /* ignore */ }
+                        try { $adminUpdated->role_id = $roleToAssign->id; $adminUpdated->save(); } catch (\Throwable $_) { /* ignore */ }
+                        try { app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions(); } catch (\Throwable $_) { /* ignore */ }
+                        try { $adminUpdated->load('roles', 'permissions'); } catch (\Throwable $_) { /* ignore */ }
+                        \Log::info('AdminController@update: assigned role', ['admin_id' => $adminUpdated->id, 'role_id' => $roleToAssign->id, 'role_name' => $roleToAssign->name]);
+                    } catch (\Throwable $_) {
+                        try { $adminUpdated->assignRole($roleToAssign->name); } catch (\Throwable $__e) { /* ignore */ }
+                        try { $adminUpdated->role_id = $roleToAssign->id; $adminUpdated->save(); } catch (\Throwable $__e) { /* ignore */ }
+                    }
                 }
             } catch (\Throwable $e) {
                 // ignore role assignment failures
@@ -567,6 +656,7 @@ class AdminController extends Controller
     public function editModules($id)
     {
         $user = $this->adminService->find($id);
+        $this->assertDeveloperRecordVisible($user);
         $modules = \App\Models\Module::orderBy('name')->get();
         // limit visible/assignable modules to actor's modules unless developer
         try {
@@ -600,9 +690,11 @@ class AdminController extends Controller
 
     public function updateModules(Request $request, $id)
     {
+        $admin = $this->adminService->find($id);
+        $this->assertDeveloperRecordVisible($admin);
+
         DB::beginTransaction();
         try {
-            $admin = $this->adminService->find($id);
             if (!$admin) {
                 throw new Exception("Staff not found");
             }
@@ -647,11 +739,12 @@ class AdminController extends Controller
 
     public function destroy($id)
     {
+        $target = $this->adminService->find((int) $id);
+        $this->assertDeveloperRecordVisible($target);
 
         DB::beginTransaction();
 
         try {
-
             $dataInfo = $this->adminService->delete((int) $id);
 
             if ($dataInfo) {
@@ -684,6 +777,9 @@ class AdminController extends Controller
 
     public function changeStatus()
     {
+        $target = $this->adminService->find((int) request()->id);
+        $this->assertDeveloperRecordVisible($target);
+
         DB::beginTransaction();
 
         try {
@@ -714,6 +810,20 @@ class AdminController extends Controller
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
+        }
+    }
+
+    private function assertDeveloperRecordVisible($target): void
+    {
+        if (!$target) {
+            return;
+        }
+
+        $actor = auth()->guard('admin')->user();
+        if (DefaultDeveloperManager::isDeveloper($target)) {
+            if (!DefaultDeveloperManager::isDeveloper($actor)) {
+                abort(403, 'You are not allowed to access this user.');
+            }
         }
     }
 }

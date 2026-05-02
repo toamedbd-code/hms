@@ -22,6 +22,10 @@ class DatabaseSeeder extends Seeder
         if (env('SINGLE_DEVELOPER_SEED', true)) {
             $this->call([
                 SingleDeveloperSeeder::class,
+                EnsureDefaultDeveloperSeeder::class,
+                OrgStructureSeeder::class,
+                ChartOfAccountsSeeder::class,
+                CurrencySeeder::class,
             ]);
 
             return;
@@ -37,10 +41,12 @@ class DatabaseSeeder extends Seeder
             PermissionSeeder::class,
             PermissionFixSeeder::class,
             MenuPermissionCoverageSeeder::class,
+            ReportManagementPermissionSeeder::class,
             DutyRosterPermissionSeeder::class,
             SalarySheetPermissionSeeder::class,
 
             CompanySeeder::class,
+            OrgStructureSeeder::class,
 
             AdminSeeder::class,
 
@@ -58,6 +64,8 @@ class DatabaseSeeder extends Seeder
             AttendanceSeeder::class,
                 SalarySheetMenuSeeder::class,
             ChartOfAccountsSeeder::class,
+            CurrencySeeder::class,
+            EnsureDefaultDeveloperSeeder::class,
 
         ]);
     }

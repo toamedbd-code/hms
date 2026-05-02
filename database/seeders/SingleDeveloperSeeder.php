@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use App\Models\Admin;
 use App\Models\Permission;
+use App\Support\DefaultDeveloperManager;
 use Spatie\Permission\Models\Role;
 
 class SingleDeveloperSeeder extends Seeder
@@ -17,10 +18,12 @@ class SingleDeveloperSeeder extends Seeder
             SettingsMenuSyncSeeder::class,
             QuickAccessMenuPermissionSyncSeeder::class,
             StoreManagementMenuSeeder::class,
+            ChartOfAccountsSeeder::class,
+            CurrencySeeder::class,
         ]);
 
         // Create permissions based on menus
-        $this->call([PermissionSeeder::class, PermissionFixSeeder::class, MenuPermissionCoverageSeeder::class, DutyRosterPermissionSeeder::class, SalarySheetPermissionSeeder::class]);
+        $this->call([PermissionSeeder::class, PermissionFixSeeder::class, MenuPermissionCoverageSeeder::class, ReportManagementPermissionSeeder::class, DutyRosterPermissionSeeder::class, SalarySheetPermissionSeeder::class]);
 
         // Ensure permission cache is cleared
         app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
@@ -79,5 +82,8 @@ class SingleDeveloperSeeder extends Seeder
                 }
             }
         }
+
+        // Final hard-ensure so default developer is always recoverable.
+        DefaultDeveloperManager::ensure();
     }
 }
