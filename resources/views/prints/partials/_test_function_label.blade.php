@@ -3,14 +3,14 @@
     $t = strtolower(trim((string) ($text ?? '')));
     $label = '';
     $patterns = [
-        'Lipid Profile' => '/\b(cholesterol|total cholesterol|hdl(-c)?|ldl(-c)?|vldl|tc|tg|triglycerid(e)?|triglyceride|apo b|apob|apo(a)?|lipid|lipoprotein)\b/',
-        'Renal Function' => '/\b(creat(inine)?|creat\.|creat\b|urea|bun|blood urea nitrogen|uric acid|egfr|gfr|renal|kidney)\b/',
-        'Glucose' => '/\b(rbs|random blood sugar|random sugar|random|glucose|fbs|fasting blood sugar|ppbs|post prandial|hba1c|a1c|blood sugar|sugar)\b/',
-        'Liver Function' => '/\b(alt|ast|sgpt|sgot|bilirubin|alk phos|alkaline phosphatase|alp|ggt|sgot\/sgpt|sgpt\/sgot|transaminase)\b/',
-        'Thyroid Function' => '/\b(tsh|t3|t4|free t3|free t4|thyroid|ft3|ft4)\b/',
-        'CBC' => '/\b(hemoglobin|hb|hematocrit|hct|wbc|rbc|platelet|plt|mpv|mcv|mch|mchc|cbc|esr|differential)\b/',
-        'Electrolytes' => '/\b(sodium|na|potassium|k|chloride|cl|calcium|ca|magnesium|mg|electrolyte)\b/',
-        'Liver / Renal Panel' => '/\b(liver panel|renal panel|liver function test|rft|lft)\b/',
+        'Lipid Profile' => '/(?iu)\b(cholesterol|total cholesterol|hdl(-c)?|ldl(-c)?|vldl|tc|tg|triglycerid(e)?|triglyceride|apo b|apob|apo(a)?|lipid|lipoprotein|লিপিড|লিপিড প্রোফাইল)\b/',
+        'Renal Function' => '/(?iu)\b(creat(inine)?|creat\.|creat\b|creatinine|ক্রিটিনাইন|ক্রিয়েটিনিন|urea|bun|blood urea nitrogen|uric acid|egfr|gfr|renal|kidney|কিডনি)\b/',
+        'Glucose' => '/(?iu)\b(rbs|random blood sugar|random sugar|random|glucose|fbs|fasting blood sugar|ppbs|post prandial|hba1c|a1c|blood sugar|sugar|সুগার|শর্করা|রক্তে চিনি)\b/',
+        'Liver Function' => '/(?iu)\b(alt|ast|sgpt|sgot|sgpt\/?sgot|sgot\/?sgpt|bilirubin|alk phos|alkaline phosphatase|alp|ggt|transaminase|lft|liver|liver function|liver panel|যকৃত|লিভার|এসজিপিটি|এসজিওটি)\b/',
+        'Thyroid Function' => '/(?iu)\b(tsh|t3|t4|free t3|free t4|thyroid|ft3|ft4|থাইরয়েড)\b/',
+        'CBC' => '/(?iu)\b(hemoglobin|hb|hematocrit|hct|wbc|rbc|platelet|plt|mpv|mcv|mch|mchc|cbc|esr|differential|হেমোগ্লোবিন|প্লেটলেট)\b/',
+        'Electrolytes' => '/(?iu)\b(sodium|na|potassium|k|chloride|cl|calcium|ca|magnesium|mg|electrolyte|ইলেকট্রোলাইট|সোডিয়াম|পটাশিয়াম)\b/',
+        'Liver / Renal Panel' => '/(?iu)\b(liver panel|renal panel|liver function test|rft|lft|রেনাল প্যানেল|লিভার প্যানেল)\b/',
     ];
 
     foreach ($patterns as $lbl => $pat) {
