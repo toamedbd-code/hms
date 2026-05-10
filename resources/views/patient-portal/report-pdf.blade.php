@@ -44,6 +44,8 @@
     </style>
 </head>
 <body>
+    @includeIf('prints.partials._header')
+
     <div class="header">
         <h1 class="title">Patient Diagnostic Report</h1>
         <div class="sub">Generated: {{ $generatedAt }} | Reported: {{ $reportedAt }}</div>
@@ -64,8 +66,55 @@
         </tr>
     </table>
 
-    @foreach(($groupedReportItems ?? []) as $category => $items)
-        <div class="category-title">{{ $category }} Report</div>
+
+    @php
+        // Flatten all groupedReportItems into a single collection of items
+        $all = collect([]);
+        if (!empty($groupedReportItems) && is_array($groupedReportItems)) {
+            foreach ($groupedReportItems as $catItems) {
+                foreach ($catItems as $it) {
+                    $all->push((object) [
+                        'name' => $it->charge_name ?? $it->item_name ?? $it->name ?? 'N/A',
+                        'note' => $it->report_note ?? '',
+                        'range' => $it->report_range ?? '',
+                    ]);
+                }
+            }
+        }
+
+        // inference closure (same logic as partial)
+        $inferCategory = function (?string $text) {
+            $t = strtolower(trim((string) $text));
+            if ($t === '') return '';
+
+            $map = [
+                'Lipid Profile' => '/\b(cholesterol|total cholesterol|hdl(-c)?|ldl(-c)?|vldl|tc|tg|triglycerid(e)?|triglyceride|apo b|apob|apo(a)?|lipid|lipoprotein)\b/',
+                'Renal Function' => '/\b(creat(inine)?|creat\.|creat\b|urea|bun|blood urea nitrogen|uric acid|egfr|gfr|renal|kidney)\b/',
+                'Glucose' => '/\b(rbs|random blood sugar|random sugar|random|glucose|fbs|fasting blood sugar|ppbs|post prandial|hba1c|a1c|blood sugar|sugar)\b/',
+                'Liver Function' => '/\b(alt|ast|sgpt|sgot|bilirubin|alk phos|alkaline phosphatase|alp|ggt|sgot\/sgpt|sgpt\/sgot|transaminase)\b/',
+                'Thyroid Function' => '/\b(tsh|t3|t4|free t3|free t4|thyroid|ft3|ft4)\b/',
+                'CBC' => '/\b(hemoglobin|hb|hematocrit|hct|wbc|rbc|platelet|plt|mpv|mcv|mch|mchc|cbc|esr|differential)\b/',
+                'Electrolytes' => '/\b(sodium|na|potassium|k|chloride|cl|calcium|ca|magnesium|mg|electrolyte)\b/',
+            ];
+
+            foreach ($map as $label => $pattern) {
+                try {
+                    if (@preg_match($pattern, $t) === 1) return $label;
+                } catch (\\Throwable $_) {
+                }
+            }
+
+            return '';
+        };
+
+        $grouped = $all->groupBy(function ($it) use ($inferCategory) {
+            $lbl = $inferCategory($it->name);
+            return $lbl ?: 'Other Tests';
+        });
+    @endphp
+
+    @foreach($grouped as $label => $items)
+        <div class="category-title">{{ $label }}</div>
         <table>
             <thead>
                 <tr>
@@ -79,9 +128,9 @@
                 @foreach($items as $idx => $item)
                     <tr>
                         <td class="sl">{{ $idx + 1 }}</td>
-                        <td>{{ $item->charge_name ?? $item->item_name ?? $item->name ?? 'N/A' }}</td>
-                        <td class="result">{{ $item->report_note ?? '' }}</td>
-                        <td>{{ $item->report_range ?? '' }}</td>
+                        <td>{{ $item->name }}</td>
+                        <td class="result">{{ $item->note }}</td>
+                        <td>{{ $item->range }}</td>
                     </tr>
                 @endforeach
             </tbody>
@@ -91,5 +140,7 @@
     @if(!empty($billing->remarks))
         <div class="footer-note"><strong>Remarks:</strong> {{ $billing->remarks }}</div>
     @endif
+
+    @includeIf('prints.partials._footer')
 </body>
 </html>

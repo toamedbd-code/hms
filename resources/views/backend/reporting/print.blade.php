@@ -352,52 +352,114 @@
                 <div class="ultra-range"><strong>Reference:</strong> {{ $primaryItem->report_range }}</div>
             @endif
         @else
-            <table style="width:100%; border-collapse: collapse; font-size: 12px;">
-                <thead>
-                    <tr>
-                        <th class="sn-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; width:6%;">S/N</th>
-                            <th class="testname-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:left; width:44%;">Item Name</th>
-                            <th class="result-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; width:25%;">Result</th>
-                            <th class="range-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; width:25%;">Normal Range</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach($items as $item)
-                        @php
-                            $params = (!empty($item->printed_parameter_rows) && is_array($item->printed_parameter_rows)) ? $item->printed_parameter_rows : [];
-                        @endphp
+            @php
+                $paramRows = [];
+                foreach ($items as $it) {
+                    $params = (!empty($it->printed_parameter_rows) && is_array($it->printed_parameter_rows)) ? $it->printed_parameter_rows : [];
+                    if (count($params) > 0) {
+                        foreach ($params as $pr) {
+                            $rHtml = $pr['result_html'] ?? '';
+                            $pos = strpos($rHtml, ':');
+                            if ($pos !== false) {
+                                $pName = trim(strip_tags(substr($rHtml, 0, $pos)));
+                                $pVal = trim(strip_tags(substr($rHtml, $pos + 1)));
+                            } else {
+                                $pName = '';
+                                $pVal = trim(strip_tags($rHtml));
+                            }
+                            $paramRows[] = [
+                                'param' => $pName ?: trim((string) ($it->item_name ?? '')),
+                                'value' => $pVal,
+                                'range' => $pr['normal_range'] ?? ($it->report_range ?? ''),
+                                'item_name' => $it->item_name ?? '',
+                            ];
+                        }
+                    } else {
+                        $paramRows[] = [
+                            'param' => trim((string) ($it->item_name ?? '')) ?: 'N/A',
+                            'value' => trim((string) ($it->report_note ?? '')),
+                            'range' => $it->report_range ?? '',
+                            'item_name' => $it->item_name ?? '',
+                        ];
+                    }
+                }
 
-                        @if(count($params) > 0)
-                            @foreach($params as $index => $pr)
-                                @php
-                                    $rHtml = $pr['result_html'] ?? '';
-                                    $pos = strpos($rHtml, ':');
-                                    if ($pos !== false) {
-                                        $nHtml = trim(substr($rHtml, 0, $pos));
-                                        $vHtml = trim(substr($rHtml, $pos + 1));
-                                    } else {
-                                        $nHtml = '';
-                                        $vHtml = $rHtml;
-                                    }
-                                @endphp
-                                <tr>
-                                    <td class="sn-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{{ $index + 1 }}</td>
-                                    <td class="testname-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{!! $nHtml !== '' ? $nHtml : e($item->item_name ?? 'N/A') !!}</td>
-                                    <td class="result-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{!! $vHtml !!}</td>
-                                    <td class="range-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{!! $pr['normal_range'] ?? '-' !!}</td>
-                                </tr>
-                            @endforeach
-                        @else
+                $allParams = collect($paramRows);
+
+                // Simple keyword-based inference for test function/category (AI-like)
+                $inferCategory = function (?string $text) {
+                    $t = strtolower(trim((string) $text));
+                    if ($t === '') return '';
+
+                    $map = [
+                        'Lipid Profile' => '/cholesterol|triglycerid|triglyceride|hdl|ldl|vldl|lipid/',
+                        'Renal Function' => '/creatinine|urea|bun|uric acid|urea nitrogen/',
+                        'Glucose' => '/\brbs\b|random blood sugar|random sugar|glucose|fbs|blood sugar|sugar/',
+                        'Liver Function' => '/alt|ast|sgpt|sgot|bilirubin|alk phos|alp|ggt|sgpt/',
+                        'Thyroid Function' => '/tsh|t3|t4|thyroid/',
+                        'CBC' => '/hemoglobin|\bhb\b|\bwbc\b|\brbc\b|platelet|cbc|esr|mcv|mch/',
+                        'Electrolytes' => '/sodium|potassium|\bp\b|\bk\b|na\b|k\b|cl\b|chloride|electrolyte/',
+                        'Renal Panel' => '/creatinine|urea|bun|egfr|uric acid/',
+                    ];
+
+                    foreach ($map as $label => $pattern) {
+                        if (@preg_match($pattern, $t) === 1) {
+                            return $label;
+                        }
+                    }
+
+                    return '';
+                };
+
+                $lipid = $allParams->filter(function ($r) {
+                    return preg_match('/cholesterol|triglycerid|triglyceride|hdl|ldl|vldl|lipid/i', $r['param'] . ' ' . $r['item_name']);
+                })->values();
+
+                $creatinine = $allParams->filter(function ($r) {
+                    return preg_match('/creatinine/i', $r['param'] . ' ' . $r['item_name']);
+                })->values();
+
+                $rbs = $allParams->filter(function ($r) {
+                    return preg_match('/\brbs\b|random blood sugar|random sugar|glucose|blood sugar|sugar/i', $r['param'] . ' ' . $r['item_name']);
+                })->values();
+
+                $others = $allParams->reject(function ($r) use ($lipid, $creatinine, $rbs) {
+                    $key = $r['param'] . '|' . $r['item_name'];
+                    return $lipid->contains(fn($x) => ($x['param'] . '|' . $x['item_name']) === $key)
+                        || $creatinine->contains(fn($x) => ($x['param'] . '|' . $x['item_name']) === $key)
+                        || $rbs->contains(fn($x) => ($x['param'] . '|' . $x['item_name']) === $key);
+                })->values();
+            @endphp
+
+            {{-- Group tests by inferred function/category and render each group once --}}
+            @php
+                $groupedByFunction = $allParams->groupBy(function ($r) use ($inferCategory) {
+                    $lbl = $inferCategory(($r['param'] ?? '') . ' ' . ($r['item_name'] ?? ''));
+                    return $lbl ?: 'Other Tests';
+                });
+            @endphp
+
+            @foreach($groupedByFunction as $label => $rows)
+                <div style="margin-top:8px; font-weight:700;">{{ $label }}</div>
+                <table style="width:100%; border-collapse: collapse; font-size: 12px; margin-top:6px;">
+                    <thead>
+                        <tr>
+                            <th style="border:1px solid #e5e7eb; padding:8px; text-align:left;">Test</th>
+                            <th style="border:1px solid #e5e7eb; padding:8px; text-align:center;">Result</th>
+                            <th style="border:1px solid #e5e7eb; padding:8px; text-align:center;">Normal Range</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($rows as $row)
                             <tr>
-                                <td class="sn-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">1</td>
-                                <td class="testname-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{{ $item->item_name ?? 'N/A' }}</td>
-                                <td class="result-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{!! nl2br(e($item->report_note ?? '')) !!}</td>
-                                <td class="range-cell" style="border:1px solid #e5e7eb; padding:8px; vertical-align: middle;">{{ $item->report_range ?? '' }}</td>
+                                <td style="border:1px solid #e5e7eb; padding:8px;">{{ $row['param'] }}</td>
+                                <td style="border:1px solid #e5e7eb; padding:8px; text-align:center;">{{ $row['value'] }}</td>
+                                <td style="border:1px solid #e5e7eb; padding:8px; text-align:center;">{{ $row['range'] ?: '-' }}</td>
                             </tr>
-                        @endif
-                    @endforeach
-                </tbody>
-            </table>
+                        @endforeach
+                    </tbody>
+                </table>
+            @endforeach
         @endif
     </div>
 
