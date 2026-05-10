@@ -401,10 +401,25 @@
                         'Electrolytes' => '/(?iu)\b(sodium|na|potassium|k|chloride|cl|calcium|ca|magnesium|mg|electrolyte|ইলেকট্রোলাইট|সোডিয়াম|পটাশিয়াম)\b/',
                     ];
 
+                    // explicit substring tokens (fast path)
+                    $explicit = [
+                        'sgpt' => 'Liver Function', 'sgot' => 'Liver Function', 'alt' => 'Liver Function', 'ast' => 'Liver Function', 'এসজিপিটি' => 'Liver Function', 'এসজিওটি' => 'Liver Function',
+                        'creatinine' => 'Renal Function', 'ক্রিটিনাইন' => 'Renal Function', 'urea' => 'Renal Function', 'bun' => 'Renal Function',
+                        'rbs' => 'Glucose', 'hba1c' => 'Glucose', 'a1c' => 'Glucose', 'glucose' => 'Glucose', 'সুগার' => 'Glucose', 'শর্করা' => 'Glucose',
+                        'cholesterol' => 'Lipid Profile', 'hdl' => 'Lipid Profile', 'ldl' => 'Lipid Profile', 'triglyceride' => 'Lipid Profile', 'ট্রাইগ্লিসারাইড' => 'Lipid Profile', 'লিপিড' => 'Lipid Profile',
+                    ];
+
+                    foreach ($explicit as $token => $lbl) {
+                        try {
+                            if (mb_stripos($t, $token) !== false) return $lbl;
+                        } catch (\\Throwable $_) {
+                        }
+                    }
+
                     foreach ($map as $label => $pattern) {
                         try {
                             if (@preg_match($pattern, $t) === 1) return $label;
-                        } catch (\Throwable $_) {
+                        } catch (\\Throwable $_) {
                         }
                     }
 

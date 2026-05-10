@@ -13,14 +13,35 @@
         'Liver / Renal Panel' => '/(?iu)\b(liver panel|renal panel|liver function test|rft|lft|রেনাল প্যানেল|লিভার প্যানেল)\b/',
     ];
 
-    foreach ($patterns as $lbl => $pat) {
+    // Explicit substring map (fast path) for common test tokens
+    $explicit = [
+        'sgpt' => 'Liver Function', 'sgot' => 'Liver Function', 'alt' => 'Liver Function', 'ast' => 'Liver Function', 'এসজিপিটি' => 'Liver Function', 'এসজিওটি' => 'Liver Function',
+        'creatinine' => 'Renal Function', 'ক্রিটিনাইন' => 'Renal Function', 'urea' => 'Renal Function', 'bun' => 'Renal Function',
+        'rbs' => 'Glucose', 'hba1c' => 'Glucose', 'a1c' => 'Glucose', 'glucose' => 'Glucose', 'সুগার' => 'Glucose', 'শর্করা' => 'Glucose',
+        'cholesterol' => 'Lipid Profile', 'hdl' => 'Lipid Profile', 'ldl' => 'Lipid Profile', 'triglyceride' => 'Lipid Profile', 'ট্রাইগ্লিসারাইড' => 'Lipid Profile', 'লিপিড' => 'Lipid Profile',
+    ];
+
+    foreach ($explicit as $token => $lbl) {
         try {
-            if ($t !== '' && preg_match($pat, $t) === 1) {
+            if ($t !== '' && mb_stripos($t, $token) !== false) {
                 $label = $lbl;
                 break;
             }
         } catch (\Throwable $_) {
-            // ignore regex errors
+            // ignore errors
+        }
+    }
+
+    if ($label === '') {
+        foreach ($patterns as $lbl => $pat) {
+            try {
+                if ($t !== '' && preg_match($pat, $t) === 1) {
+                    $label = $lbl;
+                    break;
+                }
+            } catch (\Throwable $_) {
+                // ignore regex errors
+            }
         }
     }
 @endphp
