@@ -110,6 +110,7 @@
         z-index: 1;
         background: transparent;
         box-sizing: border-box;
+        clear: both;
     }
 
     /* Layout: content area (position can be above or below the image) */
@@ -163,7 +164,9 @@
     }
 
     .footer-content-area.above {
-        top: calc(var(--report-footer-height) * -0.42);
+        /* Keep above content layered inside the footer area without shifting upward on screen */
+        top: auto;
+        bottom: 0;
     }
     .footer-content-area.below { top: auto; bottom: calc(var(--report-footer-height) * 0.08); }
 
