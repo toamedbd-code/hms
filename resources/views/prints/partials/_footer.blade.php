@@ -299,7 +299,7 @@
 
         .footer-content-area.above .footer-content-row {
             flex-direction: row !important;
-            gap: 8px !important;
+            gap: 4px !important;
             align-items: center !important;
             justify-content: space-between !important;
             width: 100%;
@@ -313,7 +313,7 @@
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             flex: 1 1 auto;
-            max-width: calc(100% - 100px) !important;
+            max-width: calc(100% - 90px) !important;
             text-align: left !important;
             font-size: 12px !important;
         }
@@ -321,8 +321,8 @@
         .footer-content-area.above .footer-printed-at {
             display: inline-block !important;
             white-space: nowrap !important;
-            margin-left: 8px !important;
-            flex: 0 0 90px !important;
+            margin-left: 6px !important;
+            flex: 0 0 80px !important;
             text-align: right !important;
             font-size: 12px !important;
         }
