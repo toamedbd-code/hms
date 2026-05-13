@@ -357,59 +357,17 @@
             margin-top: 8px;
         }
 
-        /* Footer Section (static like report print) */
-        .footer-section {
-            position: fixed; /* keep footer image fixed at bottom */
-            bottom: 0;
-            left: 0;
-            right: 0;
-            width: 100%;
-            text-align: center;
-            padding-bottom: 0px;
-            min-height: {{ $__inv_footer_h }}px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: flex-end;
-            z-index: 10;
-        }
+        /* Legacy invoice footer CSS renamed to avoid clashing with shared footer partial
+           The actual footer is rendered by prints.partials._footer (uses .footer-wrapper etc.). */
+        .invoice-legacy-footer-section { }
 
-        .footer-placeholder {
-            width: 100%;
-            height: {{ $__inv_footer_h }}px;
-            visibility: hidden;
-        }
+        .invoice-legacy-footer-placeholder { display: none; }
 
-        .footer-image {
-            width: 100%;
-            height: auto;
-            max-height: {{ $__inv_footer_h + 10 }}px;
-            object-fit: contain;
-        }
+        .invoice-legacy-footer-image { display: none; }
 
-        .footer-content {
-            /* position relative so it sits above the footer image inside the footer area */
-            position: relative;
-            left: 0;
-            right: 0;
-            margin: 0 auto;
-            font-size: 14px;
-            text-align: center;
-            padding: 6px 20px 0;
-            width: 100%;
-            z-index: 60;
-            background: transparent;
-        }
+        .invoice-legacy-footer-content { display: none; }
 
-        .footer-date-time {
-            font-size: 14px;
-            text-align: left;
-            margin-top: 4px;
-            color: #000000ff;
-            width: 100%;
-            padding: 0 20px;
-            margin-bottom: 5px;
-        }
+        .invoice-legacy-footer-date-time { display: none; }
 
         /* Print specific styles */
         @media print {
