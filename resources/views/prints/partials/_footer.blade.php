@@ -314,7 +314,8 @@
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             flex: 1 1 auto;
-            max-width: calc(100% - 90px) !important;
+            /* Narrower reserved space for timestamp so more room for main content */
+            max-width: calc(100% - 80px) !important;
             text-align: left !important;
             font-size: 12px !important;
         }
@@ -322,8 +323,9 @@
         .footer-content-area.above .footer-printed-at {
             display: inline-block !important;
             white-space: nowrap !important;
-            margin-left: 6px !important;
-            flex: 0 0 80px !important;
+            margin-left: 4px !important;
+            /* Slightly narrower timestamp box */
+            flex: 0 0 70px !important;
             text-align: right !important;
             font-size: 12px !important;
         }
