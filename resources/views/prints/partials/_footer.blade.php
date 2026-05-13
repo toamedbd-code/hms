@@ -291,14 +291,15 @@
            and render as a single-line row with left/right alignment. */
         .footer-content-area.above {
             top: auto !important;
-            bottom: calc(100% + 4px) !important; /* place above image */
+            /* move content just above the image but slightly lower to sit close to image */
+            bottom: calc(100% - 6px) !important;
             justify-content: space-between !important;
-            padding: 4px 10mm !important;
+            padding: 4px 8mm !important;
         }
 
-        .footer-content-area.above .footer-content-row { flex-direction: row !important; gap: 8px !important; align-items: center !important; justify-content: space-between !important; width: 100%; }
-        .footer-content-area.above .footer-content-main { display: inline-block !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; flex: 1 1 auto; text-align: left !important; }
-        .footer-content-area.above .footer-printed-at { display: inline-block !important; white-space: nowrap !important; margin-left: 12px !important; flex: 0 0 auto; text-align: right !important; }
+        .footer-content-area.above .footer-content-row { flex-direction: row !important; gap: 8px !important; align-items: center !important; justify-content: space-between !important; width: 100%; white-space: nowrap !important; }
+        .footer-content-area.above .footer-content-main { display: inline-block !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; flex: 1 1 auto; max-width: calc(100% - 120px) !important; text-align: left !important; }
+        .footer-content-area.above .footer-printed-at { display: inline-block !important; white-space: nowrap !important; margin-left: 8px !important; flex: 0 0 110px !important; text-align: right !important; }
 
         /* Reserve space at page bottom so content doesn't overlap/clip the footer */
         .content-section, .page, .sheet, .invoice-container, body {
