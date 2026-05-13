@@ -262,8 +262,9 @@
             z-index: 1 !important;
         }
 
-        /* Overlay content on top of the image so text is visible in print.
-           Center content horizontally and vertically within the footer image. */
+        /* Footer content in print: by default overlay centered inside image.
+           When positioned `above`, move the content outside the image and
+           render it as a single horizontal line (left content + printed-at on right). */
         .footer-content-area {
             position: absolute !important;
             left: 0 !important;
@@ -282,8 +283,22 @@
             text-align: center !important;
         }
 
+        /* Default: stacked column for small footprint */
         .footer-content-row { display: flex !important; flex-direction: column !important; gap: 4px; align-items: center; justify-content: center; }
         .footer-content-main, .footer-printed-at { pointer-events: none !important; color: #111 !important; display: block; }
+
+        /* Above-image layout: place content immediately above the footer image
+           and render as a single-line row with left/right alignment. */
+        .footer-content-area.above {
+            top: auto !important;
+            bottom: calc(100% + 4px) !important; /* place above image */
+            justify-content: space-between !important;
+            padding: 4px 10mm !important;
+        }
+
+        .footer-content-area.above .footer-content-row { flex-direction: row !important; gap: 8px !important; align-items: center !important; justify-content: space-between !important; width: 100%; }
+        .footer-content-area.above .footer-content-main { display: inline-block !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; flex: 1 1 auto; text-align: left !important; }
+        .footer-content-area.above .footer-printed-at { display: inline-block !important; white-space: nowrap !important; margin-left: 12px !important; flex: 0 0 auto; text-align: right !important; }
 
         /* Reserve space at page bottom so content doesn't overlap/clip the footer */
         .content-section, .page, .sheet, .invoice-container, body {
