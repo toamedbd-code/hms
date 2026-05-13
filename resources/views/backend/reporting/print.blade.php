@@ -31,18 +31,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Report Print</title>
     <style>
-        :root {
-            --report-header-height: {{ $reportHeaderHeight ?? 115 }}px;
-            --report-footer-height: {{ $reportFooterHeight ?? 70 }}px;
-            --report-page-top-margin: {{ $pageMarginTop ?? 0 }}px;
-            --signature-top-margin: {{ isset($signatureMarginTop) ? (int) $signatureMarginTop : 160 }}px;
-            --signature-left-margin: {{ isset($signatureMarginLeft) ? (int) $signatureMarginLeft : 96 }}px;
-        }
         * { box-sizing: border-box; }
         @page { size: A4; margin: 0; }
         body { font-family: Arial, sans-serif; color: #111827; margin: 0; padding: 0; font-size: 16px; line-height: 1.3; }
         .title { font-size: 18px; font-weight: bold; }
-        .report-title { font-size: 22px; font-weight: 800; font-family: 'Arial Black', 'Impact', sans-serif; margin: 0; letter-spacing: 6px; text-transform: uppercase; display: inline-block; background: #fff; padding: 0 8px; position: relative; z-index: 11; }
+        .report-title { font-size: 20px; font-weight: bold; font-family: Verdana, Geneva, Tahoma, sans-serif; margin: 0; letter-spacing: 2px; }
         .meta { font-size: 12px; color: #6b7280; margin-top: 4px; }
         .section { margin-top: 16px; }
         .label { font-weight: 600; }
@@ -54,65 +47,27 @@
             margin-top: var(--report-page-top-margin, 0px);
             text-align: center;
             margin-bottom: 5px;
-            /* prefer min-height to avoid collapsing when CSS vars resolve to 0 */
-            min-height: calc(var(--report-header-height, 115px) + 2mm);
-            height: auto;
+            height: var(--report-header-height, 115px);
             display: flex;
             align-items: center;
             justify-content: center;
-            overflow: visible !important;
         }
-        .header-placeholder { width: 100%; height: calc(var(--report-header-height, 115px) + 2mm); visibility: hidden; }
-        .header-image { width: 100%; height: auto; object-fit: contain; display: block; visibility: visible !important; -webkit-print-color-adjust: exact !important; }
-        .header-banner-image { width: 100%; height: auto; max-height: calc(var(--report-header-height, 115px) + 2mm); object-fit: contain; display: block; visibility: visible !important; -webkit-print-color-adjust: exact !important; }
-        .header-banner-image { width: 100%; height: auto; object-fit: contain; display: block; }
+        .header-placeholder { width: 100%; height: var(--report-header-height, 115px); visibility: hidden; }
+        .header-image { width: 100%; height: 100%; object-fit: fill; display: block; }
         .patient-details-table td { font-size: 12px; }
-        .patient-details-table .label-cell { font-weight:600; width: 14%; }
-        .patient-details-table .sep-cell { width:2%; }
-        .patient-details-table .value-cell { width: 30%; }
-                .title-section-table { width: 100%; margin-bottom: 12px; }
+        .title-section-table { width: 100%; margin-bottom: 12px; }
         .barcode-cell-left { width: 20%; text-align: left; vertical-align: top; }
         .barcode-cell-right { width: 20%; text-align: right; vertical-align: top; }
         .title-cell-center { width: 60%; text-align: center; }
-                .barcode-image { height: 25px; width: 120px; max-width: 120px; display: block; object-fit: contain; margin: 0 auto; }
-                .receipt-title { font-size: 20px; font-weight: bold; font-family: Verdana, Geneva, Tahoma, sans-serif; margin: 0; letter-spacing: 2px; }
-          .barcode-small { height: 60px; width: auto; display:inline-block; vertical-align: middle; }
-
-          /* Header layout: map to table columns (S/N+TestName = 50%, Result = 25%, Range = 25%)
-              Place left barcode at right edge of left gutter and right barcode at left edge of right gutter */
-        .header-left { flex: 0 0 20%; max-width: 20%; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; padding-right:6mm; padding-top:6px; position:relative; overflow:visible; z-index:1; }
-        .header-center { flex: 0 0 60%; max-width: 60%; display:flex; align-items:center; justify-content:center; text-align:center; padding: 0 6mm; margin-top: -6px; white-space: nowrap; overflow: visible; text-overflow: ellipsis; position:relative; z-index:11; }
-        .header-center .report-title { display:block; line-height:1; }
-        .header-right { flex: 0 0 20%; max-width: 20%; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; padding-left:6mm; padding-top:6px; position:relative; overflow:visible; z-index:1; }
-
-        .barcode-caption { font-size: 12px; text-align: center; margin-top: 4px; color: #111827; }
-        .barcode-caption .label { font-weight: 600; display:block; font-size:11px; color:#374151; }
-        .barcode-caption .value { display:block; font-size:12px; color:#111827; }
-
-        /* Table cell helpers for single-line alignment */
-        .sn-cell { text-align: center; padding-right: 6px; vertical-align: middle; }
-        .testname-cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
-        .result-cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; vertical-align: middle; line-height: 1.1; }
-        .range-cell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; text-align: center; }
-        .result-cell > * { margin: 0; padding: 0; display: inline; }
-
-        /* Electrolyte layout - three lines with minimal gap */
-        .electrolyte-container { display:flex; flex-direction:column; gap:4px; }
-        .electrolyte-list { display:flex; flex-direction:column; gap:2px; }
-        .ele-item { display:block; margin:0; padding:0; font-size:13px; }
+        .barcode-image { width: 150px; height: 34px; display: block; }
         .content-section {
             width: 100%;
             padding-left: 15px;
             padding-right: 15px;
-            padding-bottom: calc(var(--report-footer-height) + 12mm);
+            padding-bottom: 110px;
         }
-        /* header/footer and barcode layout retained in normal flow for print */
         .footer-section {
-            /* Keep footer in normal flow on-screen so it scrolls with the page
-               and does not overlay content. For print, `@media print` will
-               switch this to `position: fixed` so the footer sticks to the
-               bottom of each printed page. */
-            position: relative;
+            position: static;
             width: 100%;
             padding-left: 0;
             padding-right: 0;
@@ -186,8 +141,8 @@
 
         /* Paper-size locking to keep report print identical across printers */
         @media print and (min-width: 149mm) {
-            .header-section { height: calc(var(--report-header-height, 115px) + 2mm); }
-            .header-placeholder { height: calc(var(--report-header-height, 115px) + 2mm); }
+            .header-section { height: 1.2in; }
+            .header-placeholder { height: 1.2in; }
             .header-image { height: 100%; }
             .footer-placeholder { height: 70px; }
             .footer-image { max-height: 80px; }
@@ -266,7 +221,7 @@
         .signature-block .meta { min-height: 16px; width: 100%; text-align: center; }
         .signature-block .meta.multiline { white-space: pre-line; }
         @media print {
-            .content-section { padding-bottom: calc(var(--report-footer-height) + 8mm); }
+            .content-section { padding-bottom: 72px; }
             .footer-section {
                 position: fixed;
                 bottom: 0;
@@ -274,67 +229,43 @@
                 right: 0;
             }
             .ultra-layout .content-section { padding-bottom: 56px; }
+            .ultra-layout .signature-row {
+                margin-top: 12px;
+                margin-bottom: 8px;
+                page-break-inside: avoid;
+                break-inside: avoid;
+            }
+            .ultra-layout .ultra-report-body {
+                min-height: 0;
+            }
         }
 
-        /* Ensure footer stays in normal flow on-screen and scrolls with page */
-        @media screen {
-            .footer-section { position: relative !important; }
-            .footer-image { position: relative !important; max-height: var(--report-footer-height, 70px); }
-            .footer-placeholder { display: block; visibility: visible; }
-        }
-
-        /* Force A4 portrait layout for specific print views (e.g., /reporting/print/10) */
-        @if(isset($primaryItem) && (int) ($primaryItem->id ?? 0) === 10)
-            @page { size: A4 portrait; margin: 12mm 10mm; }
-            body { width: 210mm; min-height: 297mm; }
-            .content-section { padding-left: 12mm; padding-right: 12mm; }
-            .header-placeholder { height: calc(var(--report-header-height, 115px) + 2mm); }
-        @endif
-
-        /* Align page content with left barcode in print preview */
-        @media print {
-            .content-section { padding-left: 20px !important; padding-right: 12mm !important; }
-            /* Ensure patient details table spans full width under the header */
-            .patient-details-table { margin-left: 0 !important; }
-        }
-        </style>
-
-    <div class="content-section" @if(empty($hasHeader)) style="margin-top:var(--report-page-top-margin);" @endif>
-        @if(!empty($hasHeader) && $hasHeader)
-            @includeIf('prints.partials._header', ['header_image' => $header_image ?? null, 'printed_at' => $reportDateTime ?? null])
-
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:-6px;margin-bottom:8px;padding:0 20px;">
-                <div class="header-left">
-                    <img src="{{ $barcodeDataUri }}" alt="Barcode Left" class="barcode-image" />
-                </div>
-                <div class="header-center">
-                    <div class="receipt-title">{{ strtoupper((string) ($reportTitle ?? 'Item Report')) }}</div>
-                    @if(!empty($headerHtml))
-                        <div class="meta" style="margin-top:4px; font-size:12px;">{!! $headerHtml !!}</div>
-                    @endif
-                </div>
-                <div class="header-right">
-                    <img src="{{ $barcodeDataUri }}" alt="Barcode Right" class="barcode-image" />
-                </div>
-            </div>
+        
+    </style>
+</head>
+<body class="{{ $isUltrasonogramReport ? 'ultra-layout' : '' }}" style="--report-left-margin: {{ $signatureMarginLeft }}px; --signature-top-margin: {{ $signatureMarginTop }}px; --report-page-top-margin: {{ $pageMarginTop }}px; --report-header-height: {{ $reportHeaderHeight ?? 115 }}px; --report-footer-height: {{ $reportFooterHeight ?? 70 }}px;">
+    <div class="header-section">
+        @if(!empty($header_image))
+            <img src="{{ $header_image }}" alt="Header" class="header-image">
         @else
-            {{-- Header disabled: compact billing header with barcode --}}
-            <div class="title-section-table" style="margin-bottom:10px;">
-                <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:0 20px;">
-                    <div class="barcode-cell-left">
-                        <img src="{{ $barcodeDataUri }}" alt="Barcode Left" class="barcode-image" />
-                    </div>
-
-                    <div class="title-cell-center">
-                        <div class="receipt-title">{{ strtoupper((string) ($reportTitle ?? 'Item Report')) }}</div>
-                    </div>
-
-                    <div class="barcode-cell-right">
-                        <img src="{{ $barcodeDataUri }}" alt="Barcode Right" class="barcode-image" />
-                    </div>
-                </div>
-            </div>
+            <div class="header-placeholder"></div>
         @endif
+    </div>
+
+    <div class="content-section">
+    <table class="title-section-table">
+        <tr>
+            <td class="barcode-cell-left">
+                <img src="{{ $barcodeDataUri }}" alt="Barcode Left" class="barcode-image">
+            </td>
+            <td class="title-cell-center">
+                <div class="report-title">{{ strtoupper((string) ($reportTitle ?? 'Test Report')) }}</div>
+            </td>
+            <td class="barcode-cell-right">
+                <img src="{{ $barcodeDataUri }}" alt="Barcode Right" class="barcode-image" style="margin-left:auto;">
+            </td>
+        </tr>
+    </table>
     <table class="patient-details-table" style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
         <tr>
             <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Bill No</td>
@@ -342,7 +273,7 @@
             <td style="width: 28%; vertical-align: top; padding: 2px 0;">{{ $billing->bill_number ?? 'N/A' }}</td>
             <td style="width: 20%; vertical-align: top; padding: 2px 0; font-weight: bold;">Date & Time</td>
             <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
-            <td style="width: 28%; vertical-align: top; padding: 2px 0;"><span class="report-datetime">{{ $reportDateTime }}</span></td>
+            <td style="width: 28%; vertical-align: top; padding: 2px 0;">{{ $reportDateTime }}</td>
         </tr>
         <tr>
             <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Name</td>
@@ -523,9 +454,47 @@
                     </thead>
                     <tbody>
                         @foreach($rows as $row)
+                            @php
+                                $valRaw = trim((string) ($row['value'] ?? ''));
+                                $rangeRaw = trim((string) ($row['range'] ?? ''));
+                                $outside = false;
+
+                                // try parse numeric value: extract first numeric token (handles units and notes)
+                                $valNum = null;
+                                if (preg_match('/[+-]?[0-9]+(?:[\.,][0-9]+)?/u', $valRaw, $vm)) {
+                                    $valNum = floatval(str_replace(',', '.', $vm[0]));
+                                }
+
+                                // normalize rangeRaw for matching (use hyphen OR en-dash/em-dash)
+                                $rangeForMatch = $rangeRaw;
+
+                                // check range formats like "min - max" (allow -, –, —)
+                                if ($valNum !== null && preg_match('/^\s*([+-]?[0-9]+(?:[\.,][0-9]+)?)\s*[-\x{2013}\x{2014}]\s*([+-]?[0-9]+(?:[\.,][0-9]+)?)\s*$/u', $rangeForMatch, $m)) {
+                                    $min = floatval(str_replace(',', '.', $m[1]));
+                                    $max = floatval(str_replace(',', '.', $m[2]));
+                                    if ($valNum < $min || $valNum > $max) $outside = true;
+                                }
+
+                                // check range formats like "<5", "<=5", ">5", ">=5" (allow spaces)
+                                if ($valNum !== null && !$outside && preg_match('/^\s*([<>]=?)\s*([+-]?[0-9]+(?:[\.,][0-9]+)?)\s*$/u', $rangeForMatch, $m2)) {
+                                    $op = $m2[1];
+                                    $limit = floatval(str_replace(',', '.', $m2[2]));
+                                    if ($op === '<' && !($valNum < $limit)) $outside = true;
+                                    if ($op === '<=' && !($valNum <= $limit)) $outside = true;
+                                    if ($op === '>' && !($valNum > $limit)) $outside = true;
+                                    if ($op === '>=' && !($valNum >= $limit)) $outside = true;
+                                }
+
+                                // fallback: if two numbers appear anywhere, treat as min/max
+                                if ($valNum !== null && !$outside && preg_match_all('/[+-]?[0-9]+(?:[\.,][0-9]+)?/u', $rangeForMatch, $nums) && count($nums[0]) >= 2) {
+                                    $min = floatval(str_replace(',', '.', $nums[0][0]));
+                                    $max = floatval(str_replace(',', '.', $nums[0][1]));
+                                    if ($valNum < $min || $valNum > $max) $outside = true;
+                                }
+                            @endphp
                             <tr>
                                 <td class="testname-cell" style="border:1px solid #e5e7eb; padding:8px;">{{ $row['param'] }}</td>
-                                <td class="result-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; vertical-align: middle;">{{ $row['value'] }}</td>
+                                        <td class="result-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; vertical-align: middle;">@if($outside)<span style="font-weight:700">{{ $row['value'] }}</span>@else{{ $row['value'] }}@endif</td>
                                 <td class="range-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; vertical-align: middle;">{{ $row['range'] ?: '-' }}</td>
                             </tr>
                         @endforeach
@@ -590,8 +559,30 @@
             @endif
     </div>
 
-        @if(!empty($hasFooter) && $hasFooter)
-            @includeIf('prints.partials._footer')
+       <div class="footer-placeholder"></div>
+    </div>
+
+    <div class="footer-section">
+        @php
+            $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', ''));
+            $footerPrintedAt = trim((string) ($reportDateTime ?? ''));
+        @endphp
+
+        @if(!empty($footer_image))
+            @if(!empty($footer_content))
+                <div class="footer-content">{!! $footer_content !!}</div>
+            @elseif(!empty($footerFallbackLine))
+                <div class="footer-content">{{ $footerFallbackLine }}@if(!empty($footerPrintedAt)), Printing Date: <span class="print-datetime">{{ $footerPrintedAt }}</span>@endif</div>
+            @endif
+            <img src="{{ $footer_image }}" alt="Footer" class="footer-image">
+        @else
+            @if(!empty($footer_content))
+                <div class="footer-content">{!! $footer_content !!}</div>
+            @elseif(!empty($footerFallbackLine))
+                <div class="footer-content">{{ $footerFallbackLine }}@if(!empty($footerPrintedAt)), Printing Date: <span class="print-datetime">{{ $footerPrintedAt }}</span>@endif</div>
+            @else
+                <div class="footer-placeholder"></div>
+            @endif
         @endif
     </div>
 
@@ -599,83 +590,33 @@
 
 @if (empty($isPdf) || !$isPdf)
 <script>
-    // Format JS date to match server format like: 19-Apr-2026 03:45 PM
-    function _formatPrintDate(d) {
-        try {
-            const pad = (n) => (n < 10 ? '0' + n : n);
-            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            const dd = pad(d.getDate());
-            const mon = months[d.getMonth()];
-            const yyyy = d.getFullYear();
-            let hrs = d.getHours();
-            const mins = pad(d.getMinutes());
-            const ampm = hrs >= 12 ? 'PM' : 'AM';
-            hrs = hrs % 12; hrs = hrs ? hrs : 12; // convert 0 -> 12
-            const hh = pad(hrs);
-            return `${dd}-${mon}-${yyyy} ${hh}:${mins} ${ampm}`;
-        } catch (e) {
-            return '';
-        }
-    }
-
-    function _injectCurrentPrintDate() {
-        try {
-            const nowStr = _formatPrintDate(new Date());
-            // Keep the report's original Date & Time (server-provided) intact.
-            // Only update the footer's printing timestamp so it reflects
-            // the actual print time when the user clicks Print.
-            document.querySelectorAll('.print-datetime').forEach(el => { el.textContent = nowStr; });
-        } catch (e) {
-            // ignore
-        }
-    }
-
-    // On load, inject current datetime then trigger print after images load
     window.addEventListener('load', function () {
-        setTimeout(function () {
-            _injectCurrentPrintDate();
-            // Wait for images (footer/header) to load before triggering print.
-            const imgs = Array.from(document.images || []);
-            const pending = imgs.filter(i => !i.complete);
-            if (pending.length === 0) {
-                window.print();
-                return;
-            }
-            // Fallback: print after 2s in case some images never load.
-            const fallback = setTimeout(() => {
-                window.print();
-            }, 2000);
-            Promise.all(pending.map(img => new Promise((resolve) => {
-                img.addEventListener('load', resolve, { once: true });
-                img.addEventListener('error', resolve, { once: true });
-            }))).then(() => {
-                clearTimeout(fallback);
-                window.print();
-            }).catch(() => {
-                clearTimeout(fallback);
-                window.print();
-            });
-        }, 250);
+        // update any printing datetime placeholders to the current browser time
+        function formatPrintDate(d) {
+            try {
+                var dd = String(d.getDate()).padStart(2, '0');
+                var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                var m = monthNames[d.getMonth()];
+                var yyyy = d.getFullYear();
+                var hh = d.getHours();
+                var ampm = hh >= 12 ? 'PM' : 'AM';
+                hh = hh % 12; hh = hh ? hh : 12; // 0 -> 12
+                hh = String(hh).padStart(2, '0');
+                var min = String(d.getMinutes()).padStart(2, '0');
+                var sec = String(d.getSeconds()).padStart(2, '0');
+                return dd + '-' + m + '-' + yyyy + ' ' + hh + ':' + min + ':' + sec + ' ' + ampm;
+            } catch (e) { return d.toLocaleString(); }
+        }
+
+        var els = document.querySelectorAll('.print-datetime');
+        if (els && els.length) {
+            var now = new Date();
+            var txt = formatPrintDate(now);
+            els.forEach(function (el) { el.textContent = txt; });
+        }
+
+        setTimeout(function () { window.print(); }, 180);
     });
-
-    // Also ensure datetime is updated before a manual print (browser print dialog)
-    if (window.matchMedia) {
-        try {
-            const mql = window.matchMedia('print');
-            if (typeof mql.addListener === 'function') {
-                mql.addListener(function (m) { if (m.matches) _injectCurrentPrintDate(); });
-            } else if (typeof mql.addEventListener === 'function') {
-                mql.addEventListener('change', function (ev) { if (ev.matches) _injectCurrentPrintDate(); });
-            }
-        } catch (e) { /* ignore */ }
-    }
-
-    if (typeof window.onbeforeprint === 'function') {
-        const prev = window.onbeforeprint;
-        window.onbeforeprint = function () { _injectCurrentPrintDate(); try { prev(); } catch (e) {} };
-    } else {
-        window.onbeforeprint = _injectCurrentPrintDate;
-    }
 </script>
 @endif
 

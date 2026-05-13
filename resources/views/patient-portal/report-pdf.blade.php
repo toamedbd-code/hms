@@ -157,14 +157,14 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach($items as $idx => $item)
-                    <tr>
-                        <td class="sl">{{ $idx + 1 }}</td>
-                        <td>{{ $item->name }}</td>
-                        <td class="result">{{ $item->note }}</td>
-                        <td>{{ $item->range }}</td>
-                    </tr>
-                @endforeach
+                    @foreach($items as $idx => $item)
+                        <tr>
+                            <td class="sl">{{ $idx + 1 }}</td>
+                            <td>{{ $item->name }}</td>
+                            <td class="result">@includeIf('prints.partials._result_value', ['value' => $item->note ?? '', 'range' => $item->range ?? ''])</td>
+                            <td>{{ $item->range }}</td>
+                        </tr>
+                    @endforeach
             </tbody>
         </table>
     @endforeach
