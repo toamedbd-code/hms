@@ -34,6 +34,17 @@ const pendingQty = (item) => {
   const received = Number(item.received_quantity ?? 0);
   return Math.max(0, qty - received);
 };
+
+const formatDate = (value) => {
+  if (!value) return 'N/A';
+
+  const datePart = String(value).split('T')[0];
+  const [year, month, day] = datePart.split('-');
+
+  if (!year || !month || !day) return value;
+
+  return `${day}-${month}-${year}`;
+};
 </script>
 
 <template>
@@ -54,7 +65,7 @@ const pendingQty = (item) => {
       <div class="grid grid-cols-1 gap-3 p-3 mt-3 border rounded md:grid-cols-5">
         <div><span class="text-gray-500">Purchase No:</span> <span class="font-medium">{{ purchase.purchase_number }}</span></div>
         <div><span class="text-gray-500">Supplier:</span> <span class="font-medium">{{ purchase.supplier?.name ?? 'N/A' }}</span></div>
-        <div><span class="text-gray-500">Date:</span> <span class="font-medium">{{ purchase.purchase_date }}</span></div>
+        <div><span class="text-gray-500">Date:</span> <span class="font-medium">{{ formatDate(purchase.purchase_date) }}</span></div>
         <div><span class="text-gray-500">Invoice No:</span> <span class="font-medium">{{ purchase.invoice_number ?? 'N/A' }}</span></div>
         <div><span class="text-gray-500">Status:</span> <span class="font-medium capitalize">{{ purchase.status }}</span></div>
       </div>
@@ -81,7 +92,7 @@ const pendingQty = (item) => {
               <td class="px-3 py-2 border">{{ item.medicine_category?.medicine_category_name ?? 'N/A' }}</td>
               <td class="px-3 py-2 border">{{ item.medicine_name }}</td>
               <td class="px-3 py-2 border">{{ item.batch_no ?? 'N/A' }}</td>
-              <td class="px-3 py-2 border">{{ item.expiry_date ?? 'N/A' }}</td>
+              <td class="px-3 py-2 border">{{ formatDate(item.expiry_date) }}</td>
               <td class="px-3 py-2 border">{{ item.quantity }}</td>
               <td class="px-3 py-2 border">{{ money(item.unit_purchase_price) }}</td>
               <td class="px-3 py-2 border">{{ money(item.unit_selling_price) }}</td>
@@ -121,7 +132,7 @@ const pendingQty = (item) => {
           :disabled="receiveForm.processing || purchase.status === 'received'"
           @click="submitReceive"
         >
-          {{ purchase.status === 'received' ? 'All Items Received' : 'Update Received Quantity' }}
+          {{ purchase.status === 'received' ? 'Stock Approved' : 'Approve And Add To Stock' }}
         </button>
       </div>
     </div>

@@ -19,12 +19,14 @@ class AdminService
 
     public function list()
     {
-        return $this->adminModel->whereNull('deleted_at');
+        $table = $this->adminModel->getTable();
+        return $this->adminModel->whereNull($table . '.deleted_at');
     }
 
     public function all()
     {
-        return $this->adminModel->whereNull('deleted_at')->all();
+        $table = $this->adminModel->getTable();
+        return $this->adminModel->whereNull($table . '.deleted_at')->get();
     }
 
     public function find($id)
@@ -82,7 +84,8 @@ class AdminService
 
     public function AdminExists($userName)
     {
-        return $this->adminModel->whereNull('deleted_at')
+        $table = $this->adminModel->getTable();
+        return $this->adminModel->whereNull($table . '.deleted_at')
             ->where(function ($q) use ($userName) {
                 $q->where('email', strtolower($userName))
                     ->orWhere('phone', $userName);
@@ -92,7 +95,8 @@ class AdminService
 
     public function activeList()
     {
-        return $this->adminModel->whereNull('deleted_at')->where('status', 'Active')->get();
+        $table = $this->adminModel->getTable();
+        return $this->adminModel->whereNull($table . '.deleted_at')->where('status', 'Active')->get();
     }
 
     public function adminDetails($id)

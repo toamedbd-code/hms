@@ -6,6 +6,7 @@ use App\Http\Controllers\Backend\DashboardSettingController;
 use App\Http\Controllers\Backend\PermissionController;
 use App\Http\Controllers\Backend\RoleController;
 use App\Http\Controllers\LoginController;
+use App\Http\Controllers\Backend\JournalEntryController;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Request;
@@ -74,6 +75,7 @@ use App\Http\Controllers\Backend\MedicineCategoryController;
 use App\Http\Controllers\Backend\MedicineSupplierController;
 use App\Http\Controllers\Backend\MedicineInventoryController;
 use App\Http\Controllers\Backend\MedicinePurchaseController;
+use App\Http\Controllers\Backend\SitePurchaseController;
 use App\Http\Controllers\Backend\SupplierPaymentController;
 use App\Http\Controllers\Backend\ProductReturnController;
 use App\Http\Controllers\Backend\StockManagementController;
@@ -86,6 +88,7 @@ use App\Http\Controllers\Backend\SymptomTypeController;
 use App\Http\Controllers\Backend\InvoiceDesignController;
 use App\Http\Controllers\Backend\LeaveTypeController;
 use App\Http\Controllers\Backend\ReportController;
+use App\Http\Controllers\Backend\DoctorSummaryController;
 use App\Http\Controllers\Backend\WebSettingController;
 use App\Http\Controllers\Backend\ProfileController;
 use App\Http\Controllers\Backend\BkashSettingController;
@@ -140,6 +143,18 @@ Route::get('/facilities', [HomeController::class, 'facilities'])->name('website.
 Route::get('/appointment', [HomeController::class, 'appointment'])->name('website.appointment');
 Route::get('/contact', [HomeController::class, 'contact'])->name('website.contact');
 
+Route::get('/language/{locale}', function (string $locale, Request $request) {
+    $locale = strtolower(trim($locale));
+    if (!in_array($locale, ['en', 'bn'], true)) {
+        $locale = 'en';
+    }
+
+    session(['locale' => $locale]);
+    app()->setLocale($locale);
+
+    return redirect()->back()->withCookie(cookie('locale', $locale, 60 * 24 * 30));
+})->name('language.switch');
+
 // Serve storage files when symlink may be missing (fallback)
 Route::get('/storage/{path}', [AssetController::class, 'storage'])->where('path', '.*');
 
@@ -189,7 +204,7 @@ Route::get('/dev/debug-side-menus', function (Request $request) {
     $adminGuardCheck = auth()->guard('admin')->check();
     $adminGuardUser = auth()->guard('admin')->user();
     $requestAdminUser = $request->user('admin');
-    $defaultUser = auth()->user();
+    $defaultUser = $request->user();
 
     $sideMenusCurrent = $adminGuardUser ? getSideMenus($adminGuardUser) : [];
 
@@ -217,6 +232,44 @@ Route::get('/dev/debug-side-menus', function (Request $request) {
     ]);
 })->name('dev.debug.side-menus');
 
+// Dev debug: expose cached web setting and session companyInfo (local/dev only)
+Route::get('/dev/debug-websetting', function (Request $request) {
+    if (!app()->environment('local') && !config('app.debug')) {
+        abort(404);
+    }
+
+    $webSetting = function_exists('get_cached_web_setting') ? get_cached_web_setting(true) : null;
+    $companyInfo = session('companyInfo');
+
+    return response()->json([
+        'webSetting' => $webSetting?->toArray() ?? null,
+        'companyInfo' => $companyInfo,
+    ]);
+})->name('dev.debug.websetting');
+
+Route::get('/dev/debug-websetting/view', function (Request $request) {
+    if (!app()->environment('local') && !config('app.debug')) {
+        abort(404);
+    }
+
+    $webSetting = function_exists('get_cached_web_setting') ? get_cached_web_setting(true) : null;
+    $companyInfo = session('companyInfo');
+
+    return view('debug.websetting', compact('webSetting', 'companyInfo'));
+})->name('dev.debug.websetting.view');
+
+// Dev route: dump Inertia shared props for the current request
+Route::get('/dev/debug-shared-props', function (Request $request) {
+    if (!app()->environment('local') && !config('app.debug')) {
+        abort(404);
+    }
+
+    $middleware = app(\App\Http\Middleware\HandleInertiaRequests::class);
+    $shared = $middleware->share($request);
+
+    return response()->json($shared);
+})->name('dev.debug.shared-props');
+
 // Test-only registration endpoint (no admin auth) for automated browser tests
 Route::post('/test/attendance/face/register', [FaceAttendanceController::class, 'registerStoreTest']);
 Route::post('/test/attendance/face/mark', [FaceAttendanceController::class, 'markTest']);
@@ -234,17 +287,42 @@ Route::get('/download-invoice', [InvoiceController::class, 'downloadInvoice']);
 Route::get('/download/ipd/invoice', [InvoiceController::class, 'downloadIpdInvoice']);
 
 Route::get('/cache-clear', function () {
-    Artisan::call('cache:clear');
-    Artisan::call('route:clear');
-    Artisan::call('config:clear');
-    Artisan::call('view:clear');
-    Artisan::call('clear-compiled');
-    Artisan::call('optimize:clear');
-    Artisan::call('storage:link');
-    Artisan::call('optimize');
-    session()->flash('message', 'System Updated Successfully.');
+    try {
+        Artisan::call('cache:clear');
+        Artisan::call('route:clear');
+        Artisan::call('config:clear');
+        Artisan::call('view:clear');
+        Artisan::call('clear-compiled');
+        Artisan::call('optimize:clear');
+        Artisan::call('storage:link');
 
-    return redirect()->route('backend.dashboard');
+        // Running `optimize` (route caching) from a web request is unsafe.
+        // Skip optimization here; run `php artisan optimize` from CLI when needed.
+        \Illuminate\Support\Facades\Log::info('/cache-clear: skipped running Artisan::optimize() via web request.');
+
+        session()->flash('message', 'System Updated Successfully.');
+    } catch (\Throwable $e) {
+        return response('Cache clear failed: ' . $e->getMessage(), 500);
+    }
+
+    // Redirect to the admin dashboard. Route names may be prefixed
+    // by the RouteServiceProvider (e.g. 'backend.'). Try several
+    // likely names before falling back to root.
+    try {
+        if (\Illuminate\Support\Facades\Route::has('backend.dashboard')) {
+            return redirect()->route('backend.dashboard');
+        }
+        if (\Illuminate\Support\Facades\Route::has('admin.dashboard')) {
+            return redirect()->route('admin.dashboard');
+        }
+        if (\Illuminate\Support\Facades\Route::has('dashboard')) {
+            return redirect()->route('dashboard');
+        }
+    } catch (\Throwable $e) {
+        // If route generation fails for any reason, fallback to home URL
+    }
+
+    return redirect('/');
 });
 
 Route::get('/favicon-dynamic.ico', [WebSettingController::class, 'favicon'])->name('favicon.dynamic');
@@ -253,10 +331,14 @@ Route::get('/public-storage/{path}', [PublicStorageController::class, 'show'])
     ->name('public.storage.file');
 
 Route::group(['as' => 'auth.'], function () {
-    Route::get('/admin/login', [LoginController::class, 'loginPage'])->name('login2')->middleware('AuthCheck');
-    Route::post('/admin/login', [LoginController::class, 'login'])->name('login');
-    Route::get('/admin/logout', [LoginController::class, 'logout'])->name('logout');
+    Route::get('/login', [LoginController::class, 'loginPage'])->name('login2')->middleware('AuthCheck');
+    Route::post('/login', [LoginController::class, 'login'])->name('login');
+    Route::get('/logout', [LoginController::class, 'logout'])->name('logout');
 });
+
+// Legacy redirects: keep old /admin/login and /admin/logout working
+Route::permanentRedirect('/admin/login', '/login');
+Route::permanentRedirect('/admin/logout', '/logout');
 
 // Public bKash endpoints for subscription renewal (used from login page)
 Route::get('payment/bkash/renew', [\App\Http\Controllers\Payment\BkashController::class, 'publicInitiate'])->name('payment.bkash.initiate.public');
@@ -266,32 +348,59 @@ Route::post('/website/appointment', [HomeController::class, 'storeAppointment'])
     ->middleware('throttle:8,1')
     ->name('website.appointment.store');
 
-Route::group(['middleware' => 'AdminAuth'], function () {
+Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], function () {
 
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/dashboard', [DashboardController::class, 'index'])->name('admin.dashboard');
+    // Ensure a plain 'dashboard' route name exists so the final named route
+    // (prefixed by the RouteServiceProvider as 'backend.dashboard') matches
+    // menu entries that reference 'backend.dashboard'. Avoid naming the route
+    // with the 'backend.' prefix here to prevent double-prefixing.
+    if (!\Illuminate\Support\Facades\Route::has('backend.dashboard')) {
+        Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    }
 
     // API: return side menus as JSON for client-side fallback
     Route::get('/admin/side-menus', function () {
         $user = auth()->guard('admin')->user();
         return response()->json(getSideMenus($user));
-    })->name('backend.api.side-menus');
+    })->name('api.side-menus');
 
     // Account Management (Chart of Accounts, Ledger, Audit)
-    Route::get('accounts', [AccountController::class, 'index'])->name('backend.accounts.index');
-    Route::get('accounts/balances', [AccountController::class, 'balances'])->name('backend.accounts.balances');
-    Route::get('ledger', [LedgerController::class, 'index'])->name('backend.ledger.index');
-    Route::get('accounts/audit', [AccountAuditController::class, 'index'])->name('backend.accounts.audit');
+    Route::get('accounts', [AccountController::class, 'index'])->name('accounts.index');
+    Route::get('accounts/balances', [AccountController::class, 'balances'])->name('accounts.balances');
+    Route::get('accounts/trial-balance', [AccountController::class, 'trialBalance'])->name('accounts.trial-balance');
+    Route::get('accounts/profit-loss', [AccountController::class, 'profitLoss'])->name('accounts.profit-loss');
+    Route::get('accounts/balance-sheet', [AccountController::class, 'balanceSheet'])->name('accounts.balance-sheet');
+    Route::get('accounts/cash-flow', [AccountController::class, 'cashFlow'])->name('accounts.cash-flow');
+    Route::get('accounts/vendor-payment', [SupplierPaymentController::class, 'index'])->name('accounts.vendor-payment.index');
+    Route::get('ledger', [LedgerController::class, 'index'])->name('ledger.index');
+    Route::get('accounts/audit', [AccountAuditController::class, 'index'])->name('accounts.audit');
 
     // Account API (JSON) for Chart of Accounts CRUD
-    Route::get('accounts/list', [AccountApiController::class, 'index'])->name('backend.accounts.list');
-    Route::get('accounts/{id}/show', [AccountApiController::class, 'show'])->name('backend.accounts.show');
-    Route::post('accounts', [AccountApiController::class, 'store'])->name('backend.accounts.store');
-    Route::put('accounts/{id}', [AccountApiController::class, 'update'])->name('backend.accounts.update');
-    Route::delete('accounts/{id}', [AccountApiController::class, 'destroy'])->name('backend.accounts.destroy');
+    Route::get('accounts/list', [AccountApiController::class, 'index'])->name('accounts.list');
+    Route::get('accounts/opening-balances/status', [AccountApiController::class, 'openingBalanceStatus'])->name('accounts.opening-balances.status');
+    Route::get('accounts/opening-balances/history', [AccountApiController::class, 'openingBalanceHistory'])->name('accounts.opening-balances.history');
+    Route::get('accounts/{id}/show', [AccountApiController::class, 'show'])->name('accounts.show');
+    Route::post('accounts', [AccountApiController::class, 'store'])->name('accounts.store');
+    Route::post('accounts/opening-balances/save', [AccountApiController::class, 'saveOpeningBalances'])->name('accounts.opening-balances.save');
+    Route::post('accounts/opening-balances/post', [AccountApiController::class, 'postOpeningBalances'])->name('accounts.opening-balances.post');
+    Route::put('accounts/{id}', [AccountApiController::class, 'update'])->name('accounts.update');
+    Route::delete('accounts/{id}', [AccountApiController::class, 'destroy'])->name('accounts.destroy');
 
     // Ledger API (JSON) for browsing transactions
-    Route::get('ledger/list', [LedgerApiController::class, 'index'])->name('backend.ledger.list');
-    Route::get('ledger/{id}/show', [LedgerApiController::class, 'show'])->name('backend.ledger.show');
+    Route::get('ledger/list', [LedgerApiController::class, 'index'])->name('ledger.list');
+    Route::get('ledger/export', [LedgerApiController::class, 'export'])->name('ledger.export');
+    Route::get('ledger/{id}/show', [LedgerApiController::class, 'show'])->name('ledger.show');
+    Route::get('accounts/trial-balance/list', [LedgerApiController::class, 'trialBalance'])->name('accounts.trial-balance.list');
+    Route::get('accounts/profit-loss/list', [LedgerApiController::class, 'profitLoss'])->name('accounts.profit-loss.list');
+    Route::get('accounts/balance-sheet/list', [LedgerApiController::class, 'balanceSheet'])->name('accounts.balance-sheet.list');
+    Route::get('accounts/cash-flow/list', [LedgerApiController::class, 'cashFlow'])->name('accounts.cash-flow.list');
+    Route::get('accounts/financial-summary/list', [LedgerApiController::class, 'financialSummary'])->name('accounts.financial-summary.list');
+
+    // Generic approval inbox + actions
+    Route::get('approval-requests/inbox', [\App\Http\Controllers\Backend\ApprovalRequestController::class, 'index'])->name('approval.requests.index');
+    Route::post('approval-requests/{approvalRequest}/approve', [\App\Http\Controllers\Backend\ApprovalRequestController::class, 'approve'])->name('approval.requests.approve');
+    Route::post('approval-requests/{approvalRequest}/reject', [\App\Http\Controllers\Backend\ApprovalRequestController::class, 'reject'])->name('approval.requests.reject');
 
     // bKash settings (admin)
     Route::get('settings/payment/bkash', [BkashSettingController::class, 'index'])->name('settings.payment.bkash');
@@ -313,6 +422,7 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::post('/symptom-types', [SymptomTypeController::class, 'store'])->name('symptom-types.store');
 
     Route::resource('admin', AdminController::class);
+    Route::resource('journal-entry', JournalEntryController::class);
     Route::get('admin/{id}/modules', [AdminController::class, 'editModules'])->name('admin.modules.edit');
     Route::post('admin/{id}/modules', [AdminController::class, 'updateModules'])->name('admin.modules.update');
     Route::get('admin/{id}/status/{status}/change', [AdminController::class, 'changeStatus'])->name('admin.status.change');
@@ -411,6 +521,10 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
     // IPD Payments - simple create endpoint for payments related to an IPD admission
     Route::post('ipdpatient/{id}/payments', [IpdPatientController::class, 'storePayment'])->name('ipdpatient.payments.store');
+    // Update an existing payment (AJAX)
+    Route::post('ipdpatient/{id}/payments/{paymentId}', [IpdPatientController::class, 'updatePayment'])->name('ipdpatient.payments.update');
+    // Apply discount to billing for an IPD patient
+    Route::post('ipdpatient/{id}/billing/discount', [IpdPatientController::class, 'applyBillingDiscount'])->name('ipdpatient.billing.apply_discount');
     // IPD Notes (nurse notes, consultant register, operations, bed history)
     Route::post('ipdpatient/{id}/notes', [IpdPatientController::class, 'storeNote'])->name('ipdpatient.notes.store');
     // Live consultation toggle/update
@@ -428,6 +542,11 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
     Route::post('ipdpatient/{id}/charges/doctor-visit', [IpdChargeController::class, 'storeDoctorVisitCharge'])->name('ipdpatient.charges.doctor-visit.store');
     Route::delete('ipdpatient/{id}/charges/doctor-visit/{chargeId}', [IpdChargeController::class, 'destroyDoctorVisitCharge'])->name('ipdpatient.charges.doctor-visit.destroy');
+
+    // Add hospital charges (select from Charge list) to IPD and create/append billing
+    Route::post('ipdpatient/{id}/charges/hospital', [IpdPatientController::class, 'addHospitalCharges'])->name('ipdpatient.charges.hospital.store');
+    // Add a manual hospital charge (quick add an item from IPD UI and bill immediately)
+    Route::post('ipdpatient/{id}/charges/hospital/manual', [IpdPatientController::class, 'addManualHospitalCharge'])->name('ipdpatient.charges.hospital.manual.store');
 
 
     // Discharge Certificate
@@ -504,6 +623,20 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     //for Inventory
     Route::resource('inventory', InventoryController::class);
     Route::get('inventory/{id}/status/{status}/change', [InventoryController::class, 'changeStatus'])->name('inventory.status.change');
+
+    // Manufacturing / MRP
+    Route::resource('bom', \App\Http\Controllers\Backend\BillOfMaterialController::class);
+    Route::resource('production-order', \App\Http\Controllers\Backend\ProductionOrderController::class);
+    Route::resource('work-order', \App\Http\Controllers\Backend\WorkOrderController::class);
+
+    // Fixed Assets
+    Route::resource('fixedasset', \App\Http\Controllers\Backend\FixedAssetController::class);
+
+    // Currency & Exchange Rates
+    Route::resource('currency', \App\Http\Controllers\Backend\CurrencyController::class);
+    Route::get('exchange-rate', [\App\Http\Controllers\Backend\ExchangeRateController::class, 'index'])->name('exchange-rate.index');
+    Route::post('exchange-rate', [\App\Http\Controllers\Backend\ExchangeRateController::class, 'store'])->name('exchange-rate.store');
+    Route::delete('exchange-rate/{exchangeRate}', [\App\Http\Controllers\Backend\ExchangeRateController::class, 'destroy'])->name('exchange-rate.destroy');
 
 
     //for Certificate
@@ -591,12 +724,8 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('bed/{id}/status/{status}/change', [BedController::class, 'changeStatus'])->name('bed.status.change');
 
 
-    //for PathologyTest
-    Route::get('testpathology/search', [PathologyTestController::class, 'search'])->name('testpathology.search');
-    Route::get('testpathology/sample-csv', [PathologyTestController::class, 'downloadSampleCsv'])->name('testpathology.sample-csv');
-    Route::post('testpathology/import', [PathologyTestController::class, 'importCsv'])->name('testpathology.import');
-    Route::resource('testpathology', PathologyTestController::class);
-    Route::get('testpathology/{id}/status/{status}/change', [PathologyTestController::class, 'changeStatus'])->name('testpathology.status.change');
+    // PathologyTest: legacy "testpathology" routes removed in favor of unified
+    // `itemcharge` endpoints. Legacy redirects below keep backward compatibility.
 
 
     //for PathologyCategory
@@ -615,8 +744,28 @@ Route::group(['middleware' => 'AdminAuth'], function () {
 
 
     //for Charge
+    // Redirect hospitalcharge create to unified Itemcharge create page
+    Route::permanentRedirect('hospitalcharge/create', 'Itemcharge/create');
+
     Route::resource('hospitalcharge', ChargeController::class);
     Route::get('hospitalcharge/{id}/status/{status}/change', [ChargeController::class, 'changeStatus'])->name('hospitalcharge.status.change');
+
+    // Alias Itemcharge -> reuse ChargeController so a single Item charge UI exists
+    Route::resource('Itemcharge', ChargeController::class);
+    Route::get('Itemcharge/{id}/status/{status}/change', [ChargeController::class, 'changeStatus'])->name('Itemcharge.status.change');
+
+    // Legacy redirects: keep old /testpathology paths redirecting to /itemcharge
+    Route::permanentRedirect('testpathology', 'itemcharge');
+    Route::permanentRedirect('testpathology/create', 'itemcharge/create');
+
+    // PathologyTest (served as Item Charge)
+    Route::get('itemcharge/search', [PathologyTestController::class, 'search'])->name('itemcharge.search');
+    Route::get('itemcharge/sample-csv', [PathologyTestController::class, 'downloadSampleCsv'])->name('itemcharge.sample-csv');
+    Route::post('itemcharge/import', [PathologyTestController::class, 'importCsv'])->name('itemcharge.import');
+
+    // Lowercase alias for itemcharge (serve pathology test UI to match legacy URLs)
+    Route::resource('itemcharge', PathologyTestController::class);
+    Route::get('itemcharge/{id}/status/{status}/change', [PathologyTestController::class, 'changeStatus'])->name('itemcharge.status.change');
 
 
     //for ChargeCategory
@@ -710,6 +859,9 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::resource('medicinepurchase', \App\Http\Controllers\Backend\MedicinePurchaseController::class);
     Route::post('medicinepurchase/{medicinepurchase}/receive', [\App\Http\Controllers\Backend\MedicinePurchaseController::class, 'receiveItems'])->name('medicinepurchase.receive');
 
+    // for SitePurchase (all-site procurement)
+    Route::resource('sitepurchase', SitePurchaseController::class);
+
     // for SupplierPayment
     Route::resource('supplierpayment', \App\Http\Controllers\Backend\SupplierPaymentController::class);
     Route::post('supplierpayment/{supplierpayment}/partial', [\App\Http\Controllers\Backend\SupplierPaymentController::class, 'addPartialPayment'])->name('supplierpayment.partial');
@@ -761,6 +913,7 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     //for report
     Route::get('all-report', [ReportController::class, 'index'])->name('report.index');
     Route::get('/report/generate-pdf', [ReportController::class, 'generatePdf'])->name('report.generate-pdf');
+    Route::get('report-summary', [DoctorSummaryController::class, 'index'])->middleware('permission:report-management')->name('report-summary.index');
 
     // for General Setting (canonical URL)
     Route::get('general-setting', [WebSettingController::class, 'create'])->name('websetting.create');
@@ -769,6 +922,10 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('general-setting/section/prefix', [WebSettingController::class, 'section'])->defaults('section', 'prefix')->name('websetting.section.prefix');
     Route::get('general-setting/section/sms', [WebSettingController::class, 'section'])->defaults('section', 'sms')->name('websetting.section.sms');
     Route::get('general-setting/section/module', [WebSettingController::class, 'section'])->defaults('section', 'module')->name('websetting.section.module');
+    Route::get('general-setting/module/attendance', [WebSettingController::class, 'module'])->defaults('module', 'attendance')->name('websetting.module.attendance');
+    Route::get('general-setting/module/pathology', [WebSettingController::class, 'module'])->defaults('module', 'pathology')->name('websetting.module.pathology');
+    Route::get('general-setting/module/payroll', [WebSettingController::class, 'module'])->defaults('module', 'payroll')->name('websetting.module.payroll');
+    Route::get('general-setting/module/reporting', [WebSettingController::class, 'module'])->defaults('module', 'reporting')->name('websetting.module.reporting');
     Route::get('general-setting/section/other', [WebSettingController::class, 'section'])->defaults('section', 'other')->name('websetting.section.other');
     Route::match(['get', 'post'], 'general-setting-store', [WebSettingController::class, 'store'])->name('websetting.store');
 
@@ -899,6 +1056,57 @@ Route::get('opd-due-collect/{id}', [DueCollectController::class, 'opdIndex'])
 
 Route::post('opd-due-collect/{id}', [DueCollectController::class, 'opdStore'])
     ->name('opd.due.collect.store');
+    // Auto-register placeholder routes for menu entries that reference
+    // named routes which are not defined. This prevents menu links from
+    // throwing exceptions when the app tries to generate URLs for them.
+    try {
+        $menuRoutes = \App\Models\Menu::whereNotNull('route')->pluck('route')->unique()->filter()->values();
+        foreach ($menuRoutes as $menuRoute) {
+            $menuRoute = trim((string) $menuRoute);
+            if ($menuRoute === '') continue;
+
+            // Determine the final route name that will exist when this file
+            // is loaded inside RouteServiceProvider which applies the
+            // `as('backend.')` name prefix. If the menu route already
+            // contains that prefix, strip it before naming the new route
+            // so the final registered name matches the menu value.
+            $registrationName = $menuRoute;
+            if (str_starts_with($registrationName, 'backend.')) {
+                $registrationName = substr($registrationName, strlen('backend.'));
+            }
+
+            // Normalize the registration name to lowercase to reduce
+            // accidental case-sensitive collisions from DB entries.
+            $safeRegistrationName = strtolower($registrationName);
+
+            // If either the raw menu route or the final prefixed name
+            // already exists, skip creating a placeholder.
+            if (\Illuminate\Support\Facades\Route::has($menuRoute)
+                || \Illuminate\Support\Facades\Route::has('backend.' . $registrationName)
+                || \Illuminate\Support\Facades\Route::has('backend.' . $safeRegistrationName)
+                || \Illuminate\Support\Facades\Route::has('backend.__placeholder.' . $safeRegistrationName)) {
+                continue;
+            }
+
+            $slug = \Illuminate\Support\Str::slug($menuRoute);
+
+            // Create the placeholder route but guard the naming step so
+            // a naming collision doesn't throw and abort route loading.
+            // Use a reserved '__placeholder.' name prefix so these auto-
+            // registered routes cannot collide with real route names.
+            try {
+                \Illuminate\Support\Facades\Route::get('/__placeholder/' . $slug, function () use ($menuRoute) {
+                    return \Inertia\Inertia::render('Backend/Placeholder', ['title' => $menuRoute]);
+                })->name('__placeholder.' . $safeRegistrationName);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Skipping placeholder for ' . $menuRoute . ': ' . $e->getMessage());
+                continue;
+            }
+        }
+    } catch (\Throwable $e) {
+        // ignore placeholder registration errors during route loading
+    }
+
 });
 
 // Patient Portal

@@ -56,9 +56,150 @@ const form = useForm({
     bed_group_id: props.ipdpatient?.bed_group_id ?? '',
     bed_id: props.ipdpatient?.bed_id ?? '',
     live_consultation: props.ipdpatient?.live_consultation ?? 'no',
+    hospital_charge_items: Array.isArray(props.ipdpatient?.hospital_charge_items) && props.ipdpatient.hospital_charge_items.length
+        ? props.ipdpatient.hospital_charge_items
+        : [{ item_name: '', unit_price: '', quantity: 1 }],
 
     _method: props.ipdpatient?.id ? 'put' : 'post',
 });
+
+const addHospitalChargeItem = () => {
+    form.hospital_charge_items.push({ item_name: '', unit_price: '', quantity: 1 });
+};
+
+const removeHospitalChargeItem = (index) => {
+    if (form.hospital_charge_items.length <= 1) {
+        form.hospital_charge_items[0] = { item_name: '', unit_price: '', quantity: 1 };
+        return;
+    }
+    form.hospital_charge_items.splice(index, 1);
+};
+
+const getHospitalChargeRowTotal = (item) => {
+    const unitPrice = Number(item?.unit_price ?? 0);
+    const quantity = Number(item?.quantity ?? 0);
+    if (unitPrice <= 0 || quantity <= 0) return 0;
+    return unitPrice * quantity;
+};
+
+const hospitalChargeGrandTotal = computed(() => {
+    return (form.hospital_charge_items || []).reduce((sum, item) => sum + getHospitalChargeRowTotal(item), 0);
+});
+
+const formatTk = (amount) => `Tk ${Number(amount || 0).toFixed(2)}`;
+
+const applyGrandTotalToAdvance = () => {
+    form.advance_amount = Number(hospitalChargeGrandTotal.value.toFixed(2));
+};
+
+const hospitalItemSearchResults = ref([]);
+const hospitalItemSearchLoading = ref(false);
+const showHospitalItemSearch = ref(false);
+const hospitalItemSelectedIndex = ref(-1);
+const activeHospitalItemRow = ref(-1);
+let hospitalItemSearchTimer = null;
+
+const searchHospitalItems = async (q, rowIndex) => {
+    if (!q || String(q).trim().length < 2) {
+        hospitalItemSearchResults.value = [];
+        hospitalItemSelectedIndex.value = -1;
+        showHospitalItemSearch.value = false;
+        return;
+    }
+
+    hospitalItemSearchLoading.value = true;
+    activeHospitalItemRow.value = rowIndex;
+    try {
+        const res = await window.axios.get(route('backend.itemcharge.search'), { params: { q } });
+        hospitalItemSearchResults.value = res?.data?.results || [];
+        hospitalItemSelectedIndex.value = hospitalItemSearchResults.value.length > 0 ? 0 : -1;
+        showHospitalItemSearch.value = hospitalItemSearchResults.value.length > 0;
+    } catch (error) {
+        hospitalItemSearchResults.value = [];
+        hospitalItemSelectedIndex.value = -1;
+        showHospitalItemSearch.value = false;
+    } finally {
+        hospitalItemSearchLoading.value = false;
+    }
+};
+
+const onHospitalItemInput = (rowIndex, event) => {
+    const q = event?.target?.value ?? '';
+    activeHospitalItemRow.value = rowIndex;
+
+    if (hospitalItemSearchTimer) clearTimeout(hospitalItemSearchTimer);
+
+    if (!q || String(q).trim().length < 2) {
+        hospitalItemSearchResults.value = [];
+        hospitalItemSelectedIndex.value = -1;
+        showHospitalItemSearch.value = false;
+        return;
+    }
+
+    hospitalItemSearchTimer = setTimeout(() => searchHospitalItems(q, rowIndex), 250);
+};
+
+const hospitalItemSelectNext = () => {
+    if (!Array.isArray(hospitalItemSearchResults.value) || hospitalItemSearchResults.value.length === 0) return;
+    const len = hospitalItemSearchResults.value.length;
+    let idx = Number(hospitalItemSelectedIndex.value);
+    if (!Number.isFinite(idx) || idx < 0) idx = -1;
+    hospitalItemSelectedIndex.value = (idx + 1) % len;
+};
+
+const hospitalItemSelectPrev = () => {
+    if (!Array.isArray(hospitalItemSearchResults.value) || hospitalItemSearchResults.value.length === 0) return;
+    const len = hospitalItemSearchResults.value.length;
+    let idx = Number(hospitalItemSelectedIndex.value);
+    if (!Number.isFinite(idx)) idx = 0;
+    hospitalItemSelectedIndex.value = (idx - 1 + len) % len;
+};
+
+const selectHospitalItemForRow = (item, rowIndex) => {
+    if (!item || rowIndex < 0 || !form.hospital_charge_items[rowIndex]) return;
+
+    form.hospital_charge_items[rowIndex].item_name = item.test_name ?? item.charge_name ?? item.name ?? '';
+    form.hospital_charge_items[rowIndex].unit_price = Number(item.amount ?? item.standard_charge ?? 0);
+    if (!Number(form.hospital_charge_items[rowIndex].quantity || 0)) {
+        form.hospital_charge_items[rowIndex].quantity = 1;
+    }
+
+    hospitalItemSearchResults.value = [];
+    hospitalItemSelectedIndex.value = -1;
+    showHospitalItemSearch.value = false;
+};
+
+const onHospitalItemEnter = (rowIndex, event) => {
+    if (event && typeof event.preventDefault === 'function') {
+        event.preventDefault();
+    }
+
+    if (
+        showHospitalItemSearch.value
+        && activeHospitalItemRow.value === rowIndex
+        && Array.isArray(hospitalItemSearchResults.value)
+        && hospitalItemSearchResults.value.length > 0
+    ) {
+        let idx = Number(hospitalItemSelectedIndex.value);
+        if (!Number.isFinite(idx) || idx < 0 || idx >= hospitalItemSearchResults.value.length) idx = 0;
+        const item = hospitalItemSearchResults.value[idx];
+        if (item) {
+            selectHospitalItemForRow(item, rowIndex);
+        }
+        return;
+    }
+
+    const row = form.hospital_charge_items[rowIndex];
+    if (row && String(row.item_name || '').trim() !== '' && rowIndex === form.hospital_charge_items.length - 1) {
+        addHospitalChargeItem();
+    }
+};
+
+const hideHospitalItemSearch = () => {
+    setTimeout(() => {
+        showHospitalItemSearch.value = false;
+    }, 150);
+};
 
 const allBeds = computed(() => props.beds ?? []);
 const filteredBeds = ref(allBeds.value);
@@ -104,6 +245,13 @@ const submit = () => {
     const routeName = props.id ? route('backend.ipdpatient.update', props.id) : route('backend.ipdpatient.store');
     form.transform(data => ({
         ...data,
+        hospital_charge_items: (data.hospital_charge_items || [])
+            .map((item) => ({
+                item_name: String(item?.item_name ?? '').trim(),
+                unit_price: Number(item?.unit_price ?? 0),
+                quantity: Number(item?.quantity ?? 1),
+            }))
+            .filter((item) => item.item_name !== '' && item.unit_price > 0 && item.quantity > 0),
         patient_id: data.patient_id?.id || data.patient_id,
         consultant_doctor_id: data.consultant_doctor_id?.id || data.consultant_doctor_id,
         remember: '',
@@ -530,6 +678,16 @@ const handleDoctorSelect = (selectedDoctor) => {
                             </div>
                             <div>
                                 <InputLabel for="advance_amount" value="Advance Amount (Tk)" />
+                                <div class="mb-1 flex items-center justify-between">
+                                    <span class="text-xs text-slate-500">Suggested: {{ formatTk(hospitalChargeGrandTotal) }}</span>
+                                    <button
+                                        type="button"
+                                        class="text-xs font-semibold text-emerald-700 hover:text-emerald-800"
+                                        @click="applyGrandTotalToAdvance"
+                                    >
+                                        Use Grand Total
+                                    </button>
+                                </div>
                                 <input id="advance_amount" v-model="form.advance_amount" type="number" step="0.01"
                                     class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300" placeholder="0.00" />
                                 <InputError class="mt-1" :message="form.errors.advance_amount" />
@@ -593,6 +751,114 @@ const handleDoctorSelect = (selectedDoctor) => {
                             </div>
                         </div>
                     </div>
+                </div>
+
+
+                <div class="mt-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <InputLabel for="hospital_charge_items" value="Hospital Charge Items" />
+                        <button
+                            type="button"
+                            class="px-2 py-1 text-xs font-semibold text-white bg-emerald-600 rounded-md hover:bg-emerald-700"
+                            @click="addHospitalChargeItem"
+                        >
+                            + Add Row
+                        </button>
+                    </div>
+
+                    <div class="overflow-x-auto border rounded-md border-slate-200">
+                        <table class="min-w-full text-sm">
+                            <thead class="bg-slate-50">
+                                <tr>
+                                    <th class="px-3 py-2 text-left">Item Name</th>
+                                    <th class="px-3 py-2 text-left">Price (Tk.)</th>
+                                    <th class="px-3 py-2 text-left">Qty</th>
+                                    <th class="px-3 py-2 text-left">Subtotal</th>
+                                    <th class="px-3 py-2 text-left">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(item, index) in form.hospital_charge_items" :key="index" class="border-t border-slate-200">
+                                    <td class="px-3 py-2 relative">
+                                        <input
+                                            v-model="item.item_name"
+                                            type="text"
+                                            class="block w-full p-1.5 text-sm rounded-md border-slate-300"
+                                            placeholder="Item name"
+                                            @input="onHospitalItemInput(index, $event)"
+                                            @focus="onHospitalItemInput(index, { target: { value: item.item_name } })"
+                                            @blur="hideHospitalItemSearch"
+                                            @keydown.down.prevent="hospitalItemSelectNext"
+                                            @keydown.up.prevent="hospitalItemSelectPrev"
+                                            @keydown.enter.prevent="onHospitalItemEnter(index, $event)"
+                                        />
+
+                                        <div
+                                            v-if="showHospitalItemSearch && activeHospitalItemRow === index"
+                                            class="absolute left-3 right-3 z-50 mt-1 max-h-56 overflow-auto rounded-md border border-slate-200 bg-white shadow"
+                                        >
+                                            <div v-if="hospitalItemSearchLoading" class="p-2 text-xs text-slate-500">Searching...</div>
+                                            <div v-else>
+                                                <div
+                                                    v-for="(result, rIndex) in hospitalItemSearchResults"
+                                                    :key="result.id ?? `${result.name}-${rIndex}`"
+                                                    class="cursor-pointer p-2 text-xs"
+                                                    :class="rIndex === hospitalItemSelectedIndex ? 'bg-slate-100 font-semibold' : 'hover:bg-slate-100'"
+                                                    @mousedown.prevent="selectHospitalItemForRow(result, index)"
+                                                    @mouseover="hospitalItemSelectedIndex = rIndex"
+                                                >
+                                                    <div class="text-slate-800">{{ result.test_name ?? result.charge_name ?? result.name }}</div>
+                                                    <div class="text-slate-500">Tk {{ Number(result.amount ?? result.standard_charge ?? 0).toFixed(2) }}</div>
+                                                </div>
+                                                <div v-if="hospitalItemSearchResults.length === 0" class="p-2 text-xs text-slate-500">No matches</div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="px-3 py-2">
+                                        <input
+                                            v-model="item.unit_price"
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            class="block w-full p-1.5 text-sm rounded-md border-slate-300"
+                                            placeholder="0.00"
+                                        />
+                                    </td>
+                                    <td class="px-3 py-2">
+                                        <input
+                                            v-model="item.quantity"
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                            class="block w-full p-1.5 text-sm rounded-md border-slate-300"
+                                            placeholder="1"
+                                        />
+                                    </td>
+                                    <td class="px-3 py-2 font-semibold text-slate-700">
+                                        {{ formatTk(getHospitalChargeRowTotal(item)) }}
+                                    </td>
+                                    <td class="px-3 py-2">
+                                        <button
+                                            type="button"
+                                            class="px-2 py-1 text-xs font-semibold text-white bg-red-600 rounded-md hover:bg-red-700"
+                                            @click="removeHospitalChargeItem(index)"
+                                        >
+                                            Remove
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                            <tfoot class="bg-slate-50 border-t border-slate-200">
+                                <tr>
+                                    <td class="px-3 py-2 text-right font-semibold" colspan="3">Grand Total</td>
+                                    <td class="px-3 py-2 font-bold text-emerald-700">{{ formatTk(hospitalChargeGrandTotal) }}</td>
+                                    <td class="px-3 py-2"></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+
+                    <InputError class="mt-1" :message="form.errors.hospital_charge_items" />
                 </div>
 
                 <!-- Form Actions -->

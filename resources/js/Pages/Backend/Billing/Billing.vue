@@ -189,7 +189,7 @@ const clearSearch = () => {
                             </h2>
                             <div class="flex gap-2">
                                 <button @click="openListBillButton"
-                                    class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors duration-200 flex items-center gap-2">
+                                    class="px-4 py-2 bg-gradient-to-r from-indigo-500 via-blue-500 to-cyan-500 text-white text-sm rounded-md shadow-md hover:shadow-lg hover:from-indigo-600 hover:via-blue-600 hover:to-cyan-600 transition-all duration-200 flex items-center gap-2">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none"
                                         viewBox="0 0 24 24" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -198,7 +198,7 @@ const clearSearch = () => {
                                     Bill List
                                 </button>
                                 <button @click="openAddBillButton"
-                                    class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors duration-200 flex items-center gap-2">
+                                    class="px-4 py-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-green-500 text-white text-sm rounded-md shadow-md hover:shadow-lg hover:from-emerald-600 hover:via-teal-600 hover:to-green-600 transition-all duration-200 flex items-center gap-2">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none"
                                         viewBox="0 0 24 24" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -233,10 +233,10 @@ const clearSearch = () => {
                         <div class="p-6">
                             <form @submit.prevent="searchByCase" class="space-y-4">
                                 <div>
-                                    <InputLabel for="case_id" value="Case ID" />
+                                    <InputLabel for="case_id" value="Case ID / Billing ID" />
                                     <div class="flex mt-2">
                                         <div class="relative flex-1">
-                                            <input id="case_id" type="text" placeholder="Enter Case ID "
+                                            <input id="case_id" type="text" placeholder="Enter Case ID or Billing ID"
                                                 v-model="filters.case_id"
                                                 class="block w-full px-3 py-2 pr-8 text-sm rounded-l-md border border-gray-300 dark:border-gray-600 dark:bg-slate-700 dark:text-slate-200 focus:border-blue-500 focus:outline-none"
                                                 autocomplete="off" />
@@ -252,7 +252,7 @@ const clearSearch = () => {
                                             </button>
                                         </div>
                                         <button type="submit"
-                                            class="px-4 py-2 bg-blue-600 text-white text-sm rounded-r-md hover:bg-blue-700 transition-colors duration-200 flex items-center"
+                                            class="px-4 py-2 bg-gradient-to-r from-fuchsia-500 via-rose-500 to-orange-500 text-white text-sm rounded-r-md shadow-md hover:shadow-lg hover:from-fuchsia-600 hover:via-rose-600 hover:to-orange-600 transition-all duration-200 flex items-center"
                                             :disabled="isLoading">
                                             <span v-if="isLoading">🔍 Searching...</span>
                                             <span v-else>🔍 Search</span>
@@ -292,7 +292,7 @@ const clearSearch = () => {
                                         </div>
                                         <div class="ml-3">
                                             <p class="text-sm text-yellow-700 dark:text-yellow-300">
-                                                No records found for Case ID: "{{ filters.case_id }}"
+                                                No records found for Case ID / Billing ID: "{{ filters.case_id }}"
                                             </p>
                                         </div>
                                     </div>
@@ -303,6 +303,9 @@ const clearSearch = () => {
                                     <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                                         <thead class="bg-gray-50 dark:bg-slate-800">
                                             <tr>
+                                                <th scope="col"
+                                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                                    Billing ID</th>
                                                 <th scope="col"
                                                     class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                                                     Case ID</th>
@@ -327,6 +330,10 @@ const clearSearch = () => {
                                             class="bg-white dark:bg-slate-800 divide-y divide-gray-200 dark:divide-gray-700">
                                             <tr v-for="result in searchResults" :key="result.id"
                                                 class="hover:bg-gray-50 dark:hover:bg-slate-700">
+                                                <td
+                                                    class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-200 font-semibold">
+                                                    {{ result.billing_id ?? result.id }}
+                                                </td>
                                                 <td
                                                     class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-200">
                                                     {{ result.case_number }}

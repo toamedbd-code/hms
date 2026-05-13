@@ -389,10 +389,24 @@
 </head>
 <?php
     $__ws = function_exists('get_cached_web_setting') ? get_cached_web_setting() : null;
-    $__attendance = is_array($__ws?->attendance_device_options) ? $__ws->attendance_device_options : (is_string($__ws?->attendance_device_options) && trim($__ws->attendance_device_options) !== '' ? json_decode($__ws->attendance_device_options, true) : []);
-    $__layout = is_array($__attendance) ? data_get($__attendance, 'reporting.layout', []) : [];
-    $reportHeaderHeight = max((int) ($header_height ?? $__layout['header_height'] ?? 115), 0);
-    $reportFooterHeight = max((int) ($footer_height ?? $__layout['footer_height'] ?? 70), 0);
+    $__attendance = is_array($__ws?->attendance_device_options) ? $__ws->attendance_device_options : (is_string($__ws?->attendance_device_options) && trim($__ws?->attendance_device_options) !== '' ? json_decode($__ws?->attendance_device_options, true) : []);
+    $__reporting = is_array($__attendance) ? data_get($__attendance, 'reporting', []) : [];
+    $__settingShowHeader = array_key_exists('show_header', $__reporting) ? (bool) $__reporting['show_header'] : null;
+    $__settingShowFooter = array_key_exists('show_footer', $__reporting) ? (bool) $__reporting['show_footer'] : null;
+    if ($__settingShowHeader !== null || $__settingShowFooter !== null) {
+        $showHeaderFooter = ($__settingShowHeader ?? true) && ($__settingShowFooter ?? true);
+    } else {
+        $showHeaderFooter = array_key_exists('show_header_footer', $__reporting) ? (bool) $__reporting['show_header_footer'] : (isset($showHeaderFooter) ? (bool) $showHeaderFooter : true);
+    }
+    $__layout = data_get($__reporting, 'layout', []);
+
+    $reportHeaderHeight = max((int) ($header_height ?? ($reportHeaderHeight ?? $__layout['header_height'] ?? 115)), 0);
+    $reportFooterHeight = max((int) ($footer_height ?? ($reportFooterHeight ?? $__layout['footer_height'] ?? 70)), 0);
+
+    if (! $showHeaderFooter) {
+        $reportHeaderHeight = 0;
+        $reportFooterHeight = 0;
+    }
 ?>
 
 <body style="--report-header-height: <?php echo e($reportHeaderHeight); ?>px; --report-footer-height: <?php echo e($reportFooterHeight); ?>px;">
@@ -404,7 +418,7 @@
 
     <div class="sheet">
         <div class="content-section">
-        <?php echo $__env->make('prints.partials._header', array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
+        <?php echo $__env->make('prints.partials._header', ['showHeaderFooter' => $showHeaderFooter], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
 
         <div class="id-row">
             <div style="width:25%; display:inline-block; vertical-align:middle; text-align:left;">
@@ -496,7 +510,7 @@
                 </div>
 
                 <div class="section">
-                    <div class="section-title">Recommended Tests</div>
+                    <div class="section-title">Recommended Items</div>
                     <?php if(!empty($investigationItems ?? [])): ?>
                         <ol>
                             <?php $__currentLoopData = ($investigationItems ?? []); $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $test): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
@@ -504,7 +518,7 @@
                             <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?>
                         </ol>
                     <?php else: ?>
-                        <div>No tests recommended.</div>
+                        <div>No items recommended.</div>
                     <?php endif; ?>
                 </div>
             </div>
@@ -596,7 +610,9 @@
         </div>
     </div>
 
-    <?php echo $__env->make('prints.partials._footer', array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
+    <?php if(!empty($showHeaderFooter) && $showHeaderFooter): ?>
+        <?php echo $__env->make('prints.partials._footer', array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
+    <?php endif; ?>
 </body>
 
 <?php if(empty($forPdf) || !$forPdf): ?>

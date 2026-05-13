@@ -93,7 +93,7 @@ onMounted(() => {
       <div class="flex items-center gap-2">
         <button type="button" class="px-3 py-2 text-sm font-semibold text-white bg-sky-600 rounded hover:bg-sky-700" @click="printNow">Print</button>
         <button type="button" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700" @click="downloadPdf">Download PDF</button>
-        <button type="button" class="px-3 py-2 text-sm font-semibold text-white bg-gray-600 rounded hover:bg-gray-700" @click="goBack">Back</button>
+        <button type="button" class="px-3 py-2 text-sm font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700" @click="goBack">Back</button>
       </div>
     </div>
 

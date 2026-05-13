@@ -58,6 +58,7 @@ export default {
       const aliasMap = {
         'balance': 'finance',
         'activity-log': 'activity',
+        'factory': 'industry',
       };
 
       const lucideIcons = {
@@ -358,6 +359,14 @@ export default {
           <path d="M8 12h8"/>
           <path d="M8 16h5"/>
           <path d="M10 8H8v4h2V8z"/>
+        </svg>`,
+
+        'industry': `<svg width="${this.size}" height="${this.size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 22h20"/>
+          <path d="M4 22V10l6 3V10l6 3V6l4 2v14"/>
+          <path d="M8 22v-4"/>
+          <path d="M12 22v-6"/>
+          <path d="M16 22v-4"/>
         </svg>`
       };
 

@@ -20,12 +20,27 @@ const deletePurchase = (id) => {
 
 const money = (value) => Number(value ?? 0).toFixed(2);
 
-const paymentStatus = (purchase) => {
-  return Number(purchase?.due_amount ?? 0) <= 0 ? 'paid' : 'pending';
+const formatDate = (value) => {
+  if (!value) return 'N/A';
+
+  const datePart = String(value).split('T')[0];
+  const [year, month, day] = datePart.split('-');
+
+  if (!year || !month || !day) return value;
+
+  return `${day}-${month}-${year}`;
+};
+
+const purchaseStatus = (purchase) => {
+  return String(purchase?.status ?? 'pending').toLowerCase();
+};
+
+const purchaseStatusLabel = (purchase) => {
+  return purchaseStatus(purchase) === 'received' ? 'Approved' : 'Pending Approval';
 };
 
 const statusClass = (purchase) => {
-  return paymentStatus(purchase) === 'paid'
+  return purchaseStatus(purchase) === 'received'
     ? 'text-emerald-700 bg-emerald-100'
     : 'text-amber-700 bg-amber-100';
 };
@@ -60,20 +75,27 @@ const statusClass = (purchase) => {
             <tr v-for="purchase in rows" :key="purchase.id" class="hover:bg-gray-50">
               <td class="px-3 py-2 border">{{ purchase.purchase_number }}</td>
               <td class="px-3 py-2 border">{{ purchase.supplier?.name ?? 'N/A' }}</td>
-              <td class="px-3 py-2 border">{{ purchase.purchase_date }}</td>
+              <td class="px-3 py-2 border">{{ formatDate(purchase.purchase_date) }}</td>
               <td class="px-3 py-2 border">{{ money(purchase.total_amount) }}</td>
               <td class="px-3 py-2 border">{{ money(purchase.sell_total_amount) }}</td>
               <td class="px-3 py-2 border">{{ money(purchase.paid_amount) }}</td>
               <td class="px-3 py-2 border">{{ money(purchase.due_amount) }}</td>
               <td class="px-3 py-2 border">
                 <span class="px-2 py-1 text-xs rounded capitalize" :class="statusClass(purchase)">
-                  {{ paymentStatus(purchase) }}
+                  {{ purchaseStatusLabel(purchase) }}
                 </span>
               </td>
               <td class="px-3 py-2 border">
                 <div class="flex flex-wrap gap-2">
                   <Link :href="route('backend.medicinepurchase.show', purchase.id)" class="px-2 py-1 text-xs text-white bg-teal-600 rounded hover:bg-teal-700">
                     View
+                  </Link>
+                  <Link
+                    v-if="purchaseStatus(purchase) !== 'received'"
+                    :href="route('backend.medicinepurchase.show', purchase.id)"
+                    class="px-2 py-1 text-xs text-white bg-emerald-600 rounded hover:bg-emerald-700"
+                  >
+                    Approve Stock
                   </Link>
                   <Link
                     :href="route('backend.supplierpayment.create', { purchase_id: purchase.id })"

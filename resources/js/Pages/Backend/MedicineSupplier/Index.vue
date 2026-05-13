@@ -87,6 +87,7 @@ const submitCollect = () => {
         preserveScroll: true,
         onSuccess: () => {
             closeCollectModal(true);
+            router.reload({ only: ['datas'], preserveScroll: true });
         },
         onFinish: () => {
             isCollecting.value = false;

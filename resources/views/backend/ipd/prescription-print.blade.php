@@ -389,10 +389,24 @@
 </head>
 @php
     $__ws = function_exists('get_cached_web_setting') ? get_cached_web_setting() : null;
-    $__attendance = is_array($__ws?->attendance_device_options) ? $__ws->attendance_device_options : (is_string($__ws?->attendance_device_options) && trim($__ws->attendance_device_options) !== '' ? json_decode($__ws->attendance_device_options, true) : []);
-    $__layout = is_array($__attendance) ? data_get($__attendance, 'reporting.layout', []) : [];
-    $reportHeaderHeight = max((int) ($header_height ?? $__layout['header_height'] ?? 115), 0);
-    $reportFooterHeight = max((int) ($footer_height ?? $__layout['footer_height'] ?? 70), 0);
+    $__attendance = is_array($__ws?->attendance_device_options) ? $__ws->attendance_device_options : (is_string($__ws?->attendance_device_options) && trim($__ws?->attendance_device_options) !== '' ? json_decode($__ws?->attendance_device_options, true) : []);
+    $__reporting = is_array($__attendance) ? data_get($__attendance, 'reporting', []) : [];
+    $__settingShowHeader = array_key_exists('show_header', $__reporting) ? (bool) $__reporting['show_header'] : null;
+    $__settingShowFooter = array_key_exists('show_footer', $__reporting) ? (bool) $__reporting['show_footer'] : null;
+    if ($__settingShowHeader !== null || $__settingShowFooter !== null) {
+        $showHeaderFooter = ($__settingShowHeader ?? true) && ($__settingShowFooter ?? true);
+    } else {
+        $showHeaderFooter = array_key_exists('show_header_footer', $__reporting) ? (bool) $__reporting['show_header_footer'] : (isset($showHeaderFooter) ? (bool) $showHeaderFooter : true);
+    }
+    $__layout = data_get($__reporting, 'layout', []);
+
+    $reportHeaderHeight = max((int) ($header_height ?? ($reportHeaderHeight ?? $__layout['header_height'] ?? 115)), 0);
+    $reportFooterHeight = max((int) ($footer_height ?? ($reportFooterHeight ?? $__layout['footer_height'] ?? 70)), 0);
+
+    if (! $showHeaderFooter) {
+        $reportHeaderHeight = 0;
+        $reportFooterHeight = 0;
+    }
 @endphp
 
 <body style="--report-header-height: {{ $reportHeaderHeight }}px; --report-footer-height: {{ $reportFooterHeight }}px;">
@@ -404,7 +418,7 @@
 
     <div class="sheet">
         <div class="content-section">
-        @include('prints.partials._header')
+        @include('prints.partials._header', ['showHeaderFooter' => $showHeaderFooter])
 
         <div class="id-row">
             <div style="width:25%; display:inline-block; vertical-align:middle; text-align:left;">
@@ -496,7 +510,7 @@
                 </div>
 
                 <div class="section">
-                    <div class="section-title">Recommended Tests</div>
+                    <div class="section-title">Recommended Items</div>
                     @if (!empty($investigationItems ?? []))
                         <ol>
                             @foreach (($investigationItems ?? []) as $test)
@@ -504,7 +518,7 @@
                             @endforeach
                         </ol>
                     @else
-                        <div>No tests recommended.</div>
+                        <div>No items recommended.</div>
                     @endif
                 </div>
             </div>
@@ -594,7 +608,9 @@
         </div>
     </div>
 
-    @include('prints.partials._footer')
+    @if (!empty($showHeaderFooter) && $showHeaderFooter)
+        @include('prints.partials._footer')
+    @endif
 </body>
 
 @if (empty($forPdf) || !$forPdf)

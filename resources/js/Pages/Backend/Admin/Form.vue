@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch} from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
@@ -101,8 +101,29 @@ const form = useForm({
     _method: props.user?.id ? 'put' : 'post',
 });
 
+// Determine if selected role is a Doctor by name (avoids hard-coded IDs)
+const isDoctorRole = computed(() => {
+    try {
+        const rid = form.role_id;
+        if (!rid) return false;
+        const found = (props.roles || []).find(r => Number(r.id) === Number(rid));
+        const name = found?.name ?? '';
+        return String(name).toLowerCase() === 'doctor';
+    } catch (e) {
+        return false;
+    }
+});
+
 watch(() => form.role_id, (newRoleId) => {
-    if (newRoleId != '2') {
+    // when role changes to a non-doctor, clear doctor-specific fields
+    try {
+        const found = (props.roles || []).find(r => Number(r.id) === Number(newRoleId));
+        const name = found?.name ?? '';
+        if (String(name).toLowerCase() !== 'doctor') {
+            form.doctor_charge = '';
+            form.specialist_id = '';
+        }
+    } catch (e) {
         form.doctor_charge = '';
         form.specialist_id = '';
     }
@@ -281,7 +302,7 @@ const goToRoleList = () => {
                             <InputError class="mt-2" :message="form.errors.role_id" />
                         </div>
 
-                        <div class="col-span-1" v-if="form.role_id == '2'">
+                        <div class="col-span-1" v-if="isDoctorRole">
                             <InputLabel for="doctor_charge" value="Doctor Charge "><span class="text-red-500">*</span></InputLabel>
                             <input id="doctor_charge" v-model="form.doctor_charge" type="number" placeholder="Doctor Charge"
                                 class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
@@ -336,7 +357,7 @@ const goToRoleList = () => {
                         </div>
 
                         <!-- Specialist Field -->
-                        <div class="col-span-1" v-if="form.role_id == '2'">
+                        <div class="col-span-1" v-if="isDoctorRole">
                             <InputLabel for="specialist_id" value="Specialist"><span class="text-red-500">*</span></InputLabel>
                             <div class="flex items-center justify-between">
                                 <select id="specialist_id" v-model="form.specialist_id"

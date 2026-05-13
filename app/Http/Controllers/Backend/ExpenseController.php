@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ExpenseRequest;
+use App\Models\Account;
 use App\Models\Billing;
+use App\Models\Expense;
+use App\Models\LedgerTransaction;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -13,6 +16,7 @@ use Inertia\Inertia;
 use App\Traits\SystemTrait;
 use App\Models\ExpenseHead;
 use App\Services\ExpenseService;
+use App\Services\LedgerService;
 use Exception;
 
 class ExpenseController extends Controller
@@ -20,10 +24,12 @@ class ExpenseController extends Controller
     use SystemTrait;
 
     protected $expenseService;
+    protected LedgerService $ledgerService;
 
-    public function __construct(ExpenseService $expenseService)
+    public function __construct(ExpenseService $expenseService, LedgerService $ledgerService)
     {
         $this->expenseService = $expenseService;
+        $this->ledgerService = $ledgerService;
 
         $this->middleware('auth:admin');
         $this->middleware('permission:expense-list');
@@ -175,6 +181,8 @@ class ExpenseController extends Controller
             $dataInfo = $this->expenseService->create($data);
 
             if ($dataInfo) {
+                $this->syncExpenseLedger($dataInfo);
+
                 $message = 'Expense created successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'expenses', $message);
 
@@ -241,6 +249,8 @@ class ExpenseController extends Controller
             $dataInfo = $this->expenseService->update($data, $id);
 
             if ($dataInfo->wasChanged()) {
+                $this->syncExpenseLedger($dataInfo);
+
                 $message = 'Expense updated successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'expenses', $message);
 
@@ -282,6 +292,8 @@ class ExpenseController extends Controller
         DB::beginTransaction();
 
         try {
+            $this->removeExpenseLedger($id);
+
             if ($this->expenseService->delete($id)) {
                 $message = 'Expense deleted successfully';
                 $this->storeAdminWorkLog($id, 'expenses', $message);
@@ -318,6 +330,12 @@ class ExpenseController extends Controller
             $dataInfo = $this->expenseService->changeStatus($id, $status);
 
             if ($dataInfo->wasChanged()) {
+                if ($status === 'Active') {
+                    $this->syncExpenseLedger($dataInfo);
+                } else {
+                    $this->removeExpenseLedger($dataInfo->id);
+                }
+
                 $message = 'Expense ' . $status . ' Successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'expenses', $message);
 
@@ -343,5 +361,83 @@ class ExpenseController extends Controller
                 ->back()
                 ->with('errorMessage', $message);
         }
+    }
+
+    private function syncExpenseLedger(Expense $expense): void
+    {
+        // Keep exactly one ledger transaction per expense row.
+        $this->removeExpenseLedger((int) $expense->id);
+
+        if (($expense->status ?? 'Active') !== 'Active') {
+            return;
+        }
+
+        $amount = round((float) ($expense->amount ?? 0), 2);
+        if ($amount <= 0) {
+            return;
+        }
+
+        $cashCode = $this->ensureSystemAccount('CASH', 'Cash', 'asset', 'ASSET', false);
+        $expenseCode = $this->ensureExpenseAccountForHead($expense);
+
+        $description = trim((string) ($expense->description ?? ''));
+        if ($description === '') {
+            $description = 'Expense #' . $expense->id . ' - ' . (($expense->name ?? '') ?: 'General Expense');
+        }
+
+        $date = $expense->date ? date('Y-m-d', strtotime((string) $expense->date)) : now()->toDateString();
+        $createdBy = auth('admin')->id();
+
+        $this->ledgerService->recordExpense(
+            $expenseCode,
+            $cashCode,
+            $amount,
+            $description,
+            $date,
+            'Expense',
+            $expense->id,
+            $createdBy
+        );
+    }
+
+    private function removeExpenseLedger(int $expenseId): void
+    {
+        $existing = LedgerTransaction::query()
+            ->where('reference_type', 'Expense')
+            ->where('reference_id', $expenseId)
+            ->first();
+
+        if ($existing) {
+            $this->ledgerService->deleteTransaction($existing->id);
+        }
+    }
+
+    private function ensureExpenseAccountForHead(Expense $expense): string
+    {
+        $headId = (int) ($expense->expense_header_id ?? 0);
+        $headName = trim((string) ($expense->expenseHead?->name ?? 'General Expense'));
+
+        $baseCode = $headId > 0 ? ('EXP_HEAD_' . $headId) : 'GEN_EXP';
+        $baseCode = strtoupper((string) preg_replace('/[^A-Z0-9_]/', '_', $baseCode));
+        $code = substr($baseCode, 0, 50);
+        $name = $headName !== '' ? ('Expense - ' . $headName) : 'General Expense';
+
+        return $this->ensureSystemAccount($code, $name, 'expense', 'EXPENSE', true);
+    }
+
+    private function ensureSystemAccount(string $code, string $name, string $type, string $group, bool $isProfitLoss): string
+    {
+        Account::query()->firstOrCreate(
+            ['code' => $code],
+            [
+                'name' => $name,
+                'type' => $type,
+                'account_group' => $group,
+                'is_profit_loss' => $isProfitLoss,
+                'is_active' => true,
+            ]
+        );
+
+        return $code;
     }
 }

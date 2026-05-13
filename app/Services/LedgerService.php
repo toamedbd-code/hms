@@ -72,6 +72,7 @@ class LedgerService
                 'description' => $description,
                 'reference_type' => $referenceType,
                 'reference_id' => $referenceId,
+                'journal_entry_id' => $referenceType === 'journal_entry' ? $referenceId : null,
                 'created_by' => $createdBy,
             ]);
 
@@ -82,12 +83,41 @@ class LedgerService
                     'account_id' => $line['account_id'],
                     'amount' => (float) $line['amount'],
                     'entry_type' => $line['entry_type'],
+                    'narration' => $line['narration'] ?? null,
                 ]);
 
-                // update cached balance: debit increases, credit decreases
-                $balance = AccountBalance::firstOrCreate(['account_id' => $line['account_id']], ['balance' => 0]);
-                $delta = $line['entry_type'] === 'debit' ? (float) $line['amount'] : -1 * (float) $line['amount'];
+                $balance = AccountBalance::firstOrCreate(['account_id' => $line['account_id']], ['balance' => 0, 'profit' => 0, 'loss' => 0]);
+
+                // Type-aware balance delta using normal accounting side
+                $acc = Account::find($line['account_id']);
+                $accType = strtolower((string) ($acc->type ?? ''));
+                $normalSide = in_array($accType, ['liability', 'equity', 'income'], true) ? 'credit' : 'debit';
+                $delta = $line['entry_type'] === $normalSide
+                    ? (float) $line['amount']
+                    : -1 * (float) $line['amount'];
                 $balance->balance = (float) $balance->balance + $delta;
+
+                // Update profit/loss for income/expense accounts
+                if ($acc) {
+                    // Income accounts: credits increase profit, debits increase loss
+                    if ($acc->type === 'income') {
+                        if ($line['entry_type'] === 'credit') {
+                            $balance->profit = (float) $balance->profit + (float) $line['amount'];
+                        } else {
+                            $balance->loss = (float) $balance->loss + (float) $line['amount'];
+                        }
+                    }
+
+                    // Expense accounts: debits increase loss, credits increase profit (contra)
+                    if ($acc->type === 'expense') {
+                        if ($line['entry_type'] === 'debit') {
+                            $balance->loss = (float) $balance->loss + (float) $line['amount'];
+                        } else {
+                            $balance->profit = (float) $balance->profit + (float) $line['amount'];
+                        }
+                    }
+                }
+
                 $balance->save();
             }
 
@@ -119,5 +149,60 @@ class LedgerService
         ];
 
         return $this->recordTransaction($lines, $description, $date, $referenceType, $referenceId, $createdBy);
+    }
+
+    /**
+     * Delete (reverse) a previously recorded transaction and adjust balances.
+     * Returns true on success, false if transaction not found.
+     */
+    public function deleteTransaction($transactionId)
+    {
+        return DB::transaction(function () use ($transactionId) {
+            $tx = LedgerTransaction::with('entries')->find($transactionId);
+            if (! $tx) {
+                return false;
+            }
+
+            foreach ($tx->entries as $entry) {
+                $balance = AccountBalance::firstOrCreate(['account_id' => $entry->account_id], ['balance' => 0, 'profit' => 0, 'loss' => 0]);
+
+                $acc = Account::find($entry->account_id);
+
+                // Reverse type-aware delta using normal accounting side
+                $accType = strtolower((string) ($acc->type ?? ''));
+                $normalSide = in_array($accType, ['liability', 'equity', 'income'], true) ? 'credit' : 'debit';
+                $delta = $entry->entry_type === $normalSide
+                    ? (float) $entry->amount
+                    : -1 * (float) $entry->amount;
+                $balance->balance = (float) $balance->balance - $delta;
+
+                // Reverse profit/loss adjustments if applicable
+                if ($acc) {
+                    if ($acc->type === 'income') {
+                        if ($entry->entry_type === 'credit') {
+                            $balance->profit = (float) $balance->profit - (float) $entry->amount;
+                        } else {
+                            $balance->loss = (float) $balance->loss - (float) $entry->amount;
+                        }
+                    }
+
+                    if ($acc->type === 'expense') {
+                        if ($entry->entry_type === 'debit') {
+                            $balance->loss = (float) $balance->loss - (float) $entry->amount;
+                        } else {
+                            $balance->profit = (float) $balance->profit - (float) $entry->amount;
+                        }
+                    }
+                }
+
+                $balance->save();
+            }
+
+            // Remove entries and transaction
+            $tx->entries()->delete();
+            $tx->delete();
+
+            return true;
+        });
     }
 }

@@ -2,6 +2,8 @@
 import { ref, computed, onMounted } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
+import { Inertia } from '@inertiajs/inertia';
+import eventBus from '@/eventBus.js';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
@@ -18,7 +20,7 @@ const form = useForm({
 });
 
 
-const submit = () => {
+const submit = async () => {
     const routeName = props.id ? route('backend.role.update', props.id) : route('backend.role.store');
     form.transform(data => ({
         ...data,
@@ -26,10 +28,90 @@ const submit = () => {
         isDirty: false,
     })).post(routeName, {
 
-        onSuccess: (response) => {
+        onSuccess: async (response) => {
             if (!props.id)
                 form.reset();
-            displayResponse(response)
+            displayResponse(response);
+
+            // Proactively fetch side-menus and emit to Sidebar so the UI
+            // updates immediately without requiring any Inertia reload.
+            // Emit both the normal `sidebar.remoteUpdated` (for compatibility)
+            // and `sidebar.remoteUpdatedForce` which the sidebar will apply
+            // immediately regardless of timestamp ordering.
+            try {
+                const applySnapshot = (data) => {
+                    try { eventBus.emit('sidebar.remoteUpdated', data); } catch (e) { /* ignore */ }
+                    try { eventBus.emit('sidebar.remoteUpdatedForce', data); } catch (e) { /* ignore */ }
+                };
+
+                const fetchAndApply = (cb) => {
+                    if (typeof window !== 'undefined' && window.axios && typeof window.axios.get === 'function') {
+                        window.axios.get('/admin/side-menus')
+                            .then((resp) => {
+                                if (resp && resp.data) {
+                                    applySnapshot(resp.data);
+                                    if (typeof cb === 'function') cb(resp.data);
+                                }
+                            }).catch(() => { if (typeof cb === 'function') cb(null); });
+                    } else if (typeof fetch === 'function') {
+                        fetch('/admin/side-menus', { credentials: 'include' })
+                            .then((r) => r.json())
+                            .then((data) => {
+                                if (data) {
+                                    applySnapshot(data);
+                                    if (typeof cb === 'function') cb(data);
+                                } else if (typeof cb === 'function') cb(null);
+                            })
+                            .catch(() => { if (typeof cb === 'function') cb(null); });
+                    } else if (typeof cb === 'function') {
+                        cb(null);
+                    }
+                };
+
+                // Fetch and apply immediately
+                fetchAndApply((snapshot) => {
+                    // Also re-apply after any Inertia navigation finishes so that
+                    // the forced snapshot survives the Inertia visit that follows
+                    // the form POST (redirects update shared props and remount
+                    // the layout). Listen once and then remove the listener.
+                    try {
+                        const onInertiaFinish = () => {
+                            try {
+                                if (snapshot) applySnapshot(snapshot);
+                                else fetchAndApply();
+                            } catch (e) { /* ignore */ }
+                            try { window.removeEventListener('inertia:finish', onInertiaFinish); } catch (e) { /* ignore */ }
+                        };
+
+                        try { window.addEventListener('inertia:finish', onInertiaFinish, { passive: true }); } catch (e) { /* ignore */ }
+                        // Fallback: also re-apply after a short delay in case the
+                        // Inertia event isn't fired in some environments.
+                        setTimeout(() => {
+                            try { if (snapshot) applySnapshot(snapshot); else fetchAndApply(); } catch (e) { /* ignore */ }
+                        }, 500);
+                    } catch (e) {
+                        // ignore
+                    }
+
+                    // Final safety fallback: if the above snapshot apply did not
+                    // update the sidebar (some environments may not fire the
+                    // client-side events reliably), force Inertia to reload the
+                    // shared `auth.sideMenus` prop so the sidebar updates.
+                    try {
+                        setTimeout(() => {
+                            try {
+                                Inertia.reload({ only: ['auth.sideMenus'] });
+                            } catch (err) {
+                                try { Inertia.reload(); } catch (err2) { /* ignore */ }
+                            }
+                        }, 900);
+                    } catch (e) {
+                        // ignore
+                    }
+                });
+            } catch (e) {
+                // ignore
+            }
         },
         onError: (errorObject) => {
 
@@ -47,8 +129,8 @@ const permissionSearch = ref('');
 
 function permissionMatches(permission, query) {
     const name = String(permission?.name ?? '').toLowerCase();
-    const formatted = formatLabel(permission?.name ?? '').toLowerCase();
-    return name.includes(query) || formatted.includes(query);
+    const display = permissionDisplayLabel(permission).toLowerCase();
+    return name.includes(query) || display.includes(query);
 }
 
 function filterPermissionTree(list, query) {
@@ -96,6 +178,36 @@ const menuPermissionOrder = computed(() => {
     return order;
 });
 
+const menuPermissionLabelMap = computed(() => {
+    const labels = new Map();
+    const sideMenus = page.props?.auth?.sideMenus ?? [];
+
+    const pushLabel = (permissionName, menuName) => {
+        const normalized = String(permissionName ?? '').trim().toLowerCase();
+        const label = String(menuName ?? '').trim();
+        if (!normalized || !label || labels.has(normalized)) {
+            return;
+        }
+        labels.set(normalized, label);
+    };
+
+    sideMenus.forEach((menu) => {
+        pushLabel(menu?.permission_name, menu?.name);
+        (menu?.childrens ?? []).forEach((child) => {
+            pushLabel(child?.permission_name, child?.name);
+        });
+    });
+
+    return labels;
+});
+
+function permissionDisplayLabel(permission) {
+    const name = String(permission?.name ?? '').trim();
+    const normalized = name.toLowerCase();
+    const menuLabel = menuPermissionLabelMap.value.get(normalized);
+    return menuLabel || formatLabel(name);
+}
+
 const initialGroupOrder = ref(new Map());
 
 onMounted(() => {
@@ -132,22 +244,22 @@ const sortedPermissionGroups = computed(() => {
         const aName = String(a?.name ?? '').toLowerCase();
         const bName = String(b?.name ?? '').toLowerCase();
 
+        // Sidebar/menu serial should win first.
+        const aMenu = order.has(aName) ? order.get(aName) : Number.MAX_SAFE_INTEGER;
+        const bMenu = order.has(bName) ? order.get(bName) : Number.MAX_SAFE_INTEGER;
+        if (aMenu !== bMenu) return aMenu - bMenu;
+
         const aInit = initialGroupOrder.value.has(aName) ? initialGroupOrder.value.get(aName) : null;
         const bInit = initialGroupOrder.value.has(bName) ? initialGroupOrder.value.get(bName) : null;
 
-        // Prefer initial captured order if available (freeze)
+        // Then keep stable initial captured order if needed.
         if (aInit !== null || bInit !== null) {
             if (aInit === null) return 1;
             if (bInit === null) return -1;
             if (aInit !== bInit) return aInit - bInit;
         }
 
-        // Fallback to menu order
-        const aMenu = order.has(aName) ? order.get(aName) : Number.MAX_SAFE_INTEGER;
-        const bMenu = order.has(bName) ? order.get(bName) : Number.MAX_SAFE_INTEGER;
-        if (aMenu !== bMenu) return aMenu - bMenu;
-
-        return formatLabel(a?.name).localeCompare(formatLabel(b?.name));
+        return permissionDisplayLabel(a).localeCompare(permissionDisplayLabel(b));
     });
 });
 
@@ -306,7 +418,7 @@ const goToRoleList = () => {
                                         : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'"
                                     @click="setActivePermissionGroup(permissionInfo.id)"
                                 >
-                                    <p class="font-semibold text-sm">{{ formatLabel(permissionInfo.name) }}</p>
+                                    <p class="font-semibold text-sm">{{ permissionDisplayLabel(permissionInfo) }}</p>
                                     <p class="text-xs mt-1 text-slate-500">{{ selectedCountInModule(permissionInfo) }}/{{ totalCountInModule(permissionInfo) }} selected</p>
                                 </button>
                             </template>
@@ -319,7 +431,7 @@ const goToRoleList = () => {
                         <div v-if="activePermissionGroup" class="rounded-md border border-slate-200 bg-white shadow-sm">
                             <div class="flex items-center justify-between gap-2 p-3 border-b border-slate-100">
                                 <div>
-                                    <p class="font-semibold text-sm text-slate-800">{{ formatLabel(activePermissionGroup.name) }}</p>
+                                    <p class="font-semibold text-sm text-slate-800">{{ permissionDisplayLabel(activePermissionGroup) }}</p>
                                     <p class="text-xs text-slate-500 mt-1">{{ selectedCountInModule(activePermissionGroup) }}/{{ totalCountInModule(activePermissionGroup) }} selected</p>
                                 </div>
                                 <div class="flex items-center gap-2">
@@ -341,7 +453,7 @@ const goToRoleList = () => {
                                             <label :for="'permission_' + activePermissionGroup.id"
                                                 class="ml-2 cursor-pointer font-bold"
                                                 :class="checkedPermissions.includes(activePermissionGroup.id) ? 'text-green-600' : 'text-gray-700'">
-                                                {{ formatLabel(activePermissionGroup.name) }}
+                                                {{ permissionDisplayLabel(activePermissionGroup) }}
                                             </label>
                                         </div>
 
@@ -355,7 +467,7 @@ const goToRoleList = () => {
                                                         <label :for="'permission_' + childInfo.id"
                                                             class="ml-2 cursor-pointer"
                                                             :class="checkedPermissions.includes(childInfo.id) ? 'text-green-600' : 'text-gray-700'">
-                                                            {{ formatLabel(childInfo.name) }}
+                                                            {{ permissionDisplayLabel(childInfo) }}
                                                         </label>
                                                     </div>
 
@@ -370,7 +482,7 @@ const goToRoleList = () => {
                                                                 <label :for="'permission_' + childChildInfo.id"
                                                                     class="ml-2 cursor-pointer"
                                                                     :class="checkedPermissions.includes(childChildInfo.id) ? 'text-green-600' : 'text-gray-700'">
-                                                                    {{ formatLabel(childChildInfo.name) }}
+                                                                    {{ permissionDisplayLabel(childChildInfo) }}
                                                                 </label>
                                                             </li>
                                                         </template>

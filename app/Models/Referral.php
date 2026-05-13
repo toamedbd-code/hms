@@ -70,8 +70,9 @@ public function calculateCommission()
     $totalBillAmount = 0;
 
     foreach ($billItems as $item) {
-        $category = strtolower($item->category);
-        $itemAmount = $item->net_amount;
+        $category = strtolower($item->category ?? '');
+        // prefer net_amount, fallback to amount
+        $itemAmount = $item->net_amount ?? $item->amount ?? 0;
         $totalBillAmount += $itemAmount;
 
         if (!isset($categoryBreakdown[$category])) {
@@ -83,10 +84,34 @@ public function calculateCommission()
         }
 
         $categoryBreakdown[$category]['amount'] += $itemAmount;
-        $commissionRate = $this->getCommissionRateByCategory($payee, $category);
-        $categoryBreakdown[$category]['commission_rate'] = $commissionRate;
-        
-        $itemCommission = ($itemAmount * $commissionRate) / 100;
+
+        // Prefer snapshot stored on the bill item itself. If snapshot not
+        // present, fall back to the underlying master item (itemable). If
+        // neither has overrides, fall back to category-level payee rate.
+        $itemable = $item->itemable ?? null;
+
+        $itemCommissionable = $item->commissionable ?? null;
+        $itemRate = isset($item->commission_rate) ? (float) $item->commission_rate : null;
+
+        if ($itemCommissionable === null && $itemable) {
+            $itemCommissionable = $itemable->commissionable ?? null;
+        }
+        if ($itemRate === null && $itemable) {
+            $itemRate = isset($itemable->commission_rate) ? (float) $itemable->commission_rate : null;
+        }
+
+        if ($itemCommissionable === false) {
+            $itemCommission = 0;
+            $effectiveRate = 0;
+        } elseif ($itemRate !== null) {
+            $effectiveRate = $itemRate;
+            $itemCommission = ($itemAmount * $effectiveRate) / 100;
+        } else {
+            $effectiveRate = $this->getCommissionRateByCategory($payee, $category);
+            $itemCommission = ($itemAmount * $effectiveRate) / 100;
+        }
+
+        $categoryBreakdown[$category]['commission_rate'] = $effectiveRate;
         $categoryBreakdown[$category]['commission_amount'] += $itemCommission;
         $totalCommission += $itemCommission;
     }
@@ -106,7 +131,13 @@ private function getCommissionRateByCategory($payee, $category)
         case 'radiology':
             return $payee->radiology_commission ?? 0;
         case 'medicine':
+            case 'pharmacy':
             return $payee->pharmacy_commission ?? 0;
+            case 'opd':
+            case 'appointment':
+                return $payee->opd_commission ?? 0;
+            case 'ipd':
+                return $payee->ipd_commission ?? 0;
         default:
             return $payee->standard_commission ?? 0;
     }

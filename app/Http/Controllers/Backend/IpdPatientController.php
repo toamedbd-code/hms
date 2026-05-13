@@ -17,6 +17,7 @@ use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
+use Illuminate\Support\Facades\Log;
 use Exception;
 use App\Models\IpdPrescription;
 use App\Models\IpdPrescriptionMedicine;
@@ -29,6 +30,13 @@ use App\Models\Bed;
 use App\Models\IpdNote;
 use App\Models\IpdPatient;
 use App\Models\SymptomType;
+use App\Models\Billing;
+use App\Models\BillItem;
+use App\Models\Charge;
+use App\Models\ChargeType;
+use App\Models\ChargeCategory;
+use App\Models\ChargeUnitType;
+use App\Models\ChargeTaxCategory;
 use Illuminate\Support\Facades\Storage;
 use Milon\Barcode\DNS1D;
 use Milon\Barcode\DNS2D;
@@ -42,8 +50,9 @@ class IpdPatientController extends Controller
     protected $ipdpatientService, $patientService, $adminService, $bedGroupService, $bedService;
     protected IpdAutoChargeService $ipdAutoChargeService;
     protected IpdDischargeBillingService $ipdDischargeBillingService;
+    protected $chargeService;
 
-    public function __construct(IpdPatientService $ipdpatientService, PatientService $patientService, AdminService $adminService, BedGroupService $bedGroupService, BedService $bedService, IpdAutoChargeService $ipdAutoChargeService, IpdDischargeBillingService $ipdDischargeBillingService)
+    public function __construct(IpdPatientService $ipdpatientService, PatientService $patientService, AdminService $adminService, BedGroupService $bedGroupService, BedService $bedService, IpdAutoChargeService $ipdAutoChargeService, IpdDischargeBillingService $ipdDischargeBillingService, \App\Services\ChargeService $chargeService)
 
     {
         $this->ipdpatientService = $ipdpatientService;
@@ -53,14 +62,76 @@ class IpdPatientController extends Controller
         $this->bedService = $bedService;
         $this->ipdAutoChargeService = $ipdAutoChargeService;
         $this->ipdDischargeBillingService = $ipdDischargeBillingService;
+        $this->chargeService = $chargeService;
 
 
         $this->middleware('auth:admin');
         $this->middleware('permission:ipd-patient-list');
         $this->middleware('permission:ipd-patient-status', ['only' => ['changeStatus', 'regenerateDischargeBilling']]);
         $this->middleware('permission:ipd-patient-create', ['only' => ['create', 'store']]);
-        $this->middleware('permission:ipd-patient-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:ipd-patient-edit', ['only' => ['edit', 'update', 'addHospitalCharges']]);
         $this->middleware('permission:ipd-patient-delete', ['only' => ['destroy']]);
+    }
+
+    protected function normalizeGender($gender): string
+    {
+        $g = strtolower(trim((string) $gender));
+
+        if (in_array($g, ['male', 'm'], true)) {
+            return 'Male';
+        }
+        if (in_array($g, ['female', 'f'], true)) {
+            return 'Female';
+        }
+
+        return 'Others';
+    }
+
+    protected function mapBillItemCategory(?string $name): string
+    {
+        $n = strtolower(trim((string) $name));
+
+        if ($n === '') {
+            return 'IPD';
+        }
+
+        if (str_contains($n, 'path')) {
+            return 'Pathology';
+        }
+        if (str_contains($n, 'radio') || str_contains($n, 'xray') || str_contains($n, 'ct') || str_contains($n, 'mri')) {
+            return 'Radiology';
+        }
+        if (str_contains($n, 'med') || str_contains($n, 'pharm') || str_contains($n, 'drug') || str_contains($n, 'medicine')) {
+            return 'Medicine';
+        }
+
+        // Map bed/room/ot/visit/doctor charges to explicit DB enum values
+        if (str_contains($n, 'room') || str_contains($n, 'rent')) {
+            return 'Room Rent';
+        }
+
+        if (str_contains($n, 'bed')) {
+            return 'Bed Charge';
+        }
+
+        if (str_contains($n, 'ot')) {
+            return 'OT';
+        }
+
+        if (str_contains($n, 'doctor') || str_contains($n, 'visit')) {
+            return 'Doctor Visit';
+        }
+
+        if (str_contains($n, 'ipd') || str_contains($n, 'admission') || str_contains($n, 'indoor')) {
+            return 'IPD';
+        }
+
+        if (str_contains($n, 'opd') || str_contains($n, 'outdoor')) {
+            return 'OPD';
+        }
+
+        // Fallback to IPD for unknown categories in IPD admission/discharge flows
+        return 'IPD';
     }
 
 
@@ -292,6 +363,7 @@ class IpdPatientController extends Controller
             // to insert a non-existent column into the `ipdpatients` table.
             $advance = (float) ($data['advance_amount'] ?? 0);
             unset($data['advance_amount']);
+            unset($data['hospital_charge_items']);
 
             $dataInfo = $this->ipdpatientService->create($data);
 
@@ -312,6 +384,89 @@ class IpdPatientController extends Controller
                         'payment_status' => 'Paid',
                         'status' => 'Active',
                     ]);
+                }
+
+                // If manual hospital charge items were provided at admission,
+                // create a Billing with those items.
+                $manualItems = $request->input('hospital_charge_items', []);
+                if (is_array($manualItems) && count($manualItems) > 0) {
+                    $lines = [];
+                    foreach ($manualItems as $item) {
+                        $name = trim((string) ($item['item_name'] ?? ''));
+                        $unitPrice = (float) ($item['unit_price'] ?? 0);
+                        $quantity = max(1, (int) ($item['quantity'] ?? 1));
+
+                        if ($name === '' || $unitPrice <= 0) {
+                            continue;
+                        }
+
+                        $lineTotal = $unitPrice * $quantity;
+                        $lines[] = [
+                            'item_id' => null,
+                            'item_name' => $name,
+                            'category' => 'IPD',
+                            'unit_price' => $unitPrice,
+                            'quantity' => $quantity,
+                            'total_amount' => $lineTotal,
+                            'discount' => 0,
+                            'rugound' => 0,
+                            'net_amount' => $lineTotal,
+                            'status' => 'Active',
+                        ];
+                    }
+
+                    if (!empty($lines)) {
+                        $total = array_sum(array_map(fn($l) => (float) ($l['net_amount'] ?? 0), $lines));
+                        $patient = $dataInfo->patient;
+                        $doctor = $dataInfo->doctor;
+                        $actorId = (int) (auth('admin')->id() ?? Admin::query()->value('id') ?? 1);
+
+                        $caseNumber = 'IPD-' . str_pad((string) $dataInfo->id, 6, '0', STR_PAD_LEFT);
+                        if (Billing::withTrashed()->where('case_number', $caseNumber)->exists()) {
+                            $caseNumber .= '-' . now()->format('His');
+                        }
+
+                        $billing = Billing::query()->create([
+                            'case_number' => $caseNumber,
+                            'patient_id' => $patient?->id,
+                            'patient_mobile' => (string) ($patient?->mobile ?? $patient?->phone ?? ''),
+                            'gender' => $this->normalizeGender($patient?->gender),
+                            'doctor_id' => $doctor?->id,
+                            'doctor_type' => 'admin',
+                            'doctor_name' => $doctor?->name,
+                            'card_type' => 'Cash',
+                            'pay_mode' => 'Cash',
+                            'card_number' => null,
+                            'total' => $total,
+                            'discount' => 0,
+                            'extra_flat_discount' => 0,
+                            'discount_type' => 'flat',
+                            'payable_amount' => $total,
+                            'paid_amt' => 0,
+                            'change_amt' => 0,
+                            'receiving_amt' => 0,
+                            'due_amount' => $total,
+                            'delivery_date' => now(),
+                            'delivery_time' => null,
+                            'remarks' => 'IPD Admission Items | IPD#' . $dataInfo->id,
+                            'commission_total' => 0,
+                            'physyst_amt' => 0,
+                            'commission_slider' => 0,
+                            'created_by' => $actorId,
+                            'payment_status' => 'Pending',
+                            'status' => 'Active',
+                        ]);
+
+                        foreach ($lines as $line) {
+                            BillItem::query()->create(array_merge($line, ['billing_id' => $billing->id]));
+                        }
+
+                        // attach any IPD payments (advance) to this billing
+                        Payment::query()->whereNull('deleted_at')->where('status', 'Active')->where('ipd_patient_id', $dataInfo->id)->whereNull('billing_id')->update(['billing_id' => $billing->id]);
+
+                        $dataInfo->billing_id = $billing->id;
+                        $dataInfo->save();
+                    }
                 }
 
                 $message = 'IpdPatient created successfully';
@@ -367,40 +522,35 @@ class IpdPatientController extends Controller
                 ->with('errorMessage', 'IPD patient not found.');
         }
 
-                $ipdpatient->loadMissing([ 
-            'patient', 
-            'doctor', 
-            'bed', 
-            'latestPrescription.medicines', 
-            'latestPrescription.tests', 
-            'roomRentCharges.bed',
-            'bedCharges.bed',
-            'otCharges',
-            'doctorVisitCharges.doctor',
+        // Ensure related models needed by the view are present
+        $ipdpatient->loadMissing([
+            'patient',
+            'doctor',
+            'bed',
+            'ipdNotes',
+            'billing',
+            'billing.billItems',
+        ]);
 
-        ]); 
-
-
+        // Payments related to this IPD patient
         $payments = Payment::query()
-            ->where('ipd_patient_id', $ipdpatient->id)
             ->whereNull('deleted_at')
-            ->orderByDesc('id')
+            ->where('status', 'Active')
+            ->where('ipd_patient_id', $ipdpatient->id)
             ->get();
 
-        // Prepare overview totals for the UI
+        // Overview counters used by the frontend summary
         $overviewTotals = [
-            'nurse_notes' => $ipdpatient->ipdNotes()->where('type', 'nurse_note')->count(),
-            'consultant_register' => $ipdpatient->ipdNotes()->where('type', 'consultant_register')->count(),
-            'operations' => $ipdpatient->ipdNotes()->where('type', 'operation')->count(),
-            'bed_history' => $ipdpatient->ipdNotes()->where('type', 'bed_history')->count(),
-            'medicines' => optional($ipdpatient->latestPrescription)->medicines ? $ipdpatient->latestPrescription->medicines->count() : 0,
-            'tests' => optional($ipdpatient->latestPrescription)->tests ? $ipdpatient->latestPrescription->tests->count() : 0,
+            'nurse_notes' => IpdNote::where('ipd_patient_id', $ipdpatient->id)->where('type', 'nurse_note')->count(),
+            'consultant_register' => IpdNote::where('ipd_patient_id', $ipdpatient->id)->where('type', 'consultant_register')->count(),
+            'operations' => IpdNote::where('ipd_patient_id', $ipdpatient->id)->where('type', 'operation')->count(),
+            'bed_history' => IpdNote::where('ipd_patient_id', $ipdpatient->id)->where('type', 'bed_history')->count(),
+            'medicines' => (int) ($ipdpatient->latestPrescription?->medicines?->count() ?? 0),
+            'tests' => (int) ($ipdpatient->latestPrescription?->tests?->count() ?? 0),
             'room_rent_charges' => $ipdpatient->roomRentCharges()->count(),
             'bed_charges' => $ipdpatient->bedCharges()->count(),
             'ot_charges' => $ipdpatient->otCharges()->count(),
             'doctor_visit_charges' => $ipdpatient->doctorVisitCharges()->count(),
-            'payments' => $payments->count(),
-            'live_consultation' => $ipdpatient->live_consultation ?? null,
         ];
 
         $runningBill = $this->ipdDischargeBillingService->getRunningSummary($ipdpatient);
@@ -414,6 +564,11 @@ class IpdPatientController extends Controller
                 'payments' => fn() => $payments,
                 'overviewTotals' => fn() => $overviewTotals,
                 'runningBill' => fn() => $runningBill,
+                    'charges' => fn() => $this->chargeService->activeList(),
+                    'chargeTypes' => fn() => ChargeType::query()->where('status', 'Active')->orderBy('name')->get(),
+                    'chargeCategories' => fn() => ChargeCategory::query()->where('status', 'Active')->orderBy('name')->get(),
+                    'chargeUnits' => fn() => ChargeUnitType::query()->where('status', 'Active')->orderBy('name')->get(),
+                    'taxCategories' => fn() => ChargeTaxCategory::query()->where('status', 'Active')->orderBy('name')->get(),
             ]
         );
     }
@@ -485,7 +640,8 @@ class IpdPatientController extends Controller
                 $data['file'],
                 $data['created_at'],
                 $data['updated_at'],
-                $data['deleted_at']
+                $data['deleted_at'],
+                $data['hospital_charge_items']
             );
 
             $ipdpatient = $this->ipdpatientService->find($id);
@@ -510,6 +666,110 @@ class IpdPatientController extends Controller
 
             // Auto-sync running charges when bed changes (and also fills rate if previously 0).
             $this->ipdAutoChargeService->syncAdmissionCharges($dataInfo, auth('admin')->id());
+
+            // If manual hospital charge items were provided during update,
+            // create or append Billing items.
+            $manualItems = $request->input('hospital_charge_items', []);
+            if (is_array($manualItems) && count($manualItems) > 0) {
+                $lines = [];
+                foreach ($manualItems as $item) {
+                    $name = trim((string) ($item['item_name'] ?? ''));
+                    $unitPrice = (float) ($item['unit_price'] ?? 0);
+                    $quantity = max(1, (int) ($item['quantity'] ?? 1));
+
+                    if ($name === '' || $unitPrice <= 0) {
+                        continue;
+                    }
+
+                    $lineTotal = $unitPrice * $quantity;
+                    $lines[] = [
+                        'item_id' => null,
+                        'item_name' => $name,
+                        'category' => 'IPD',
+                        'unit_price' => $unitPrice,
+                        'quantity' => $quantity,
+                        'total_amount' => $lineTotal,
+                        'discount' => 0,
+                        'rugound' => 0,
+                        'net_amount' => $lineTotal,
+                        'status' => 'Active',
+                    ];
+                }
+
+                if (!empty($lines)) {
+                    $total = array_sum(array_map(fn($l) => (float) ($l['net_amount'] ?? 0), $lines));
+                    $patient = $dataInfo->patient;
+                    $doctor = $dataInfo->doctor;
+                    $actorId = (int) (auth('admin')->id() ?? Admin::query()->value('id') ?? 1);
+
+                    $billing = null;
+                    if (!empty($dataInfo->billing_id)) {
+                        $billing = Billing::query()->find($dataInfo->billing_id);
+                    }
+
+                    if (!$billing) {
+                        $caseNumber = 'IPD-' . str_pad((string) $dataInfo->id, 6, '0', STR_PAD_LEFT);
+                        if (Billing::withTrashed()->where('case_number', $caseNumber)->exists()) {
+                            $caseNumber .= '-' . now()->format('His');
+                        }
+
+                        $billing = Billing::query()->create([
+                            'case_number' => $caseNumber,
+                            'patient_id' => $patient?->id,
+                            'patient_mobile' => (string) ($patient?->mobile ?? $patient?->phone ?? ''),
+                            'gender' => $this->normalizeGender($patient?->gender),
+                            'doctor_id' => $doctor?->id,
+                            'doctor_type' => 'admin',
+                            'doctor_name' => $doctor?->name,
+                            'card_type' => 'Cash',
+                            'pay_mode' => 'Cash',
+                            'card_number' => null,
+                            'total' => $total,
+                            'discount' => 0,
+                            'extra_flat_discount' => 0,
+                            'discount_type' => 'flat',
+                            'payable_amount' => $total,
+                            'paid_amt' => 0,
+                            'change_amt' => 0,
+                            'receiving_amt' => 0,
+                            'due_amount' => $total,
+                            'delivery_date' => now(),
+                            'delivery_time' => null,
+                            'remarks' => 'IPD Items | IPD#' . $dataInfo->id,
+                            'commission_total' => 0,
+                            'physyst_amt' => 0,
+                            'commission_slider' => 0,
+                            'created_by' => $actorId,
+                            'payment_status' => 'Pending',
+                            'status' => 'Active',
+                        ]);
+
+                        $dataInfo->billing_id = $billing->id;
+                        $dataInfo->save();
+                    }
+
+                    foreach ($lines as $line) {
+                        BillItem::query()->create(array_merge($line, ['billing_id' => $billing->id]));
+                    }
+
+                    // recalc totals
+                    $billing->loadMissing('billItems');
+                    $newTotal = (float) ($billing->billItems?->sum('net_amount') ?? 0);
+                    $paymentsSum = (float) Payment::where('billing_id', $billing->id)->sum('amount');
+                    $dueAmount = max(0, $newTotal - $paymentsSum);
+                    $billing->fill([
+                        'total' => $newTotal,
+                        'payable_amount' => $newTotal,
+                        'paid_amt' => $paymentsSum,
+                        'receiving_amt' => $paymentsSum,
+                        'due_amount' => $dueAmount,
+                        'payment_status' => ($paymentsSum >= $newTotal) ? 'Paid' : ($paymentsSum > 0 ? 'Partial' : 'Pending'),
+                    ]);
+                    $billing->save();
+
+                    Payment::query()->whereNull('deleted_at')->where('status', 'Active')->where('ipd_patient_id', $dataInfo->id)->whereNull('billing_id')->update(['billing_id' => $billing->id]);
+                }
+            }
 
             $message = 'IpdPatient updated successfully';
 
@@ -542,6 +802,351 @@ class IpdPatientController extends Controller
             return redirect()
                 ->back()
                 ->with('errorMessage', 'Server Errors Occur. Please Try Again.');
+        }
+    }
+
+    /**
+     * Add selected hospital charges to IPD and create/append a Billing + BillItems.
+     */
+    public function addHospitalCharges(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'hospital_charge_ids' => 'required|array|min:1',
+            'hospital_charge_ids.*' => 'integer|exists:charges,id',
+        ]);
+
+        $ipdpatient = $this->ipdpatientService->find($id);
+        if (!$ipdpatient) {
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'IPD patient not found.'], 404);
+            }
+            return redirect()->back()->with('errorMessage', 'IPD patient not found.');
+        }
+
+        DB::beginTransaction();
+        try {
+            $chargeIds = $validated['hospital_charge_ids'] ?? [];
+            $lines = [];
+
+            foreach ($chargeIds as $cid) {
+                $charge = Charge::query()->find($cid);
+                if (!$charge) continue;
+                $amount = (float) ($charge->standard_charge ?? 0);
+                if ($amount <= 0) continue;
+
+                $lines[] = [
+                    'item_id' => (int) $charge->id,
+                    'item_name' => (string) $charge->name,
+                    'category' => $this->mapBillItemCategory($charge->chargeCategory?->name ?? null),
+                    'unit_price' => $amount,
+                    'quantity' => 1,
+                    'total_amount' => $amount,
+                    'discount' => 0,
+                    'rugound' => 0,
+                    'net_amount' => $amount,
+                    'status' => 'Active',
+                ];
+            }
+
+            if (empty($lines)) {
+                DB::rollBack();
+                if ($request->expectsJson() || $request->ajax()) {
+                    return response()->json(['success' => false, 'message' => 'No valid charges selected.'], 422);
+                }
+                return redirect()->back()->with('errorMessage', 'No valid charges selected.');
+            }
+
+            $total = array_sum(array_map(fn($l) => (float) ($l['net_amount'] ?? 0), $lines));
+
+            $patient = $ipdpatient->patient;
+            $doctor = $ipdpatient->doctor;
+            $actorId = (int) (auth('admin')->id() ?? Admin::query()->value('id') ?? 1);
+
+            // If a billing already exists for this IPD, append; otherwise create.
+            $billing = null;
+            if (!empty($ipdpatient->billing_id)) {
+                $billing = Billing::query()->find($ipdpatient->billing_id);
+            }
+
+            if (!$billing) {
+                $caseNumber = 'IPD-' . str_pad((string) $ipdpatient->id, 6, '0', STR_PAD_LEFT);
+                if (Billing::withTrashed()->where('case_number', $caseNumber)->exists()) {
+                    $caseNumber .= '-' . now()->format('His');
+                }
+
+                $billing = Billing::query()->create([
+                    'case_number' => $caseNumber,
+                    'patient_id' => $patient?->id,
+                    'patient_mobile' => (string) ($patient?->mobile ?? $patient?->phone ?? ''),
+                    'gender' => $this->normalizeGender($patient?->gender),
+                    'doctor_id' => $doctor?->id,
+                    'doctor_type' => 'admin',
+                    'doctor_name' => $doctor?->name,
+                    'card_type' => 'Cash',
+                    'pay_mode' => 'Cash',
+                    'card_number' => null,
+                    'total' => $total,
+                    'discount' => 0,
+                    'extra_flat_discount' => 0,
+                    'discount_type' => 'flat',
+                    'payable_amount' => $total,
+                    'paid_amt' => 0,
+                    'change_amt' => 0,
+                    'receiving_amt' => 0,
+                    'due_amount' => $total,
+                    'delivery_date' => now(),
+                    'delivery_time' => null,
+                    'remarks' => 'IPD Selected Charges | IPD#' . $ipdpatient->id,
+                    'commission_total' => 0,
+                    'physyst_amt' => 0,
+                    'commission_slider' => 0,
+                    'created_by' => $actorId,
+                    'payment_status' => 'Pending',
+                    'status' => 'Active',
+                ]);
+
+                // attach billing id to ipd
+                $ipdpatient->billing_id = $billing->id;
+                $ipdpatient->save();
+            } else {
+                // append: update totals after creating items
+            }
+
+            $createdItemIds = [];
+            foreach ($lines as $line) {
+                $line['category'] = $this->mapBillItemCategory($line['category'] ?? null);
+
+                // Prevent rapid duplicate creation of the same hospital charge
+                $recentDuplicate = BillItem::query()
+                    ->where('billing_id', $billing->id)
+                    ->where('item_id', $line['item_id'])
+                    ->where('unit_price', $line['unit_price'])
+                    ->where('quantity', $line['quantity'])
+                    ->where('net_amount', $line['net_amount'])
+                    ->where('status', 'Active')
+                    ->where('created_at', '>=', now()->subSeconds(30))
+                    ->exists();
+
+                if ($recentDuplicate) {
+                    continue;
+                }
+
+                $created = BillItem::query()->create(array_merge($line, ['billing_id' => $billing->id]));
+                if ($created && $created->id) {
+                    $createdItemIds[] = $created->id;
+                }
+            }
+
+            // update billing totals
+            $billing->loadMissing('billItems');
+            $newTotal = (float) ($billing->billItems?->sum('net_amount') ?? 0);
+            $paymentsSum = (float) Payment::where('billing_id', $billing->id)->sum('amount');
+            $dueAmount = max(0, $newTotal - $paymentsSum);
+            $billing->fill([
+                'total' => $newTotal,
+                'payable_amount' => $newTotal,
+                'paid_amt' => $paymentsSum,
+                'receiving_amt' => $paymentsSum,
+                'due_amount' => $dueAmount,
+                'payment_status' => ($paymentsSum >= $newTotal) ? 'Paid' : ($paymentsSum > 0 ? 'Partial' : 'Pending'),
+            ]);
+            $billing->save();
+
+            // attach any IPD payments to billing
+            Payment::query()->whereNull('deleted_at')->where('status', 'Active')->where('ipd_patient_id', $ipdpatient->id)->whereNull('billing_id')->update(['billing_id' => $billing->id]);
+
+            DB::commit();
+
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Selected charges added to invoice.',
+                    'billId' => $ipdpatient->id,
+                    'created_item_ids' => $createdItemIds,
+                ], 200);
+            }
+
+            return redirect()->back()->with('successMessage', 'Selected charges added to invoice.')->with('billId', $ipdpatient->id)->with('createdItemIds', $createdItemIds);
+        } catch (Exception $err) {
+            DB::rollBack();
+            try {
+                Log::error('addHospitalCharges failed', [
+                    'message' => $err->getMessage(),
+                    'file' => $err->getFile(),
+                    'line' => $err->getLine(),
+                    'trace' => $err->getTraceAsString(),
+                    'request' => $request->all(),
+                ]);
+            } catch (Exception $_e) {
+                // ignore logging failure
+            }
+            $this->storeSystemError('Backend', 'IpdPatientController', 'addHospitalCharges', substr($err->getMessage(), 0, 1000));
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'Failed to add charges.'], 500);
+            }
+            return redirect()->back()->with('errorMessage', 'Failed to add charges.');
+        }
+    }
+
+    /**
+     * Create a manual hospital charge (ad-hoc item) and attach it to IPD billing.
+     * This allows quick item entry from the IPD screen without creating a Charge record.
+     */
+    public function addManualHospitalCharge(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'item_name' => 'required|string|max:255',
+            'unit_price' => 'required|numeric|min:0',
+            'quantity' => 'nullable|integer|min:1',
+            'category' => 'nullable|string|max:255',
+        ]);
+
+        $ipdpatient = $this->ipdpatientService->find($id);
+        if (!$ipdpatient) {
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'IPD patient not found.'], 404);
+            }
+            return redirect()->back()->with('errorMessage', 'IPD patient not found.');
+        }
+
+        DB::beginTransaction();
+        try {
+            $quantity = max(1, (int) ($validated['quantity'] ?? 1));
+            $unitPrice = (float) ($validated['unit_price'] ?? 0);
+            $net = $unitPrice * $quantity;
+
+            // create or find billing for this IPD
+            $billing = null;
+            if (!empty($ipdpatient->billing_id)) {
+                $billing = Billing::query()->find($ipdpatient->billing_id);
+            }
+
+            $patient = $ipdpatient->patient;
+            $doctor = $ipdpatient->doctor;
+            $actorId = (int) (auth('admin')->id() ?? Admin::query()->value('id') ?? 1);
+
+            if (!$billing) {
+                $caseNumber = 'IPD-' . str_pad((string) $ipdpatient->id, 6, '0', STR_PAD_LEFT);
+                if (Billing::withTrashed()->where('case_number', $caseNumber)->exists()) {
+                    $caseNumber .= '-' . now()->format('His');
+                }
+
+                $billing = Billing::query()->create([
+                    'case_number' => $caseNumber,
+                    'patient_id' => $patient?->id,
+                    'patient_mobile' => (string) ($patient?->mobile ?? $patient?->phone ?? ''),
+                    'gender' => $this->normalizeGender($patient?->gender),
+                    'doctor_id' => $doctor?->id,
+                    'doctor_type' => 'admin',
+                    'doctor_name' => $doctor?->name,
+                    'card_type' => 'Cash',
+                    'pay_mode' => 'Cash',
+                    'card_number' => null,
+                    'total' => $net,
+                    'discount' => 0,
+                    'extra_flat_discount' => 0,
+                    'discount_type' => 'flat',
+                    'payable_amount' => $net,
+                    'paid_amt' => 0,
+                    'change_amt' => 0,
+                    'receiving_amt' => 0,
+                    'due_amount' => $net,
+                    'delivery_date' => now(),
+                    'delivery_time' => null,
+                    'remarks' => 'IPD Manual Charge | IPD#' . $ipdpatient->id,
+                    'commission_total' => 0,
+                    'physyst_amt' => 0,
+                    'commission_slider' => 0,
+                    'created_by' => $actorId,
+                    'payment_status' => 'Pending',
+                    'status' => 'Active',
+                ]);
+
+                // attach billing id to ipd
+                $ipdpatient->billing_id = $billing->id;
+                $ipdpatient->save();
+            }
+
+            $line = [
+                'item_id' => 0,
+                'item_name' => (string) $validated['item_name'],
+                'category' => $this->mapBillItemCategory($validated['category'] ?? null),
+                'unit_price' => $unitPrice,
+                'quantity' => $quantity,
+                'total_amount' => $unitPrice * $quantity,
+                'discount' => 0,
+                'rugound' => 0,
+                'net_amount' => $net,
+                'status' => 'Active',
+            ];
+
+            // Prevent rapid duplicate manual charge creation: if an identical
+            // manual item (same name, price, qty, net) was added to this
+            // billing within the last few seconds, treat as already-added.
+            $recentDuplicate = BillItem::query()
+                ->where('billing_id', $billing->id)
+                ->where('item_name', $line['item_name'])
+                ->where('unit_price', $line['unit_price'])
+                ->where('quantity', $line['quantity'])
+                ->where('net_amount', $line['net_amount'])
+                ->where('status', 'Active')
+                ->where('created_at', '>=', now()->subSeconds(30))
+                ->exists();
+
+            if ($recentDuplicate) {
+                // Nothing to create; commit transaction and return success
+                DB::commit();
+                if ($request->expectsJson() || $request->ajax()) {
+                    return response()->json(['success' => true, 'message' => 'Item already added recently.', 'created_item_id' => null], 200);
+                }
+                return redirect()->back()->with('successMessage', 'Item already added recently.')->with('billId', $ipdpatient->id)->with('createdItemId', null);
+            }
+
+            $created = BillItem::query()->create(array_merge($line, ['billing_id' => $billing->id]));
+
+            // update billing totals
+            $billing->loadMissing('billItems');
+            $newTotal = (float) ($billing->billItems?->sum('net_amount') ?? 0);
+            $paymentsSum = (float) Payment::where('billing_id', $billing->id)->sum('amount');
+            $dueAmount = max(0, $newTotal - $paymentsSum);
+            $billing->fill([
+                'total' => $newTotal,
+                'payable_amount' => $newTotal,
+                'paid_amt' => $paymentsSum,
+                'receiving_amt' => $paymentsSum,
+                'due_amount' => $dueAmount,
+                'payment_status' => ($paymentsSum >= $newTotal) ? 'Paid' : ($paymentsSum > 0 ? 'Partial' : 'Pending'),
+            ]);
+            $billing->save();
+
+            // attach any IPD payments to billing
+            Payment::query()->whereNull('deleted_at')->where('status', 'Active')->where('ipd_patient_id', $ipdpatient->id)->whereNull('billing_id')->update(['billing_id' => $billing->id]);
+
+            DB::commit();
+
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => true, 'message' => 'Item added to invoice.', 'billId' => $ipdpatient->id, 'created_item_id' => $created->id ?? null], 200);
+            }
+
+            return redirect()->back()->with('successMessage', 'Item added to invoice.')->with('billId', $ipdpatient->id)->with('createdItemId', $created->id ?? null);
+        } catch (Exception $err) {
+            DB::rollBack();
+            try {
+                Log::error('addManualHospitalCharge failed', [
+                    'message' => $err->getMessage(),
+                    'file' => $err->getFile(),
+                    'line' => $err->getLine(),
+                    'trace' => $err->getTraceAsString(),
+                    'request' => $request->all(),
+                ]);
+            } catch (Exception $_e) {
+                // ignore logging failure
+            }
+            $this->storeSystemError('Backend', 'IpdPatientController', 'addManualHospitalCharge', substr($err->getMessage(), 0, 1000));
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'Failed to add manual charge.'], 500);
+            }
+            return redirect()->back()->with('errorMessage', 'Failed to add manual charge.');
         }
     }
 
@@ -736,15 +1341,21 @@ class IpdPatientController extends Controller
             'payment_method' => 'nullable|string|max:255',
             'transaction_id' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
+            'billing_id' => 'nullable|integer|exists:billings,id',
         ]);
 
         $ipdpatient = $this->ipdpatientService->find($id);
         if (!$ipdpatient) {
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'IPD patient not found.'], 404);
+            }
             return redirect()->back()->with('errorMessage', 'IPD patient not found.');
         }
 
         try {
-            $payment = Payment::create([
+            $billingId = $validated['billing_id'] ?? ($ipdpatient->billing_id ?? null);
+
+            $paymentData = [
                 'ipd_patient_id' => $ipdpatient->id,
                 'amount' => $validated['amount'],
                 'payment_method' => $validated['payment_method'] ?? 'Unknown',
@@ -753,12 +1364,156 @@ class IpdPatientController extends Controller
                 'received_by' => auth('admin')->id(),
                 'payment_status' => 'Paid',
                 'status' => 'Active',
-            ]);
+            ];
+            if ($billingId) {
+                $paymentData['billing_id'] = $billingId;
+            }
+
+            $payment = Payment::create($paymentData);
+
+            // refresh billing totals if billing present
+            if ($billingId) {
+                try {
+                    $this->ipdDischargeBillingService->refreshBillingTotals($ipdpatient, auth('admin')->id());
+                } catch (Exception $_e) {
+                    Log::warning('Failed to refresh billing totals after payment', ['err' => $_e->getMessage()]);
+                }
+            }
+
+            if ($request->expectsJson() || $request->ajax()) {
+                $runningBill = $this->ipdDischargeBillingService->getRunningSummary($ipdpatient);
+                $billing = null;
+                if (!empty($ipdpatient->billing_id)) {
+                    $billing = Billing::query()->find($ipdpatient->billing_id);
+                }
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Payment recorded successfully.',
+                    'payment' => $payment,
+                    'runningBill' => $runningBill,
+                    'billing' => $billing,
+                ], 200);
+            }
 
             return redirect()->back()->with('successMessage', 'Payment recorded successfully.');
         } catch (Exception $err) {
             $this->storeSystemError('Backend', 'IpdPatientController', 'storePayment', substr($err->getMessage(), 0, 1000));
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'Server Errors Occur. Please Try Again.'], 500);
+            }
             return redirect()->back()->with('errorMessage', 'Server Errors Occur. Please Try Again.');
+        }
+    }
+
+    /**
+     * Update an existing payment for an IPD patient (AJAX-friendly).
+     */
+    public function updatePayment(Request $request, $id, $paymentId)
+    {
+        $validated = $request->validate([
+            'amount' => 'nullable|numeric|min:0.01',
+            'payment_method' => 'nullable|string|max:255',
+            'transaction_id' => 'nullable|string|max:255',
+            'notes' => 'nullable|string',
+        ]);
+
+        $ipdpatient = $this->ipdpatientService->find($id);
+        if (!$ipdpatient) {
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'IPD patient not found.'], 404);
+            }
+            return redirect()->back()->with('errorMessage', 'IPD patient not found.');
+        }
+
+        $payment = Payment::query()->where('id', $paymentId)->where('ipd_patient_id', $ipdpatient->id)->first();
+        if (!$payment) {
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'Payment not found.'], 404);
+            }
+            return redirect()->back()->with('errorMessage', 'Payment not found.');
+        }
+
+        try {
+            if (isset($validated['amount'])) $payment->amount = $validated['amount'];
+            if (array_key_exists('payment_method', $validated)) $payment->payment_method = $validated['payment_method'];
+            if (array_key_exists('transaction_id', $validated)) $payment->transaction_id = $validated['transaction_id'];
+            if (array_key_exists('notes', $validated)) $payment->notes = $validated['notes'];
+            $payment->updated_by = auth('admin')->id();
+            $payment->save();
+
+            // refresh billing totals if needed
+            try {
+                $this->ipdDischargeBillingService->refreshBillingTotals($ipdpatient, auth('admin')->id());
+            } catch (Exception $_e) {
+                Log::warning('Failed to refresh billing totals after payment update', ['err' => $_e->getMessage()]);
+            }
+
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => true, 'message' => 'Payment updated successfully.', 'payment' => $payment], 200);
+            }
+
+            return redirect()->back()->with('successMessage', 'Payment updated successfully.');
+        } catch (Exception $err) {
+            $this->storeSystemError('Backend', 'IpdPatientController', 'updatePayment', substr($err->getMessage(), 0, 1000));
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'Failed to update payment.'], 500);
+            }
+            return redirect()->back()->with('errorMessage', 'Failed to update payment.');
+        }
+    }
+
+    /**
+     * Apply discount to IPD billing (creates billing if missing) and refresh totals.
+     */
+    public function applyBillingDiscount(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'discount' => 'nullable|numeric|min:0',
+            'discount_type' => 'nullable|in:flat,percentage',
+            'extra_flat_discount' => 'nullable|numeric|min:0',
+        ]);
+
+        $ipdpatient = $this->ipdpatientService->find($id);
+        if (!$ipdpatient) {
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'IPD patient not found.'], 404);
+            }
+            return redirect()->back()->with('errorMessage', 'IPD patient not found.');
+        }
+
+        DB::beginTransaction();
+        try {
+            $billing = null;
+            if (!empty($ipdpatient->billing_id)) {
+                $billing = Billing::query()->find($ipdpatient->billing_id);
+            }
+            if (!$billing) {
+                $billing = $this->ipdDischargeBillingService->createOrGetForDischarge($ipdpatient, auth('admin')->id());
+                $ipdpatient->billing_id = $billing->id;
+                $ipdpatient->save();
+            }
+
+            $billing->discount = (float) ($validated['discount'] ?? 0);
+            $billing->discount_type = $validated['discount_type'] ?? ($billing->discount_type ?? 'flat');
+            $billing->extra_flat_discount = (float) ($validated['extra_flat_discount'] ?? ($billing->extra_flat_discount ?? 0));
+            $billing->save();
+
+            $this->ipdDischargeBillingService->refreshBillingTotals($ipdpatient, auth('admin')->id());
+
+            DB::commit();
+
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => true, 'message' => 'Discount applied successfully.'], 200);
+            }
+
+            return redirect()->back()->with('successMessage', 'Discount applied successfully.');
+        } catch (Exception $err) {
+            DB::rollBack();
+            $this->storeSystemError('Backend', 'IpdPatientController', 'applyBillingDiscount', substr($err->getMessage(), 0, 1000));
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'Failed to apply discount.'], 500);
+            }
+            return redirect()->back()->with('errorMessage', 'Failed to apply discount.');
         }
     }
 
@@ -858,18 +1613,186 @@ class IpdPatientController extends Controller
 
         $printData = $this->ipdDischargeBillingService->getRunningDetails($ipdpatient);
 
-        $barcodeImage = '';
-        try {
-            $dns1d = new DNS1D();
-            $code = prefixed_serial('ipd_no_prefix', 'IPDN', $ipdpatient->id, 4);
-            $barcodeImage = 'data:image/png;base64,' . $dns1d->getBarcodePNG($code, 'C128', 2.2, 52);
-        } catch (Exception $err) {
-            $barcodeImage = '';
+        // Build a compatibility view-model (`$vm`) expected by the
+        // canonical final-invoice template and its partials.
+        $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
+
+        $ipdpatient->loadMissing(['patient', 'doctor', 'bed', 'billing']);
+        $patient = $ipdpatient->patient;
+        $billing = $ipdpatient->billing ?? null;
+
+        $safeDate = function ($value, $format = 'd-m-Y h:i A') {
+            if (empty($value)) return 'N/A';
+            try {
+                return \Carbon\Carbon::parse($value)->format($format);
+            } catch (\Throwable $_) {
+                return 'N/A';
+            }
+        };
+
+        // Map lines to the final-invoice expected structure
+        $rawLines = $printData['lines'] ?? [];
+        $vmLines = [];
+        foreach ($rawLines as $idx => $ln) {
+            $category = (string) ($ln['category'] ?? '');
+            $serviceAt = $ln['service_at'] ?? ($printData['printed_at'] ?? null);
+
+            $vmLines[] = [
+                'sl' => $idx + 1,
+                'service_at' => is_string($serviceAt) ? $serviceAt : $safeDate($serviceAt),
+                'department_code' => strtoupper(substr(trim($category), 0, 3)),
+                'particulars' => (string) ($ln['item_name'] ?? $ln['item_name'] ?? ''),
+                'is_package' => false,
+                'qty' => (float) ($ln['quantity'] ?? 1),
+                'unit_price' => (float) ($ln['unit_price'] ?? 0),
+                'gross_amount' => (float) ($ln['total_amount'] ?? $ln['net_amount'] ?? 0),
+                'discount_amount' => (float) ($ln['discount'] ?? 0),
+                'taxable_amount' => (float) ($ln['net_amount'] ?? 0),
+                'tax_rate' => null,
+                'tax_amount' => 0.0,
+                'net_amount' => (float) ($ln['net_amount'] ?? 0),
+            ];
         }
 
-        return view('backend.ipd.running-bill-print', array_merge($printData, [
-            'barcodeImage' => $barcodeImage,
-        ]));
+        // Department summary grouping
+        $deptMap = [];
+        foreach ($vmLines as $ln) {
+            $d = $ln['department_code'] ?? 'OTH';
+            if (!isset($deptMap[$d])) {
+                $deptMap[$d] = [
+                    'department_name' => $d,
+                    'gross_amount' => 0.0,
+                    'package_included_amount' => 0.0,
+                    'discount_amount' => 0.0,
+                    'taxable_amount' => 0.0,
+                    'tax_rate_effective' => null,
+                    'tax_amount' => 0.0,
+                    'net_amount' => 0.0,
+                ];
+            }
+            $deptMap[$d]['gross_amount'] += $ln['gross_amount'];
+            $deptMap[$d]['discount_amount'] += $ln['discount_amount'];
+            $deptMap[$d]['taxable_amount'] += $ln['taxable_amount'];
+            $deptMap[$d]['tax_amount'] += $ln['tax_amount'];
+            $deptMap[$d]['net_amount'] += $ln['net_amount'];
+        }
+        $deptSummary = array_values($deptMap);
+
+        // Totals
+        $totals = [
+            'gross_total' => array_sum(array_map(fn($r) => $r['gross_amount'], $vmLines)),
+            'package_included_total' => 0.0,
+            'discount_total' => array_sum(array_map(fn($r) => $r['discount_amount'], $vmLines)),
+            'taxable_total' => array_sum(array_map(fn($r) => $r['taxable_amount'], $vmLines)),
+            'tax_total' => array_sum(array_map(fn($r) => $r['tax_amount'], $vmLines)),
+            'net_total' => array_sum(array_map(fn($r) => $r['net_amount'], $vmLines)),
+        ];
+
+        // Payments breakdown
+        $paymentsQuery = Payment::query()
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->where('ipd_patient_id', $ipdpatient->id);
+        $paymentsCol = $paymentsQuery->get();
+        $paidTotal = (float) $paymentsCol->sum('amount');
+
+        $modeBreakdown = [
+            'cash' => 0.0,
+            'card' => 0.0,
+            'mfs' => 0.0,
+            'bank' => 0.0,
+            'cheque' => 0.0,
+            'other' => 0.0,
+        ];
+        foreach ($paymentsCol as $p) {
+            $m = strtolower(trim((string) ($p->payment_method ?? '')));
+            if (str_contains($m, 'cash')) {
+                $modeBreakdown['cash'] += (float) $p->amount;
+            } elseif (str_contains($m, 'card')) {
+                $modeBreakdown['card'] += (float) $p->amount;
+            } elseif (preg_match('/bkash|nagad|rocket|mfs/', $m)) {
+                $modeBreakdown['mfs'] += (float) $p->amount;
+            } elseif (str_contains($m, 'bank')) {
+                $modeBreakdown['bank'] += (float) $p->amount;
+            } elseif (str_contains($m, 'cheque') || str_contains($m, 'check')) {
+                $modeBreakdown['cheque'] += (float) $p->amount;
+            } else {
+                $modeBreakdown['other'] += (float) $p->amount;
+            }
+        }
+
+        $receiptNos = $paymentsCol->pluck('id')->map(fn($v) => 'P#' . $v)->implode(', ');
+
+        $vm = [
+            'hospital' => [
+                'name' => $websetting?->company_name ?? config('app.name'),
+                'address' => $websetting?->address ?? $websetting?->report_title ?? '',
+                'phone' => $websetting?->phone ?? '',
+                'email' => $websetting?->email ?? '',
+                'logo_url' => trim((string) ($websetting?->getRawOriginal('logo') ?? $websetting?->logo ?? '')),
+                'bin_vat_no' => $websetting?->bin_vat_no ?? '',
+                'tax_reg_no' => $websetting?->tax_reg_no ?? '',
+            ],
+            'invoice' => [
+                'invoice_no' => $billing?->invoice_number ?? '',
+                'ipd_no' => prefixed_serial('ipd_no_prefix', 'IPDN', $ipdpatient->id, 4),
+                'uhid' => $patient?->tpa_code ?? ($patient?->id ?? ''),
+                'printed_at' => $printData['printed_at'] ?? now()->format('d-m-Y h:i A'),
+                'admission_at' => $safeDate($printData['admission_at'] ?? $ipdpatient->admission_date ?? null),
+                'discharge_at' => $safeDate($ipdpatient->discharged_at ?? null),
+                'length_of_stay_label' => (function () use ($ipdpatient) {
+                    try {
+                        $start = \Carbon\Carbon::parse($ipdpatient->admission_date);
+                        $end = $ipdpatient->discharged_at ? \Carbon\Carbon::parse($ipdpatient->discharged_at) : now();
+                        $days = $start->diffInDays($end) + 1;
+                        return $days . ' days';
+                    } catch (\Throwable $_) {
+                        return 'N/A';
+                    }
+                })(),
+            ],
+            'patient' => [
+                'name' => $patient?->name ?? 'N/A',
+                'age' => $patient?->age ?? 'N/A',
+                'gender' => $patient?->gender ?? 'N/A',
+                'mobile' => $patient?->phone ?? ($patient?->mobile ?? ''),
+                'credit_limit' => (float) ($ipdpatient->credit_limit ?? $patient?->credit_limit ?? 0),
+                'address' => $patient?->address ?? '',
+                'ward' => $ipdpatient->bed?->bedGroup?->name ?? '',
+                'room' => $ipdpatient->bed?->name ?? '',
+                'bed' => $ipdpatient->bed?->name ?? '',
+                'consultant_name' => $ipdpatient->doctor?->name ?? '',
+                'ref_doctor_name' => '',
+            ],
+            'payer' => [
+                'payer_type' => 'SELF',
+                'company_name' => '',
+                'policy_no' => '',
+                'approval_no' => '',
+                'coverage_type' => '',
+            ],
+            'package' => ['exists' => false],
+            'dept_summary' => $deptSummary,
+            'lines' => $vmLines,
+            'totals' => $totals,
+            'payments' => [
+                'advance_total' => 0.0,
+                'paid_total_excluding_advances' => $paidTotal,
+                'patient_final_payable' => max(0.0, $totals['net_total'] - $paidTotal),
+                'paid_total' => $paidTotal,
+                'due_amount' => max(0.0, $totals['net_total'] - $paidTotal),
+                'refund_amount' => max(0.0, $paidTotal - $totals['net_total']),
+                'mode_breakdown' => $modeBreakdown,
+                'receipt_nos' => $receiptNos,
+            ],
+            'insurance' => [
+                'approved_amount' => 0.0,
+                'non_payable_amount' => 0.0,
+                'remarks' => '',
+            ],
+        ];
+
+        return view('prints.ipd.final-invoice', ['vm' => $vm]);
     }
 
         public function downloadPrescriptionPdf($id)

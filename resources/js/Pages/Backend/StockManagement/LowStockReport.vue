@@ -13,7 +13,7 @@ const props = defineProps({
     <div class="w-full p-4 mt-3 bg-white rounded shadow-md">
       <div class="flex items-center justify-between p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h1>
-        <a :href="route('backend.stock.index')" class="px-3 py-2 text-sm font-semibold text-white bg-gray-600 rounded hover:bg-gray-700">Back Dashboard</a>
+        <a :href="route('backend.stock.index')" class="px-3 py-2 text-sm font-semibold text-white bg-amber-600 rounded hover:bg-amber-700">Back Dashboard</a>
       </div>
 
       <p class="mt-3 text-sm text-slate-600">Threshold: {{ threshold }} বা কম quantity হলে low stock হিসেবে দেখাবে।</p>

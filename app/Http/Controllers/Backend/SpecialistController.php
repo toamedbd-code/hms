@@ -139,6 +139,10 @@ class SpecialistController extends Controller
 
                 DB::commit();
 
+                if ($request->wantsJson()) {
+                    return response()->json(['specialist' => $dataInfo, 'successMessage' => $message], 201);
+                }
+
                 return redirect()
                     ->back()
                     ->with('successMessage', $message);

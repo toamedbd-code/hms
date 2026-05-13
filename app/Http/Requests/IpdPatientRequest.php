@@ -32,6 +32,10 @@ class IpdPatientRequest extends FormRequest
                     'bed_id' => 'required',
 
                     'live_consultation' => 'required',
+                    'hospital_charge_items' => 'nullable|array',
+                    'hospital_charge_items.*.item_name' => 'nullable|string|max:255',
+                    'hospital_charge_items.*.unit_price' => 'nullable|numeric|min:0',
+                    'hospital_charge_items.*.quantity' => 'nullable|integer|min:1',
                 ];
                 break;
 
@@ -57,6 +61,10 @@ class IpdPatientRequest extends FormRequest
                     'bed_id' => 'required',
 
                     'live_consultation' => 'required',
+                    'hospital_charge_items' => 'nullable|array',
+                    'hospital_charge_items.*.item_name' => 'nullable|string|max:255',
+                    'hospital_charge_items.*.unit_price' => 'nullable|numeric|min:0',
+                    'hospital_charge_items.*.quantity' => 'nullable|integer|min:1',
                 ];
                 break;
             case 'PATCH':

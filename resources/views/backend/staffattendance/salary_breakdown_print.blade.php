@@ -46,6 +46,8 @@
     </style>
 </head>
 <body>
+    @includeIf('prints.partials._header')
+
     @php
         $breakdowns = collect($row['attendance_breakdown'] ?? []);
         $minutesToHms = function ($value) {

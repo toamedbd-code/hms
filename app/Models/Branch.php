@@ -1,0 +1,27 @@
+<?php
+
+namespace App\Models;
+
+use App\Traits\ScopesByOrganization;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+class Branch extends Model
+{
+    use HasFactory, SoftDeletes, ScopesByOrganization;
+
+    protected $fillable = [
+        'company_id',
+        'code',
+        'name',
+        'timezone',
+        'currency_code',
+        'status',
+    ];
+
+    public function company()
+    {
+        return $this->belongsTo(Company::class);
+    }
+}

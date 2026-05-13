@@ -18,7 +18,7 @@ class AdminAuth
      */
     public function handle(Request $request, Closure $next)
     {
-        if (auth()->guard('admin')->check() && auth()->guard('admin')->user()->status == 'Active') {
+        if (auth()->guard('admin')->check() && strcasecmp(trim((string) (auth()->guard('admin')->user()->status ?? '')), 'Active') === 0) {
 
             // Ensure packages/middlewares that rely on the default guard (like Spatie Permission)
             // will use the admin guard for backend routes.

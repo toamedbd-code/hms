@@ -76,7 +76,7 @@
         <div class="form-group"><label>Identifier (IP or serial)</label><input name="identifier" class="form-control" required /></div>
         <div class="form-group"><label>Type</label><select name="type" class="form-control"><option value="fingerprint">Fingerprint</option><option value="face">Face</option></select></div>
         <div class="form-group"><label>Secret (optional)</label><input name="secret" class="form-control" /></div>
-        <button type="submit" class="btn btn-primary">Register Device</button>
+        <button type="submit" class="btn btn-primary btn-colorful">Register Device</button>
     </form>
 
     <hr />
@@ -91,7 +91,7 @@
     <a href="{{ route('backend.attendance.face') }}" class="btn btn-success btn-sm mr-2">Open Face Attendance</a>
     <a href="{{ route('backend.attendance.face.register') }}" class="btn btn-info btn-sm mr-2">Open Face Register</a>
     <a href="{{ route('backend.attendance.face.encodings') }}" class="btn btn-secondary btn-sm mr-2">Face Encoding List</a>
-    <a href="{{ route('backend.websetting.create') }}" class="btn btn-primary btn-sm">Open Device Settings</a>
+    <a href="{{ route('backend.websetting.create') }}" class="btn btn-primary btn-sm btn-colorful-sm">Open Device Settings</a>
 </div>
 
 <script>

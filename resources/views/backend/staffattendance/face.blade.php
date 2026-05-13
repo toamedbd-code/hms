@@ -10,7 +10,7 @@
         </div>
 
         <div style="margin-top:10px">
-            <button id="startBtn" class="btn btn-primary">Start Camera</button>
+            <button id="startBtn" class="btn btn-primary btn-colorful">Start Camera</button>
             <button id="stopBtn" class="btn btn-secondary" disabled>Stop</button>
         </div>
 

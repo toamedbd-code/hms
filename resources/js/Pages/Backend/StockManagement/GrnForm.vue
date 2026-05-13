@@ -47,7 +47,7 @@ const submit = () => {
     <div class="w-full p-4 mt-3 bg-white rounded shadow-md">
       <div class="flex items-center justify-between p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h1>
-        <a :href="route('backend.stock.grns')" class="px-3 py-2 text-sm font-semibold text-white bg-gray-600 rounded hover:bg-gray-700">Back GRN List</a>
+        <a :href="route('backend.stock.grns')" class="px-3 py-2 text-sm font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700">Back GRN List</a>
       </div>
 
       <form @submit.prevent="submit" class="mt-4 space-y-4">

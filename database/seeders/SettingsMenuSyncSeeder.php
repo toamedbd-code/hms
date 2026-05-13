@@ -68,8 +68,8 @@ class SettingsMenuSyncSeeder extends Seeder
                 [
                     'name' => 'CMS Setting',
                     'icon' => 'list',
-                    'route' => 'backend.websetting.create',
-                    'permission_name' => 'websetting-add',
+                    'route' => 'backend.websetting.section.cms',
+                    'permission_name' => 'cms-setting',
                     'sorting' => 5,
                 ],
                 [
@@ -83,21 +83,21 @@ class SettingsMenuSyncSeeder extends Seeder
                     'name' => 'Activity Logs',
                     'icon' => 'activity',
                     'route' => 'backend.activity-logs.index',
-                    'permission_name' => 'activity-log-view',
+                    'permission_name' => 'activity-logs',
                     'sorting' => 7,
                 ],
                 [
                     'name' => 'Activity Logs Print',
                     'icon' => 'printer',
                     'route' => 'backend.activity-logs.print',
-                    'permission_name' => 'activity-log-view',
+                    'permission_name' => 'activity-logs-print',
                     'sorting' => 8,
                 ],
                 [
                     'name' => 'bKash Settings',
                     'icon' => 'credit-card',
                     'route' => 'backend.settings.payment.bkash',
-                    'permission_name' => 'websetting-add',
+                    'permission_name' => 'b-kash-settings',
                     'sorting' => 14,
                 ],
             ];
@@ -108,9 +108,10 @@ class SettingsMenuSyncSeeder extends Seeder
                 $menu = Menu::query()->updateOrCreate(
                     [
                         'parent_id' => $settings->id,
-                        'name' => $child['name'],
+                        'route' => $child['route'],
                     ],
                     [
+                        'name' => $child['name'],
                         'route' => $child['route'],
                         'icon' => $child['icon'],
                         'description' => null,
@@ -123,6 +124,13 @@ class SettingsMenuSyncSeeder extends Seeder
 
                 $keepIds[] = $menu->id;
             }
+
+            // Module Setting is managed through dedicated settings screens,
+            // so remove it from Settings sidebar menu to avoid duplication.
+            Menu::query()
+                ->where('parent_id', $settings->id)
+                ->where('route', 'backend.websetting.section.module')
+                ->delete();
 
             // Intentionally do not delete other children here to avoid removing
             // custom / third-party menu items. We only ensure desired children

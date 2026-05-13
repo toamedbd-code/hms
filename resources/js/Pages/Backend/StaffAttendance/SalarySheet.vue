@@ -545,7 +545,7 @@ const unpaidCellClass = (row) =>
           </a>
           <a
             :href="salaryPdfTargetUrl"
-            class="px-3 py-2 text-sm text-white bg-rose-600 rounded hover:bg-rose-700"
+            class="px-3 py-2 text-sm !text-white bg-rose-600 rounded hover:bg-rose-700"
           >
             Export PDF
           </a>
@@ -566,7 +566,7 @@ const unpaidCellClass = (row) =>
           </a>
           <Link
             :href="route('backend.staffattendance.report')"
-            class="px-3 py-2 text-sm text-white bg-gray-600 rounded hover:bg-gray-700"
+            class="px-3 py-2 text-sm !text-white bg-gray-600 rounded hover:bg-gray-700"
           >
             Back
           </Link>
@@ -678,10 +678,10 @@ const unpaidCellClass = (row) =>
         <Link
           v-if="integrationOptions.modules.face_attendance"
           :href="route('backend.attendance.face')"
-          class="p-3 rounded-md border border-violet-200 bg-violet-50 hover:bg-violet-100 transition"
+          class="p-3 rounded-md border border-green-200 bg-green-50 hover:bg-green-100 transition"
         >
-          <div class="text-xs font-semibold text-violet-700">Attendance</div>
-          <div class="text-sm font-bold text-violet-900 mt-1">Face Attendance</div>
+          <div class="text-xs font-semibold text-white">Attendance</div>
+          <div class="text-sm font-bold text-white mt-1">Face Attendance</div>
         </Link>
 
         <a
@@ -689,8 +689,8 @@ const unpaidCellClass = (row) =>
           href="/admin/attendance/devices"
           class="p-3 rounded-md border border-cyan-200 bg-cyan-50 hover:bg-cyan-100 transition"
         >
-          <div class="text-xs font-semibold text-cyan-700">Device</div>
-          <div class="text-sm font-bold text-cyan-900 mt-1">Fingerprint/Face Devices</div>
+          <div class="text-xs font-semibold text-white">Device</div>
+          <div class="text-sm font-bold text-white mt-1">Fingerprint/Face Devices</div>
         </a>
 
         <Link
@@ -698,8 +698,8 @@ const unpaidCellClass = (row) =>
           :href="route('backend.pending.request')"
           class="p-3 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 transition"
         >
-          <div class="text-xs font-semibold text-amber-700">Leave</div>
-          <div class="text-sm font-bold text-amber-900 mt-1">Leave Requests</div>
+          <div class="text-xs font-semibold text-white">Leave</div>
+          <div class="text-sm font-bold text-white mt-1">Leave Requests</div>
         </Link>
 
         <Link
@@ -707,17 +707,17 @@ const unpaidCellClass = (row) =>
           :href="route('backend.staffattendance.duty-roster')"
           class="p-3 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 transition"
         >
-          <div class="text-xs font-semibold text-emerald-700">Roster</div>
-          <div class="text-sm font-bold text-emerald-900 mt-1">Duty Roster</div>
+          <div class="text-xs font-semibold text-white">Roster</div>
+          <div class="text-sm font-bold text-white mt-1">Duty Roster</div>
         </Link>
 
         <Link
           v-if="integrationOptions.modules.salary_sheet"
           :href="route('backend.staffattendance.report')"
-          class="p-3 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 transition"
+          class="p-3 rounded-md border border-green-200 bg-green-50 hover:bg-green-100 transition"
         >
-          <div class="text-xs font-semibold text-slate-700">Summary</div>
-          <div class="text-sm font-bold text-slate-900 mt-1">Attendance Report</div>
+          <div class="text-xs font-semibold text-white">Summary</div>
+          <div class="text-sm font-bold text-white mt-1">Attendance Report</div>
         </Link>
       </div>
 

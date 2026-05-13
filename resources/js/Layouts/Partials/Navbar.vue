@@ -153,27 +153,14 @@ const filteredActivityLogs = computed(() => {
     return logs.filter((log) => log?.status === 'failed');
 });
 const groupedBeds = computed(() => {
-    const groups = {
-        Male: [],
-        Female: [],
-        Cabin: [],
-        Others: [],
-    };
+    const groups = {};
 
     bedStatuses.value.forEach((bed) => {
-        const name = (bed.bed_group_name || '').toLowerCase();
-        const normalized = name.replace(/[^a-z]+/g, ' ').trim();
-        const words = normalized ? normalized.split(' ') : [];
-
-        if (words.includes('female') || words.includes('femele')) {
-            groups.Female.push(bed);
-        } else if (words.includes('male')) {
-            groups.Male.push(bed);
-        } else if (words.includes('cabin')) {
-            groups.Cabin.push(bed);
-        } else {
-            groups.Others.push(bed);
+        const groupName = String(bed?.bed_group_name ?? '').trim() || 'Unassigned';
+        if (!groups[groupName]) {
+            groups[groupName] = [];
         }
+        groups[groupName].push(bed);
     });
 
     return groups;

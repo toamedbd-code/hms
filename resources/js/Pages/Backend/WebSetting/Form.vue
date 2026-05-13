@@ -2,12 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
+import eventBus from '@/eventBus.js';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 
-const props = defineProps(['websetting', 'id', 'activeSection', 'singleSectionMode', 'availableTemplates', 'bookingDoctors']);
+const props = defineProps(['websetting', 'id', 'activeSection', 'activeModule', 'singleSectionMode', 'availableTemplates', 'bookingDoctors']);
 const bookingDoctors = props.bookingDoctors ?? [];
 const bookingPanelOpen = ref(false);
 const page = usePage();
@@ -341,6 +342,13 @@ const toggleModuleSection = (moduleKey) => {
 const getSelectedModuleSection = () => moduleSectionKeys.find((key) => moduleSections[key]) ?? '';
 
 const applyModuleSelectionFromQuery = () => {
+    const moduleFromProps = normalizeModuleSection(props.activeModule);
+    if (moduleFromProps) {
+        lockedModuleSection.value = moduleFromProps;
+        setSingleModuleSection(moduleFromProps);
+        return;
+    }
+
     if (typeof window === 'undefined') {
         return;
     }
@@ -441,6 +449,7 @@ const parseFeaturedDoctorsRows = (rawJson) => {
                 designation: String(item.designation ?? ''),
                 phone: String(item.phone ?? ''),
                 experience: String(item.experience ?? ''),
+                doctor_fee: String(item.doctor_fee ?? ''),
                 bio: String(item.bio ?? ''),
                 image_url: String(item.image_url ?? ''),
             }));
@@ -594,9 +603,39 @@ const facilityRows = ref(parseSimpleListRows(form.website_facilities_json));
 const testimonialEnRows = ref(parseTestimonialsRows(form.website_testimonials_en_json));
 const testimonialBnRows = ref(parseTestimonialsRows(form.website_testimonials_bn_json));
 
+const cmsStats = computed(() => ({
+    doctors: featuredDoctorsRows.value.filter((row) => String(row.name ?? '').trim() !== '').length,
+    services: serviceRows.value.filter((row) => String(row.label ?? '').trim() !== '').length,
+    facilities: facilityRows.value.filter((row) => String(row.label ?? '').trim() !== '').length,
+    testimonials: [...testimonialEnRows.value, ...testimonialBnRows.value]
+        .filter((row) => String(row.name ?? '').trim() !== '' && String(row.quote ?? '').trim() !== '').length,
+}));
+
+const cmsCompletionPercent = computed(() => {
+    const checkpoints = [
+        String(form.website_hero_title ?? '').trim() !== '',
+        String(form.website_hero_subtitle ?? '').trim() !== '',
+        String(form.website_about_text ?? '').trim() !== '',
+        String(form.website_cta_text ?? '').trim() !== '',
+        String(form.website_emergency_phone ?? '').trim() !== '',
+        cmsStats.value.doctors > 0,
+        cmsStats.value.services > 0,
+        cmsStats.value.facilities > 0,
+    ];
+
+    const completed = checkpoints.filter(Boolean).length;
+    return Math.round((completed / checkpoints.length) * 100);
+});
+
+const cmsCompletionTone = computed(() => {
+    if (cmsCompletionPercent.value >= 85) return 'text-emerald-700';
+    if (cmsCompletionPercent.value >= 60) return 'text-amber-700';
+    return 'text-rose-700';
+});
+
 if (featuredDoctorsRows.value.length === 0) {
     featuredDoctorsRows.value = [
-        { name: '', specialty: '', designation: '', phone: '', experience: '', bio: '', image_url: '' },
+        { name: '', specialty: '', designation: '', phone: '', experience: '', doctor_fee: '', bio: '', image_url: '' },
     ];
 }
 
@@ -633,8 +672,11 @@ const addFeaturedDoctorRow = () => {
     featuredDoctorsRows.value.push({
         name: '',
         specialty: '',
+        designation: '',
         phone: '',
         experience: '',
+        doctor_fee: '',
+        bio: '',
         image_url: '',
     });
 };
@@ -658,6 +700,7 @@ const addDoctorFromBooking = (doc) => {
         designation: '',
         phone: doc.phone ?? '',
         experience: '',
+        doctor_fee: String(doc.doctor_fee ?? doc.doctor_charge ?? ''),
         bio: '',
         image_url: '',
         admin_id: doc.id,
@@ -789,6 +832,7 @@ watch(featuredDoctorsRows, (rows) => {
             designation: String(row.designation ?? '').trim(),
             phone: String(row.phone ?? '').trim(),
             experience: String(row.experience ?? '').trim(),
+            doctor_fee: String(row.doctor_fee ?? '').trim(),
             bio: String(row.bio ?? '').trim(),
             image_url: String(row.image_url ?? '').trim(),
         }))
@@ -873,16 +917,49 @@ const handleMobileLogoChange = (event) => {
 const submit = () => {
     form.transform((data) => ({
         ...data,
+        activeSection: activeSettingsSection.value,
         report_title: data.address,
         attendance_device_options: JSON.stringify(deviceOptions.value),
     })).post(route('backend.websetting.store'), {
         onSuccess: (response) => {
             displayResponse(response);
-            router.reload({
-                only: ['websetting'],
-                preserveScroll: true,
-                preserveState: true,
-            });
+
+            // Emit client-side branding update immediately so layout components
+            // (Sidebar, Navbar) reflect the new company name without waiting
+            // for the next server-provided branding payload.
+            try {
+                const payload = {
+                    id: response?.props?.websetting?.id ?? page.props?.websetting?.id ?? null,
+                    name: form.company_name ?? page.props?.companyInfo?.name ?? '',
+                    short_name: form.company_short_name ?? page.props?.companyInfo?.short_name ?? '',
+                    phone: form.phone ?? page.props?.companyInfo?.phone ?? '',
+                    email: form.email ?? page.props?.companyInfo?.email ?? '',
+                    logo: form.logoPreview ?? page.props?.companyInfo?.logo ?? '',
+                    favicon: form.iconPreview ?? page.props?.companyInfo?.favicon ?? '',
+                    address: form.address ?? page.props?.companyInfo?.address ?? '',
+                    updated_at: new Date().toISOString(),
+                };
+
+                if (typeof window !== 'undefined') {
+                    window.__last_branding_payload = payload;
+                    try {
+                        if (typeof localStorage !== 'undefined') {
+                            localStorage.setItem('__last_branding_payload', JSON.stringify(payload));
+                        }
+                    } catch (e) {
+                        // ignore localStorage write errors
+                    }
+                    if (typeof eventBus !== 'undefined' && eventBus && typeof eventBus.emit === 'function') {
+                        eventBus.emit('branding.updated', payload);
+                    }
+                }
+            } catch (e) {
+                // ignore emit failures
+            }
+
+            // Force a full Inertia reload so shared props (webSetting/websetting)
+            // propagate to layout components like the Sidebar immediately.
+            router.reload();
         },
         onError: (errorObject) => {
             displayWarning(errorObject);
@@ -964,7 +1041,7 @@ onBeforeUnmount(() => {
 <template>
     <BackendLayout>
         <div class="w-full transition duration-1000 ease-in-out transform bg-white rounded-md">
-            <div class="flex items-center justify-between w-full text-gray-700 bg-gray-100 rounded-md">
+            <div v-if="$page.props.pageTitle" class="flex items-center justify-between w-full text-gray-700 bg-gray-100 rounded-md">
                 <h1 class="p-4 text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
             </div>
 
@@ -1117,6 +1194,7 @@ onBeforeUnmount(() => {
                             <select id="language" v-model="form.language"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300">
                                 <option value="English">English</option>
+                                <option value="Bangla">Bangla</option>
                             </select>
                             <InputError class="mt-2" :message="form.errors.language" />
                         </div>
@@ -1219,7 +1297,44 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div v-show="activeSettingsSection === 'cms'" class="border rounded-md p-4">
-                    <h2 class="text-lg font-semibold mb-4">Website Content (Dynamic CMS)</h2>
+                    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <h2 class="text-lg font-semibold">Website Content (Dynamic CMS)</h2>
+                            <p class="mt-1 text-xs text-slate-600">এই section-এ সব content no-code ভাবে edit/post করা যাবে, JSON manually edit করার দরকার নেই।</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <a href="/" target="_blank" class="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Open Website</a>
+                            <button type="button" @click="submit" class="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100">Save CMS Now</button>
+                        </div>
+                    </div>
+
+                    <div class="mb-4 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 via-cyan-50 to-emerald-50 p-4">
+                        <div class="grid grid-cols-2 gap-3 md:grid-cols-5">
+                            <div class="rounded-lg bg-white/90 p-2 text-center">
+                                <p class="text-[11px] uppercase tracking-wide text-slate-500">Doctors</p>
+                                <p class="text-lg font-semibold text-slate-800">{{ cmsStats.doctors }}</p>
+                            </div>
+                            <div class="rounded-lg bg-white/90 p-2 text-center">
+                                <p class="text-[11px] uppercase tracking-wide text-slate-500">Services</p>
+                                <p class="text-lg font-semibold text-slate-800">{{ cmsStats.services }}</p>
+                            </div>
+                            <div class="rounded-lg bg-white/90 p-2 text-center">
+                                <p class="text-[11px] uppercase tracking-wide text-slate-500">Facilities</p>
+                                <p class="text-lg font-semibold text-slate-800">{{ cmsStats.facilities }}</p>
+                            </div>
+                            <div class="rounded-lg bg-white/90 p-2 text-center">
+                                <p class="text-[11px] uppercase tracking-wide text-slate-500">Testimonials</p>
+                                <p class="text-lg font-semibold text-slate-800">{{ cmsStats.testimonials }}</p>
+                            </div>
+                            <div class="rounded-lg bg-white/90 p-2 text-center">
+                                <p class="text-[11px] uppercase tracking-wide text-slate-500">Completion</p>
+                                <p class="text-lg font-semibold" :class="cmsCompletionTone">{{ cmsCompletionPercent }}%</p>
+                            </div>
+                        </div>
+                        <div class="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                            <div class="h-full rounded-full bg-gradient-to-r from-sky-500 to-emerald-500 transition-all duration-300" :style="{ width: `${cmsCompletionPercent}%` }"></div>
+                        </div>
+                    </div>
 
                     <div class="space-y-4">
                         <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
@@ -1328,6 +1443,7 @@ onBeforeUnmount(() => {
                                                 <th class="border border-slate-200 px-2 py-2 text-left">Designation</th>
                                             <th class="border border-slate-200 px-2 py-2 text-left">Phone</th>
                                             <th class="border border-slate-200 px-2 py-2 text-left">Experience</th>
+                                                <th class="border border-slate-200 px-2 py-2 text-left">Doctor Fee</th>
                                                 <th class="border border-slate-200 px-2 py-2 text-left">Image URL</th>
                                             <th class="border border-slate-200 px-2 py-2 text-center">Action</th>
                                         </tr>
@@ -1352,6 +1468,10 @@ onBeforeUnmount(() => {
                                             </td>
                                             <td class="border border-slate-200 p-1">
                                                 <input v-model="doctor.experience" type="text" placeholder="10 years"
+                                                    class="block w-full rounded border-slate-300 p-1 text-xs md:text-sm" />
+                                            </td>
+                                            <td class="border border-slate-200 p-1">
+                                                <input v-model="doctor.doctor_fee" type="number" min="0" step="0.01" placeholder="500"
                                                     class="block w-full rounded border-slate-300 p-1 text-xs md:text-sm" />
                                             </td>
                                             <td class="border border-slate-200 p-1">

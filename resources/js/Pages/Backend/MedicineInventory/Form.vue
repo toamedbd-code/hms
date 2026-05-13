@@ -100,6 +100,20 @@ const importSummary = ref({
     errors: [],
 })
 
+const normalizeCsvErrors = (errors) => {
+    if (Array.isArray(errors)) {
+        return errors
+    }
+
+    if (!errors || typeof errors !== 'object') {
+        return []
+    }
+
+    return Object.values(errors).flatMap((value) =>
+        Array.isArray(value) ? value : [String(value)]
+    )
+}
+
 const handleCsvFile = (e) => {
     csv.value.file = e.target.files[0]
     csvMessage.value = ''
@@ -157,13 +171,13 @@ const uploadInventoryCsv = async () => {
         }
     } catch (e) {
         csvMessage.value = e.response?.data?.message || 'CSV upload failed.'
-        csvErrors.value = e.response?.data?.errors || []
+        csvErrors.value = normalizeCsvErrors(e.response?.data?.errors)
         importSummary.value = {
             imported: 0,
             skipped: 0,
-            failed: Array.isArray(csvErrors.value) ? csvErrors.value.length : 1,
+            failed: csvErrors.value.length || 1,
             message: csvMessage.value,
-            errors: Array.isArray(csvErrors.value) ? csvErrors.value : [],
+            errors: csvErrors.value,
         }
         showImportSummary.value = true
     } finally {

@@ -102,6 +102,7 @@ class AppServiceProvider extends ServiceProvider
             $dbName = env('DB_DATABASE');
             $dbUser = env('DB_USERNAME');
             $dbPass = env('DB_PASSWORD');
+            $cacheDriver = env('CACHE_DRIVER', config('cache.default', 'file'));
 
             $envPath = base_path('.env');
             if (file_exists($envPath)) {
@@ -112,6 +113,7 @@ class AppServiceProvider extends ServiceProvider
                     if (preg_match('/^DB_DATABASE=(.+)$/m', $contents, $m)) { $dbName = trim(trim($m[1]), "\"'"); }
                     if (preg_match('/^DB_USERNAME=(.+)$/m', $contents, $m)) { $dbUser = trim(trim($m[1]), "\"'"); }
                     if (preg_match('/^DB_PASSWORD=(.*)$/m', $contents, $m)) { $dbPass = trim(trim($m[1]), "\"'"); }
+                    if (preg_match('/^CACHE_DRIVER=(.+)$/m', $contents, $m)) { $cacheDriver = trim(trim($m[1]), "\"'"); }
                 }
             }
 
@@ -140,6 +142,26 @@ class AppServiceProvider extends ServiceProvider
                     'db_database' => $dbName,
                     'db_username' => $dbUser,
                 ]);
+
+                try {
+                    if (trim(strtolower((string) $cacheDriver)) === 'database') {
+                        $cacheTable = (string) config('cache.stores.database.table', 'cache');
+                        $hasCacheTable = app('db')->connection()->getSchemaBuilder()->hasTable($cacheTable);
+
+                        if (!$hasCacheTable) {
+                            config(['cache.default' => 'file']);
+                            $_ENV['CACHE_DRIVER'] = 'file';
+                            @putenv('CACHE_DRIVER=file');
+
+                            Log::warning('AppServiceProvider: falling back to file cache because cache table is missing', [
+                                'cache_table' => $cacheTable,
+                                'db_database' => $dbName,
+                            ]);
+                        }
+                    }
+                } catch (\Throwable $cacheException) {
+                    // Keep cache fallback best-effort and avoid breaking bootstrap.
+                }
             } else {
                 Log::warning('AppServiceProvider: DB env values missing; skipping enforcement');
             }
@@ -155,6 +177,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot()
     {
+        date_default_timezone_set((string) config('app.timezone', 'Asia/Dhaka'));
+
         $logsPath = storage_path('logs');
         $logFile = $logsPath . DIRECTORY_SEPARATOR . 'laravel.log';
         $permissionPaths = [
@@ -187,7 +211,7 @@ class AppServiceProvider extends ServiceProvider
         // Share side menus for admin users with Inertia so frontend can render sidebar
         Inertia::share('auth.sideMenus', function () {
             try {
-                if (auth()->guard('admin')->check() && auth()->guard('admin')->user()->status == 'Active') {
+                if (auth()->guard('admin')->check() && strcasecmp(trim((string) (auth()->guard('admin')->user()->status ?? '')), 'Active') === 0) {
                     return getSideMenus(auth()->guard('admin')->user());
                 }
             } catch (\Throwable $e) {

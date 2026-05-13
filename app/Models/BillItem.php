@@ -18,6 +18,8 @@ class BillItem extends Model
         'reported_at' => 'datetime',
         'sent_at' => 'datetime',
         'delivered_at' => 'datetime',
+        'commissionable' => 'boolean',
+        'commission_rate' => 'decimal:2',
     ];
 
     public function billing()

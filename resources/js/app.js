@@ -1,6 +1,7 @@
 import './bootstrap';
 import '../css/app.css';
 import FeatherIcon from './Components/FeatherIcon.vue';
+import eventBus from './eventBus.js';
 
 
 import { createApp, h } from 'vue';
@@ -200,17 +201,306 @@ const setFavicon = (webSetting) => {
 };
 
 const applyRuntimeBranding = (pageProps) => {
-    const webSetting = pageProps?.webSetting ?? null;
-    const runtimeName = resolveRuntimeAppName(webSetting);
+    const webSetting = pageProps?.websetting ?? pageProps?.webSetting ?? null;
+    let brandingPayload = null;
+
+    // Maintain a last-seen branding payload so pages that don't include
+    // branding props (partial Inertia responses) can still receive the
+    // most recent runtime branding update emitted earlier.
+    try {
+        if (typeof window !== 'undefined') {
+            window.__last_branding_payload = window.__last_branding_payload ?? null;
+
+            // Hydrate last branding payload from localStorage so full page
+            // reloads keep the most recent branding visible to the user.
+            try {
+                if (!window.__last_branding_payload && typeof localStorage !== 'undefined') {
+                    const stored = localStorage.getItem('__last_branding_payload');
+                    if (stored) {
+                        window.__last_branding_payload = JSON.parse(stored);
+                    }
+                }
+            } catch (e) {
+                // ignore localStorage parse errors
+            }
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    // Prepare a candidate branding payload based on server props but do
+    // not yet apply it to `pageProps`/`window.__inertia` — we'll decide
+    // the final effective branding below after comparing timestamps with
+    // any in-memory / persisted payload.
+    let serverCandidate = null;
+    try {
+        if (webSetting) {
+            serverCandidate = {
+                id: webSetting.id ?? null,
+                name: webSetting.company_name ?? webSetting.companyName ?? (pageProps?.companyInfo?.name ?? ''),
+                short_name: webSetting.company_short_name ?? (pageProps?.companyInfo?.short_name ?? ''),
+                phone: webSetting.phone ?? (pageProps?.companyInfo?.phone ?? ''),
+                email: webSetting.email ?? (pageProps?.companyInfo?.email ?? ''),
+                logo: webSetting.logo ?? (pageProps?.companyInfo?.logo ?? ''),
+                favicon: webSetting.icon ?? (pageProps?.companyInfo?.favicon ?? ''),
+                address: webSetting.address ?? (pageProps?.companyInfo?.address ?? ''),
+                sorting: pageProps?.companyInfo?.sorting ?? 0,
+                status: webSetting.status ?? (pageProps?.companyInfo?.status ?? 'Active'),
+                created_at: webSetting.created_at ?? (pageProps?.companyInfo?.created_at ?? null),
+                updated_at: webSetting.updated_at ?? (pageProps?.companyInfo?.updated_at ?? null),
+                current_theme: webSetting?.current_theme ?? (pageProps?.companyInfo?.current_theme ?? undefined),
+            };
+
+            brandingPayload = serverCandidate;
+        } else if (pageProps?.companyInfo) {
+            brandingPayload = pageProps.companyInfo;
+            serverCandidate = brandingPayload;
+        }
+    } catch (e) {
+        // non-fatal: continue with branding even if mapping fails
+    }
+
+    // After comparing and selecting the effective branding payload below,
+    // we'll persist it to localStorage so full reloads can hydrate it.
+
+    // If the server did not provide branding for this Inertia visit but we
+    // have a last-known branding payload, reuse it so client UI remains
+    // consistent across navigation that omits branding props.
+    try {
+        if (!brandingPayload && typeof window !== 'undefined' && window.__last_branding_payload) {
+            brandingPayload = window.__last_branding_payload;
+            if (pageProps) {
+                pageProps.companyInfo = brandingPayload;
+                pageProps.webSetting = brandingPayload;
+                pageProps.websetting = brandingPayload;
+            }
+            if (typeof window !== 'undefined' && window.__inertia && window.__inertia.page && window.__inertia.page.props) {
+                window.__inertia.page.props.companyInfo = brandingPayload;
+                window.__inertia.page.props.webSetting = brandingPayload;
+                window.__inertia.page.props.websetting = brandingPayload;
+            }
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    try {
+        // Safe update: avoid overwriting a newer in-memory branding with an
+        // older server response. Compare timestamps between any previously
+        // persisted payload and the server candidate and choose the newer
+        // as the `window.__last_branding_payload`.
+        const prev = (typeof window !== 'undefined' && window.__last_branding_payload) ? window.__last_branding_payload : null;
+
+        const parseTs = (v) => {
+            if (!v) return NaN;
+            const s = String(v);
+            const t = Date.parse(s);
+            return Number.isFinite(t) ? t : NaN;
+        };
+
+        if (!prev && brandingPayload) {
+            window.__last_branding_payload = brandingPayload;
+        } else if (prev && brandingPayload) {
+            const prevTs = parseTs(prev.updated_at ?? prev.updatedAt ?? null);
+            const newTs = parseTs(brandingPayload.updated_at ?? brandingPayload.updatedAt ?? null);
+
+            if (!Number.isFinite(prevTs) && !Number.isFinite(newTs)) {
+                // No reliable timestamps: keep existing persisted payload
+                window.__last_branding_payload = prev;
+                brandingPayload = prev;
+            } else if (!Number.isFinite(prevTs) && Number.isFinite(newTs)) {
+                window.__last_branding_payload = brandingPayload;
+            } else if (Number.isFinite(prevTs) && !Number.isFinite(newTs)) {
+                window.__last_branding_payload = prev;
+                brandingPayload = prev;
+            } else {
+                if (newTs >= prevTs) {
+                    window.__last_branding_payload = brandingPayload;
+                } else {
+                    window.__last_branding_payload = prev;
+                    brandingPayload = prev;
+                }
+            }
+        }
+    } catch (e) {
+        // non-fatal: continue with branding even if sync fails
+    }
+
+    // Determine the final effective branding payload we'll apply to the
+    // page props and to persisted storage. If the server provided a
+    // candidate (`serverCandidate`) prefer that as the authoritative
+    // source so freshly-saved WebSetting values show immediately in
+    // layout components (Sidebar, Navbar). Otherwise fall back to the
+    // last-known persisted payload when available.
+    let effectiveBranding = null;
+    if (serverCandidate) {
+        effectiveBranding = serverCandidate;
+    } else if (typeof window !== 'undefined' && window.__last_branding_payload) {
+        effectiveBranding = window.__last_branding_payload;
+    } else {
+        effectiveBranding = (brandingPayload ?? null);
+    }
+
+    // Normalize branding for components that expect server-style keys
+    // (`company_name`, `company_short_name`) as well as client-style
+    // keys (`name`, `short_name`). This prevents UI fallbacks like
+    // "Company Name" when the page props contain `name` instead of
+    // `company_name`.
+    const normalizeBranding = (b) => {
+        if (!b || typeof b !== 'object') return b;
+        return {
+            id: b.id ?? null,
+            name: b.name ?? b.company_name ?? '',
+            short_name: b.short_name ?? b.company_short_name ?? '',
+            company_name: b.name ?? b.company_name ?? '',
+            company_short_name: b.short_name ?? b.company_short_name ?? '',
+            phone: b.phone ?? '',
+            email: b.email ?? '',
+            logo: b.logo ?? '',
+            favicon: b.favicon ?? b.icon ?? '',
+            address: b.address ?? '',
+            sorting: b.sorting ?? 0,
+            status: b.status ?? 'Active',
+            created_at: b.created_at ?? b.createdAt ?? null,
+            updated_at: b.updated_at ?? b.updatedAt ?? null,
+            current_theme: b.current_theme ?? b.currentTheme ?? undefined,
+        };
+    };
+
+    // Allow pages that are clearly the public website (they include
+    // `initialSection` in their props) to prefer the server-provided
+    // branding. This prevents stale persisted branding in localStorage
+    // from overriding freshly-saved CMS settings on the public site.
+    let effectiveBrandingNormalized = normalizeBranding(effectiveBranding);
+    try {
+        const isPublicWebsite = pageProps && typeof pageProps.initialSection !== 'undefined';
+        if (isPublicWebsite && serverCandidate) {
+            const serverNormalized = normalizeBranding(serverCandidate);
+            effectiveBrandingNormalized = serverNormalized;
+            if (typeof window !== 'undefined') {
+                window.__last_branding_payload = serverNormalized;
+                try {
+                    if (typeof localStorage !== 'undefined') {
+                        localStorage.setItem('__last_branding_payload', JSON.stringify(serverNormalized));
+                    }
+                } catch (e) {
+                    // ignore storage write errors
+                }
+                try {
+                    if (typeof eventBus !== 'undefined' && eventBus && typeof eventBus.emit === 'function') {
+                        eventBus.emit('branding.updated', serverNormalized);
+                    }
+                } catch (e) {
+                    // ignore emit errors
+                }
+            }
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    // If this Inertia visit appears to be the public website (frontend pages
+    // expose `initialSection`), prefer the server-provided branding payload
+    // to avoid a stale client-persisted branding (localStorage) overriding
+    // the authoritative server value on the public site.
+    try {
+        const isPublicWebsite = pageProps && typeof pageProps.initialSection !== 'undefined';
+        if (isPublicWebsite && serverCandidate) {
+            const serverNormalized = normalizeBranding(serverCandidate);
+            effectiveBrandingNormalized = serverNormalized;
+
+            if (typeof window !== 'undefined') {
+                window.__last_branding_payload = serverNormalized;
+                try {
+                    if (typeof localStorage !== 'undefined') {
+                        localStorage.setItem('__last_branding_payload', JSON.stringify(serverNormalized));
+                    }
+                } catch (e) {
+                    // ignore storage write errors
+                }
+
+                try {
+                    if (typeof eventBus !== 'undefined' && eventBus && typeof eventBus.emit === 'function') {
+                        eventBus.emit('branding.updated', serverNormalized);
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    // Apply the effective branding into the Inertia page props so that a
+    // full reload or initial render shows the chosen payload.
+    try {
+        if (effectiveBrandingNormalized && pageProps) {
+            pageProps.companyInfo = effectiveBrandingNormalized;
+            pageProps.webSetting = effectiveBrandingNormalized;
+            pageProps.websetting = effectiveBrandingNormalized;
+        }
+
+        if (typeof window !== 'undefined' && window.__inertia && window.__inertia.page && window.__inertia.page.props) {
+            if (effectiveBrandingNormalized) {
+                window.__inertia.page.props.companyInfo = effectiveBrandingNormalized;
+                window.__inertia.page.props.webSetting = effectiveBrandingNormalized;
+                window.__inertia.page.props.websetting = effectiveBrandingNormalized;
+            }
+        }
+
+        // Also ensure the global last-branding payload is normalized so
+        // subsequent comparisons and persistence use consistent keys.
+        if (typeof window !== 'undefined') {
+            window.__last_branding_payload = effectiveBrandingNormalized ?? window.__last_branding_payload;
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    // Persist the chosen branding so full page reloads can hydrate it.
+    try {
+        if (typeof window !== 'undefined' && window.__last_branding_payload && typeof localStorage !== 'undefined') {
+            try {
+                localStorage.setItem('__last_branding_payload', JSON.stringify(window.__last_branding_payload));
+            } catch (e) {
+                // ignore storage write errors
+            }
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    // Notify other components (Sidebar, Navbar) that branding changed so
+    // they can update themselves even if they were rendered with stale props.
+    try {
+        if (effectiveBranding && typeof eventBus !== 'undefined' && eventBus && typeof eventBus.emit === 'function') {
+            eventBus.emit('branding.updated', effectiveBranding);
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    const runtimeName = resolveRuntimeAppName(effectiveBranding ?? null);
     runtimeAppName = runtimeName;
 
     updateDocumentTitle(runtimeName);
-    setTheme(webSetting?.current_theme ?? 'default');
-    setFavicon(webSetting);
+    setTheme(effectiveBranding?.current_theme ?? 'default');
+    setFavicon(effectiveBranding ?? { icon: effectiveBranding?.favicon, logo: effectiveBranding?.logo, updated_at: effectiveBranding?.updated_at });
 };
 
 document.addEventListener('inertia:success', (event) => {
-    const pageProps = event?.detail?.page?.props;
+    const page = event?.detail?.page;
+    try {
+        if (typeof window !== 'undefined') {
+            window.__inertia = window.__inertia || {};
+            window.__inertia.page = page ?? window.__inertia.page ?? null;
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    const pageProps = page?.props;
     applyRuntimeBranding(pageProps);
 });
 
@@ -233,6 +523,18 @@ createInertiaApp({
         // isCustomElement: (tag) => tag === 'Pagination',
     },
     setup({ el, App, props, plugin }) {
+        // Seed global `window.__inertia.page` for legacy consumers that
+        // inspect `window.__inertia.page.props` directly from console or
+        // non-Inertia code paths.
+        try {
+            if (typeof window !== 'undefined') {
+                window.__inertia = window.__inertia || {};
+                window.__inertia.page = props?.initialPage ?? window.__inertia.page ?? null;
+            }
+        } catch (e) {
+            // ignore
+        }
+
         applyRuntimeBranding(props?.initialPage?.props);
 
         const instance = createApp({ render: () => h(App, props) })

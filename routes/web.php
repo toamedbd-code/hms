@@ -50,7 +50,25 @@ Route::middleware([
 ])->group(function () {
     Route::get('/dashboard', function () {
         return Inertia::render('Dashboard');
-    })->name('dashboard');
+    })->name('user.dashboard');
+
+    // Debug routes: returns current cached web setting and session companyInfo
+    Route::get('/debug/websetting', function () {
+        $webSetting = function_exists('get_cached_web_setting') ? get_cached_web_setting(true) : null;
+        $companyInfo = session('companyInfo');
+
+        return response()->json([
+            'webSetting' => $webSetting?->toArray() ?? null,
+            'companyInfo' => $companyInfo,
+        ]);
+    })->name('debug.websetting');
+
+    Route::get('/debug/websetting/view', function () {
+        $webSetting = function_exists('get_cached_web_setting') ? get_cached_web_setting(true) : null;
+        $companyInfo = session('companyInfo');
+
+        return view('debug.websetting', compact('webSetting', 'companyInfo'));
+    })->name('debug.websetting.view');
 });
 
 require __DIR__ . '/backend.php';

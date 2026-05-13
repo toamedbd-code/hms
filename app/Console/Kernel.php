@@ -46,5 +46,9 @@ class Kernel extends ConsoleKernel
         Commands\SyncGoogleHolidaysCommand::class,
         Commands\ExportHolidayAuditCommand::class,
         Commands\SyncFeaturedDoctors::class,
+        Commands\RunMrp::class,
+        Commands\RunDepreciation::class,
+        Commands\SyncExpenseLedgerCommand::class,
+        Commands\SyncPurchaseLedgerCommand::class,
     ];
 }

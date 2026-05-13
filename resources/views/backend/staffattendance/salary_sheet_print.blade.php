@@ -169,6 +169,8 @@
     </style>
 </head>
 <body>
+    @includeIf('prints.partials._header')
+
     @php
         $minutesToHms = static function ($value): string {
             $numeric = is_numeric($value) ? (float) $value : 0.0;

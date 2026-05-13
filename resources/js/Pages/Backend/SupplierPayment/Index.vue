@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import Pagination from '@/Components/Pagination.vue';
@@ -13,13 +13,17 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  payableAccounts: {
+    type: Array,
+    default: () => [],
+  },
   filters: {
     type: Object,
     default: () => ({}),
   },
 });
 
-const rows = props.payments?.data ?? [];
+const rows = computed(() => props.payments?.data ?? []);
 
 const filterForm = ref({
   supplier_id: props.filters?.supplier_id ?? '',
@@ -58,6 +62,7 @@ const partialForm = ref({
   paymentDate: '',
   dueAmount: 0,
   amount: '',
+  payment_account_id: '',
 });
 
 const closePartialModal = (force = false) => {
@@ -70,6 +75,7 @@ const closePartialModal = (force = false) => {
     paymentDate: '',
     dueAmount: 0,
     amount: '',
+    payment_account_id: '',
   };
 };
 
@@ -80,9 +86,10 @@ const addPartial = (payment) => {
   partialForm.value = {
     paymentId: payment.id,
     supplierName: payment?.supplier?.name ?? 'N/A',
-    paymentDate: payment?.payment_date ?? '-',
+    paymentDate: formatDate(payment?.payment_date),
     dueAmount: maxDue,
     amount: maxDue,
+    payment_account_id: payment?.payment_account_id ?? '',
   };
   showPartialModal.value = true;
 };
@@ -91,6 +98,7 @@ const submitPartial = () => {
   const paymentId = partialForm.value.paymentId;
   const maxDue = Number(partialForm.value.dueAmount ?? 0);
   const amount = Number(partialForm.value.amount ?? 0);
+  const paymentAccountId = Number(partialForm.value.payment_account_id ?? 0);
 
   if (!paymentId) return;
 
@@ -99,10 +107,15 @@ const submitPartial = () => {
     return;
   }
 
+  if (!Number.isFinite(paymentAccountId) || paymentAccountId <= 0) {
+    window.alert('Select a payment account.');
+    return;
+  }
+
   isSubmittingPartial.value = true;
   router.post(
     route('backend.supplierpayment.partial', paymentId),
-    { amount },
+    { amount, payment_account_id: paymentAccountId },
     {
       preserveScroll: true,
       onFinish: () => {
@@ -110,6 +123,7 @@ const submitPartial = () => {
       },
       onSuccess: () => {
         closePartialModal(true);
+        router.reload({ only: ['payments'], preserveScroll: true });
       },
     },
   );
@@ -122,12 +136,45 @@ const destroyPayment = (paymentId) => {
 
 const money = (value) => Number(value ?? 0).toFixed(2);
 
+const formatDate = (value) => {
+  if (!value) return '-';
+
+  if (typeof value === 'string') {
+    const dateOnly = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (dateOnly?.[1]) return dateOnly[1];
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Dhaka',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+};
+
 const purchaseNumberFromNotes = (notes) => {
   const text = String(notes ?? '').trim();
   if (!text) return null;
 
   const match = text.match(/Initial\s+payment\s+from\s+purchase\s+([A-Za-z0-9-]+)/i);
   return match?.[1] ?? null;
+};
+
+const stockApprovalStatus = (payment) => {
+  return String(payment?.linked_purchase?.status ?? '').toLowerCase() === 'received' ? 'Approved' : 'Pending Approval';
+};
+
+const stockApprovalClass = (payment) => {
+  return String(payment?.linked_purchase?.status ?? '').toLowerCase() === 'received'
+    ? 'text-emerald-700 bg-emerald-100'
+    : 'text-amber-700 bg-amber-100';
+};
+
+const canApproveStock = (payment) => {
+  return !!payment?.linked_purchase && String(payment?.linked_purchase?.status ?? '').toLowerCase() !== 'received';
 };
 </script>
 
@@ -187,13 +234,15 @@ const purchaseNumberFromNotes = (notes) => {
               <th class="px-3 py-2 border">Paid</th>
               <th class="px-3 py-2 border">Due</th>
               <th class="px-3 py-2 border">Type</th>
+              <th class="px-3 py-2 border">Account</th>
               <th class="px-3 py-2 border">Status</th>
+              <th class="px-3 py-2 border">Stock Approval</th>
               <th class="px-3 py-2 border">Action</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="payment in rows" :key="payment.id" class="hover:bg-gray-50">
-              <td class="px-3 py-2 border">{{ payment.payment_date }}</td>
+              <td class="px-3 py-2 border">{{ formatDate(payment.payment_date) }}</td>
               <td class="px-3 py-2 border">
                 <div>{{ payment.supplier?.name ?? 'N/A' }}</div>
                 <div v-if="purchaseNumberFromNotes(payment.notes)" class="mt-1">
@@ -206,16 +255,32 @@ const purchaseNumberFromNotes = (notes) => {
               <td class="px-3 py-2 border">{{ money(payment.paid_amount) }}</td>
               <td class="px-3 py-2 border">{{ money(payment.due_amount) }}</td>
               <td class="px-3 py-2 border">{{ payment.payment_type }}</td>
+              <td class="px-3 py-2 border">{{ payment.payment_account?.name ?? 'Cash' }}</td>
               <td class="px-3 py-2 border">
                 <span
                   class="px-2 py-1 text-xs rounded"
                   :class="payment.status === 'paid' ? 'text-emerald-700 bg-emerald-100' : 'text-amber-700 bg-amber-100'"
                 >
-                  {{ payment.status }}
+                  {{ payment.status === 'paid' ? 'Paid' : 'Pending' }}
                 </span>
               </td>
               <td class="px-3 py-2 border">
+                <template v-if="payment.linked_purchase">
+                  <span class="px-2 py-1 text-xs rounded" :class="stockApprovalClass(payment)">
+                    {{ stockApprovalStatus(payment) }}
+                  </span>
+                </template>
+                <span v-else class="text-gray-400">N/A</span>
+              </td>
+              <td class="px-3 py-2 border">
                 <div class="flex flex-wrap gap-2">
+                  <Link
+                    v-if="canApproveStock(payment)"
+                    :href="route('backend.medicinepurchase.show', payment.linked_purchase.id)"
+                    class="px-2 py-1 text-xs text-white bg-emerald-600 rounded hover:bg-emerald-700"
+                  >
+                    Approve Stock
+                  </Link>
                   <Link :href="route('backend.supplierpayment.edit', payment.id)" class="px-2 py-1 text-xs text-black bg-yellow-400 rounded hover:bg-yellow-500">
                     Edit
                   </Link>
@@ -234,7 +299,7 @@ const purchaseNumberFromNotes = (notes) => {
               </td>
             </tr>
             <tr v-if="rows.length === 0">
-              <td colspan="8" class="px-3 py-6 text-center text-gray-500 border">No supplier payments found.</td>
+              <td colspan="10" class="px-3 py-6 text-center text-gray-500 border">No supplier payments found.</td>
             </tr>
           </tbody>
         </table>
@@ -286,6 +351,20 @@ const purchaseNumberFromNotes = (notes) => {
               class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
             >
             <p class="mt-1 text-xs text-gray-500">Max: Tk {{ money(partialForm.dueAmount) }}</p>
+          </div>
+
+          <div class="mt-3">
+            <label class="mb-1 block text-sm font-semibold text-gray-700">Payment Account</label>
+            <select
+              v-model="partialForm.payment_account_id"
+              :disabled="isSubmittingPartial"
+              class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+            >
+              <option value="">Select account</option>
+              <option v-for="account in payableAccounts" :key="account.id" :value="account.id">
+                {{ account.name }} ({{ account.code }})
+              </option>
+            </select>
           </div>
         </div>
 

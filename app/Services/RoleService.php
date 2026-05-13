@@ -85,14 +85,18 @@ class RoleService
 
         $roleInfo->syncPermissions($permissions);
 
+        try {
+            app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+        } catch (\Throwable $e) {
+            // ignore cache clearing failures
+        }
+
         return $roleInfo;
     }
     public function roleHasPermission($roleId)
     {
-        $roleInfo=$this->spatieRoleModel->find($roleId);
-
-        $roleInfo->syncPermissions($permissions);
-
-        return $roleInfo;
+        $roleInfo = $this->spatieRoleModel->find($roleId);
+        if (! $roleInfo) return [];
+        return $roleInfo->permissions->pluck('id')->toArray();
     }
 }

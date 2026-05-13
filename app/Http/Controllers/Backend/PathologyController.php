@@ -643,6 +643,8 @@ class PathologyController extends Controller
                     'discount' => 0,
                     'rugound' => 0,
                     'net_amount' => floatval($test['amount'] ?? $testInfo->amount ?? $testInfo->standard_charge),
+                    'commissionable' => $testInfo->commissionable ?? null,
+                    'commission_rate' => $testInfo->commission_rate ?? null,
                     'status' => 'Active',
                 ]);
             }

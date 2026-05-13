@@ -11,7 +11,8 @@ use App\Models\Admin;
 
 echo "== Admin permissions and sideMenus debug ==\n";
 
-$admin = Admin::where('email', 'admin@gmail.com')->first();
+$email = 'eti@gmail.com';
+$admin = Admin::where('email', $email)->first();
 if ($admin) {
     echo "Admin: " . ($admin->email ?? $admin->name ?? 'unknown') . " (id={$admin->id})\n";
 
@@ -34,7 +35,7 @@ if ($admin) {
     }
 
 } else {
-    echo "No admin user with email admin@gmail.com found.\n";
+    echo "No admin user with email {$email} found.\n";
 }
 
 echo "Done.\n";

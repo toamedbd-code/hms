@@ -381,6 +381,45 @@ class IpdDischargeBillingService
         $lines = [];
         $includedTestIds = [];
 
+        // Include any existing Billing->BillItems that were created via
+        // IPD "Add from Hospital Charges" flow. These are stored as
+        // BillItem rows on a Billing and should appear in the running
+        // bill before discharge. We normalize category names and mark
+        // pathology/radiology item ids to avoid duplicate lines later.
+        if (!empty($ipdpatient->billing_id)) {
+            $billing = Billing::query()->with('billItems')->find($ipdpatient->billing_id);
+            if ($billing && $billing->billItems->isNotEmpty()) {
+                foreach ($billing->billItems as $bi) {
+                    $category = $this->normalizeBillItemCategory((string) ($bi->category ?? ''));
+                    $itemId = (int) ($bi->item_id ?? 0);
+
+                    // Legacy safeguard: old IPD manual/admission lines were saved as
+                    // category=Medicine with null/0 item_id. In IPD running/final bill,
+                    // these should be treated as IPD, not pharmacy medicine.
+                    if ($category === 'Medicine' && $itemId <= 0) {
+                        $category = 'IPD';
+                    }
+
+                    if (in_array($category, ['Pathology', 'Radiology'], true) && $itemId > 0) {
+                        $includedTestIds[$itemId] = true;
+                    }
+
+                    $lines[] = [
+                        'item_id' => $itemId,
+                        'item_name' => (string) ($bi->item_name ?? ''),
+                        'category' => $category,
+                        'unit_price' => (float) ($bi->unit_price ?? 0),
+                        'quantity' => (float) ($bi->quantity ?? 1),
+                        'total_amount' => (float) ($bi->total_amount ?? 0),
+                        'discount' => (float) ($bi->discount ?? 0),
+                        'rugound' => (float) ($bi->rugound ?? 0),
+                        'net_amount' => (float) ($bi->net_amount ?? 0),
+                        'status' => (string) ($bi->status ?? 'Active'),
+                    ];
+                }
+            }
+        }
+
         // Pathology tests => BillItem(category=Pathology)
         foreach ($pathologyQuery->get() as $pathology) {
             $tests = is_string($pathology->tests) ? json_decode($pathology->tests, true) : $pathology->tests;
@@ -796,11 +835,48 @@ class IpdDischargeBillingService
 
     private function normalizeBillItemCategory(string $category): string
     {
-        $category = trim($category);
-        if ($category === '') {
+        $c = strtolower(trim($category));
+        if ($c === '') {
+            return 'IPD';
+        }
+
+        if (str_contains($c, 'path')) {
+            return 'Pathology';
+        }
+
+        if (str_contains($c, 'radio') || str_contains($c, 'xray') || str_contains($c, 'ct') || str_contains($c, 'mri')) {
+            return 'Radiology';
+        }
+
+        if (str_contains($c, 'med') || str_contains($c, 'pharm') || str_contains($c, 'drug') || str_contains($c, 'medicine')) {
             return 'Medicine';
         }
-        $allowed = ['Pathology', 'Radiology', 'Medicine'];
-        return in_array($category, $allowed, true) ? $category : 'Medicine';
+
+        // IPD-specific charges: return explicit DB enum values
+        if (str_contains($c, 'room') || str_contains($c, 'rent')) {
+            return 'Room Rent';
+        }
+
+        if (str_contains($c, 'bed')) {
+            return 'Bed Charge';
+        }
+
+        if (str_contains($c, 'ot')) {
+            return 'OT';
+        }
+
+        if (str_contains($c, 'doctor') || str_contains($c, 'visit')) {
+            return 'Doctor Visit';
+        }
+
+        if (str_contains($c, 'ipd') || str_contains($c, 'admission') || str_contains($c, 'indoor')) {
+            return 'IPD';
+        }
+
+        if (str_contains($c, 'opd') || str_contains($c, 'outdoor')) {
+            return 'OPD';
+        }
+
+        return 'IPD';
     }
 }

@@ -37,6 +37,8 @@
     </style>
 </head>
 <body>
+    @includeIf('prints.partials._header')
+
     <div class="card">
         <div class="title">Expense Details</div>
         <div class="row"><span class="label">Expense Head:</span>{{ $expense->expenseHead->name ?? 'N/A' }}</div>

@@ -1253,9 +1253,10 @@ const formatSampleDateTime = (value) => {
                 :id="`note_top_${item.id}`"
                 :ref="(el) => setEditorRef(el, item.id)"
                 contenteditable="true"
-                class="block w-full min-h-[46px] p-3 text-sm leading-7 rounded-md shadow-sm border-slate-300 focus:border-indigo-300 overflow-hidden"
+                class="report-editable-field block w-full min-h-[46px] p-3 text-sm leading-7 rounded-md shadow-sm border-slate-300 focus:border-indigo-300 overflow-hidden"
                 :style="`font-family: ${UNIVERSAL_FONT_STACK}; line-height: ${editorUiState[item.id]?.lineHeight || '1.75'};`"
                 @input="(e) => onEditorInput(e, item.id)"
+                @click="(e) => e.currentTarget?.focus()"
               ></div>
               <InputError class="mt-1" :message="itemForms[item.id].errors.report_note" />
             </div>
@@ -1354,7 +1355,7 @@ const formatSampleDateTime = (value) => {
                   :ref="(el) => setReportFieldRef(el, item.id)"
                   :value="itemForms[item.id].report_note"
                   rows="1"
-                  class="block w-full min-h-[46px] p-3 text-sm leading-7 rounded-md shadow-sm border-slate-300 focus:border-indigo-300 resize-none overflow-hidden"
+                  class="report-editable-field block w-full min-h-[46px] p-3 text-sm leading-7 rounded-md shadow-sm border-slate-300 focus:border-indigo-300 resize-none overflow-hidden"
                   :style="`font-family: ${UNIVERSAL_FONT_STACK};`"
                   @input="(e) => onPlainReportInput(e, item.id)"
                   :placeholder="getReportNotePlaceholder(item.id)"
@@ -1391,3 +1392,19 @@ const formatSampleDateTime = (value) => {
     </div>
   </BackendLayout>
 </template>
+
+<style scoped>
+.report-editable-field {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+  caret-color: #111827 !important;
+  cursor: text !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  pointer-events: auto !important;
+}
+
+.report-editable-field:focus {
+  outline: none;
+}
+</style>

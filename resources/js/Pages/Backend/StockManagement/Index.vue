@@ -32,11 +32,11 @@ const applyPerPage = () => {
         <div class="flex flex-wrap items-center gap-2">
           <a :href="route('backend.stock.item.create')" class="px-3 py-2 text-sm font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700">Store Item Setup</a>
           <a :href="route('backend.stock.grns')" class="px-3 py-2 text-sm font-semibold text-white bg-cyan-600 rounded hover:bg-cyan-700">GRN Receive</a>
-          <a :href="route('backend.stock.requisitions')" class="px-3 py-2 text-sm font-semibold text-white bg-slate-700 rounded hover:bg-slate-800">Requisitions</a>
+          <a :href="route('backend.stock.requisitions')" class="px-3 py-2 text-sm font-semibold text-white bg-teal-600 rounded hover:bg-teal-700">Requisitions</a>
           <a :href="route('backend.stock.adjustments')" class="px-3 py-2 text-sm font-semibold text-white bg-sky-600 rounded hover:bg-sky-700">Adjustments</a>
           <a :href="route('backend.stock.adjustment.create')" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700">Stock In/Out Entry</a>
           <a :href="route('backend.stock.low-stock-report')" class="px-3 py-2 text-sm font-semibold text-white bg-amber-600 rounded hover:bg-amber-700">Low Stock</a>
-          <a :href="route('backend.stock.movement-report')" class="px-3 py-2 text-sm font-semibold text-white bg-violet-600 rounded hover:bg-violet-700">Movement Report</a>
+          <a :href="route('backend.stock.movement-report')" class="px-3 py-2 text-sm font-semibold text-white bg-fuchsia-600 rounded hover:bg-fuchsia-700">Movement Report</a>
           <a :href="route('backend.stock.monthly-closing')" class="px-3 py-2 text-sm font-semibold text-white bg-rose-600 rounded hover:bg-rose-700">Monthly Closing</a>
         </div>
       </div>

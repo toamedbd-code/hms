@@ -12,10 +12,10 @@ class ChargeRequest extends FormRequest
             case 'POST':
                 return [
                     'name' => 'required|string|max:255',
-                    'charge_type_id' => 'required',
-                    'charge_category_id' => 'required',
-                    'unit_type_id' => 'required',
-                    'tax_category_id' => 'required',
+                    'charge_type_id' => 'nullable',
+                    'charge_category_id' => 'nullable',
+                    'unit_type_id' => 'nullable',
+                    'tax_category_id' => 'nullable',
                     'tax' => 'nullable|numeric',
                     'standard_charge' => 'required|numeric',
                     'description' => 'nullable|string',
@@ -25,10 +25,10 @@ class ChargeRequest extends FormRequest
             case 'PUT':
                 return [
                     'name' => 'required|string|max:255',
-                    'charge_type_id' => 'required',
-                    'charge_category_id' => 'required',
-                    'unit_type_id' => 'required',
-                    'tax_category_id' => 'required',
+                    'charge_type_id' => 'nullable',
+                    'charge_category_id' => 'nullable',
+                    'unit_type_id' => 'nullable',
+                    'tax_category_id' => 'nullable',
                     'tax' => 'nullable|numeric',
                     'standard_charge' => 'required|numeric',
                     'description' => 'nullable|string',
@@ -51,7 +51,6 @@ class ChargeRequest extends FormRequest
         return [
             'name.required' => __('The charge name field is required.'),
             'charge_type_id.required' => __('The charge type field is required.'),
-            'charge_category_id.required' => __('The charge category field is required.'),
             'unit_type_id.required' => __('The unit type field is required.'),
             'tax_category_id.required' => __('The tax category field is required.'),
             'standard_charge.numeric' => __('The standard charge field must be a number.'),

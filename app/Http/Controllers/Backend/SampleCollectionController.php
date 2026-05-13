@@ -25,6 +25,11 @@ class SampleCollectionController extends Controller
 
         $datas = Billing::query()
             ->where('status', 'Active')
+            // Exclude IPD-generated billings (case_number starting with 'IPD-')
+            ->where(function ($q) {
+                $q->whereNull('case_number')
+                    ->orWhere('case_number', 'not like', 'IPD-%');
+            })
             ->when($search !== '', function ($query) use ($search, $allowedCategories) {
                 $query->where(function ($searchQuery) use ($search, $allowedCategories) {
                     $searchQuery
@@ -69,6 +74,11 @@ class SampleCollectionController extends Controller
 
     public function collect(Billing $billing)
     {
+        // Prevent sample collection for IPD invoices
+        if (str_starts_with((string) ($billing->case_number ?? ''), 'IPD-')) {
+            return back()->with('warning', 'Cannot collect samples for IPD invoices.');
+        }
+
         $allowedCategories = $this->resolveDepartmentCategories();
 
         BillItem::query()
@@ -88,6 +98,11 @@ class SampleCollectionController extends Controller
      */
     public function collectItem(BillItem $billItem)
     {
+        // Prevent collecting individual items for IPD invoices
+        if (str_starts_with((string) ($billItem->billing->case_number ?? ''), 'IPD-')) {
+            return response()->json(['error' => 'Cannot collect sample for IPD invoice'], 403);
+        }
+
         $allowedCategories = $this->resolveDepartmentCategories();
 
         if (! in_array($billItem->category, $allowedCategories)) {
@@ -108,6 +123,11 @@ class SampleCollectionController extends Controller
 
     public function barcode(Billing $billing)
     {
+        // No barcodes for IPD-generated billings
+        if (str_starts_with((string) ($billing->case_number ?? ''), 'IPD-')) {
+            return back()->with('warning', 'No sample barcodes for IPD invoices.');
+        }
+
         $allowedCategories = $this->resolveDepartmentCategories();
         $settings = WebSetting::query()->first();
         $scale = (float) ($settings?->barcode_scale ?? 2.2);

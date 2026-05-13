@@ -21,6 +21,11 @@ class ReportDeliveryController extends Controller
      */
     public function sendAll(Billing $billing)
     {
+        // Prevent sending reports for IPD-generated billings
+        if (str_starts_with((string) ($billing->case_number ?? ''), 'IPD-')) {
+            return back()->with('error', 'Cannot send reports for IPD invoices.');
+        }
+
         $allowedCategories = ['Pathology', 'Radiology'];
 
         if ((float) ($billing->due_amount ?? 0) > 0) {
@@ -45,6 +50,11 @@ class ReportDeliveryController extends Controller
      */
     public function deliverAll(Billing $billing)
     {
+        // Prevent delivering reports for IPD-generated billings
+        if (str_starts_with((string) ($billing->case_number ?? ''), 'IPD-')) {
+            return back()->with('error', 'Cannot deliver reports for IPD invoices.');
+        }
+
         $allowedCategories = ['Pathology', 'Radiology'];
 
         if ((float) ($billing->due_amount ?? 0) > 0) {
@@ -73,6 +83,11 @@ class ReportDeliveryController extends Controller
 
         $datas = Billing::query()
             ->where('status', 'Active')
+            // Exclude IPD-generated billings (case_number starting with 'IPD-')
+            ->where(function ($q) {
+                $q->whereNull('case_number')
+                    ->orWhere('case_number', 'not like', 'IPD-%');
+            })
             ->whereHas('billItems', function ($q) use ($allowedCategories) {
                 $q->whereIn('category', $allowedCategories);
             })
@@ -133,6 +148,11 @@ class ReportDeliveryController extends Controller
 
     public function send(BillItem $billItem)
     {
+        // Prevent sending individual report for IPD-generated bill items
+        if (str_starts_with((string) ($billItem->billing->case_number ?? ''), 'IPD-')) {
+            return back()->with('error', 'Cannot send report for IPD invoice item.');
+        }
+
         $billItem->sent_at = now();
         $billItem->sent_via = 'manual';
         $billItem->save();
@@ -142,6 +162,11 @@ class ReportDeliveryController extends Controller
 
     public function deliver(BillItem $billItem)
     {
+        // Prevent delivering individual report for IPD-generated bill items
+        if (str_starts_with((string) ($billItem->billing->case_number ?? ''), 'IPD-')) {
+            return back()->with('error', 'Cannot deliver report for IPD invoice item.');
+        }
+
         $billItem->delivered_at = now();
         $billItem->delivered_by = auth('admin')->id();
         $billItem->save();

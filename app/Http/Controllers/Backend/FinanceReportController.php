@@ -982,16 +982,51 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
             $defaultFontConfig = (new FontVariables())->getDefaults();
             $fontData = $defaultFontConfig['fontdata'];
 
+            // read websetting to respect report header/footer settings
+            $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
+            $attendanceOptions = $websetting?->attendance_device_options ?? [];
+            if (!is_array($attendanceOptions)) {
+                try {
+                    $attendanceOptions = is_string($attendanceOptions) && trim($attendanceOptions) !== '' ? json_decode($attendanceOptions, true) : [];
+                } catch (\Throwable $e) {
+                    $attendanceOptions = [];
+                }
+            }
+            $attendanceOptions = is_array($attendanceOptions) ? $attendanceOptions : [];
+
+            $reporting = data_get($attendanceOptions, 'reporting', []);
+            $settingShowHeader = array_key_exists('show_header', $reporting) ? (bool) $reporting['show_header'] : null;
+            $settingShowFooter = array_key_exists('show_footer', $reporting) ? (bool) $reporting['show_footer'] : null;
+            if ($settingShowHeader !== null || $settingShowFooter !== null) {
+                $showHeader = $settingShowHeader !== null ? $settingShowHeader : true;
+                $showFooter = $settingShowFooter !== null ? $settingShowFooter : true;
+                $showHeaderFooter = $showHeader && $showFooter;
+            } else {
+                $showHeaderFooter = array_key_exists('show_header_footer', $reporting) ? (bool) $reporting['show_header_footer'] : true;
+            }
+            $layout = data_get($reporting, 'layout', []);
+            $reportHeaderHeightPx = max(0, (int) ($layout['header_height'] ?? 115));
+            $reportFooterHeightPx = max(0, (int) ($layout['footer_height'] ?? 70));
+            $pageMarginTop = isset($layout['page_margin_top']) ? (int) $layout['page_margin_top'] : 15;
+            $pageMarginBottom = isset($layout['page_margin_bottom']) ? (int) $layout['page_margin_bottom'] : 15;
+
+            $pxToMm = function ($px) {
+                return round(((float) $px) * 25.4 / 96, 2);
+            };
+
+            $marginHeaderMm = $showHeaderFooter ? $pxToMm($reportHeaderHeightPx) : 0;
+            $marginFooterMm = $showHeaderFooter ? $pxToMm($reportFooterHeightPx) : 0;
+
             $mpdf = new Mpdf([
                 'mode' => 'utf-8',
                 'format' => 'A4',
                 'orientation' => 'P',
                 'margin_left' => 10,
                 'margin_right' => 10,
-                'margin_top' => 15,
-                'margin_bottom' => 15,
-                'margin_header' => 5,
-                'margin_footer' => 5,
+                'margin_top' => max(0, (int) $pageMarginTop),
+                'margin_bottom' => max(0, (int) $pageMarginBottom),
+                'margin_header' => $marginHeaderMm,
+                'margin_footer' => $marginFooterMm,
                 'fontDir' => array_merge($fontDirs, [
                     base_path('storage/fonts'),
                 ]),
@@ -1010,7 +1045,7 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
             $mpdf->setAutoTopMargin = 'stretch';
             $mpdf->setAutoBottomMargin = 'stretch';
 
-            $html = $this->generatePDFHTML($reportType, $reportData, $tableHeaders, $dataFields, $footerTotals, $dateFrom, $dateTo);
+            $html = $this->generatePDFHTML($reportType, $reportData, $tableHeaders, $dataFields, $footerTotals, $dateFrom, $dateTo, $showHeaderFooter);
 
             $mpdf->WriteHTML($html);
 
@@ -1023,7 +1058,7 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
         }
     }
 
-    private function generatePDFHTML($reportType, $reportData, $tableHeaders, $dataFields, $footerTotals, $dateFrom, $dateTo)
+    private function generatePDFHTML($reportType, $reportData, $tableHeaders, $dataFields, $footerTotals, $dateFrom, $dateTo, $showHeaderFooter = true)
     {
         $reportTitle = $this->getReportTitle($reportType);
         $currentDateTime = now()->format('d/m/Y H:i');
@@ -1106,14 +1141,11 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
             }
         </style>
     </head>
-    <body>
-        <div class="header">
-            <div class="subtitle"><strong>' . htmlspecialchars($hospitalName) . '</strong></div>
-            <div class="subtitle">' . htmlspecialchars($hospitalAddress) . '</div>
-            <div class="title">' . htmlspecialchars($reportTitle) . '</div>
-            <div class="subtitle">Generated on: ' . $currentDateTime . '</div>
-            <div class="subtitle">Date Range: ' . $this->formatDateForDisplay($dateFrom) . ' to ' . $this->formatDateForDisplay($dateTo) . '</div>
-        </div>';
+    <body>';
+
+        if ($showHeaderFooter) {
+            $html .= '\n        <div class="header">\n            <div class="subtitle"><strong>' . htmlspecialchars($hospitalName) . '</strong></div>\n            <div class="subtitle">' . htmlspecialchars($hospitalAddress) . '</div>\n            <div class="title">' . htmlspecialchars($reportTitle) . '</div>\n            <div class="subtitle">Generated on: ' . $currentDateTime . '</div>\n            <div class="subtitle">Date Range: ' . $this->formatDateForDisplay($dateFrom) . ' to ' . $this->formatDateForDisplay($dateTo) . '</div>\n        </div>';
+        }
 
         $html .= '
         <div class="summary">

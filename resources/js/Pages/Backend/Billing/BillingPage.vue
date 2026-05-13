@@ -11,6 +11,10 @@ import { parse, format, isValid, differenceInYears, differenceInMonths, differen
 const props = defineProps({
   pageTitle: String,
   pathologyAndRadiologyTests: Array,
+  hospitalCharges: {
+    type: Array,
+    default: () => [],
+  },
   medicineInventories: Array,
   doctors: Array,
   patients: Array,
@@ -23,9 +27,9 @@ const props = defineProps({
 });
 
 const page = usePage();
-const unitCompanyName = computed(() => page.props.webSetting?.company_name || 'ToaMed.');
+const unitCompanyName = computed(() => (page.props.websetting ?? page.props.webSetting)?.company_name || 'ToaMed.');
 const maxBillingDiscountPercent = computed(() => {
-  const raw = Number(page.props?.webSetting?.max_billing_discount_percent ?? 100);
+  const raw = Number((page.props.websetting ?? page.props.webSetting)?.max_billing_discount_percent ?? 100);
   if (!Number.isFinite(raw)) return 100;
   return Math.min(100, Math.max(0, raw));
 });
@@ -479,6 +483,13 @@ const handleCardNumberEnter = (event) => {
       discountRef.value?.focus();
     });
   }
+};
+
+const selectAllOnFocus = (event) => {
+  const el = event.target;
+  nextTick(() => {
+    el.select();
+  });
 };
 
 const handleDiscountEnter = (event) => {
@@ -1019,6 +1030,9 @@ const updateCommissionRate = (referrer) => {
     pathology: referrer.pathology_commission || 0,
     radiology: referrer.radiology_commission || 0,
     medicine: referrer.pharmacy_commission || 0,
+    opd: referrer.opd_commission || 0,
+    ipd: referrer.ipd_commission || 0,
+    appointment: referrer.opd_commission || 0,
   };
 
   commissionDetails.value.hasPathologyCommission =
@@ -1062,6 +1076,15 @@ const updateCommissionRate = (referrer) => {
       case "medicine":
         rate = availableCommissions.medicine;
         break;
+      case "opd":
+        rate = availableCommissions.opd;
+        break;
+      case "ipd":
+        rate = availableCommissions.ipd;
+        break;
+      case "appointment":
+        rate = availableCommissions.appointment;
+        break;
     }
 
     const categoryAmount = categoryData[category].totalAmount;
@@ -1085,6 +1108,15 @@ const updateCommissionRate = (referrer) => {
     categoriesWithoutCommission.length > 0 &&
     categoriesWithCommission.length > 0
   ) {
+    const totalBillAmount = summary.value.payableAmount || summary.value.total;
+    const effectiveCommissionRate =
+      totalBillAmount > 0 ? (totalCommissionAmount / totalBillAmount) * 100 : 0;
+
+    commission.value.commissionRate = parseFloat(effectiveCommissionRate.toFixed(2));
+    commission.value.slider = parseFloat(effectiveCommissionRate.toFixed(2));
+    commissionDetails.value.manualCommissionEnabled = false;
+    commissionDetails.value.noCommissionMessage = "";
+  } else {
     const totalBillAmount = summary.value.payableAmount || summary.value.total;
     const effectiveCommissionRate =
       totalBillAmount > 0 ? (totalCommissionAmount / totalBillAmount) * 100 : 0;
@@ -1183,6 +1215,18 @@ const commissionBreakdown = computed(() => {
         rate = selectedReferrer.pharmacy_commission || 0;
         rateName = "Pharmacy Commission";
         break;
+      case "opd":
+        rate = selectedReferrer.opd_commission || 0;
+        rateName = "OPD Commission";
+        break;
+      case "ipd":
+        rate = selectedReferrer.ipd_commission || 0;
+        rateName = "IPD Commission";
+        break;
+      case "appointment":
+        rate = selectedReferrer.opd_commission || 0;
+        rateName = "Appointment Commission";
+        break;
     }
 
     const categoryTotal = categoryTotals[category].total;
@@ -1221,7 +1265,15 @@ const allAvailableItems = computed(() => {
       type: "medicine",
     }));
 
-  return [...tests, ...medicines];
+  const hospitalCharges = props.hospitalCharges.map((charge) => ({
+    id: charge.id,
+    name: charge.name,
+    category: charge.module,
+    unitPrice: charge.amount,
+    type: "charge",
+  }));
+
+  return [...tests, ...medicines, ...hospitalCharges];
 });
 
 const deliveryDateFormatted = computed(() => {
@@ -1240,7 +1292,9 @@ const filteredItems = computed(() => {
   let itemsToFilter = [];
 
   if (itemForm.value.category) {
-    if (itemForm.value.category.toLowerCase() === "medicine") {
+    const selectedCategory = itemForm.value.category.toLowerCase();
+
+    if (selectedCategory === "medicine") {
       itemsToFilter = props.medicineInventories
         .filter((medicine) => medicine.status === "Active")
         .map((medicine) => ({
@@ -1250,6 +1304,16 @@ const filteredItems = computed(() => {
           unitPrice: medicine.medicine_unit_selling_price,
           stock: medicine.medicine_quantity,
           type: "medicine",
+        }));
+    } else if (["opd", "ipd", "appointment"].includes(selectedCategory)) {
+      itemsToFilter = props.hospitalCharges
+        .filter((charge) => charge.module.toLowerCase() === selectedCategory)
+        .map((charge) => ({
+          id: charge.id,
+          name: charge.name,
+          category: charge.module,
+          unitPrice: charge.amount,
+          type: "charge",
         }));
     } else {
       itemsToFilter = props.pathologyAndRadiologyTests
@@ -1291,7 +1355,7 @@ const addItem = () => {
     );
 
     if (existingItem) {
-      displayWarning({ message: "This test has already been added to the cart." });
+      displayWarning({ message: "This item has already been added to the cart." });
       itemForm.value = {
         category: "",
         itemName: "",
@@ -2366,8 +2430,8 @@ const handleDoctorSearchInput = (event) => {
                   <!-- Display text normally; on hover show editable inputs -->
                   <div class="relative" @mouseenter="billingEditing = true" @mouseleave="billingEditing = false">
                     <template v-if="!billingEditing">
-                      <span class="text-[10px] text-white/80 px-2">{{ billingLiveText }}</span>
-                      <button @click.prevent="billingEditing = true" class="ml-1 text-white/60 hover:text-white text-xs" title="Edit">
+                      <span class="text-[10px] text-white px-2">{{ billingLiveText }}</span>
+                      <button @click.prevent="billingEditing = true" class="ml-1 text-white hover:text-white text-xs" title="Edit">
                         ✎
                       </button>
                     </template>
@@ -2375,7 +2439,7 @@ const handleDoctorSearchInput = (event) => {
                       <input
                         type="date"
                         v-model="billingDate"
-                        class="px-2 py-1 border border-white/30 rounded text-[11px] bg-white/10 focus:border-white focus:outline-none"
+                        class="px-2 py-1 border border-white/30 rounded text-[11px] text-white bg-white/10 focus:border-white focus:outline-none"
                         ref="billingDateRef"
                         @input="handleBillingDateTimeInput"
                       />
@@ -2383,7 +2447,7 @@ const handleDoctorSearchInput = (event) => {
                         type="time"
                         v-model="billingTime"
                         step="1"
-                        class="px-2 py-1 border border-white/30 rounded text-[11px] bg-white/10 focus:border-white focus:outline-none ml-2"
+                        class="px-2 py-1 border border-white/30 rounded text-[11px] text-white bg-white/10 focus:border-white focus:outline-none ml-2"
                         ref="billingTimeRef"
                         @input="handleBillingDateTimeInput"
                       />
@@ -2396,7 +2460,7 @@ const handleDoctorSearchInput = (event) => {
                       v-model="prescriptionSearchId"
                       ref="prescriptionSearchInputRef"
                       type="text"
-                      class="px-2 py-1 border border-white/30 rounded text-[11px] bg-white/10 text-white placeholder-white/70 focus:border-white focus:outline-none"
+                      class="px-2 py-1 border border-slate-200 rounded text-[11px] bg-white text-slate-900 placeholder-slate-600 focus:border-slate-400 focus:outline-none"
                       placeholder="Prescription ID"
                       @input="handlePrescriptionInput"
                       @focus="handlePrescriptionInput"
@@ -2436,11 +2500,13 @@ const handleDoctorSearchInput = (event) => {
                 </div>
               <a :href="route('backend.billing.view')" target="_blank"
                 class="flex items-center px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-xs transition-colors duration-200 shadow-sm"
+                style="color: #ffffff !important"
                 title="Billing List">
                 Billing Add
               </a>
               <a :href="route('backend.billing.list')" target="_blank"
                 class="flex items-center px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-xs transition-colors duration-200 shadow-sm"
+                style="color: #ffffff !important"
                 title="Billing List">
                 Billing List
               </a>
@@ -2471,6 +2537,9 @@ const handleDoctorSearchInput = (event) => {
                   <option value="Pathology">Pathology</option>
                   <option value="Radiology">Radiology</option>
                   <option value="Medicine">Medicine</option>
+                  <option value="OPD">OPD</option>
+                  <option value="IPD">IPD</option>
+                  <option value="Appointment">Appointment</option>
                 </select>
               </div>
               <div class="lg:col-span-2 relative">
@@ -2483,9 +2552,9 @@ const handleDoctorSearchInput = (event) => {
                   <div v-if="searchQuery || (itemForm.category && filteredItems.length > 0)"
                     class="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto dark:bg-slate-700 dark:border-gray-600">
                     <ul>
-                      <li v-for="(item, index) in filteredItems" :key="item.id" @click="selectItem(item)"
+                      <li v-for="(item, index) in filteredItems" :key="`${item.type}-${item.category}-${item.id}`" @click="selectItem(item)"
                         @keypress.enter="selectItem(item);" :class="['list-focus px-3 py-2 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-600',
-                          { 'bg-blue-100 dark:bg-blue-700': index === selectedIndex }]"
+                          { 'bg-slate-300 dark:bg-slate-500 text-slate-900 dark:text-white font-semibold': index === selectedIndex }]"
                         :ref="(el) => { if (index === selectedIndex) selectedItemRef = el }">
                         <div class="flex justify-between">
                           <span>{{ item.name }}</span>
@@ -2570,6 +2639,12 @@ const handleDoctorSearchInput = (event) => {
                           item.category === 'Radiology',
                         'bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs':
                           item.category === 'Medicine',
+                        'bg-amber-100 text-amber-800 px-2 py-1 rounded-full text-xs':
+                          item.category === 'OPD',
+                        'bg-cyan-100 text-cyan-800 px-2 py-1 rounded-full text-xs':
+                          item.category === 'IPD',
+                        'bg-rose-100 text-rose-800 px-2 py-1 rounded-full text-xs':
+                          item.category === 'Appointment',
                       }">
                         {{ item.category }}
                       </span>
@@ -2832,7 +2907,7 @@ const handleDoctorSearchInput = (event) => {
                 <div class="flex">
                   <input v-model="summary.discount" type="number" step="1" min="0" :max="summary.discountType === 'percentage' ? maxBillingDiscountPercent : null" id="discount"
                     class="w-full px-2 py-1.5 border border-gray-300 rounded-l text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                    ref="discountRef" @keydown="handleDiscountEnter" />
+                    ref="discountRef" @keydown="handleDiscountEnter" @click="selectAllOnFocus" @focus="selectAllOnFocus" />
                   <span
                     class="px-2 py-1.5 bg-gray-200 border-t border-b border-r border-gray-300 rounded-r text-xs dark:bg-gray-600 dark:text-gray-200">৳</span>
                 </div>
@@ -2843,7 +2918,7 @@ const handleDoctorSearchInput = (event) => {
                   <input v-model="summary.extraFlatDiscount" @input="updateSummary" type="number" step="1" min="0"
                     id="extraFlatDiscount"
                     class="w-full px-2 py-1.5 border border-gray-300 rounded-l text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                    placeholder="Additional flat discount" ref="extraDiscountRef" @keydown="handleExtraDiscountEnter" />
+                    placeholder="Additional flat discount" ref="extraDiscountRef" @keydown="handleExtraDiscountEnter" @click="selectAllOnFocus" @focus="selectAllOnFocus" />
                   <span
                     class="px-2 py-1.5 bg-gray-200 border-t border-b border-r border-gray-300 rounded-r text-xs dark:bg-gray-600 dark:text-gray-200">৳</span>
                 </div>
@@ -2864,7 +2939,7 @@ const handleDoctorSearchInput = (event) => {
                 <div class="flex">
                   <input v-model="summary.receivingAmt" type="number" step="0.01" min="0" id="receivingAmt"
                     class="w-full px-2 py-1.5 border border-blue-500 rounded-l text-xs focus:border-blue-700 focus:outline-none bg-blue-50 dark:bg-blue-900 dark:border-blue-400 dark:text-blue-100"
-                    placeholder="Amount given by customer" ref="receivingAmtRef" @keydown="handleReceivingAmtEnter" />
+                    placeholder="Amount given by customer" ref="receivingAmtRef" @keydown="handleReceivingAmtEnter" @click="selectAllOnFocus" @focus="selectAllOnFocus" />
                   <span
                     class="px-2 py-1.5 bg-blue-200 border-t border-b border-r border-blue-500 rounded-r text-xs font-semibold dark:bg-blue-700 dark:text-blue-100">৳</span>
                 </div>

@@ -152,9 +152,13 @@ class DepartmentController extends Controller
 
                 DB::commit();
 
-                return redirect()
-                    ->back()
-                    ->with('successMessage', $message);
+                    if ($request->wantsJson()) {
+                        return response()->json(['department' => $dataInfo, 'successMessage' => $message], 201);
+                    }
+
+                    return redirect()
+                        ->back()
+                        ->with('successMessage', $message);
             } else {
                 DB::rollBack();
 

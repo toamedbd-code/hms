@@ -104,13 +104,13 @@ onUnmounted(() => {
         </a>
 
         <a v-if="canViewExpiringMedicines" :href="route('backend.medicineinventory.index', { expiry_filter: 'expiring_soon' })" target="_blank"
-          class="bg-amber-50 border border-amber-200 rounded-lg shadow-sm hover:shadow-md transition-all p-4 flex items-center hover:-translate-y-1">
-          <div class="w-12 h-12 bg-amber-500 text-white text-xl rounded-lg flex items-center justify-center mr-3">
+          class="bg-rose-50 border border-rose-200 rounded-lg shadow-sm hover:shadow-md transition-all p-4 flex items-center hover:-translate-y-1">
+          <div class="w-12 h-12 bg-amber-400 text-white text-xl rounded-lg flex items-center justify-center mr-3">
             !!
           </div>
           <div>
-            <p class="text-sm font-medium text-amber-700">Expiring In 30 Days</p>
-            <p class="text-lg font-bold text-amber-900">
+            <p class="text-sm font-medium text-amber-600">Expiring In 30 Days</p>
+            <p class="text-lg font-bold text-amber-700">
               {{ countFormat($page.props.pharmacyAlerts?.medicineExpiry?.expiring_soon_count) }}
             </p>
           </div>

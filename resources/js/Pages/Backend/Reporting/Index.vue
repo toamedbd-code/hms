@@ -53,7 +53,8 @@ const submitSearch = () => {
         <div class="flex items-center gap-3">
           <Link
             :href="route('backend.dashboard')"
-            class="px-3 py-1 text-xs text-white bg-slate-600 rounded hover:bg-slate-700"
+            class="inline-flex items-center rounded-md border border-slate-700 bg-slate-700 px-3 py-1.5 text-xs font-semibold tracking-wide text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+            style="color: #ffffff !important"
           >
             Back
           </Link>

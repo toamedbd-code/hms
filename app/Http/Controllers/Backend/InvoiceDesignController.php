@@ -28,7 +28,7 @@ class InvoiceDesignController extends Controller
         $this->invoicedesignService = $invoicedesignService;
 
         $this->middleware('auth:admin');
-        $this->middleware('permission:invoice-design-list');
+        $this->middleware('permission:invoice-design-list|invoicedesign-management');
         $this->middleware('permission:invoice-design-list-create', ['only' => ['create', 'store']]);
         $this->middleware('permission:invoice-design-list-edit', ['only' => ['edit', 'update']]);
         $this->middleware('permission:invoice-design-list-delete', ['only' => ['destroy']]);

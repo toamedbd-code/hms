@@ -25,10 +25,10 @@ class ChargeTaxCategoryController extends Controller
 
         $this->middleware('auth:admin');
         $this->middleware('permission:charge-tax-category-list');
-        $this->middleware('permission:charge-tax-category-create', ['only' => ['create', 'store']]);
-        $this->middleware('permission:charge-tax-category-edit', ['only' => ['edit', 'update']]);
-        $this->middleware('permission:charge-tax-category-delete', ['only' => ['destroy']]);
-        $this->middleware('permission:charge-tax-category-status', ['only' => ['changeStatus']]);
+        $this->middleware('permission:charge-tax-category-list-create', ['only' => ['create', 'store']]);
+        $this->middleware('permission:charge-tax-category-list-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:charge-tax-category-list-delete', ['only' => ['destroy']]);
+        $this->middleware('permission:charge-tax-category-list-status', ['only' => ['changeStatus']]);
     }
 
 

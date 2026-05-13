@@ -80,7 +80,7 @@ class PathologyTestRequest extends FormRequest
     {
         return [
             'category_type.required' => __('The category type field is required.'),
-            'test_name.required' => 'The test name field is required.',
+            'test_name.required' => 'The item name field is required.',
             'test_category_id.required' => 'The category field is required.',
             'test_sub_category_id.required' => 'The sub category field is required.',
             'test_category_id.exists' => 'The selected category is invalid.',

@@ -669,13 +669,13 @@ const goToRadiologyList = () => {
                             <!-- Searchable Test Name Field -->
                             <div class="relative">
                                 <div class="mb-2">
-                                    <span class="text-sm font-medium text-black">Test Name</span>
+                                    <span class="text-sm font-medium text-black">Item Name</span>
                                     <span class="text-red-500 ml-1">*</span>
                                 </div>
                                 <input :id="`testSearch_${index}`" v-model="searchQueries[test.id]"
                                     @input="handleTestSearch(index, $event.target.value)"
                                     @focus="handleTestFocus(index)" @blur="handleTestBlur(index, $event)"
-                                    @keydown="handleTestKeydown(index, $event)" type="text" placeholder="Search test..."
+                                    @keydown="handleTestKeydown(index, $event)" type="text" placeholder="Search item..."
                                     class="block w-full px-3 py-2 text-sm border border-gray-300 rounded focus:border-blue-500 focus:outline-none"
                                     autocomplete="off" />
 
@@ -707,8 +707,8 @@ const goToRadiologyList = () => {
                                 <!-- No results found -->
                                 <div v-if="showDropdowns[test.id] && getFilteredTests(test.id).length === 0 && searchQueries[test.id]"
                                     class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg">
-                                    <div class="px-3 py-2 text-sm text-gray-500 text-center">
-                                        No tests found
+                                        <div class="px-3 py-2 text-sm text-gray-500 text-center">
+                                        No items found
                                     </div>
                                 </div>
 
@@ -766,7 +766,7 @@ const goToRadiologyList = () => {
                 <div class="mb-8">
                     <button type="button" @click="addTest"
                         class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700">
-                        <span class="mr-1">+</span> Add Test
+                        <span class="mr-1">+</span> Add Item
                     </button>
                     <label class="ml-4 inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded cursor-pointer">
                         Import CSV

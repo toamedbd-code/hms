@@ -87,10 +87,17 @@ class AdminRequest extends FormRequest
             'other_documents' => 'nullable|file|mimes:pdf,doc,docx|max:25048',
         ];
 
-        // Add conditional validation for charge when role is Doctor
-        if ($this->input('role_id') == 2 ) {
-            $rules['doctor_charge'] = 'required|numeric|min:0';
-            $rules['specialist_id'] = 'required';
+        // Add conditional validation for doctor_charge when selected role is Doctor
+        if ($this->input('role_id')) {
+            try {
+                $role = \Spatie\Permission\Models\Role::find($this->input('role_id'));
+                if ($role && strtolower((string) $role->name) === 'doctor') {
+                    $rules['doctor_charge'] = 'required|numeric|min:0';
+                    $rules['specialist_id'] = 'required';
+                }
+            } catch (\Throwable $_) {
+                // ignore and continue without conditional validation
+            }
         }
 
         return $rules;
@@ -129,9 +136,9 @@ class AdminRequest extends FormRequest
             'designation_id.exists' => __('Selected designation does not exist.'),
             'department_id.exists' => __('Selected department does not exist.'),
             'specialist_id.exists' => __('Selected specialist does not exist.'),
-            'charge.required' => __('The charge field is required for doctors.'),
-            'charge.numeric' => __('The charge must be a number.'),
-            'charge.min' => __('The charge must be at least 0.'),
+            'doctor_charge.required' => __('The charge field is required for doctors.'),
+            'doctor_charge.numeric' => __('The charge must be a number.'),
+            'doctor_charge.min' => __('The charge must be at least 0.'),
             
             // Payroll
             'basic_salary.numeric' => __('Basic salary must be a number.'),

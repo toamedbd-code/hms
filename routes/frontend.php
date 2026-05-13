@@ -17,18 +17,6 @@ use Illuminate\Support\Facades\Route;
 */
 
 
-Route::get('/cache-clear', function () {
-    Artisan::call('cache:clear');
-    Artisan::call('route:clear');
-    Artisan::call('config:clear');
-    Artisan::call('view:clear');
-    Artisan::call('clear-compiled');
-    Artisan::call('optimize:clear');
-    Artisan::call('storage:link');
-    // Artisan::call('optimize');
-    session()->flash('message', 'System Updated Successfully.');
-    return redirect()->route('frontend.home');
-});
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
 

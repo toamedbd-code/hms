@@ -18,7 +18,10 @@ class ReportSettingController extends Controller
 
     public function edit()
     {
-        $settings = WebSetting::query()->first();
+        $settings = WebSetting::where('status', 'Active')->orderByDesc('id')->first();
+        if (! $settings) {
+            $settings = WebSetting::query()->orderByDesc('id')->first();
+        }
 
         if (!$settings) {
             return redirect()->route('backend.websetting.create')
@@ -38,7 +41,10 @@ class ReportSettingController extends Controller
 
     public function update(ReportSettingRequest $request)
     {
-        $settings = WebSetting::query()->first();
+        $settings = WebSetting::where('status', 'Active')->orderByDesc('id')->first();
+        if (! $settings) {
+            $settings = WebSetting::query()->orderByDesc('id')->first();
+        }
 
         if (!$settings) {
             return redirect()->route('backend.websetting.create')
@@ -60,12 +66,27 @@ class ReportSettingController extends Controller
         // ensure array
         $attendanceOptions = is_array($attendanceOptions) ? $attendanceOptions : [];
 
-        // set reporting.show_header_footer
+        // support both combined and separate header/footer toggles
         if (array_key_exists('report_show_header_footer', $data)) {
             $show = $data['report_show_header_footer'];
             $show = $show === '0' || $show === 0 || $show === false ? false : (bool) $show;
-            data_set($attendanceOptions, 'reporting.show_header_footer', $show);
+            data_set($attendanceOptions, 'reporting.show_header', $show);
+            data_set($attendanceOptions, 'reporting.show_footer', $show);
             unset($data['report_show_header_footer']);
+        }
+
+        if (array_key_exists('report_show_header', $data)) {
+            $showHeader = $data['report_show_header'];
+            $showHeader = $showHeader === '0' || $showHeader === 0 || $showHeader === false ? false : (bool) $showHeader;
+            data_set($attendanceOptions, 'reporting.show_header', $showHeader);
+            unset($data['report_show_header']);
+        }
+
+        if (array_key_exists('report_show_footer', $data)) {
+            $showFooter = $data['report_show_footer'];
+            $showFooter = $showFooter === '0' || $showFooter === 0 || $showFooter === false ? false : (bool) $showFooter;
+            data_set($attendanceOptions, 'reporting.show_footer', $showFooter);
+            unset($data['report_show_footer']);
         }
 
         if (array_key_exists('report_margin_top', $data)) {

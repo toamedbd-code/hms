@@ -41,64 +41,64 @@ class StoreManagementMenuSeeder extends Seeder
                     'name' => 'Store Item Setup',
                     'icon' => 'package',
                     'route' => 'backend.stock.item.create',
-                    'permission_name' => 'stock-report-list-create',
-                    'sorting' => 19,
+                    'permission_name' => 'store-item-setup',
+                    'sorting' => 1,
                 ],
                 [
-                    'name' => 'Store Dashboard',
+                    'name' => 'Stock Management',
                     'icon' => 'box',
                     'route' => 'backend.stock.index',
-                    'permission_name' => 'stock-report-list',
-                    'sorting' => 20,
+                    'permission_name' => 'stock-management',
+                    'sorting' => 2,
                 ],
                 [
                     'name' => 'Department Requisitions',
                     'icon' => 'clipboard',
                     'route' => 'backend.stock.requisitions',
-                    'permission_name' => 'stock-report-list',
-                    'sorting' => 20,
+                    'permission_name' => 'department-requisitions',
+                    'sorting' => 3,
                 ],
                 [
                     'name' => 'GRN Receive',
                     'icon' => 'download-cloud',
                     'route' => 'backend.stock.grns',
-                    'permission_name' => 'stock-report-list',
-                    'sorting' => 21,
+                    'permission_name' => 'grn-receive',
+                    'sorting' => 4,
                 ],
                 [
                     'name' => 'Store Adjustments',
                     'icon' => 'shuffle',
                     'route' => 'backend.stock.adjustments',
-                    'permission_name' => 'stock-report-list',
-                    'sorting' => 22,
+                    'permission_name' => 'store-adjustments',
+                    'sorting' => 5,
                 ],
                 [
                     'name' => 'Stock In/Out Entry',
                     'icon' => 'plus-circle',
                     'route' => 'backend.stock.adjustment.create',
-                    'permission_name' => 'stock-report-list-create',
-                    'sorting' => 22,
+                    'permission_name' => 'stock-in-out-entry',
+                    'sorting' => 6,
                 ],
                 [
                     'name' => 'Low Stock Report',
                     'icon' => 'alert-triangle',
                     'route' => 'backend.stock.low-stock-report',
-                    'permission_name' => 'stock-report-list',
-                    'sorting' => 23,
+                    'permission_name' => 'low-stock-report',
+                    'sorting' => 7,
                 ],
                 [
                     'name' => 'Stock Movement Report',
                     'icon' => 'trending-up',
                     'route' => 'backend.stock.movement-report',
-                    'permission_name' => 'stock-report-list',
-                    'sorting' => 24,
+                    'permission_name' => 'stock-movement-report',
+                    'sorting' => 8,
                 ],
                 [
                     'name' => 'Monthly Closing',
                     'icon' => 'file-text',
                     'route' => 'backend.stock.monthly-closing',
-                    'permission_name' => 'stock-report-list',
-                    'sorting' => 25,
+                    'permission_name' => 'monthly-closing',
+                    'sorting' => 9,
                 ],
             ];
 
@@ -121,39 +121,40 @@ class StoreManagementMenuSeeder extends Seeder
                 $menu->save();
             }
 
-            $stockBasePermission = Permission::query()->firstOrCreate(
-                [
-                    'name' => 'stock-report-list',
-                    'guard_name' => 'admin',
-                ],
-                [
-                    'parent_id' => $storeParentPermission->id,
-                ]
-            );
+            $storePermissionNames = [
+                'store-item-setup',
+                'stock-management',
+                'department-requisitions',
+                'grn-receive',
+                'store-adjustments',
+                'stock-in-out-entry',
+                'low-stock-report',
+                'stock-movement-report',
+                'monthly-closing',
+            ];
 
-            if ((int) $stockBasePermission->parent_id !== (int) $storeParentPermission->id) {
-                $stockBasePermission->parent_id = $storeParentPermission->id;
-                $stockBasePermission->save();
-            }
+            foreach ($storePermissionNames as $index => $permissionName) {
+                $permission = Permission::query()->firstOrCreate(
+                    [
+                        'name' => $permissionName,
+                        'guard_name' => 'admin',
+                    ],
+                    [
+                        'parent_id' => $storeParentPermission->id,
+                        'sorting' => $index + 1,
+                    ]
+                );
 
-            $stockCreatePermission = Permission::query()->firstOrCreate(
-                [
-                    'name' => 'stock-report-list-create',
-                    'guard_name' => 'admin',
-                ],
-                [
-                    'parent_id' => $stockBasePermission->id,
-                ]
-            );
-
-            if ((int) $stockCreatePermission->parent_id !== (int) $stockBasePermission->id) {
-                $stockCreatePermission->parent_id = $stockBasePermission->id;
-                $stockCreatePermission->save();
+                if ((int) ($permission->parent_id ?? 0) !== (int) $storeParentPermission->id || (int) ($permission->sorting ?? 0) !== ($index + 1)) {
+                    $permission->parent_id = $storeParentPermission->id;
+                    $permission->sorting = $index + 1;
+                    $permission->save();
+                }
             }
 
             // Backfill store permissions for roles that already have stock access.
             $stockPermissions = Permission::query()
-                ->whereIn('name', ['store-management', 'stock-report-list', 'stock-report-list-create'])
+                ->whereIn('name', array_merge(['store-management'], $storePermissionNames))
                 ->where('guard_name', 'admin')
                 ->pluck('name')
                 ->all();

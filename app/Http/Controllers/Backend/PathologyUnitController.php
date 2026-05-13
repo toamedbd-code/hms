@@ -36,7 +36,7 @@ class PathologyUnitController extends Controller
         return Inertia::render(
             'Backend/PathologyUnit/Index',
             [
-                'pageTitle' => fn() => 'Test Unit List',
+                'pageTitle' => fn() => 'Item Unit List',
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
@@ -118,7 +118,7 @@ class PathologyUnitController extends Controller
         return Inertia::render(
             'Backend/PathologyUnit/Form',
             [
-                'pageTitle' => fn() => 'Test Unit Create',
+                'pageTitle' => fn() => 'Item Unit Create',
             ]
         );
     }
@@ -135,7 +135,7 @@ class PathologyUnitController extends Controller
             $dataInfo = $this->pathologyunitService->create($data);
 
             if ($dataInfo) {
-                $message = 'Test unit created successfully';
+                $message = 'Item unit created successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'testunits', $message);
 
                 DB::commit();
@@ -146,7 +146,7 @@ class PathologyUnitController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To create Pathology Unit.";
+                $message = "Failed To create Item Unit.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -172,7 +172,7 @@ class PathologyUnitController extends Controller
         return Inertia::render(
             'Backend/PathologyUnit/Form',
             [
-                'pageTitle' => fn() => 'Test Unit Edit',
+                'pageTitle' => fn() => 'Item Unit Edit',
                 'pathologyunit' => fn() => $pathologyunit,
                 'id' => fn() => $id,
             ]
@@ -190,7 +190,7 @@ class PathologyUnitController extends Controller
             $dataInfo = $this->pathologyunitService->update($data, $id);
 
             if ($dataInfo->save()) {
-                $message = 'Test unit updated successfully';
+                $message = 'Item unit updated successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'pathologyunits', $message);
 
                 DB::commit();
@@ -201,7 +201,7 @@ class PathologyUnitController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To update test unit.";
+                $message = "Failed To update item unit.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -225,7 +225,7 @@ class PathologyUnitController extends Controller
         try {
 
             if ($this->pathologyunitService->delete($id)) {
-                $message = 'Test unit deleted successfully';
+                $message = 'Item unit deleted successfully';
                 $this->storeAdminWorkLog($id, 'pathologyunits', $message);
 
                 DB::commit();
@@ -236,7 +236,7 @@ class PathologyUnitController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To Delete test unit.";
+                $message = "Failed To Delete item unit.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);

@@ -13,6 +13,8 @@ class LedgerEntry extends Model
 
     protected $guarded = [];
 
+    protected $fillable = ['transaction_id', 'account_id', 'amount', 'entry_type', 'narration'];
+
     public function transaction()
     {
         return $this->belongsTo(LedgerTransaction::class, 'transaction_id');

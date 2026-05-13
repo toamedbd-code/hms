@@ -38,7 +38,7 @@ class PathologyParameterController extends Controller
         return Inertia::render(
             'Backend/PathologyParameter/Index',
             [
-                'pageTitle' => fn() => 'Test Parameter List',
+                'pageTitle' => fn() => 'Item Parameter List',
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
@@ -135,7 +135,7 @@ class PathologyParameterController extends Controller
         return Inertia::render(
             'Backend/PathologyParameter/Form',
             [
-                'pageTitle' => fn() => 'Test Parameter Create',
+                'pageTitle' => fn() => 'Item Parameter Create',
                 'units' => fn() => $this->pathologyUnitService->activeList()
             ]
         );
@@ -153,7 +153,7 @@ class PathologyParameterController extends Controller
             $dataInfo = $this->pathologyparameterService->create($data);
 
             if ($dataInfo) {
-                $message = 'Test Parameter created successfully';
+                $message = 'Item Parameter created successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'testparameters', $message);
 
                 DB::commit();
@@ -164,7 +164,7 @@ class PathologyParameterController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To create Test Parameter.";
+                $message = "Failed To create Item Parameter.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -190,7 +190,7 @@ class PathologyParameterController extends Controller
         return Inertia::render(
             'Backend/PathologyParameter/Form',
             [
-                'pageTitle' => fn() => 'Test Parameter Edit',
+                'pageTitle' => fn() => 'Item Parameter Edit',
                 'pathologyparameter' => fn() => $pathologyparameter,
                 'id' => fn() => $id,
                 'units' => fn() => $this->pathologyUnitService->activeList()
@@ -209,8 +209,8 @@ class PathologyParameterController extends Controller
 
             $dataInfo = $this->pathologyparameterService->update($data, $id);
 
-            if ($dataInfo->save()) {
-                $message = 'Test Parameter updated successfully';
+                if ($dataInfo->save()) {
+                $message = 'Item Parameter updated successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'pathologyparameters', $message);
 
                 DB::commit();
@@ -221,7 +221,7 @@ class PathologyParameterController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To update test parameters.";
+                $message = "Failed To update item parameters.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -245,7 +245,7 @@ class PathologyParameterController extends Controller
         try {
 
             if ($this->pathologyparameterService->delete($id)) {
-                $message = 'Test Parameter deleted successfully';
+                $message = 'Item Parameter deleted successfully';
                 $this->storeAdminWorkLog($id, 'pathologyparameters', $message);
 
                 DB::commit();
@@ -256,7 +256,7 @@ class PathologyParameterController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To Delete Test Parameter.";
+                $message = "Failed To Delete Item Parameter.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -280,8 +280,8 @@ class PathologyParameterController extends Controller
 
             $dataInfo = $this->pathologyparameterService->changeStatus($id, $status);
 
-            if ($dataInfo->wasChanged()) {
-                $message = 'Test Parameter ' . request()->status . ' Successfully';
+                if ($dataInfo->wasChanged()) {
+                $message = 'Item Parameter ' . request()->status . ' Successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'pathologyparameters', $message);
 
                 DB::commit();
@@ -292,7 +292,7 @@ class PathologyParameterController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To " . request()->status . "Test Parameter.";
+                $message = "Failed To " . request()->status . " Item Parameter.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);

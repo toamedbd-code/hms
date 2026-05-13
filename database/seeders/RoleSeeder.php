@@ -21,6 +21,18 @@ class RoleSeeder extends Seeder
                 ['created_at' => $value['created_at'] ?? now()]
             );
         }
+
+        // Ensure the developer role is marked private so it cannot be
+        // assigned casually to newly created users.
+        try {
+            $dev = Role::where('name', 'developer')->where('guard_name', 'admin')->first();
+            if ($dev) {
+                $dev->is_private = true;
+                $dev->save();
+            }
+        } catch (\Throwable $e) {
+            // ignore
+        }
     }
 
     private function datas()
@@ -34,6 +46,11 @@ class RoleSeeder extends Seeder
             ],
             [
                 'name' => 'Doctor',
+                'guard_name' => 'admin',
+                'created_at' => now(),
+            ],
+            [
+                'name' => 'developer',
                 'guard_name' => 'admin',
                 'created_at' => now(),
             ],

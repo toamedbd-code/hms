@@ -12,7 +12,7 @@
 
     <form method="GET" class="form-inline mb-3">
         <input type="text" name="employee_code" class="form-control mr-2" placeholder="Search employee code" value="{{ request('employee_code') }}">
-        <button type="submit" class="btn btn-primary btn-sm mr-2">Search</button>
+        <button type="submit" class="btn btn-primary btn-sm mr-2 btn-colorful-sm">Search</button>
         <a href="{{ route('backend.attendance.face.encodings') }}" class="btn btn-secondary btn-sm">Reset</a>
     </form>
 

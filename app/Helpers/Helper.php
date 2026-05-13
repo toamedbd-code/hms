@@ -293,7 +293,14 @@ function getSideMenus($user)
 
     $grantedPermissions = collect();
     try {
-        $grantedPermissions = $user->getAllPermissions()->pluck('name')->filter()->values();
+        // Normalize permission names to lowercase trimmed strings so
+        // server-side matching is robust against case/whitespace differences.
+        $grantedPermissions = $user->getAllPermissions()
+            ->pluck('name')
+            ->filter()
+            ->map(function ($n) {
+                return strtolower(trim((string) $n));
+            })->unique()->values();
     } catch (\Throwable $e) {
         $grantedPermissions = collect();
     }
@@ -309,7 +316,7 @@ function getSideMenus($user)
             return false;
         }
 
-        return $grantedPermissions->contains($permissionName);
+        return $grantedPermissions->contains(strtolower($permissionName));
     };
 
     $menus = Menu::with(['childrens' => function ($q) {
@@ -326,13 +333,72 @@ function getSideMenus($user)
         ->orderBy('sorting', 'ASC')
         ->orderBy('id', 'ASC')
         ->get();
+    // Per-user strict filtering control. When an admin's email appears in
+    // the `SIDEBAR_STRICT_EMAILS` env list, we disable any "show-everything"
+    // fallbacks so that the returned menus strictly reflect assigned
+    // permissions/modules for that user.
+    $strictEmailsEnv = env('SIDEBAR_STRICT_EMAILS', '');
+    $strictEmails = array_filter(array_map('trim', explode(',', (string) $strictEmailsEnv)));
+    $userEmailLower = null;
+    try {
+        $userEmailLower = strtolower(trim((string) ($user->email ?? '')));
+    } catch (\Throwable $e) {
+        $userEmailLower = null;
+    }
+    $strictFiltering = $userEmailLower && in_array($userEmailLower, array_map('strtolower', $strictEmails), true);
+    // Config-driven override: optionally force full unfiltered menus for
+    // debugging or for specific users. Controlled via config/sidebar.php
+    // or environment variables (FORCE_FULL_SIDEBAR, FORCE_FULL_SIDEBAR_EMAILS, etc.).
+    try {
+        $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
+        $forceForAll = config('sidebar.force_for_all', env('FORCE_FULL_SIDEBAR_FORCE_ALL', false));
+        $allowDevs = config('sidebar.allow_developers', env('FORCE_FULL_SIDEBAR_ALLOW_DEVS', true));
+        $emailsEnv = env('FORCE_FULL_SIDEBAR_EMAILS', '');
+        $emails = array_filter(array_map('trim', explode(',', (string) $emailsEnv)));
 
-        // If the current user is a developer, return all parent menus and their
-        // children unfiltered so a developer always sees everything.
+        if ($forceFull && !$strictFiltering) {
+            $shouldReturn = false;
+
+            if ($forceForAll) {
+                $shouldReturn = true;
+            } else {
+                $userEmail = null;
+                try {
+                    $userEmail = strtolower(trim((string) ($user->email ?? '')));
+                } catch (\Throwable $e) {
+                    $userEmail = null;
+                }
+
+                if ($userEmail && in_array($userEmail, array_map('strtolower', $emails), true)) {
+                    $shouldReturn = true;
+                }
+
+                if (!$shouldReturn && $allowDevs && !$strictFiltering) {
+                    try {
+                        if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+                            $shouldReturn = true;
+                        }
+                    } catch (\Throwable $e) {
+                        // ignore
+                    }
+                }
+            }
+
+            if ($shouldReturn) {
+                return $menus->map(function ($m) {
+                    return is_array($m) ? $m : $m->toArray();
+                })->values();
+            }
+        }
+    } catch (\Throwable $e) {
+        // ignore override failures
+    }
+
+        // Developer full-menu bypass: developer should always see sidebar entries.
         try {
-            if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
-                    // Remove any InvoiceDesign-related menus from the sidebar
-                    $blockedSubstrings = ['invoicedesign', 'invoice design'];
+            if (!$strictFiltering && method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+                    // Allow developers to see all menus only when the override is active.
+                    $blockedSubstrings = [];
 
                     $devMenus = $menus->map(function ($menu) use ($blockedSubstrings) {
                         $arr = is_array($menu) ? $menu : $menu->toArray();
@@ -396,6 +462,8 @@ function getSideMenus($user)
 
     $result = $menus->filter(function ($menu) use ($normalizeRoute, $hasMenuPermission) {
         $menuHasPermission = $hasMenuPermission($menu->permission_name ?? null);
+        $menuPermissionName = trim((string) ($menu->permission_name ?? ''));
+        $hasExplicitMenuPermission = $menuPermissionName !== '';
 
         $menu->childrens = $menu->childrens->filter(function ($child) use ($hasMenuPermission) {
             return $hasMenuPermission($child->permission_name ?? null);
@@ -479,6 +547,13 @@ function getSideMenus($user)
             }
         }
 
+        // Treat explicit parent permission as authoritative: if a menu has its
+        // own permission slug and the user does not have it, hide the parent
+        // menu even when some child permissions are present.
+        if ($hasExplicitMenuPermission && !$menuHasPermission) {
+            return false;
+        }
+
         // If there are no permitted children and no route, hide the parent only
         // when the current user also doesn't have the parent's permission.
         if (!$hasChildren && $route === '' && !$menuHasPermission) {
@@ -491,53 +566,28 @@ function getSideMenus($user)
         return $route !== '' ? ('route:' . $route) : ('name:' . trim((string) ($menu->name ?? '')));
     })->values();
 
-    // Temporary safety: ensure Account Management parent menu appears for admins
-    // when either the admin has the parent permission or at least one child
-    // permission is granted. This helps in cases where Inertia props or
-    // permission snapshots don't reach the client immediately.
+    // NOTE: removed special-case injection for "Account Management" so that
+    // it follows the same permission-based visibility rules as other menus.
+
+    // Developer full-menu bypass: only apply when the sidebar debug override
+    // is explicitly enabled (config/sidebar.force_full_menus +
+    // config/sidebar.allow_developers). By default developers should see
+    // only the menus granted via permissions so role-created developer
+    // accounts behave like any other role.
     try {
-        $accountName = 'Account Management';
-        $already = $result->first(function ($m) use ($accountName) {
-            $name = is_array($m) ? ($m['name'] ?? '') : ($m->name ?? '');
-            return trim(strtolower((string) $name)) === trim(strtolower($accountName));
-        });
+        $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
+        $allowDevs = config('sidebar.allow_developers', env('FORCE_FULL_SIDEBAR_ALLOW_DEVS', false));
 
-        if (!$already) {
-            $accountMenuModel = Menu::with('childrens')->where('name', $accountName)->first();
-            if ($accountMenuModel) {
-                $menuArr = $accountMenuModel->toArray();
-                $children = collect($menuArr['childrens'] ?? [])->filter(function ($child) use ($hasMenuPermission) {
-                    return $hasMenuPermission($child['permission_name'] ?? null);
-                })->sortBy(function ($child) {
-                    $sorting = (int) ($child['sorting'] ?? 0);
-                    $id = (int) ($child['id'] ?? 0);
-                    return sprintf('%05d-%010d', $sorting, $id);
-                })->values()->toArray();
-
-                $menuArr['childrens'] = $children;
-
-                $hasParentPermission = $hasMenuPermission($menuArr['permission_name'] ?? null);
-                $hasAnyChildPerm = count($children) > 0;
-
-                if ($hasParentPermission || $hasAnyChildPerm) {
-                    $result->push($menuArr);
-                }
-            }
-        }
-    } catch (\Throwable $e) {
-        // ignore temporary override failures
-    }
-
-    // If the current user is a developer, skip module filtering and show all menus
-    try {
-        if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+        if (!$strictFiltering && $forceFull && $allowDevs && method_exists($user, 'hasRole') && $user->hasRole('developer')) {
             return $result->values();
         }
     } catch (\Throwable $e) {
         // ignore failures; fall back to module filtering below
     }
 
-    // Filter menus by assigned modules (if menus have module_slug set)
+    // Filter menus by assigned modules (if menus have module_slug set).
+    // If module master data is not seeded yet, skip module filtering and
+    // rely on permission filtering so sidebar does not become empty.
     try {
         try {
             $userModuleSlugs = $user->modules()->pluck('slug')->map(function ($s) {
@@ -547,28 +597,47 @@ function getSideMenus($user)
             $userModuleSlugs = collect();
         }
 
-        $result = $result->filter(function ($menu) use ($userModuleSlugs) {
-            $menuModule = '';
-            if (is_array($menu)) {
-                $menuModule = trim(strtolower((string) ($menu['module_slug'] ?? '')));
-            } else {
-                $menuModule = trim(strtolower((string) ($menu->module_slug ?? '')));
-            }
+        $applyModuleFilter = true;
+        try {
+            $hasDefinedModules = \App\Models\Module::query()->exists();
+            $isDeveloper = method_exists($user, 'hasRole') && $user->hasRole('developer');
 
-            // keep menus without a module assignment
-            if ($menuModule === '') {
-                return true;
+            if (! $hasDefinedModules || ($isDeveloper && $userModuleSlugs->isEmpty())) {
+                $applyModuleFilter = false;
             }
+        } catch (\Throwable $e) {
+            // keep default behavior
+        }
 
-            return $userModuleSlugs->contains($menuModule);
-        })->values();
+        if ($applyModuleFilter) {
+            $result = $result->filter(function ($menu) use ($userModuleSlugs) {
+                $menuModule = '';
+                if (is_array($menu)) {
+                    $menuModule = trim(strtolower((string) ($menu['module_slug'] ?? '')));
+                } else {
+                    $menuModule = trim(strtolower((string) ($menu->module_slug ?? '')));
+                }
+
+                // keep menus without a module assignment
+                if ($menuModule === '') {
+                    return true;
+                }
+
+                return $userModuleSlugs->contains($menuModule);
+            })->values();
+        }
     } catch (\Throwable $e) {
         // ignore filtering errors and return as-is
     }
 
-    // Remove InvoiceDesign-related menu entries (both parent and children)
-    try {
-        $blockedSubstrings = ['invoicedesign', 'invoice design'];
+        // Block specific menu entries by substring to remove them from sidebar.
+        // Add any menu name/route fragments here to hide them application-wide.
+        try {
+        $blockedSubstrings = [
+            'invoicedesign', // route slug used by InvoiceDesign resource
+            'invoice design',
+            'invoice-design',
+        ];
 
         // strip any children matching blocked substrings for arrays and objects
         $result = $result->map(function ($menu) use ($blockedSubstrings, $normalizeRoute) {
@@ -608,10 +677,6 @@ function getSideMenus($user)
             $name = is_array($menu) ? strtolower(trim((string) ($menu['name'] ?? ''))) : strtolower(trim((string) ($menu->name ?? '')));
             $route = is_array($menu) ? strtolower(trim((string) ($menu['route'] ?? ''))) : strtolower(trim((string) ($menu->route ?? '')));
 
-            if ($normalizeRoute($route) === 'backend.invoicedesign.index') {
-                return false;
-            }
-
             foreach ($blockedSubstrings as $s) {
                 if ($s !== '' && (strpos($name, $s) !== false || strpos($route, $s) !== false)) return false;
             }
@@ -641,6 +706,29 @@ function getSideMenus($user)
         })->values();
     } catch (\Throwable $e) {
         // ignore sort failures and return as-is
+    }
+
+    // Final safety fallback: if no menus remained after filtering but the
+    // current user is an admin, only return the full menus when an explicit
+    // debug override is enabled (`force_full_menus`). This prevents admins
+    // from implicitly seeing all menus when their role/permissions are
+    // intended to limit visibility.
+    try {
+        if (!$strictFiltering && method_exists($result, 'isEmpty') && $result->isEmpty()) {
+            try {
+                $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
+                // Only apply the fallback when the override is explicitly enabled.
+                if ($forceFull && method_exists($user, 'hasRole') && ($user->hasRole('Admin') || $user->hasRole('admin'))) {
+                    return $menus->map(function ($m) {
+                        return is_array($m) ? $m : $m->toArray();
+                    })->values();
+                }
+            } catch (\Throwable $e) {
+                // ignore
+            }
+        }
+    } catch (\Throwable $e) {
+        // ignore
     }
 
     return $result->values();
@@ -678,6 +766,14 @@ function web_setting_cache_ttl_seconds(): int
 function get_cached_web_setting(bool $refresh = false): ?WebSetting
 {
     $cacheKey = web_setting_cache_key();
+
+    try {
+        if (!app('db')->connection()->getSchemaBuilder()->hasTable('web_settings')) {
+            return null;
+        }
+    } catch (\Throwable $exception) {
+        return null;
+    }
 
     if ($refresh) {
         Cache::forget($cacheKey);

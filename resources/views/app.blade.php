@@ -24,6 +24,18 @@
  
     <!-- Scripts -->
     @routes
+    <script>
+        (function () {
+            try {
+                var __lp = localStorage.getItem('__last_branding_payload');
+                if (__lp) {
+                    window.__last_branding_payload = JSON.parse(__lp);
+                }
+            } catch (e) {
+                // ignore
+            }
+        })();
+    </script>
     @php $viteManifest = public_path('build/manifest.json'); @endphp
     @if (file_exists($viteManifest))
         @vite('resources/js/app.js')

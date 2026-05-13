@@ -1,14 +1,27 @@
 @extends('layouts.backend')
 
 @section('content')
+    @php
+        $settingsBackRoute = null;
+        if (Route::has('backend.dashboard-setting.edit')) {
+            $settingsBackRoute = route('backend.dashboard-setting.edit');
+        } elseif (Route::has('backend.report-setting.edit')) {
+            $settingsBackRoute = route('backend.report-setting.edit');
+        } elseif (Route::has('backend.websetting.section.cms')) {
+            $settingsBackRoute = route('backend.websetting.section.cms');
+        } elseif (Route::has('backend.websetting.create')) {
+            $settingsBackRoute = route('backend.websetting.create');
+        }
+    @endphp
+
     <div class="container">
         <div class="row justify-content-center">
             <div class="col-md-8">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                             <div class="d-flex align-items-center">
-                                @if(Route::has('backend.websetting.create'))
-                                    <a href="{{ route('backend.websetting.create') }}" class="btn btn-sm btn-secondary me-2">Back</a>
+                                @if($settingsBackRoute)
+                                    <a href="{{ $settingsBackRoute }}" class="btn btn-sm btn-secondary me-2">Back</a>
                                 @else
                                     <a href="javascript:history.back()" class="btn btn-sm btn-secondary me-2">Back</a>
                                 @endif
@@ -74,7 +87,7 @@
                             </div>
 
                             <div class="d-flex gap-2">
-                                <button class="btn btn-primary">Save</button>
+                                <button class="btn btn-primary btn-colorful">Save</button>
                                 @if(optional($setting)->is_enabled && (float) optional($setting)->monthly_amount > 0)
                                     <form method="POST" action="{{ route('backend.payment.bkash.initiate') }}" style="display:inline">
                                         @csrf

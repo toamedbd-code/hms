@@ -541,7 +541,7 @@ const goBack = () => {
           <input
             v-model="search"
             type="text"
-            placeholder="Bill no / patient / test"
+            placeholder="Bill no / patient / item"
             class="w-56 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-200"
             @keyup.enter="handleSearch"
           />
@@ -578,7 +578,7 @@ const goBack = () => {
             <tr>
               <th class="px-3 py-2 border">Bill No</th>
               <th class="px-3 py-2 border">Patient</th>
-              <th class="px-3 py-2 border">Tests</th>
+              <th class="px-3 py-2 border">Items</th>
               <th class="px-3 py-2 border">Collected By</th>
               <th class="px-3 py-2 border">Reported By</th>
               <th class="px-3 py-2 border">Status</th>

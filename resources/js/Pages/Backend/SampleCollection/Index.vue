@@ -140,7 +140,7 @@ const goBack = () => {
           <input
             v-model="search"
             type="text"
-            placeholder="Bill no / patient / test"
+            placeholder="Bill no / patient / item"
             class="w-56 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-200"
             @keyup.enter="handleSearch"
           />
@@ -167,8 +167,8 @@ const goBack = () => {
             <tr>
               <th class="px-3 py-2 border">Bill No</th>
               <th class="px-3 py-2 border">Patient</th>
-              <th class="px-3 py-2 border">Test Names</th>
-              <th class="px-3 py-2 border">Test Count</th>
+              <th class="px-3 py-2 border">Item Names</th>
+              <th class="px-3 py-2 border">Item Count</th>
               <th class="px-3 py-2 border">Action</th>
             </tr>
           </thead>
@@ -184,7 +184,7 @@ const goBack = () => {
                 <div class="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    class="px-3 py-1 text-xs text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-md shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:bg-slate-400 disabled:hover:bg-slate-400 disabled:cursor-not-allowed"
                     :disabled="!canCollect(billing.id)"
                     @click="handleCollect(billing)"
                   >
@@ -194,7 +194,7 @@ const goBack = () => {
                     :href="route('backend.sample-collection.barcode', billing.id)"
                     target="_blank"
                     rel="noopener"
-                    class="px-3 py-1 text-xs text-white bg-gray-700 rounded hover:bg-gray-800"
+                    class="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-md shadow-sm hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300"
                     @click="markBarcodePrinted(billing.id)"
                   >
                     Print Barcode
@@ -256,7 +256,7 @@ const goBack = () => {
                   </td>
                 </tr>
                 <tr v-if="modalItems.length === 0">
-                  <td colspan="2" class="py-6 text-center text-gray-500">No uncollected tests.</td>
+                  <td colspan="2" class="py-6 text-center text-gray-500">No uncollected items.</td>
                 </tr>
               </tbody>
             </table>

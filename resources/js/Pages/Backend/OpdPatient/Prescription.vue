@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, nextTick } from "vue";
+import { ref, reactive, nextTick, onMounted, onBeforeUnmount } from "vue";
 import BackendLayout from "@/Layouts/BackendLayout.vue";
 import InputLabel from "@/Components/InputLabel.vue";
 import { useForm } from "@inertiajs/vue3";
@@ -26,13 +26,124 @@ const doctorSignaturePreview = ref(props.prescription?.doctor_signature_url ?? "
 const doctorSealPreview = ref(props.prescription?.doctor_seal_url ?? "");
 const medicineSuggestions = ref([]);
 const testSuggestions = ref([]);
-// Medicine dropdown state
-const focusedMedicineIndex = ref(-1);
-const showMedicineDropdown = ref(false);
-const highlightedMedicineIndex = ref(-1);
+// Medicine dropdown refs/state (align with IPD implementation)
 const medicineInputs = ref([]);
+const activeMedicineRowIndex = ref(null);
+const medicineSuggestionsVisible = ref(false);
+const medicineHighlightedIndex = ref(0);
 let medicineSearchTimer = null;
 const testSearchTimers = {};
+// Track whether dropdown should open above the input for each row
+const medicineDropdownAbove = reactive({});
+const medicineDropdownAttempts = reactive({});
+const medicineDropdownCoords = reactive({});
+
+const getScrollParent = (node) => {
+    if (typeof window === 'undefined' || !node) return window;
+    let parent = node.parentElement;
+    while (parent) {
+        try {
+            const style = window.getComputedStyle(parent);
+            const oy = style.overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && parent.scrollHeight > parent.clientHeight) {
+                return parent;
+            }
+        } catch (e) {
+            // ignore
+        }
+        parent = parent.parentElement;
+    }
+    return document.scrollingElement || window;
+};
+
+const computeMedicineDropdownPosition = (rowIndex) => {
+    nextTick(() => {
+        try {
+            if (typeof document === 'undefined') return;
+            const input = medicineInputs.value?.[rowIndex];
+            if (!input) {
+                medicineDropdownAttempts[rowIndex] = (medicineDropdownAttempts[rowIndex] || 0) + 1;
+                if (medicineDropdownAttempts[rowIndex] <= 6) {
+                    setTimeout(() => computeMedicineDropdownPosition(rowIndex), 80);
+                }
+                return;
+            }
+
+            const padding = 8;
+            const estimatedHeight = 240;
+            const inputRect = input.getBoundingClientRect();
+            const left = (window.pageXOffset || document.documentElement.scrollLeft) + inputRect.left;
+            const width = Math.max(180, inputRect.width || 200);
+
+            // Always position above the input (user requested unconditional above)
+            let top = (window.pageYOffset || document.documentElement.scrollTop) + inputRect.top - estimatedHeight - padding;
+            if (top < 8) top = 8;
+
+            medicineDropdownCoords[rowIndex] = { top, left, width };
+            medicineDropdownAbove[rowIndex] = true;
+
+            // Try to ensure there's room by centering input in its scroll parent if too close to top
+            const scrollParent = getScrollParent(input);
+            const viewportSpaceAbove = inputRect.top;
+            if (viewportSpaceAbove < 80) {
+                try {
+                    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } catch (e) {
+                    if (scrollParent && scrollParent !== window) {
+                        const parentRect = scrollParent.getBoundingClientRect();
+                        const inputTopInParent = inputRect.top - parentRect.top + scrollParent.scrollTop;
+                        const desired = Math.max(0, inputTopInParent - Math.floor(scrollParent.clientHeight / 2));
+                        try { scrollParent.scrollTo({ top: desired, behavior: 'smooth' }); } catch (e2) { scrollParent.scrollTop = desired; }
+                    } else {
+                        const viewportTop = (window.pageYOffset || document.documentElement.scrollTop);
+                        const delta = inputRect.top - Math.floor(window.innerHeight / 2);
+                        try { window.scrollBy({ top: delta, behavior: 'smooth' }); } catch (e3) { window.scrollTo({ top: viewportTop + delta }); }
+                    }
+                }
+            }
+
+            // After dropdown is rendered in body, read actual height and adjust top
+            setTimeout(() => {
+                try {
+                    const portal = document.querySelector(`#medicineDropdownPortal_${rowIndex}`);
+                    if (!portal) return;
+                    const actualHeight = portal.offsetHeight || estimatedHeight;
+                    let newTop = (window.pageYOffset || document.documentElement.scrollTop) + inputRect.top - actualHeight - padding;
+                    if (newTop < 8) {
+                        const extraUp = 8 - newTop;
+                        try { window.scrollBy({ top: -extraUp, left: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo({ top: Math.max(0, (window.pageYOffset || document.documentElement.scrollTop) - extraUp) }); }
+                        newTop = 8;
+                    }
+                    medicineDropdownCoords[rowIndex] = { top: newTop, left, width };
+                } catch (e) {
+                    // ignore
+                }
+            }, 120);
+        } catch (e) {
+            // ignore
+        }
+    });
+};
+
+const recomputeActiveDropdown = () => {
+    const idx = activeMedicineRowIndex.value;
+    if (idx === null || idx === undefined) return;
+    computeMedicineDropdownPosition(idx);
+};
+
+onMounted(() => {
+    if (typeof window !== 'undefined') {
+        window.addEventListener('resize', recomputeActiveDropdown);
+        window.addEventListener('scroll', recomputeActiveDropdown, true);
+    }
+});
+
+onBeforeUnmount(() => {
+    if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', recomputeActiveDropdown);
+        window.removeEventListener('scroll', recomputeActiveDropdown, true);
+    }
+});
 
 // Per-row suggestions and dropdown state for Recommended Tests
 const testSuggestionsMap = reactive({});
@@ -289,10 +400,13 @@ const searchMedicine = (query, rowIndex = null) => {
 
             if (rowIndex !== null) {
                 // show dropdown for this row
-                showMedicineDropdown.value = true;
-                focusedMedicineIndex.value = rowIndex;
-                highlightedMedicineIndex.value = 0;
+                medicineDropdownAttempts[rowIndex] = 0;
+                medicineSuggestionsVisible.value = true;
+                activeMedicineRowIndex.value = rowIndex;
+                medicineHighlightedIndex.value = 0;
                 applyMedicineDefaults(rowIndex, form.items[rowIndex]?.medicine_name);
+                // compute whether dropdown should open above or below
+                computeMedicineDropdownPosition(rowIndex);
             }
         } catch (error) {
             medicineSuggestions.value = [];
@@ -301,17 +415,19 @@ const searchMedicine = (query, rowIndex = null) => {
 };
 
 const onMedicineFocus = (rowIndex) => {
-    focusedMedicineIndex.value = rowIndex;
+    activeMedicineRowIndex.value = rowIndex;
     if (Array.isArray(medicineSuggestions.value) && medicineSuggestions.value.length > 0) {
-        showMedicineDropdown.value = true;
+        medicineSuggestionsVisible.value = true;
+        computeMedicineDropdownPosition(rowIndex);
     }
 };
 
 const onMedicineBlur = (rowIndex) => {
     setTimeout(() => {
-        if (focusedMedicineIndex.value === rowIndex) {
-            showMedicineDropdown.value = false;
-            highlightedMedicineIndex.value = -1;
+        if (activeMedicineRowIndex.value === rowIndex) {
+            medicineSuggestionsVisible.value = false;
+            medicineHighlightedIndex.value = -1;
+            activeMedicineRowIndex.value = null;
         }
     }, 150);
 };
@@ -320,21 +436,21 @@ const onMedicineKeyDown = (rowIndex, event) => {
     const list = medicineSuggestions.value || [];
     if (event.key === 'ArrowDown') {
         event.preventDefault();
-        highlightedMedicineIndex.value = Math.min((highlightedMedicineIndex.value || -1) + 1, list.length - 1);
+        medicineHighlightedIndex.value = (medicineHighlightedIndex.value + 1) % list.length;
         scrollToHighlighted(rowIndex);
     } else if (event.key === 'ArrowUp') {
         event.preventDefault();
-        highlightedMedicineIndex.value = Math.max((highlightedMedicineIndex.value || -1) - 1, -1);
+        medicineHighlightedIndex.value = (medicineHighlightedIndex.value - 1 + list.length) % list.length;
         scrollToHighlighted(rowIndex);
     } else if (event.key === 'Escape') {
-        showMedicineDropdown.value = false;
+        medicineSuggestionsVisible.value = false;
     }
 };
 
 const onMedicineEnter = async (rowIndex) => {
     const list = medicineSuggestions.value || [];
-    if (showMedicineDropdown.value && list.length > 0) {
-        const pick = (highlightedMedicineIndex.value >= 0) ? highlightedMedicineIndex.value : 0;
+    if (medicineSuggestionsVisible.value && list.length > 0) {
+        const pick = (medicineHighlightedIndex.value >= 0) ? medicineHighlightedIndex.value : 0;
         const item = list[pick];
         if (item) {
             await selectMedicineSuggestion(rowIndex, item);
@@ -362,8 +478,8 @@ const selectMedicineSuggestion = async (rowIndex, item) => {
     if (!name) return;
     form.items[rowIndex].medicine_name = name;
     applyMedicineDefaults(rowIndex, name);
-    showMedicineDropdown.value = false;
-    highlightedMedicineIndex.value = -1;
+    medicineSuggestionsVisible.value = false;
+    medicineHighlightedIndex.value = 0;
     // After selecting, move focus to next row (select+move in one Enter)
     const nextIndex = rowIndex + 1;
     if (form.items[nextIndex] !== undefined) {
@@ -394,7 +510,7 @@ const searchTest = (query, rowIndex) => {
     }
 
     testSearchTimers[rowIndex] = setTimeout(async () => {
-        const url = route("backend.testpathology.search", { q: term });
+        const url = route("backend.itemcharge.search", { q: term });
         try {
             const response = await fetch(url, { headers: { Accept: "application/json" } });
             if (!response.ok) {
@@ -419,13 +535,14 @@ const resetTestHighlight = () => { highlightedIndex.value = -1; };
 const scrollToHighlighted = (rowIndex) => {
     nextTick(() => {
         const doc = (typeof document !== 'undefined') ? document : null;
-        const dropdown = doc ? (doc.querySelector(`#testDropdown_${rowIndex}`) || doc.querySelector(`#medicineDropdown_${rowIndex}`)) : null;
+        const dropdown = doc ? (doc.querySelector(`#testDropdown_${rowIndex}`) || doc.querySelector(`#medicineDropdownPortal_${rowIndex}`) || doc.querySelector(`#medicineDropdown_${rowIndex}`)) : null;
         const highlightedItem = dropdown?.querySelector('.highlighted');
         if (highlightedItem) highlightedItem.scrollIntoView({ block: 'nearest' });
     });
 };
 
-const selectTestFromSuggestion = async (rowIndex, name) => {
+const selectTestFromSuggestion = async (rowIndex, item) => {
+    const name = (typeof item === 'string') ? item : (item?.test_name ?? item?.name ?? '');
     form.tests[rowIndex] = name || '';
     showTestDropdown.value = false;
     highlightedIndex.value = -1;
@@ -456,8 +573,26 @@ const onTestBlur = (rowIndex) => {
     }, 180);
 };
 
+const flattenTestSuggestionsArr = (rowIndex) => {
+    return Array.isArray(testSuggestionsMap[rowIndex]) ? testSuggestionsMap[rowIndex] : [];
+};
+
+const groupSuggestions = (rowIndex) => {
+    const groups = {};
+    flattenTestSuggestionsArr(rowIndex).forEach((item) => {
+        const key = (typeof item === 'string') ? 'Other' : ((item?.category_type ?? 'Other') || 'Other');
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(item);
+    });
+    return groups;
+};
+
+const flatIndexOf = (rowIndex, item) => {
+    return flattenTestSuggestionsArr(rowIndex).indexOf(item);
+};
+
 const onTestKeyDown = (rowIndex, event) => {
-    const list = testSuggestionsMap[rowIndex] || [];
+    const list = flattenTestSuggestionsArr(rowIndex);
     if (event.key === 'ArrowDown') {
         event.preventDefault();
         highlightedIndex.value = Math.min((highlightedIndex.value || -1) + 1, list.length - 1);
@@ -470,7 +605,7 @@ const onTestKeyDown = (rowIndex, event) => {
 };
 
 const onTestEnter = async (rowIndex) => {
-    const list = testSuggestionsMap[rowIndex] || [];
+    const list = flattenTestSuggestionsArr(rowIndex);
     if (showTestDropdown.value && list.length > 0) {
         const pick = (highlightedIndex.value >= 0) ? highlightedIndex.value : 0;
         await selectTestFromSuggestion(rowIndex, list[pick]);
@@ -654,13 +789,15 @@ const onTestEnter = async (rowIndex) => {
                                             autocomplete="off"
                                         />
 
-                                        <div v-if="focusedMedicineIndex === index && showMedicineDropdown" :id="`medicineDropdown_${index}`" class="absolute z-50 left-0 right-0 mt-1 bg-white border rounded shadow text-xs">
-                                            <div v-for="(item, sIndex) in medicineSuggestions" :key="sIndex" @mousedown.prevent="selectMedicineSuggestion(index, item)" @mouseenter="highlightedMedicineIndex = sIndex" :class="{ 'bg-blue-100': highlightedMedicineIndex === sIndex, 'highlighted': highlightedMedicineIndex === sIndex }" class="px-3 py-2 cursor-pointer">
-                                                <div class="font-medium">{{ typeof item === 'string' ? item : (item.name ?? item.medicine_name ?? '') }}</div>
-                                                <div v-if="typeof item !== 'string' && (item.dose || item.duration)" class="text-[11px] text-gray-500">{{ item.dose ? item.dose + (item.duration ? ' · ' + item.duration : '') : (item.duration ?? '') }}</div>
+                                        <teleport to="body">
+                                            <div v-if="activeMedicineRowIndex === index && medicineSuggestionsVisible" :id="`medicineDropdownPortal_${index}`" :style="{ position: 'absolute', top: (medicineDropdownCoords[index]?.top ? medicineDropdownCoords[index].top + 'px' : '0px'), left: (medicineDropdownCoords[index]?.left ? medicineDropdownCoords[index].left + 'px' : '0px'), width: (medicineDropdownCoords[index]?.width ? medicineDropdownCoords[index].width + 'px' : '240px') }" class="z-50 bg-white border rounded shadow text-xs">
+                                                <div v-for="(item, sIndex) in medicineSuggestions" :key="sIndex" @mousedown.prevent="selectMedicineSuggestion(index, item)" @mouseenter="medicineHighlightedIndex = sIndex" :class="{ 'bg-blue-100': medicineHighlightedIndex === sIndex, 'highlighted': medicineHighlightedIndex === sIndex }" class="px-3 py-2 cursor-pointer">
+                                                    <div class="font-medium">{{ typeof item === 'string' ? item : (item.name ?? item.medicine_name ?? '') }}</div>
+                                                    <div v-if="typeof item !== 'string' && (item.dose || item.duration)" class="text-[11px] text-gray-500">{{ item.dose ? item.dose + (item.duration ? ' · ' + item.duration : '') : (item.duration ?? '') }}</div>
+                                                </div>
+                                                <div v-if="!medicineSuggestions.length" class="px-3 py-2 text-sm text-gray-500 text-center">No medicines found</div>
                                             </div>
-                                            <div v-if="!medicineSuggestions.length" class="px-3 py-2 text-sm text-gray-500 text-center">No medicines found</div>
-                                        </div>
+                                        </teleport>
                                     </div>
                                     <p v-if="form.errors[`items.${index}.medicine_name`]" class="mt-1 text-xs text-red-600">
                                         {{ form.errors[`items.${index}.medicine_name`] }}
@@ -721,6 +858,7 @@ const onTestEnter = async (rowIndex) => {
 
                 <div class="mt-3 no-print">
                     <button
+                        id="addMedicineBtn"
                         type="button"
                         class="px-3 py-1.5 text-xs bg-gray-600 text-white rounded"
                         @click="addRow"
@@ -730,7 +868,7 @@ const onTestEnter = async (rowIndex) => {
                 </div>
 
                 <div class="mt-3 border border-gray-200 rounded-md p-2 dark:border-gray-700">
-                    <div class="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Recommended Tests</div>
+                    <div class="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Recommended Items</div>
                     <div class="space-y-1.5">
                         <div
                             v-for="(testName, index) in form.tests"
@@ -747,7 +885,7 @@ const onTestEnter = async (rowIndex) => {
                                     v-model="form.tests[index]"
                                     type="text"
                                     class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                                    placeholder="Test name"
+                                    placeholder="Item name"
                                     @input="e => { searchTest(e.target.value, index); resetTestHighlight(); }"
                                     @focus="onTestFocus(index)"
                                     @blur="onTestBlur(index)"
@@ -756,12 +894,16 @@ const onTestEnter = async (rowIndex) => {
                                     autocomplete="off"
                                 />
 
-                                <!-- Custom dropdown for test suggestions -->
+                                <!-- Custom dropdown for test suggestions (grouped by category_type) -->
                                 <div v-if="focusedTestIndex === index && showTestDropdown" :id="`testDropdown_${index}`" class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
-                                    <div v-for="(name, sIndex) in (testSuggestionsMap[index] || [])" :key="sIndex" @click="selectTestFromSuggestion(index, name)" :class="{ 'bg-blue-100': highlightedIndex === sIndex, 'highlighted': highlightedIndex === sIndex }" class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-700 border-b border-gray-100 last:border-b-0">
-                                        <div class="font-medium">{{ name }}</div>
-                                    </div>
-                                    <div v-if="(testSuggestionsMap[index] || []).length === 0" class="px-3 py-2 text-sm text-gray-500 text-center">
+                                    <template v-for="(items, group) in groupSuggestions(index)" :key="group">
+                                        <div class="px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700">{{ group }}</div>
+                                        <div v-for="(item, sIndex) in items" :key="group + '-' + sIndex" @click="selectTestFromSuggestion(index, item)" @mouseenter="highlightedIndex = flatIndexOf(index, item)" :class="flatIndexOf(index, item) === highlightedIndex ? 'bg-blue-100 highlighted' : ''" class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 hover:text-blue-700 border-b border-gray-100 last:border-b-0">
+                                            <div class="font-medium">{{ typeof item === 'string' ? item : (item.test_name ?? item.name ?? '') }}</div>
+                                            <div v-if="typeof item !== 'string' && (item.amount || item.standard_charge)" class="text-[11px] text-gray-500">৳{{ item.amount ?? item.standard_charge }}</div>
+                                        </div>
+                                    </template>
+                                    <div v-if="flattenTestSuggestionsArr(index).length === 0" class="px-3 py-2 text-sm text-gray-500 text-center">
                                         No tests found
                                     </div>
                                 </div>
@@ -782,7 +924,7 @@ const onTestEnter = async (rowIndex) => {
                             class="px-3 py-1.5 text-xs bg-gray-600 text-white rounded"
                             @click="addTestRow"
                         >
-                            Add Test
+                            Add Item
                         </button>
                     </div>
                     <p v-if="form.errors.tests" class="mt-1 text-xs text-red-600">

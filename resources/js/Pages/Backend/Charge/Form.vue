@@ -75,6 +75,26 @@ const handleChargeTypeCreated = (response) => {
         preserveScroll: true,
         onSuccess: (page) => {
             modalData.value.chargeTypes = page.props.chargeTypes || [];
+            // Try to auto-select the newly created charge type and prefill Charge Name
+            const newId = response.data?.id || response.props?.data?.id || (page.props.chargeTypes && page.props.chargeTypes.length ? page.props.chargeTypes[page.props.chargeTypes.length - 1].id : null);
+            const newName = response.data?.name || response.props?.data?.name || (page.props.chargeTypes && page.props.chargeTypes.length ? page.props.chargeTypes[page.props.chargeTypes.length - 1].name : null);
+
+            if (newId) {
+                form.charge_type_id = newId;
+            }
+
+            if (newName) {
+                // If Charge Name is empty, populate it; otherwise append the type name in brackets
+                if (!form.name) {
+                    form.name = newName;
+                } else {
+                    // avoid duplicating if already contains the name
+                    if (!String(form.name).includes(newName)) {
+                        form.name = `${form.name} (${newName})`;
+                    }
+                }
+            }
+
             displayResponse(response);
         }
     });
@@ -191,15 +211,14 @@ const goToChargeList = () => {
                     </div>
 
                     <div class="col-span-1">
-                        <InputLabel for="charge_category_id" value="Charge Category *" />
+                        <InputLabel for="charge_category_id" value="Charge Category" />
                         <div class="flex items-center space-x-2">
                             <select id="charge_category_id"
                                 class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 v-model="form.charge_category_id">
-                                <option value="">Select Charge Category</option>
-                                <option v-for="category in modalData.chargeCategories" :key="category.id"
-                                    :value="category.id">
-                                    {{ category.name }}
+                                <option value="">(Optional) Select Charge Category</option>
+                                <option v-for="cat in modalData.chargeCategories" :key="cat.id" :value="cat.id">
+                                    {{ cat.name }}
                                 </option>
                             </select>
                             <button type="button" @click="openModal('chargeCategory')"

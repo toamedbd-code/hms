@@ -526,6 +526,8 @@ class PharmacyBillController extends Controller
                 'quantity' => $product['quantity'],
                 'total_amount' => $product['amount'],
                 'net_amount' => $product['amount'],
+                'commissionable' => null,
+                'commission_rate' => null,
             ]);
         }
 
@@ -787,6 +789,8 @@ class PharmacyBillController extends Controller
                     'quantity' => $product['quantity'],
                     'total_amount' => $product['amount'],
                     'net_amount' => $product['amount'],
+                    'commissionable' => null,
+                    'commission_rate' => null,
                 ]);
             }
 

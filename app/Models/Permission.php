@@ -13,7 +13,7 @@ class Permission extends Model
         'module_slug' => 'string',
     ];
 
-    protected $fillable = ['name','guard_name','parent_id','module_slug'];
+    protected $fillable = ['name','guard_name','parent_id','module_slug','sorting'];
 
     protected static function boot()
     {
@@ -43,7 +43,7 @@ class Permission extends Model
     }
     public function child()
     {
-        // Ensure children are returned in stable order (by id asc)
-        return $this->hasMany(Permission::class,'parent_id','id')->orderBy('id', 'asc');
+        // Ensure children are returned in stable order by `sorting` then id
+        return $this->hasMany(Permission::class,'parent_id','id')->orderBy('sorting', 'asc')->orderBy('id', 'asc');
     }
 }

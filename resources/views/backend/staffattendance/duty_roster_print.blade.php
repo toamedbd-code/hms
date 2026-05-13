@@ -16,6 +16,8 @@
     </style>
 </head>
 <body>
+    @includeIf('prints.partials._header')
+
     <div class="header">
         <h2>Duty Roster</h2>
         <div class="period">Period: {{ \Carbon\Carbon::parse($start)->format('d-m-Y') }} to {{ \Carbon\Carbon::parse($end)->format('d-m-Y') }}</div>
@@ -53,7 +55,6 @@
     <div style="margin-top:20px" class="no-print">
         <button onclick="window.print()">Print</button>
         <button onclick="window.close()">Close</button>
-                @includeIf('prints.partials._footer')
     </div>
     @includeIf('prints.partials._footer')
 </body>

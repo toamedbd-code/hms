@@ -7,62 +7,20 @@ class ReferralPersonRequest extends FormRequest
     public function rules()
     {
         $baseRules = [
-            'name' => 'required|string|max:255',
-            'phone' => 'required',
+            'name' => 'nullable|string|max:255',
+            'phone' => 'nullable',
             'contact_person_name' => 'nullable|string|max:255',
             'contact_person_phone' => 'nullable|string|max:20',
-            'category_id' => 'required',
+            'category_id' => 'nullable',
             'address' => 'nullable|string',
-            'standard_commission' => 'nullable',
-            'opd_commission' => [
-                'required_without_all:ipd_commission,pharmacy_commission,pathology_commission,radiology_commission,blood_bank_commission,ambulance_commission',
-                'nullable',
-                'numeric',
-                'min:0.01',
-                'max:100'
-            ],
-            'ipd_commission' => [
-                'required_without_all:opd_commission,pharmacy_commission,pathology_commission,radiology_commission,blood_bank_commission,ambulance_commission',
-                'nullable',
-                'numeric',
-                'min:0.01',
-                'max:100'
-            ],
-            'pharmacy_commission' => [
-                'required_without_all:opd_commission,ipd_commission,pathology_commission,radiology_commission,blood_bank_commission,ambulance_commission',
-                'nullable',
-                'numeric',
-                'min:0.01',
-                'max:100'
-            ],
-            'pathology_commission' => [
-                'required_without_all:opd_commission,ipd_commission,pharmacy_commission,radiology_commission,blood_bank_commission,ambulance_commission',
-                'nullable',
-                'numeric',
-                'min:0.01',
-                'max:100'
-            ],
-            'radiology_commission' => [
-                'required_without_all:opd_commission,ipd_commission,pharmacy_commission,pathology_commission,blood_bank_commission,ambulance_commission',
-                'nullable',
-                'numeric',
-                'min:0.01',
-                'max:100'
-            ],
-            'blood_bank_commission' => [
-                'required_without_all:opd_commission,ipd_commission,pharmacy_commission,pathology_commission,radiology_commission,ambulance_commission',
-                'nullable',
-                'numeric',
-                'min:0.01',
-                'max:100'
-            ],
-            'ambulance_commission' => [
-                'required_without_all:opd_commission,ipd_commission,pharmacy_commission,pathology_commission,radiology_commission,blood_bank_commission',
-                'nullable',
-                'numeric',
-                'min:0.01',
-                'max:100'
-            ],
+            'standard_commission' => 'nullable|numeric|min:0|max:100',
+            'opd_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'ipd_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'pharmacy_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'pathology_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'radiology_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'blood_bank_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'ambulance_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'apply_to_all' => 'sometimes|boolean',
         ];
 

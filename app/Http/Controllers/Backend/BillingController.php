@@ -8,6 +8,7 @@ use App\Models\Admin;
 use App\Models\Billing;
 use App\Models\BillingDoctor;
 use App\Models\BillItem;
+use App\Models\Charge;
 use App\Models\Expense;
 use App\Models\MedicineInventory;
 use App\Models\Pathology;
@@ -261,6 +262,8 @@ $customData->links = $links;
         $mapBilling = function (Billing $billing) {
             return [
                 'id' => $billing->id,
+                'billing_id' => $billing->id,
+                'bill_number' => $billing->bill_number,
                 'case_number' => $billing->case_number,
                 'patient_name' => $billing->patient?->name ?? 'N/A',
                 'patient_mobile' => $billing->patient?->phone ?? 'N/A',
@@ -270,8 +273,17 @@ $customData->links = $links;
             ];
         };
 
+        $numericSearchId = ctype_digit($caseId) ? (int) $caseId : null;
+
         $results = Billing::query()
-            ->where('case_number', 'like', '%' . $caseId . '%')
+            ->where(function ($q) use ($caseId, $numericSearchId) {
+                $q->where('case_number', 'like', '%' . $caseId . '%')
+                  ->orWhere('bill_number', 'like', '%' . $caseId . '%')
+                  ->orWhere('invoice_number', 'like', '%' . $caseId . '%');
+                if ($numericSearchId !== null) {
+                    $q->orWhere('id', $numericSearchId);
+                }
+            })
             ->with(['patient', 'doctor'])
             ->limit(10)
             ->get()
@@ -377,6 +389,7 @@ $customData->links = $links;
                 ];
             });
 
+        $hospitalCharges = $this->getBillableModuleCharges();
         $medicineInventories = $this->medicineInventoryService->activeList();
         $doctors = $this->adminService->activeDoctors();
         $patients = $this->patientService->activeList();
@@ -390,6 +403,7 @@ $customData->links = $links;
                 'pageTitle' => fn() => 'Billing Page',
                 'billnumber' => fn() => $lastBillNumber,
                 'pathologyAndRadiologyTests' => fn() => $pathologyAndRadiologyTests,
+                'hospitalCharges' => fn() => $hospitalCharges,
                 'medicineInventories' => fn() => $medicineInventories,
                 'doctors' => fn() => $doctors,
                 'patients' => fn() => $patients,
@@ -397,6 +411,45 @@ $customData->links = $links;
                 'authInfo' => fn() => $authInfo,
             ]
         );
+    }
+
+    private function getBillableModuleCharges()
+    {
+        $billingModules = ['OPD', 'IPD', 'Appointment'];
+
+        return Charge::query()
+            ->where('status', 'Active')
+            ->whereHas('chargeType', function ($query) use ($billingModules) {
+                $query->where('status', 'Active')
+                    ->where(function ($moduleQuery) use ($billingModules) {
+                        foreach ($billingModules as $module) {
+                            $moduleQuery->orWhere('modules', 'like', '%"' . $module . '"%');
+                        }
+                    });
+            })
+            ->with(['chargeType:id,name,modules,status'])
+            ->orderBy('name')
+            ->get()
+            ->flatMap(function ($charge) use ($billingModules) {
+                $modulesRaw = $charge->chargeType?->modules;
+                $decodedModules = is_string($modulesRaw) ? json_decode($modulesRaw, true) : $modulesRaw;
+
+                if (!is_array($decodedModules)) {
+                    return [];
+                }
+
+                $activeModules = array_values(array_intersect($billingModules, $decodedModules));
+
+                return collect($activeModules)->map(function ($module) use ($charge) {
+                    return [
+                        'id' => (int) $charge->id,
+                        'name' => (string) $charge->name,
+                        'module' => (string) $module,
+                        'amount' => (float) ($charge->standard_charge ?? 0),
+                    ];
+                });
+            })
+            ->values();
     }
 
     public function store(BillingRequest $request)
@@ -526,6 +579,13 @@ if ($existingBill) {
                         case 'medicine':
                             $commissionRate = $referrer->pharmacy_commission ?? 0;
                             break;
+                        case 'opd':
+                        case 'appointment':
+                            $commissionRate = $referrer->opd_commission ?? 0;
+                            break;
+                        case 'ipd':
+                            $commissionRate = $referrer->ipd_commission ?? 0;
+                            break;
                     }
 
                     $itemCommission = ($item['net_amount'] * $commissionRate) / 100;
@@ -570,6 +630,18 @@ if ($existingBill) {
                 $itemProportionalDiscount = $item['total_amount'] * $discountFactor;
                 $itemNetAmount = $item['total_amount'] - $itemProportionalDiscount;
 
+                // snapshot item-level commission settings when available
+                $commissionable = null;
+                $commission_rate = null;
+                $catLower = strtolower($item['category'] ?? '');
+                if (in_array($catLower, ['pathology', 'radiology'])) {
+                    $master = \App\Models\Test::find($item['id']);
+                    if ($master) {
+                        $commissionable = $master->commissionable ?? null;
+                        $commission_rate = $master->commission_rate ?? null;
+                    }
+                }
+
                 BillItem::create([
                     'billing_id' => $billing->id,
                     'item_id' => $item['id'],
@@ -581,6 +653,8 @@ if ($existingBill) {
                     'discount' => $itemProportionalDiscount,
                     'rugound' => $item['rugound'] ?? 0,
                     'net_amount' => $itemNetAmount,
+                    'commissionable' => $commissionable,
+                    'commission_rate' => $commission_rate,
                 ]);
 
                 if (strtolower($item['category']) === 'medicine') {
@@ -1282,6 +1356,7 @@ if ($existingBill) {
                 ];
             });
 
+        $hospitalCharges = $this->getBillableModuleCharges();
         $medicineInventories = $this->medicineInventoryService->activeList();
         $doctors = $this->adminService->activeDoctors();
         $patients = $this->patientService->activeList();
@@ -1345,6 +1420,7 @@ if ($existingBill) {
                 'billing' => fn() => $billing,
                 'editData' => fn() => $editData,
                 'pathologyAndRadiologyTests' => fn() => $pathologyAndRadiologyTests,
+                'hospitalCharges' => fn() => $hospitalCharges,
                 'medicineInventories' => fn() => $medicineInventories,
                 'doctors' => fn() => $doctors,
                 'patients' => fn() => $patients,
@@ -1431,6 +1507,17 @@ if ($existingBill) {
 
             // Create new billing items and update medicine inventory
             foreach ($data['items'] as $item) {
+                $commissionable = null;
+                $commission_rate = null;
+                $catLower = strtolower($item['category'] ?? '');
+                if (in_array($catLower, ['pathology', 'radiology'])) {
+                    $master = \App\Models\Test::find($item['id']);
+                    if ($master) {
+                        $commissionable = $master->commissionable ?? null;
+                        $commission_rate = $master->commission_rate ?? null;
+                    }
+                }
+
                 BillItem::create([
                     'billing_id' => $id,
                     'item_id' => $item['id'],
@@ -1442,7 +1529,9 @@ if ($existingBill) {
                     'discount' => $item['discount'] ?? 0,
                     'rugound' => $item['rugound'] ?? 0,
                     'net_amount' => $item['net_amount'],
-                    'status' => 'Active'
+                    'status' => 'Active',
+                    'commissionable' => $commissionable,
+                    'commission_rate' => $commission_rate,
                 ]);
 
                 // Update medicine inventory for new quantities
@@ -1502,6 +1591,13 @@ if ($existingBill) {
                             break;
                         case 'medicine':
                             $commissionRate = $referrer->pharmacy_commission ?? 0;
+                            break;
+                        case 'opd':
+                        case 'appointment':
+                            $commissionRate = $referrer->opd_commission ?? 0;
+                            break;
+                        case 'ipd':
+                            $commissionRate = $referrer->ipd_commission ?? 0;
                             break;
                     }
 

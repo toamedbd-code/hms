@@ -319,9 +319,9 @@
                 <td class="colon">:</td>
                 <td class="value">{{ $ipd_id ?? 'N/A' }}</td>
 
-                <td class="label">Printed At</td>
-                <td class="colon">:</td>
-                <td class="value">{{ $printed_at ?? '' }}</td>
+                <td class="label"></td>
+                <td class="colon"></td>
+                <td class="value"></td>
             </tr>
             <tr>
                 <td class="label">Patient Name</td>
@@ -340,15 +340,6 @@
                 <td class="label">Phone</td>
                 <td class="colon">:</td>
                 <td class="value">{{ $patientPhone ?: 'N/A' }}</td>
-            </tr>
-            <tr>
-                <td class="label">Credit Limit</td>
-                <td class="colon">:</td>
-                <td class="value">Tk {{ number_format((float) ($ipdpatient?->credit_limit ?? 0), 2) }}</td>
-
-                <td class="label"></td>
-                <td class="colon"></td>
-                <td class="value"></td>
             </tr>
             <tr>
                 <td class="label">Consultant</td>
@@ -418,6 +409,20 @@
                     <td>Total Paid</td>
                     <td class="amount">Tk {{ number_format((float) ($total_paid ?? 0), 2) }}</td>
                 </tr>
+
+                @if(isset($medicineTotal) && (float) $medicineTotal > 0)
+                <tr>
+                    <td>Medicine Bill</td>
+                    <td class="amount">Tk {{ number_format((float) $medicineTotal, 2) }}</td>
+                </tr>
+                @endif
+
+                @if(isset($labTotal) && (float) $labTotal > 0)
+                <tr>
+                    <td>Laboratory Bill</td>
+                    <td class="amount">Tk {{ number_format((float) $labTotal, 2) }}</td>
+                </tr>
+                @endif
             </table>
         </div>
 

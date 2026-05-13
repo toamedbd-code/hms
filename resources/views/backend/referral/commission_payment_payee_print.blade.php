@@ -22,6 +22,8 @@
     </style>
 </head>
 <body>
+    @includeIf('prints.partials._header')
+
     <div class="card">
         <div class="title">Referral Commission Payment</div>
         <div class="row"><span class="label">Payee:</span>{{ $payee->name ?? 'N/A' }}</div>

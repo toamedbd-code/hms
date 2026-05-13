@@ -34,13 +34,30 @@ class Subscription extends Model
         return Carbon::now()->lessThan($this->expires_at);
     }
 
+    public static function tableExists(): bool
+    {
+        try {
+            return app('db')->connection()->getSchemaBuilder()->hasTable((new static())->getTable());
+        } catch (\Throwable $exception) {
+            return false;
+        }
+    }
+
     public static function getCurrent(): ?self
     {
+        if (!static::tableExists()) {
+            return null;
+        }
+
         return static::first();
     }
 
     public static function ensureExists(): self
     {
+        if (!static::tableExists()) {
+            return new static(['is_active' => false]);
+        }
+
         return static::first() ?? static::create(['is_active' => false]);
     }
 }
