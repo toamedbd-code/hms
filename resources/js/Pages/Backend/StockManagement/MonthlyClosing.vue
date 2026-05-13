@@ -38,15 +38,15 @@ const exportCsv = () => {
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-        <div class="p-3 border rounded bg-slate-50 text-white">
+        <div class="p-3 border rounded bg-slate-50">
           <p class="text-xs text-slate-500">Total Received Qty</p>
           <p class="text-lg font-semibold text-slate-800 mt-1">{{ Number(summary.total_received_qty ?? 0).toFixed(2) }}</p>
         </div>
-        <div class="p-3 border rounded bg-slate-50 text-white">
+        <div class="p-3 border rounded bg-slate-50">
           <p class="text-xs text-slate-500">Total Issued Qty</p>
           <p class="text-lg font-semibold text-slate-800 mt-1">{{ Number(summary.total_issued_qty ?? 0).toFixed(2) }}</p>
         </div>
-        <div class="p-3 border rounded bg-slate-50 text-white">
+        <div class="p-3 border rounded bg-slate-50">
           <p class="text-xs text-slate-500">Total Closing Value</p>
           <p class="text-lg font-semibold text-slate-800 mt-1">{{ Number(summary.total_closing_value ?? 0).toFixed(2) }}</p>
         </div>

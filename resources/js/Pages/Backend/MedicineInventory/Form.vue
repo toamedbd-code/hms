@@ -100,6 +100,20 @@ const importSummary = ref({
     errors: [],
 })
 
+const normalizeCsvErrors = (errors) => {
+    if (Array.isArray(errors)) {
+        return errors
+    }
+
+    if (!errors || typeof errors !== 'object') {
+        return []
+    }
+
+    return Object.values(errors).flatMap((value) =>
+        Array.isArray(value) ? value : [String(value)]
+    )
+}
+
 const handleCsvFile = (e) => {
     csv.value.file = e.target.files[0]
     csvMessage.value = ''
@@ -157,13 +171,13 @@ const uploadInventoryCsv = async () => {
         }
     } catch (e) {
         csvMessage.value = e.response?.data?.message || 'CSV upload failed.'
-        csvErrors.value = e.response?.data?.errors || []
+        csvErrors.value = normalizeCsvErrors(e.response?.data?.errors)
         importSummary.value = {
             imported: 0,
             skipped: 0,
-            failed: Array.isArray(csvErrors.value) ? csvErrors.value.length : 1,
+            failed: csvErrors.value.length || 1,
             message: csvMessage.value,
-            errors: Array.isArray(csvErrors.value) ? csvErrors.value : [],
+            errors: csvErrors.value,
         }
         showImportSummary.value = true
     } finally {
@@ -182,10 +196,10 @@ const goToList = () => {
 <template>
     <BackendLayout>
         <!-- Flash Messages -->
-        <div v-if="flash.successMessage" class="mb-4 p-4 bg-green-100 border border-green-400 text-white rounded">
+        <div v-if="flash.successMessage" class="mb-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
             {{ flash.successMessage }}
         </div>
-        <div v-if="flash.errorMessage" class="mb-4 p-4 bg-red-100 border border-red-400 text-white rounded">
+        <div v-if="flash.errorMessage" class="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
             {{ flash.errorMessage }}
         </div>
         <div v-if="flash.infoMessage" class="mb-4 p-4 bg-blue-100 border border-blue-400 text-blue-700 rounded">
@@ -254,7 +268,7 @@ const goToList = () => {
                     </div>
                 </div>
 
-                <div v-if="csvMessage" class="mb-2 p-2 rounded text-sm" :class="csvErrors.length ? 'bg-red-100 text-white border border-red-200' : 'bg-green-100 text-green-700 border border-green-200'">
+                <div v-if="csvMessage" class="mb-2 p-2 rounded text-sm" :class="csvErrors.length ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-green-100 text-green-700 border border-green-200'">
                     {{ csvMessage }}
                 </div>
 
@@ -284,7 +298,7 @@ const goToList = () => {
                 </p>
             </div>
 
-            <div v-if="showImportSummary" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 text-white">
+            <div v-if="showImportSummary" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
                 <div class="w-full max-w-lg bg-white rounded-lg shadow-lg border border-gray-200">
                     <div class="flex items-center justify-between p-4 border-b">
                         <h4 class="text-base font-semibold text-gray-800">CSV Import Summary</h4>
@@ -297,13 +311,13 @@ const goToList = () => {
                         <p class="text-sm text-gray-700">{{ importSummary.message }}</p>
 
                         <div class="grid grid-cols-3 gap-2 text-sm">
-                            <div class="p-2 text-white rounded bg-emerald-50 text-emerald-700 border border-emerald-100">
+                            <div class="p-2 text-center rounded bg-emerald-50 text-emerald-700 border border-emerald-100">
                                 Imported: {{ importSummary.imported }}
                             </div>
                             <div class="p-2 text-center rounded bg-amber-50 text-amber-700 border border-amber-100">
                                 Skipped: {{ importSummary.skipped }}
                             </div>
-                            <div class="p-2 text-white rounded bg-red-50 text-red-700 border border-red-100">
+                            <div class="p-2 text-center rounded bg-red-50 text-red-700 border border-red-100">
                                 Failed: {{ importSummary.failed }}
                             </div>
                         </div>

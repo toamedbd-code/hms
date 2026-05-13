@@ -545,14 +545,14 @@ const unpaidCellClass = (row) =>
           </a>
           <a
             :href="salaryPdfTargetUrl"
-            class="px-3 py-2 text-sm text-white bg-rose-600 rounded hover:bg-rose-700"
+            class="px-3 py-2 text-sm !text-white bg-rose-600 rounded hover:bg-rose-700"
           >
             Export PDF
           </a>
           <button
             type="button"
             class="px-3 py-2 text-sm text-white rounded"
-            :class="isLocked ? 'bg-gray-400 cursor-not-allowed text-white' : 'bg-red-600 hover:bg-red-700 text-white'"
+            :class="isLocked ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'"
             :disabled="isLocked"
             @click="lockSalarySheet"
           >
@@ -566,7 +566,7 @@ const unpaidCellClass = (row) =>
           </a>
           <Link
             :href="route('backend.staffattendance.report')"
-            class="px-3 py-2 text-sm text-white bg-gray-600 rounded hover:bg-gray-700"
+            class="px-3 py-2 text-sm !text-white bg-gray-600 rounded hover:bg-gray-700"
           >
             Back
           </Link>
@@ -579,13 +579,13 @@ const unpaidCellClass = (row) =>
         <span class="font-semibold">Month:</span> {{ formattedMonth || 'N/A' }}
         <span
           v-if="isLocked"
-          class="inline-flex items-center px-2 py-0.5 ml-2 text-white font-semibold text-red-700 bg-red-100 rounded"
+          class="inline-flex items-center px-2 py-0.5 ml-2 text-xs font-semibold text-red-700 bg-red-100 rounded"
         >
           Locked
         </span>
       </div>
 
-      <div class="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-white text-emerald-900 print:hidden">
+      <div class="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 print:hidden">
         <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-emerald-600 text-white mr-2">Auto Synced</span>
         Salary computation is fed by auto-updated attendance IN/OUT with roster and leave integration.
         <div class="mt-2 text-emerald-800">
@@ -678,19 +678,19 @@ const unpaidCellClass = (row) =>
         <Link
           v-if="integrationOptions.modules.face_attendance"
           :href="route('backend.attendance.face')"
-          class="p-3 rounded-md border border-violet-200 bg-violet-50 hover:bg-violet-100 transition text-white"
+          class="p-3 rounded-md border border-green-200 bg-green-50 hover:bg-green-100 transition"
         >
-          <div class="text-xs font-semibold text-violet-700">Attendance</div>
-          <div class="text-sm font-bold text-violet-900 mt-1">Face Attendance</div>
+          <div class="text-xs font-semibold text-white">Attendance</div>
+          <div class="text-sm font-bold text-white mt-1">Face Attendance</div>
         </Link>
 
         <a
           v-if="integrationOptions.modules.fingerprint || integrationOptions.modules.face_attendance"
           href="/admin/attendance/devices"
-          class="p-3 rounded-md border border-cyan-200 bg-cyan-50 hover:bg-cyan-100 transition text-white"
+          class="p-3 rounded-md border border-cyan-200 bg-cyan-50 hover:bg-cyan-100 transition"
         >
-          <div class="text-xs font-semibold text-cyan-700">Device</div>
-          <div class="text-sm font-bold text-cyan-900 mt-1">Fingerprint/Face Devices</div>
+          <div class="text-xs font-semibold text-white">Device</div>
+          <div class="text-sm font-bold text-white mt-1">Fingerprint/Face Devices</div>
         </a>
 
         <Link
@@ -698,26 +698,26 @@ const unpaidCellClass = (row) =>
           :href="route('backend.pending.request')"
           class="p-3 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 transition"
         >
-          <div class="text-xs font-semibold text-amber-700">Leave</div>
-          <div class="text-sm font-bold text-amber-900 mt-1">Leave Requests</div>
+          <div class="text-xs font-semibold text-white">Leave</div>
+          <div class="text-sm font-bold text-white mt-1">Leave Requests</div>
         </Link>
 
         <Link
           v-if="integrationOptions.modules.duty_roster"
           :href="route('backend.staffattendance.duty-roster')"
-          class="p-3 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 transition text-white"
+          class="p-3 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 transition"
         >
-          <div class="text-xs font-semibold text-emerald-700">Roster</div>
-          <div class="text-sm font-bold text-emerald-900 mt-1">Duty Roster</div>
+          <div class="text-xs font-semibold text-white">Roster</div>
+          <div class="text-sm font-bold text-white mt-1">Duty Roster</div>
         </Link>
 
         <Link
           v-if="integrationOptions.modules.salary_sheet"
           :href="route('backend.staffattendance.report')"
-          class="p-3 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 transition"
+          class="p-3 rounded-md border border-green-200 bg-green-50 hover:bg-green-100 transition"
         >
-          <div class="text-xs font-semibold text-slate-700">Summary</div>
-          <div class="text-sm font-bold text-slate-900 mt-1">Attendance Report</div>
+          <div class="text-xs font-semibold text-white">Summary</div>
+          <div class="text-sm font-bold text-white mt-1">Attendance Report</div>
         </Link>
       </div>
 
@@ -790,7 +790,7 @@ const unpaidCellClass = (row) =>
                   <button
                     type="button"
                     class="px-3 py-1 text-sm text-white rounded"
-                    :class="isLocked ? 'bg-gray-400 cursor-not-allowed text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'"
+                    :class="isLocked ? 'bg-gray-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'"
                     :disabled="isLocked"
                     @click.prevent="paySalary(row.staff_admin_id, row.payable_salary)"
                   >
@@ -835,7 +835,7 @@ const unpaidCellClass = (row) =>
         v-if="selectedBreakdownRow"
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 print:hidden"
       >
-        <div class="w-full max-w-5xl bg-white rounded-lg shadow-xl text-gray-800">
+        <div class="w-full max-w-5xl bg-white rounded-lg shadow-xl">
           <div class="flex items-start justify-between p-4 border-b">
             <div>
               <h3 class="text-lg font-bold text-gray-800">Attendance Breakdown</h3>

@@ -77,7 +77,7 @@ const setExpiryFilter = (value) => {
 
             <!-- ===== Filter Bar ===== -->
             <div
-                class="grid grid-cols-1 gap-3 p-3 mb-3 bg-slate-200 rounded-md md:grid-cols-5 dark:bg-gray-700 text-white"
+                class="grid grid-cols-1 gap-3 p-3 mb-3 bg-slate-200 rounded-md md:grid-cols-5 dark:bg-gray-700"
             >
                 <!-- Search -->
                 <div class="md:col-span-3">

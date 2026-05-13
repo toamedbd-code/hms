@@ -88,24 +88,24 @@ const goToAttendanceAdd = () => {
                 </div>
             </div>
 
-            <div class="mb-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-white text-emerald-900">
+            <div class="mb-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
                 <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-emerald-600 text-white mr-2">Auto Synced</span>
                 Face/Device attendance events automatically update IN time and OUT time for this list.
             </div>
 
             <div
-                class="flex justify-between w-full p-2 py-3 space-x-2 text-white rounded-md bg-slate-300">
+                class="flex justify-between w-full p-2 py-3 space-x-2 text-gray-700 rounded-md bg-slate-300">
                 <div class="grid w-full grid-cols-1 gap-2 md:grid-cols-5">
                     <div class="flex space-x-2">
                         <div class="w-full">
                             <input id="title_en" v-model="filters.staff_id"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 type="text" placeholder="Staff Id" @input="applyFilter" />
                         </div>
 
                         <div class="block min-w-24 md:hidden">
                             <select v-model="filters.numOfData" @change="applyFilter"
-                                class="w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="10">Show 10</option>
                                 <option value="20">Show 20</option>
                                 <option value="30">Show 30</option>
@@ -119,20 +119,20 @@ const goToAttendanceAdd = () => {
 
                     <div class="w-full">
                         <input id="title_en" v-model="filters.name"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             type="text" placeholder="Name" @input="applyFilter" />
                     </div>
 
                     <div class="w-full">
                         <input ref="dateRangeInput"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             type="text" placeholder="Select date range" />
                     </div>
                 </div>
 
                 <div class="hidden min-w-24 md:block">
                     <select v-model="filters.numOfData" @change="applyFilter"
-                        class="w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                        class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                         <option value="10">show 10</option>
                         <option value="20">show 20</option>
                         <option value="30">show 30</option>

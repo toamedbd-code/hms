@@ -5,10 +5,12 @@ namespace App\Http\Middleware;
 use App\Models\Company;
 use App\Models\ActivityLog;
 use App\Models\Admin;
+use App\Models\Menu;
 use App\Models\MedicineInventory;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Inertia\Middleware;
 use Tighten\Ziggy\Ziggy;
 
@@ -39,6 +41,8 @@ class HandleInertiaRequests extends Middleware
 
         $sideMenus = [];
         $companyInfo = [];
+        $adminPermissions = collect();
+        $strictSidebarFiltering = false;
 
         // Load cached web setting early so we can prefer it for company info
         // when session fallback is not present.
@@ -72,8 +76,70 @@ class HandleInertiaRequests extends Middleware
                 // Fall back to currently authenticated user instance.
             }
 
-            // always regenerate menus from current permissions (don't cache in session)
-            $sideMenus = getSideMenus($adminUser);
+            try {
+                $adminPermissions = $adminUser->getAllPermissions()
+                    ->pluck('name')
+                    ->filter()
+                    ->map(function ($name) {
+                        return strtolower(trim((string) $name));
+                    })->unique()->values();
+            } catch (\Throwable $exception) {
+                $adminPermissions = collect();
+            }
+
+            try {
+                $strictEmailsEnv = env('SIDEBAR_STRICT_EMAILS', '');
+                $strictEmails = array_filter(array_map('trim', explode(',', (string) $strictEmailsEnv)));
+                $adminEmailLower = strtolower(trim((string) ($adminUser->email ?? '')));
+                $strictSidebarFiltering = $adminEmailLower !== ''
+                    && in_array($adminEmailLower, array_map('strtolower', $strictEmails), true);
+            } catch (\Throwable $exception) {
+                $strictSidebarFiltering = false;
+            }
+
+            $moduleSlugs = collect();
+            try {
+                if (method_exists($adminUser, 'modules')) {
+                    $moduleSlugs = $adminUser->modules()
+                        ->pluck('slug')
+                        ->map(function ($slug) {
+                            return strtolower(trim((string) $slug));
+                        })->filter()->sort()->values();
+                }
+            } catch (\Throwable $exception) {
+                $moduleSlugs = collect();
+            }
+
+            $menuSchemaVersion = Cache::remember('sidebar.menu_schema_version', 60, function () {
+                $latestMenuUpdate = Menu::query()->whereNull('deleted_at')->max('updated_at');
+
+                if ($latestMenuUpdate instanceof \Carbon\CarbonInterface) {
+                    return (string) $latestMenuUpdate->timestamp;
+                }
+
+                if (is_string($latestMenuUpdate) && trim($latestMenuUpdate) !== '') {
+                    return (string) strtotime($latestMenuUpdate);
+                }
+
+                return '0';
+            });
+
+            $sideMenuCacheKey = sprintf(
+                'sidebar.menus.u%s.p%s.m%s.s%s.v%s',
+                (string) $adminUser->id,
+                substr(sha1($adminPermissions->sort()->values()->implode('|')), 0, 16),
+                substr(sha1($moduleSlugs->implode('|')), 0, 16),
+                $strictSidebarFiltering ? '1' : '0',
+                (string) $menuSchemaVersion
+            );
+
+            $sideMenus = Cache::remember(
+                $sideMenuCacheKey,
+                max((int) config('cache.side_menu_ttl_seconds', 180), 30),
+                function () use ($adminUser) {
+                    return getSideMenus($adminUser);
+                }
+            );
         }
 
         $sideMenus = collect($sideMenus)
@@ -129,7 +195,13 @@ class HandleInertiaRequests extends Middleware
         } elseif (session()->has('companyInfo')) {
             $companyInfo = session()->get('companyInfo');
         } else {
-            $companyInfo = Company::first();
+            try {
+                $companyInfo = app('db')->connection()->getSchemaBuilder()->hasTable('companies')
+                    ? Company::first()
+                    : [];
+            } catch (\Throwable $exception) {
+                $companyInfo = [];
+            }
         }
 
         $medicineExpiryAlert = [
@@ -145,73 +217,70 @@ class HandleInertiaRequests extends Middleware
         ];
 
         if ($adminUser) {
-            /** @var \App\Models\Admin|null $adminUser */
-            $adminUser = $adminUser ?: ($request->user('admin') ?? auth()->guard('admin')->user());
             $today = Carbon::today()->toDateString();
             $soonDate = Carbon::today()->addDays(30)->toDateString();
 
-            $medicineExpiryAlert['expired_count'] = MedicineInventory::query()
-                ->where('status', 'Active')
-                ->whereNotNull('expiry_date')
-                ->whereDate('expiry_date', '<', $today)
-                ->count();
+            $medicineExpiryAlert = Cache::remember(
+                sprintf('alerts.medicine_expiry.%s.%s', $today, $soonDate),
+                max((int) config('cache.medicine_expiry_alert_ttl_seconds', 120), 30),
+                function () use ($today, $soonDate) {
+                    return [
+                        'expired_count' => MedicineInventory::query()
+                            ->where('status', 'Active')
+                            ->whereNotNull('expiry_date')
+                            ->whereDate('expiry_date', '<', $today)
+                            ->count(),
+                        'expiring_soon_count' => MedicineInventory::query()
+                            ->where('status', 'Active')
+                            ->whereNotNull('expiry_date')
+                            ->whereDate('expiry_date', '>=', $today)
+                            ->whereDate('expiry_date', '<=', $soonDate)
+                            ->count(),
+                        'days_window' => 30,
+                    ];
+                }
+            );
 
-            $medicineExpiryAlert['expiring_soon_count'] = MedicineInventory::query()
-                ->where('status', 'Active')
-                ->whereNotNull('expiry_date')
-                ->whereDate('expiry_date', '>=', $today)
-                ->whereDate('expiry_date', '<=', $soonDate)
-                ->count();
-
-            $activityLogAlert['can_view'] = (bool) ($adminUser?->can('activity-log-view'));
+            $activityLogAlert['can_view'] = $adminPermissions->contains('activity-log-view')
+                || (bool) ($adminUser?->can('activity-log-view'));
 
             if ($activityLogAlert['can_view']) {
-                $activityLogAlert['today_count'] = ActivityLog::query()
-                    ->whereDate('created_at', $today)
-                    ->count();
+                $activityData = Cache::remember(
+                    sprintf('alerts.activity_log.%s.%s', (string) $adminUser->id, $today),
+                    max((int) config('cache.activity_log_alert_ttl_seconds', 60), 30),
+                    function () use ($today) {
+                        $todayCount = ActivityLog::query()
+                            ->whereDate('created_at', $today)
+                            ->count();
 
-                $activityLogAlert['recent'] = ActivityLog::query()
-                    ->orderByDesc('created_at')
-                    ->limit(8)
-                    ->get(['id', 'user_name', 'module', 'action', 'description', 'status', 'created_at'])
-                    ->map(function ($log) {
+                        $recent = ActivityLog::query()
+                            ->orderByDesc('created_at')
+                            ->limit(8)
+                            ->get(['id', 'user_name', 'module', 'action', 'description', 'status', 'created_at'])
+                            ->map(function ($log) {
+                                return [
+                                    'id' => $log->id,
+                                    'user_name' => $log->user_name,
+                                    'module' => $log->module,
+                                    'action' => $log->action,
+                                    'description' => $log->description,
+                                    'status' => $log->status,
+                                    'created_at' => optional($log->created_at)->format('d-m-Y h:i A'),
+                                ];
+                            })
+                            ->values()
+                            ->toArray();
+
                         return [
-                            'id' => $log->id,
-                            'user_name' => $log->user_name,
-                            'module' => $log->module,
-                            'action' => $log->action,
-                            'description' => $log->description,
-                            'status' => $log->status,
-                            'created_at' => optional($log->created_at)->format('d-m-Y h:i A'),
+                            'today_count' => $todayCount,
+                            'recent' => $recent,
                         ];
-                    })
-                    ->values()
-                    ->toArray();
-            }
-        }
+                    }
+                );
 
-        $adminPermissions = collect();
-        if ($adminUser) {
-            // Normalize permissions to lowercase trimmed strings for consistency
-            $adminPermissions = $adminUser->getAllPermissions()
-                ->pluck('name')
-                ->filter()
-                ->map(function ($n) {
-                    return strtolower(trim((string) $n));
-                })->unique()->values();
-        }
-
-        // Per-user strict sidebar filtering flag (controlled by SIDEBAR_STRICT_EMAILS)
-        $strictSidebarFiltering = false;
-        try {
-            if ($adminUser) {
-                $strictEmailsEnv = env('SIDEBAR_STRICT_EMAILS', '');
-                $strictEmails = array_filter(array_map('trim', explode(',', (string) $strictEmailsEnv)));
-                $adminEmailLower = strtolower(trim((string) ($adminUser->email ?? '')));
-                $strictSidebarFiltering = $adminEmailLower && in_array($adminEmailLower, array_map('strtolower', $strictEmails), true);
+                $activityLogAlert['today_count'] = (int) ($activityData['today_count'] ?? 0);
+                $activityLogAlert['recent'] = (array) ($activityData['recent'] ?? []);
             }
-        } catch (\Throwable $_) {
-            $strictSidebarFiltering = false;
         }
 
 
@@ -235,6 +304,10 @@ class HandleInertiaRequests extends Middleware
             ],
 
             'companyInfo' => $companyInfo,
+            'appMeta' => [
+                'version' => (string) config('app.version', env('APP_VERSION', '2.1.1')),
+            ],
+            'locale' => app()->getLocale(),
             // Provide both `webSetting` and lowercase `websetting` keys so Inertia
             // partial reloads requesting `only: ['websetting']` will receive
             // the updated settings regardless of casing used by the client.

@@ -87,14 +87,14 @@ const goToApplyLeaveList = () => {
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="apply_date" value="Apply date" />
                         <input id="apply_date"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.apply_date" type="date" placeholder="Apply date" />
                         <InputError class="mt-2" :message="form.errors.apply_date" />
                     </div>
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="leave_type_id" value="Leave type" />
                         <select id="leave_type_id"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.leave_type_id" type="text" placeholder="Leave type">
                             <option value="">Select A Type</option>
                             <option v-for="leaveType in leaveTypes" :key="leaveType.id" :value="leaveType.id">{{
@@ -105,7 +105,7 @@ const goToApplyLeaveList = () => {
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="employee_id" value="Employee Name" />
                         <select id="employee_id"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.employee_id" type="text" placeholder="Employee Name">
                             <option value="">Select Name</option>
                             <option v-for="user in employeeDetails" :key="user.id" :value="user.id">{{
@@ -116,28 +116,28 @@ const goToApplyLeaveList = () => {
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="from" value="From" />
                         <input id="from"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.from" type="date" placeholder="From" />
                         <InputError class="mt-2" :message="form.errors.from" />
                     </div>
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="to" value="To" />
                         <input id="to"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.to" type="date" placeholder="To" />
                         <InputError class="mt-2" :message="form.errors.to" />
                     </div>
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="reason" value="Reason" />
                         <textarea id="reason"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.reason" type="text" placeholder="Reason"></textarea>
                         <InputError class="mt-2" :message="form.errors.reason" />
                     </div>
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="attachment" value="Attachment" />
                         <input id="attachment"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             type="file" @change="handlefileChange" placeholder="Attachment" />
                         <InputError class="mt-2" :message="form.errors.attachment" />
                     </div>

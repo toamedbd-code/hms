@@ -218,6 +218,13 @@
             width: 30%;
         }
 
+        .info-table .refd-by-value {
+            width: auto;
+            white-space: normal;
+            overflow-wrap: break-word;
+            word-break: break-word;
+        }
+
         /* Items table */
         .items-table {
             width: 100%;
@@ -583,6 +590,7 @@
             'footerHeight' => $__inv_footer_h,
             'printed_at' => $invoiceDateTime ?? ($printed_at ?? null),
             'showHeaderFooter' => $__inv_show,
+            'allowInvoiceDesignFallback' => false,
         ])
 
         <div class="content-section">
@@ -604,8 +612,12 @@
             @if(!empty($ipd_id))
             <table class="info-table">
                 <tr>
+                    <td class="label">Bill No</td><td class="colon">:</td><td class="value">{{ $bill_number }}</td>
+                    <td class="label">Date & Time</td><td class="colon">:</td><td class="value">{{ $invoiceDateTime ?? '' }}</td>
+                </tr>
+                <tr>
                     <td class="label">IPD ID</td><td class="colon">:</td><td class="value">{{ $ipd_id }}</td>
-                    <td class="label">Printed At</td><td class="colon">:</td><td class="value">{{ $printed_at ?? $invoiceDateTime ?? '' }}</td>
+                    <td class="label">Case</td><td class="colon">:</td><td class="value">{{ $case ?? '' }}</td>
                 </tr>
                 <tr>
                     <td class="label">Patient Name</td><td class="colon">:</td><td class="value">{{ $patient_name }}</td>
@@ -616,16 +628,15 @@
                     <td class="label">Phone</td><td class="colon">:</td><td class="value">{{ $contact_no }}</td>
                 </tr>
                 <tr>
-                    <td class="label">Credit Limit</td><td class="colon">:</td><td class="value">Tk {{ number_format((float) ($credit_limit ?? 0), 2) }}</td>
-                    <td class="label">Consultant</td><td class="colon">:</td><td class="value">{{ $consultant ?? $refd_by ?? '' }}</td>
-                </tr>
-                <tr>
                     <td class="label">Bed</td><td class="colon">:</td><td class="value">{{ $bed ?? '' }}</td>
                     <td class="label">Admission</td><td class="colon">:</td><td class="value">{{ $admission ?? '' }}</td>
                 </tr>
                 <tr>
+                    <td class="label">Bed Group</td><td class="colon">:</td><td class="value">{{ $bed_group ?? '' }}</td>
                     <td class="label">Discharge</td><td class="colon">:</td><td class="value">{{ $discharge ?? '' }}</td>
-                    <td class="label">Case</td><td class="colon">:</td><td class="value">{{ $case ?? '' }}</td>
+                </tr>
+                <tr>
+                    <td class="label">Consultant</td><td class="colon">:</td><td class="value" colspan="4">{{ $consultant ?? $refd_by ?? '' }}</td>
                 </tr>
             </table>
             @else
@@ -643,7 +654,7 @@
                     <td class="label">Gender</td><td class="colon">:</td><td class="value">{{ $gender }}</td>
                 </tr>
                 <tr>
-                    <td class="label">Refd. By</td><td class="colon">:</td><td class="value" colspan="3">{{ $refd_by }}</td>
+                    <td class="label">Refd. By</td><td class="colon">:</td><td class="value refd-by-value" colspan="4">{{ $refd_by }}</td>
                 </tr>
             </table>
             @endif
@@ -789,7 +800,7 @@ $labTotal = $billItemsCollection->filter(function($it){
 </td>
 </tr>
 
-@if((float) ($medicineTotal ?? 0) > 0)
+@if(($module ?? '') === 'ipd' && (float) ($medicineTotal ?? 0) > 0)
 <tr>
 <td class="label-col">Medicine Bill</td>
 <td class="amount-col">{{ number_format($medicineTotal, 2) }}</td>
@@ -909,47 +920,14 @@ Discount ({{ number_format($discount, 2) }}%)
   {{ $amount_in_words }}
 </div>
 
-        <!-- Footer Section -->
-        @if($__inv_show)
-        <div class="footer-section">
-            @php
-                $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
-                $footerPrintedAt = trim((string) ($printed_at ?? ''));
-            @endphp
-
-            @if(!empty($footer_image))
-                @if(!empty($footer_content))
-                    <div class="footer-content" style="position:relative; z-index:11;">{!! $footer_content !!}</div>
-                @endif
-
-                @if($footerFallbackLine !== '' || $footerPrintedAt !== '')
-                <div class="footer-date-time">
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <tr>
-                            <td style="text-align: left; padding-right: 12px;">
-                                    {{ $footerFallbackLine }}
-                            </td>
-                            <td style="text-align: right; white-space: nowrap; padding-right: 40px;">
-                                @if($footerPrintedAt !== '')
-                                    Printing Date: {{ $footerPrintedAt }}
-                                @endif
-                            </td>
-                        </tr>
-                    </table>
-                </div>
-                @endif
-
-                <img src="{{ $footer_image }}" alt="Footer" class="footer-image">
-            @else
-                <div class="footer-placeholder"></div>
-                @if(!empty($footer_content))
-                    <div class="footer-content">{!! $footer_content !!}</div>
-                @elseif($footerFallbackLine !== '')
-                    <div class="footer-content">{{ $footerFallbackLine }}@if(!empty($footerPrintedAt)) , Printing Date: {{ $footerPrintedAt }}@endif</div>
-                @endif
-            @endif
-        </div>
-        @endif
+        @includeIf('prints.partials._footer', [
+            'footer_image' => $footer_image ?? null,
+            'footer_content' => $footer_content ?? null,
+            'footer_content_position' => $footer_content_position ?? 'above',
+            'footerHeight' => $__inv_footer_h,
+            'showHeaderFooter' => $__inv_show,
+            'allowInvoiceDesignFallback' => false,
+        ])
     </div>
 </body>
 </html>

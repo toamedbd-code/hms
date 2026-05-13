@@ -218,6 +218,13 @@
             width: 30%;
         }
 
+        .info-table .refd-by-value {
+            width: auto;
+            white-space: normal;
+            overflow-wrap: break-word;
+            word-break: break-word;
+        }
+
         /* Items table */
         .items-table {
             width: 100%;
@@ -583,12 +590,14 @@
             'footerHeight' => $__inv_footer_h,
             'printed_at' => $invoiceDateTime ?? ($printed_at ?? null),
             'showHeaderFooter' => $__inv_show,
+            'allowInvoiceDesignFallback' => false,
         ])) echo $__env->make('prints.partials._header', [
             'header_image' => $header_image ?? null,
             'headerHeight' => $__inv_header_h,
             'footerHeight' => $__inv_footer_h,
             'printed_at' => $invoiceDateTime ?? ($printed_at ?? null),
             'showHeaderFooter' => $__inv_show,
+            'allowInvoiceDesignFallback' => false,
         ], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
 
         <div class="content-section">
@@ -612,8 +621,12 @@
             <?php if(!empty($ipd_id)): ?>
             <table class="info-table">
                 <tr>
+                    <td class="label">Bill No</td><td class="colon">:</td><td class="value"><?php echo e($bill_number); ?></td>
+                    <td class="label">Date & Time</td><td class="colon">:</td><td class="value"><?php echo e($invoiceDateTime ?? ''); ?></td>
+                </tr>
+                <tr>
                     <td class="label">IPD ID</td><td class="colon">:</td><td class="value"><?php echo e($ipd_id); ?></td>
-                    <td class="label">Printed At</td><td class="colon">:</td><td class="value"><?php echo e($printed_at ?? $invoiceDateTime ?? ''); ?></td>
+                    <td class="label">Case</td><td class="colon">:</td><td class="value"><?php echo e($case ?? ''); ?></td>
                 </tr>
                 <tr>
                     <td class="label">Patient Name</td><td class="colon">:</td><td class="value"><?php echo e($patient_name); ?></td>
@@ -624,16 +637,15 @@
                     <td class="label">Phone</td><td class="colon">:</td><td class="value"><?php echo e($contact_no); ?></td>
                 </tr>
                 <tr>
-                    <td class="label">Credit Limit</td><td class="colon">:</td><td class="value">Tk <?php echo e(number_format((float) ($credit_limit ?? 0), 2)); ?></td>
-                    <td class="label">Consultant</td><td class="colon">:</td><td class="value"><?php echo e($consultant ?? $refd_by ?? ''); ?></td>
-                </tr>
-                <tr>
                     <td class="label">Bed</td><td class="colon">:</td><td class="value"><?php echo e($bed ?? ''); ?></td>
                     <td class="label">Admission</td><td class="colon">:</td><td class="value"><?php echo e($admission ?? ''); ?></td>
                 </tr>
                 <tr>
+                    <td class="label">Bed Group</td><td class="colon">:</td><td class="value"><?php echo e($bed_group ?? ''); ?></td>
                     <td class="label">Discharge</td><td class="colon">:</td><td class="value"><?php echo e($discharge ?? ''); ?></td>
-                    <td class="label">Case</td><td class="colon">:</td><td class="value"><?php echo e($case ?? ''); ?></td>
+                </tr>
+                <tr>
+                    <td class="label">Consultant</td><td class="colon">:</td><td class="value" colspan="4"><?php echo e($consultant ?? $refd_by ?? ''); ?></td>
                 </tr>
             </table>
             <?php else: ?>
@@ -651,7 +663,7 @@
                     <td class="label">Gender</td><td class="colon">:</td><td class="value"><?php echo e($gender); ?></td>
                 </tr>
                 <tr>
-                    <td class="label">Refd. By</td><td class="colon">:</td><td class="value" colspan="3"><?php echo e($refd_by); ?></td>
+                    <td class="label">Refd. By</td><td class="colon">:</td><td class="value refd-by-value" colspan="4"><?php echo e($refd_by); ?></td>
                 </tr>
             </table>
             <?php endif; ?>
@@ -800,7 +812,7 @@ $labTotal = $billItemsCollection->filter(function($it){
 </td>
 </tr>
 
-<?php if((float) ($medicineTotal ?? 0) > 0): ?>
+<?php if(($module ?? '') === 'ipd' && (float) ($medicineTotal ?? 0) > 0): ?>
 <tr>
 <td class="label-col">Medicine Bill</td>
 <td class="amount-col"><?php echo e(number_format($medicineTotal, 2)); ?></td>
@@ -925,49 +937,21 @@ Discount (<?php echo e(number_format($discount, 2)); ?>%)
 
 </div>
 
-        <!-- Footer Section -->
-        <?php if($__inv_show): ?>
-        <div class="footer-section">
-            <?php
-                $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
-                $footerPrintedAt = trim((string) ($printed_at ?? ''));
-            ?>
-
-            <?php if(!empty($footer_image)): ?>
-                <?php if(!empty($footer_content)): ?>
-                    <div class="footer-content" style="position:relative; z-index:11;"><?php echo $footer_content; ?></div>
-                <?php endif; ?>
-
-                <?php if($footerFallbackLine !== '' || $footerPrintedAt !== ''): ?>
-                <div class="footer-date-time">
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <tr>
-                            <td style="text-align: left; padding-right: 12px;">
-                                    <?php echo e($footerFallbackLine); ?>
-
-                            </td>
-                            <td style="text-align: right; white-space: nowrap; padding-right: 40px;">
-                                <?php if($footerPrintedAt !== ''): ?>
-                                    Printing Date: <?php echo e($footerPrintedAt); ?>
-
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                    </table>
-                </div>
-                <?php endif; ?>
-
-                <img src="<?php echo e($footer_image); ?>" alt="Footer" class="footer-image">
-            <?php else: ?>
-                <div class="footer-placeholder"></div>
-                <?php if(!empty($footer_content)): ?>
-                    <div class="footer-content"><?php echo $footer_content; ?></div>
-                <?php elseif($footerFallbackLine !== ''): ?>
-                    <div class="footer-content"><?php echo e($footerFallbackLine); ?><?php if(!empty($footerPrintedAt)): ?> , Printing Date: <?php echo e($footerPrintedAt); ?><?php endif; ?></div>
-                <?php endif; ?>
-            <?php endif; ?>
-        </div>
-        <?php endif; ?>
+        <?php if ($__env->exists('prints.partials._footer', [
+            'footer_image' => $footer_image ?? null,
+            'footer_content' => $footer_content ?? null,
+            'footer_content_position' => $footer_content_position ?? 'above',
+            'footerHeight' => $__inv_footer_h,
+            'showHeaderFooter' => $__inv_show,
+            'allowInvoiceDesignFallback' => false,
+        ])) echo $__env->make('prints.partials._footer', [
+            'footer_image' => $footer_image ?? null,
+            'footer_content' => $footer_content ?? null,
+            'footer_content_position' => $footer_content_position ?? 'above',
+            'footerHeight' => $__inv_footer_h,
+            'showHeaderFooter' => $__inv_show,
+            'allowInvoiceDesignFallback' => false,
+        ], array_diff_key(get_defined_vars(), ['__data' => 1, '__path' => 1]))->render(); ?>
     </div>
 </body>
 </html><?php /**PATH C:\laragon\www\hms\resources\views/frontend/invoice/pdf.blade.php ENDPATH**/ ?>

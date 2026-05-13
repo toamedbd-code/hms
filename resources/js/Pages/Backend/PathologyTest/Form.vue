@@ -159,6 +159,16 @@ const selectedChargeCategoryId = computed(() => {
     return found ? found.id : '';
 });
 
+const showItemParameters = computed(() => {
+    const categoryType = (form.category_type || '').toString().trim().toLowerCase();
+    return categoryType === 'pathology' || categoryType === 'radiology';
+});
+
+const itemParametersTitle = computed(() => {
+    const categoryType = (form.category_type || '').toString().trim().toLowerCase();
+    return categoryType === 'radiology' ? 'Radiology Parameters' : 'Item Parameters';
+});
+
 watch(() => props.testParameters, (newParameters) => {
     testParameters.value = [...(newParameters || [])];
 });
@@ -576,7 +586,7 @@ const submit = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="category_type" value="Category Type" />
                         <select id="category_type" v-model="form.category_type"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                             <option value="">-- Select Type --</option>
                             <option value="Appointment">Appointment</option>
                             <option value="OPD">OPD</option>
@@ -698,9 +708,9 @@ const submit = () => {
                 </div>
 
                 <!-- Parameters Section -->
-                    <div class="mt-8">
+                    <div v-if="showItemParameters" class="mt-8">
                     <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300">Item Parameters</h3>
+                        <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300">{{ itemParametersTitle }}</h3>
                                         <div class="flex items-center space-x-2">
                                             <button type="button" @click="addParameter"
                                                 class="px-4 py-2 text-sm text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500">

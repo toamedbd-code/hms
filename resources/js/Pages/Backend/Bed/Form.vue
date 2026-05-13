@@ -71,7 +71,7 @@ const goToBedList = () => {
                     <div>
                         <InputLabel for="name" value="Bed Name" class="required" />
                         <input id="name" v-model="form.name" type="text" required
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             placeholder="Enter bed name (e.g., Bed 101)" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -80,7 +80,7 @@ const goToBedList = () => {
                     <div>
                         <InputLabel for="bed_type_id" value="Bed Type" class="required" />
                         <select id="bed_type_id" v-model="form.bed_type_id" required
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                             <option value="">Select Bed Type</option>
                             <option v-for="bedType in bedTypes" :key="bedType.id" :value="bedType.id">
                                 {{ bedType.name }}
@@ -93,7 +93,7 @@ const goToBedList = () => {
                     <div>
                         <InputLabel for="bed_group_id" value="Bed Group" class="required" />
                         <select id="bed_group_id" v-model="form.bed_group_id" required
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                             <option value="">Select Bed Group</option>
                             <option v-for="bedGroup in bedGroups" :key="bedGroup.id" :value="bedGroup.id">
                                 {{ bedGroup.name }}

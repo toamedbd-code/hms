@@ -367,7 +367,7 @@ eventBus.on("sidebarToggled", (flag) => {
 });
 
 const navSidebar = reactive([
-  "flex items-center p-3 space-x-3 rounded-md cursor-pointer hover:bg-blue-50 hover:text-blue-600 transition-all duration-200 group",
+  "flex items-center p-3 space-x-3 rounded-md cursor-pointer hover:bg-white hover:text-emerald-700 transition-all duration-200 group",
 ]);
 
 // Local fallback storage for side menus if server-side Inertia props are empty
@@ -445,21 +445,60 @@ const routeAliasMap = {
 // Additional aliases for menu entries that may omit the `backend.` prefix
 Object.assign(routeAliasMap, {
   'websetting.create': 'backend.websetting.create',
+  'billing.Page': 'backend.billing.Page',
+  'billing.index': 'backend.billing.Page',
   'journal-entry.index': 'backend.journal-entry.index',
+  'accounts.vendor-payment.index': 'backend.accounts.vendor-payment.index',
+  'inventory.index': 'backend.inventory.index',
+  'inventory.create': 'backend.inventory.create',
+  'medicineinventory.index': 'backend.medicineinventory.index',
+  'medicinesupplier.index': 'backend.medicinesupplier.index',
+  'medicinepurchase.index': 'backend.medicinepurchase.index',
+  'supplierpayment.index': 'backend.supplierpayment.index',
+  'stock.index': 'backend.stock.index',
 });
 
 // Some environments prefix route names (e.g., group 'as' + explicit names) causing
 // duplicated name parts like 'backend.backend.accounts.index'. Add common aliases
 // so client-side menu descriptors resolve to the Ziggy-exported names.
 Object.assign(routeAliasMap, {
+  'backend.billing.index': 'backend.billing.Page',
+  'backend.accounts.vendor-payment.index': 'backend.supplierpayment.index',
   'backend.accounts.index': 'backend.backend.accounts.index',
   'backend.ledger.index': 'backend.backend.ledger.index',
   'backend.accounts.balances': 'backend.backend.accounts.balances',
   'backend.accounts.audit': 'backend.backend.accounts.audit',
+  'backend.accounts.trial-balance': 'backend.backend.accounts.trial-balance',
+  'backend.accounts.profit-loss': 'backend.backend.accounts.profit-loss',
+  'backend.accounts.balance-sheet': 'backend.backend.accounts.balance-sheet',
+  'backend.accounts.cash-flow': 'backend.backend.accounts.cash-flow',
+  'backend.ledger.export': 'backend.backend.ledger.export',
+  'backend.backend.inventory.index': 'backend.inventory.index',
+  'backend.backend.inventory.create': 'backend.inventory.create',
+  'backend.backend.medicineinventory.index': 'backend.medicineinventory.index',
+  'backend.backend.medicinesupplier.index': 'backend.medicinesupplier.index',
+  'backend.backend.medicinepurchase.index': 'backend.medicinepurchase.index',
+  'backend.backend.supplierpayment.index': 'backend.supplierpayment.index',
+  'backend.backend.stock.index': 'backend.stock.index',
 });
 
 const menuLabelOverrides = {
+  'backend.accounts.vendor-payment.index': 'Vendor Payments',
   'backend.productreturn.index': 'Supplier Product Return',
+  'backend.inventory.index': 'General Inventory',
+  'backend.backend.inventory.index': 'General Inventory',
+  'backend.medicineinventory.index': 'Medicine Inventory',
+  'backend.backend.medicineinventory.index': 'Medicine Inventory',
+  'backend.medicinesupplier.index': 'Medicine Suppliers',
+  'backend.backend.medicinesupplier.index': 'Medicine Suppliers',
+  'backend.medicinepurchase.index': 'Medicine Purchases',
+  'backend.backend.medicinepurchase.index': 'Medicine Purchases',
+  'backend.supplierpayment.index': 'Supplier Payments',
+  'backend.backend.supplierpayment.index': 'Supplier Payments',
+  'backend.stock.index': 'Stock Management',
+  'backend.backend.stock.index': 'Stock Management',
+  'backend.stock.low-stock-report': 'Low Stock Report',
+  'backend.backend.stock.low-stock-report': 'Low Stock Report',
 };
 
 const fullReloadRoutes = [
@@ -471,7 +510,56 @@ const fullReloadRoutes = [
 
 const isFullReloadRoute = (name) => fullReloadRoutes.includes(name);
 
-const normalizeRouteName = (name) => routeAliasMap[name] ?? name;
+const routeExists = (name) => {
+  const routeName = String(name ?? '').trim();
+  if (!routeName) return false;
+
+  try {
+    const router = route();
+    if (typeof router?.has === 'function') {
+      return router.has(routeName);
+    }
+
+    route(routeName);
+    return true;
+  } catch (error) {
+    return false;
+  }
+};
+
+const normalizeRouteName = (name) => {
+  const original = String(name ?? '').trim();
+  if (!original) return '';
+
+  const alias = routeAliasMap[original];
+  if (alias) {
+    // Prefer alias only when it exists in the current Ziggy route list.
+    if (routeExists(alias)) return alias;
+    if (routeExists(original)) return original;
+
+    return alias;
+  }
+
+  // Generic fallback for duplicated backend prefix (backend.backend.*).
+  if (original.startsWith('backend.backend.')) {
+    const singlePrefixed = original.replace(/^backend\.backend\./, 'backend.');
+    if (routeExists(singlePrefixed)) return singlePrefixed;
+  }
+
+  // Generic fallback when menu route omits backend prefix.
+  if (!original.startsWith('backend.')) {
+    const backendPrefixed = `backend.${original}`;
+    if (routeExists(backendPrefixed)) return backendPrefixed;
+  }
+
+  // Generic fallback when environment uses double backend prefix.
+  if (original.startsWith('backend.')) {
+    const doublePrefixed = original.replace(/^backend\./, 'backend.backend.');
+    if (routeExists(doublePrefixed)) return doublePrefixed;
+  }
+
+  return original;
+};
 
 const getMenuDisplayName = (menuItem) => {
   const normalizedRoute = parseRouteDescriptor(menuItem?.route ?? '').name;
@@ -530,18 +618,7 @@ const currentModule = computed(() => {
 const hasRoute = (name) => {
   const descriptor = parseRouteDescriptor(name);
   if (!descriptor.name) return false;
-  try {
-    const router = route();
-    if (typeof router?.has === 'function') {
-      return router.has(descriptor.name);
-    }
-
-    // Fallback for Ziggy versions without route().has
-    route(descriptor.name);
-    return true;
-  } catch (error) {
-    return false;
-  }
+  return routeExists(descriptor.name);
 };
 
 const getMenuHref = (name) => {
@@ -637,32 +714,40 @@ const canManageGeneralSettings = computed(() => canManageAllWebSettings.value ||
 const canShowWebSettingModuleSubmenus = computed(() => (
   canManageAllWebSettings.value
   && hasRoute('backend.websetting.section.module')
-  && (canAccessMenuRoute('backend.websetting.section.module') || canAccessMenuRoute('backend.websetting.create'))
+  // Do not depend on a dedicated sidebar menu row for module settings.
+  // We intentionally hide the generic "Module Setting" menu entry,
+  // while still exposing the 4 focused module submenus under web settings.
+  && (
+    canAccessMenuRoute('backend.websetting.section.cms')
+    || canAccessMenuRoute('backend.websetting.section.general')
+    || canAccessMenuRoute('backend.websetting.create')
+    || canAccessMenuRoute('backend.websetting.section.module')
+  )
 ));
 
 const webSettingModuleSubmenus = [
   {
     name: 'Attendance Module Setting',
     icon: 'check-square',
-    route: 'backend.websetting.section.module?section=module&module=attendance',
+    route: 'backend.websetting.module.attendance',
     requiredPermission: 'attendance-settings',
   },
   {
     name: 'Machine Integration Setting',
     icon: 'activity',
-    route: 'backend.websetting.section.module?section=module&module=pathology',
+    route: 'backend.websetting.module.pathology',
     requiredPermission: 'machine-integration-setting',
   },
   {
     name: 'Payroll Module Setting',
     icon: 'dollar-sign',
-    route: 'backend.websetting.section.module?section=module&module=payroll',
+    route: 'backend.websetting.module.payroll',
     requiredPermission: 'payroll-management',
   },
   {
     name: 'Reporting Module Setting',
     icon: 'bar-chart-2',
-    route: 'backend.websetting.section.module?section=module&module=reporting',
+    route: 'backend.websetting.module.reporting',
     requiredPermission: 'report-settings',
   },
 ];
@@ -850,6 +935,28 @@ const isBlockedMenuName = (name) => {
   return blockedMenuNames.has(normalized) || blockedMenuNames.has(String(name ?? '').trim());
 };
 
+const isAccountManagementMenu = (menu) => {
+  return normalizeMenuName(menu?.name) === 'account management';
+};
+
+const shouldHideDuplicateSupplierPayment = (menu, child) => {
+  const childRoute = parseRouteDescriptor(child?.route ?? '').name;
+  const childName = normalizeMenuName(child?.name);
+
+  const isSupplierPaymentRoute = (
+    childRoute === 'backend.supplierpayment.index'
+    || childRoute === 'backend.pharmacy.supplier.payment'
+  );
+
+  const isSupplierPaymentName = childName === 'supplier payment' || childName === 'vendor payment';
+
+  if (!isSupplierPaymentRoute && !isSupplierPaymentName) {
+    return false;
+  }
+
+  return !isAccountManagementMenu(menu);
+};
+
 const childUniqueKey = (child) => {
   const normalizedName = normalizeMenuName(child?.name);
   if (normalizedName === 'supplier payment') {
@@ -932,6 +1039,20 @@ watch(currentRouteName, async (newRoute) => {
   if (!newRoute) return;
 
   await nextTick();
+
+  // Auto-open the parent menu whose child matches the active route
+  try {
+    const activeMenu = orderedMenus.value.find((menu) => Boolean(getActiveRoute(menu)));
+    if (activeMenu) {
+      const key = childUniqueKey(activeMenu);
+      if (!openState[key]) {
+        openState[key] = true;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
   const targetRoute = lastClickedRoute.value ?? newRoute;
   scrollRouteToTop(targetRoute, 'smooth');
 }, { immediate: true });
@@ -944,6 +1065,10 @@ const filteredMenus = computed(() => {
 
     const filteredChildren = (menu.childrens ?? []).filter(child => {
         if (isBlockedMenuName(child?.name)) {
+          return false;
+        }
+
+        if (shouldHideDuplicateSupplierPayment(menu, child)) {
           return false;
         }
 
@@ -1003,11 +1128,19 @@ const filteredMenus = computed(() => {
       && menuHasPermission
       && !shouldHideTopLevelQuickLink;
 
+    const hideTopLevelDuplicateSupplierPayment = (
+      !isAccountManagementMenu(menu)
+      && (
+        parseRouteDescriptor(menu?.route ?? '').name === 'backend.supplierpayment.index'
+        || normalizeMenuName(menu?.name) === 'supplier payment'
+      )
+    );
+
     // Show parent menu when admin has the parent's permission even if it has no route/children
     const showBecauseHasParentPermission = (!menu.route || String(menu.route).trim() === '')
       && (menu.permission_name && hasPermission(menu.permission_name));
 
-    if (canShowTopLevelMenu || uniqueChildren.length > 0 || showBecauseHasParentPermission) {
+    if (!hideTopLevelDuplicateSupplierPayment && (canShowTopLevelMenu || uniqueChildren.length > 0 || showBecauseHasParentPermission)) {
       return {
         ...menu,
         childrens: uniqueChildren,
@@ -1174,19 +1307,86 @@ const menuHasChildren = (mainMenu) => {
 const insertionIndex = computed(() => {
   if (!showHrHub) return -1;
   try {
-    return Array.isArray(filteredMenus.value) ? filteredMenus.value.length : 0;
+    return Array.isArray(orderedMenus.value) ? orderedMenus.value.length : 0;
   } catch (e) {
     return 0;
   }
 });
 
+// Keep server/menu sorting stable so sidebar items do not jump position
+// while navigating related pages inside the same module.
+const orderedMenus = computed(() => {
+  return Array.isArray(filteredMenus.value) ? filteredMenus.value : [];
+});
+
+const getRouteGroupKey = (routeName) => {
+  const normalized = String(routeName ?? '').trim();
+  if (!normalized) return '';
+
+  const segments = normalized.split('.').filter(Boolean);
+  if (segments.length < 2) return normalized;
+
+  // backend.employee.index/create/edit => backend.employee
+  return `${segments[0]}.${segments[1]}`;
+};
+
 const getActiveRoute = (mainMenu) => {
-  if (!mainMenu.childrens) return null;
-  for (const childMenu of mainMenu.childrens) {
-    if (isRouteActive(childMenu.route)) {
-      return childMenu.route;
+  // Use rendered children so parent remains highlighted even when children
+  // come from fallback/raw menu sources instead of `mainMenu.childrens`.
+  const children = getRenderedChildren(mainMenu);
+  if (Array.isArray(children)) {
+    for (const childMenu of children) {
+      if (childMenu?.route && isRouteActive(childMenu.route)) {
+        return childMenu.route;
+      }
+    }
+
+    // Fallback: if current route-name matches a child route-name, treat parent as active.
+    // This covers cases where query/default section params differ across menu definitions.
+    const currentName = currentRouteName.value;
+    if (currentName) {
+      for (const childMenu of children) {
+        const descriptor = parseRouteDescriptor(childMenu?.route ?? '');
+        if (!descriptor.name || descriptor.name !== currentName) continue;
+
+        if (descriptor.section && currentSection.value && descriptor.section !== currentSection.value) {
+          continue;
+        }
+
+        if (descriptor.module && currentModule.value && descriptor.module !== currentModule.value) {
+          continue;
+        }
+
+        return childMenu.route;
+      }
+
+      // Related-route fallback: keep parent marked for CRUD sibling pages
+      // (e.g., employee.index -> employee.create/edit/update).
+      const currentGroup = getRouteGroupKey(currentName);
+      if (currentGroup) {
+        for (const childMenu of children) {
+          const descriptor = parseRouteDescriptor(childMenu?.route ?? '');
+          if (!descriptor.name) continue;
+
+          if (getRouteGroupKey(descriptor.name) === currentGroup) {
+            return childMenu.route;
+          }
+        }
+      }
     }
   }
+
+  // If parent itself is directly active, keep it marked as active too.
+  if (mainMenu?.route && isRouteActive(mainMenu.route)) {
+    return mainMenu.route;
+  }
+
+  // Parent route-name fallback match (without strict query dependence).
+  const parentDescriptor = parseRouteDescriptor(mainMenu?.route ?? '');
+  if (parentDescriptor.name && currentRouteName.value === parentDescriptor.name) {
+    return mainMenu.route;
+  }
+
   return null;
 };
 
@@ -1205,18 +1405,18 @@ const sidebarClasses = computed(() => {
     <!-- Header -->
     <div class="w-full flex items-center h-[50px] border-b border-gray-200 bg-gray-100 px-4">
       <Link :href="route('backend.dashboard')"
-        class="text-xl font-bold text-gray-800 hover:text-blue-600 transition-colors duration-200">
+        class="text-xl font-bold text-gray-800 hover:text-emerald-700 transition-colors duration-200">
       {{ sideBar ? webSetting?.company_short_name : webSetting?.company_name || 'Company Name' }}
       <span v-if="!sideBar" class="block text-xs font-normal text-gray-500 mt-0.5"></span>
       </Link>
     </div>
 
     <!-- Navigation Menu -->
-    <div ref="sidebarScrollContainer" style="width: inherit" class="h-[calc(100vh-60px)] overflow-y-auto bg-gray-100">
+    <div ref="sidebarScrollContainer" style="width: inherit" class="h-[calc(100vh-60px)] overflow-y-auto bg-white">
       <ul class="w-full px-3 py-4 space-y-1">
         <!-- quickLinks will be inserted inline within the menu list (see insertionIndex) -->
 
-        <template v-for="(mainMenu, Index) in filteredMenus" :key="childUniqueKey(mainMenu)">
+        <template v-for="(mainMenu, Index) in orderedMenus" :key="childUniqueKey(mainMenu)">
           <!-- Menu with Submenu -->
           <li v-if="menuHasChildren(mainMenu)" :class="{ 'flex justify-center': sideBar }" class="relative" @click="onMenuTriggerClick($event, childUniqueKey(mainMenu), getActiveRoute(mainMenu) || (getRenderedChildren(mainMenu)[0] && getRenderedChildren(mainMenu)[0].route))">
             <SideBarSubMenu
@@ -1229,12 +1429,12 @@ const sidebarClasses = computed(() => {
               <template #trigger>
                 <div :class="[
                   navSidebar,
-                  getActiveRoute(mainMenu) ? 'bg-blue-50 text-blue-600 font-medium border-l-3 border-blue-500' : ''
+                  getActiveRoute(mainMenu) ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600' : 'bg-white text-gray-700'
                 ]">
                   <div class="flex items-center justify-center w-5 h-5">
                     <FeatherIcon :name="mainMenu.icon" size="18" :class="[
                       'transition-colors duration-200',
-                      getActiveRoute(mainMenu) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
+                      getActiveRoute(mainMenu) ? 'text-white' : 'text-gray-500 group-hover:text-emerald-700'
                     ]" />
                   </div>
                   <span v-if="!sideBar" class="truncate font-medium text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
@@ -1248,32 +1448,32 @@ const sidebarClasses = computed(() => {
                       <template v-if="isFullReloadRoute(submenu.route)">
                         <a :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click="handleMenuClick($event, submenu.route)" :class="[
                           isRouteActive(submenu.route)
-                            ? 'bg-blue-50 text-blue-600 font-medium'
-                            : 'text-gray-700 hover:bg-gray-50',
-                          'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-sm mx-1',
+                            ? 'bg-emerald-500 text-white font-medium'
+                            : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
+                          'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-md mx-1',
                           sideBar ? '' : 'ml-3',
                         ]">
-                          <FeatherIcon :name="submenu.icon" size="16" class="text-gray-500" />
+                          <FeatherIcon :name="submenu.icon" size="16" :class="isRouteActive(submenu.route) ? 'text-white' : 'text-gray-500'" />
                           <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(submenu) }}</span>
                         </a>
                       </template>
                       <template v-else>
                         <Link :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click="handleMenuClick($event, submenu.route)" :class="[
                           isRouteActive(submenu.route)
-                            ? 'bg-blue-50 text-blue-600 font-medium'
-                            : 'text-gray-700 hover:bg-gray-50',
-                          'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-sm mx-1',
+                            ? 'bg-emerald-500 text-white font-medium'
+                            : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
+                          'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-md mx-1',
                           sideBar ? '' : 'ml-3',
                         ]">
-                          <FeatherIcon :name="submenu.icon" size="16" class="text-gray-500" />
+                          <FeatherIcon :name="submenu.icon" size="16" :class="isRouteActive(submenu.route) ? 'text-white' : 'text-gray-500'" />
                           <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(submenu) }}</span>
                         </Link>
                       </template>
                     </template>
                     <template v-else>
                       <a href="#" @click.prevent="navigateFallback(submenu.route, $event)" :class="[
-                        'text-gray-700 hover:bg-gray-50',
-                        'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-sm mx-1',
+                        'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
+                        'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-md mx-1',
                         sideBar ? '' : 'ml-3',
                       ]">
                         <FeatherIcon :name="submenu.icon" size="16" class="text-gray-500" />
@@ -1292,14 +1492,14 @@ const sidebarClasses = computed(() => {
               <template v-if="isFullReloadRoute(mainMenu.route)">
                 <a :href="getMenuHref(mainMenu.route)" :data-menu-route="normalizeRouteName(mainMenu.route)" @click="handleMenuClick($event, mainMenu.route)" :class="[
                   isRouteActive(mainMenu.route)
-                    ? 'bg-blue-50 text-blue-600 font-medium border-l-3 border-blue-500'
-                    : 'text-gray-700 hover:bg-blue-50 hover:text-blue-600',
+                    ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600'
+                    : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
                   navSidebar,
                 ]" class="w-full">
                   <div class="flex items-center justify-center w-5 h-5">
                     <FeatherIcon :name="mainMenu.icon" size="18" :class="[
                       'transition-colors duration-200',
-                      isRouteActive(mainMenu.route) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
+                      isRouteActive(mainMenu.route) ? 'text-white' : 'text-gray-500 group-hover:text-emerald-700'
                     ]" />
                   </div>
                   <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
@@ -1308,14 +1508,14 @@ const sidebarClasses = computed(() => {
               <template v-else>
                 <Link :href="getMenuHref(mainMenu.route)" :data-menu-route="normalizeRouteName(mainMenu.route)" @click="handleMenuClick($event, mainMenu.route)" :class="[
                   isRouteActive(mainMenu.route)
-                    ? 'bg-blue-50 text-blue-600 font-medium border-l-3 border-blue-500'
-                    : 'text-gray-700 hover:bg-blue-50 hover:text-blue-600',
+                    ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600'
+                    : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
                   navSidebar,
                 ]" class="w-full">
                   <div class="flex items-center justify-center w-5 h-5">
                     <FeatherIcon :name="mainMenu.icon" size="18" :class="[
                       'transition-colors duration-200',
-                      isRouteActive(mainMenu.route) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
+                      isRouteActive(mainMenu.route) ? 'text-white' : 'text-gray-500 group-hover:text-emerald-700'
                     ]" />
                   </div>
                   <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
@@ -1336,14 +1536,14 @@ const sidebarClasses = computed(() => {
               <template v-if="isFullReloadRoute(quickLink.route)">
                 <a :href="getMenuHref(quickLink.route)" :data-menu-route="normalizeRouteName(quickLink.route)" @click="handleMenuClick($event, quickLink.route)" :class="[
                   isRouteActive(quickLink.route)
-                    ? 'bg-blue-50 text-blue-600 font-medium border-l-3 border-blue-500'
-                    : 'text-gray-700 hover:bg-blue-50 hover:text-blue-600',
+                    ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600'
+                    : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
                   navSidebar,
                 ]" class="w-full">
                   <div class="flex items-center justify-center w-5 h-5">
                     <FeatherIcon :name="quickLink.icon" size="18" :class="[
                       'transition-colors duration-200',
-                      isRouteActive(quickLink.route) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
+                      isRouteActive(quickLink.route) ? 'text-white' : 'text-gray-500 group-hover:text-emerald-700'
                     ]" />
                   </div>
                   <span v-if="!sideBar" class="truncate text-sm">{{ quickLink.label }}</span>
@@ -1353,14 +1553,14 @@ const sidebarClasses = computed(() => {
               <template v-else>
                 <Link :href="getMenuHref(quickLink.route)" :data-menu-route="normalizeRouteName(quickLink.route)" @click="handleMenuClick($event, quickLink.route)" :class="[
                   isRouteActive(quickLink.route)
-                    ? 'bg-blue-50 text-blue-600 font-medium border-l-3 border-blue-500'
-                    : 'text-gray-700 hover:bg-blue-50 hover:text-blue-600',
+                    ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600'
+                    : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
                   navSidebar,
                 ]" class="w-full">
                   <div class="flex items-center justify-center w-5 h-5">
                     <FeatherIcon :name="quickLink.icon" size="18" :class="[
                       'transition-colors duration-200',
-                      isRouteActive(quickLink.route) ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'
+                      isRouteActive(quickLink.route) ? 'text-white' : 'text-gray-500 group-hover:text-emerald-700'
                     ]" />
                   </div>
                   <span v-if="!sideBar" class="truncate text-sm">{{ quickLink.label }}</span>
@@ -1382,13 +1582,21 @@ const sidebarClasses = computed(() => {
   height: 10px;
 }
 
-.bg-blue-50 {
+.bg-emerald-50 {
   background-color: var(--app-theme-soft) !important;
 }
 
 .bg-gray-100,
 .bg-gray-50 {
   background-color: color-mix(in srgb, var(--app-theme-soft) 36%, #f8fafc) !important;
+}
+
+.bg-white {
+  background-color: #ffffff !important;
+}
+
+.bg-emerald-500 {
+  background-color: #10b981 !important;
 }
 
 .border-gray-200 {
@@ -1401,12 +1609,12 @@ const sidebarClasses = computed(() => {
   color: color-mix(in srgb, var(--app-theme-contrast) 70%, #334155) !important;
 }
 
-.text-blue-600,
-.text-blue-700 {
+.text-emerald-700,
+.text-emerald-600 {
   color: var(--app-theme-primary) !important;
 }
 
-.border-blue-500 {
+.border-emerald-500 {
   border-color: var(--app-theme-primary) !important;
 }
 
@@ -1414,16 +1622,20 @@ const sidebarClasses = computed(() => {
   background-color: color-mix(in srgb, var(--app-theme-soft) 62%, white) !important;
 }
 
-.hover\:bg-blue-50:hover {
+.hover\:bg-emerald-50:hover {
   background-color: var(--app-theme-soft) !important;
 }
 
-.hover\:text-blue-600:hover,
-.hover\:text-blue-700:hover {
+.hover\:bg-white:hover {
+  background-color: #ffffff !important;
+}
+
+.hover\:text-emerald-700:hover,
+.hover\:text-emerald-600:hover {
   color: var(--app-theme-primary) !important;
 }
 
-.group:hover .group-hover\:text-blue-600 {
+.group:hover .group-hover\:text-emerald-700 {
   color: var(--app-theme-primary) !important;
 }
 

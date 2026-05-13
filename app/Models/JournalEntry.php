@@ -19,6 +19,8 @@ class JournalEntry extends Model
         'posted',
         'status',
         'created_by',
+        'posted_by',
+        'posted_at',
     ];
 
     protected $casts = [
@@ -26,6 +28,7 @@ class JournalEntry extends Model
         'posted' => 'boolean',
         'total_debit' => 'decimal:2',
         'total_credit' => 'decimal:2',
+        'posted_at' => 'datetime',
     ];
 
     public function lines()

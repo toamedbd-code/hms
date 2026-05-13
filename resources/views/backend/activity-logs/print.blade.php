@@ -80,6 +80,8 @@
     </style>
 </head>
 <body>
+    @includeIf('prints.partials._header')
+
     <div class="header">
         <div>
             <h1 class="title">Activity Logs</h1>

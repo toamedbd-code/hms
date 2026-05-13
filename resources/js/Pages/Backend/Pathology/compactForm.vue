@@ -292,7 +292,7 @@ watch(() => form.net_amount, (newVal) => {
                 <div class="flex items-center space-x-3">
                     <div class="relative min-w-[260px]">
                         <select id="patient_id" v-model="form.patient_id"
-                            class="block w-full p-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            class="block w-full p-1 text-xs rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                             <option value="">Select Patient</option>
                             <option v-for="data in patients" :key="data.id" :value="data.id">{{ data.name }}</option>
                         </select>

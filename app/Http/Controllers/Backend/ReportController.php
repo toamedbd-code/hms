@@ -143,6 +143,7 @@ class ReportController extends Controller
                     'opdRows' => $opdRows,
                     'opdTotals' => $opdTotals,
                     'allModuleTotals' => [],
+                    '_force_show_header_footer' => $request->query('inline') ? false : null,
                 ];
 
                 $pdf = $this->generateDailySalesPdf($data);
@@ -272,6 +273,7 @@ class ReportController extends Controller
                     'reportRows' => $moduleRows,
                     'fallbackBillingRows' => [],
                     'allModuleTotals' => $allModuleTotals,
+                    '_force_show_header_footer' => $request->query('inline') ? false : null,
                 ];
 
                 $pdf = $this->generateDailySalesPdf($data);
@@ -388,6 +390,7 @@ class ReportController extends Controller
                 'reportRows' => $reportRows,
                 'fallbackBillingRows' => $fallbackBillingRows,
                 'allModuleTotals' => [],
+                '_force_show_header_footer' => $request->query('inline') ? false : null,
             ];
 
             $pdf = $this->generateDailySalesPdf($data);
@@ -1209,6 +1212,9 @@ class ReportController extends Controller
     private function generateDailySalesPdf($data)
     {
         $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
+        $forcedShowHeaderFooter = array_key_exists('_force_show_header_footer', $data)
+            ? (bool) $data['_force_show_header_footer']
+            : null;
 
         // parse attendance_device_options and reporting layout
         $attendanceOptions = $websetting?->attendance_device_options ?? [];
@@ -1225,7 +1231,9 @@ class ReportController extends Controller
         // Respect separate show_header/show_footer flags when configured
         $settingShowHeader = array_key_exists('show_header', $reporting) ? (bool) $reporting['show_header'] : null;
         $settingShowFooter = array_key_exists('show_footer', $reporting) ? (bool) $reporting['show_footer'] : null;
-        if ($settingShowHeader !== null || $settingShowFooter !== null) {
+        if ($forcedShowHeaderFooter !== null) {
+            $showHeaderFooter = $forcedShowHeaderFooter;
+        } elseif ($settingShowHeader !== null || $settingShowFooter !== null) {
             $showHeader = $settingShowHeader !== null ? $settingShowHeader : true;
             $showFooter = $settingShowFooter !== null ? $settingShowFooter : true;
             $showHeaderFooter = $showHeader && $showFooter;

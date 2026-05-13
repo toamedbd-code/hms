@@ -632,7 +632,7 @@ class MedicineInventoryController extends Controller
     {
         $request->validate([
             'supplier_id' => 'nullable|exists:medicinesuppliers,id',
-            'medicine_category_id' => 'nullable|exists:medicine_categories,id',
+            'medicine_category_id' => 'nullable|exists:medicinecategories,id',
             'csv_file' => 'required|file|mimes:csv,txt|max:102400',
             'skip_duplicates' => 'nullable|boolean',
         ]);
@@ -662,7 +662,10 @@ class MedicineInventoryController extends Controller
             ], 422);
         }
 
-        $header = array_map(fn ($value) => trim((string) $value), $headerRow);
+        $header = array_map(
+            fn ($value) => trim((string) $value, " \t\n\r\0\x0B\xEF\xBB\xBF"),
+            $headerRow
+        );
         $normalizedHeader = array_map(fn ($value) => Str::lower(trim((string) $value)), $header);
         $requiredHeader = ['supplier', 'category', 'medicine_name', 'unit_purchase_price', 'unit_selling_price', 'quantity'];
         $missingHeaders = array_values(array_diff($requiredHeader, $normalizedHeader));
@@ -848,6 +851,18 @@ class MedicineInventoryController extends Controller
             if (is_resource($handle)) {
                 fclose($handle);
             }
+
+            Log::error('MedicineInventoryController::importCsv failed: ' . $e->getMessage(), [
+                'exception' => $e,
+                'line' => $line ?? null,
+                'imported' => $imported ?? 0,
+                'skipped' => $skipped ?? 0,
+                'failed' => $failed ?? 0,
+                'supplier_id' => $request->input('supplier_id'),
+                'medicine_category_id' => $request->input('medicine_category_id'),
+                'csv_file' => $file?->getClientOriginalName(),
+            ]);
+
             return response()->json([
                 'status' => false,
                 'message' => 'CSV import failed due to server error.',

@@ -79,7 +79,7 @@ const goToBedTypeList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="name" value="Name" />
                         <input id="name"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" type="text" placeholder="Name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -87,7 +87,7 @@ const goToBedTypeList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="room_rent_rate_per_day" value="Room Rent (Per Day)" />
                         <input id="room_rent_rate_per_day"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.room_rent_rate_per_day" type="number" step="0.01" placeholder="0" />
                         <InputError class="mt-2" :message="form.errors.room_rent_rate_per_day" />
                     </div>
@@ -95,7 +95,7 @@ const goToBedTypeList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="bed_charge_rate_per_day" value="Bed Charge (Per Day)" />
                         <input id="bed_charge_rate_per_day"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.bed_charge_rate_per_day" type="number" step="0.01" placeholder="0" />
                         <InputError class="mt-2" :message="form.errors.bed_charge_rate_per_day" />
                     </div>

@@ -3,13 +3,30 @@
 @tailwind utilities;
 
 :root {
-  --app-theme-primary: #64748b;
-  --app-theme-soft: #f1f5f9;
-  --app-theme-contrast: #334155;
+  --app-theme-primary: #0284c7;
+  --app-theme-soft: #ecfeff;
+  --app-theme-contrast: #0f766e;
   --app-theme-surface: #ffffff;
-  --app-theme-primary-rgb: 100 116 139;
-  --app-theme-border: #d1d5db;
-  --app-theme-muted-surface: #f8fafc;
+  --app-theme-primary-rgb: 2 132 199;
+  --app-theme-border: #bae6fd;
+  --app-theme-muted-surface: #f0fdfa;
+
+  /* Theme-aware multi-color button palette */
+  --btn-blue-start: color-mix(in srgb, var(--app-theme-primary) 82%, #2563eb);
+  --btn-blue-end: color-mix(in srgb, var(--app-theme-primary) 58%, #0ea5e9);
+  --btn-blue-border: color-mix(in srgb, var(--app-theme-primary) 70%, #1d4ed8);
+
+  --btn-green-start: color-mix(in srgb, var(--app-theme-primary) 48%, #059669);
+  --btn-green-end: color-mix(in srgb, var(--app-theme-primary) 34%, #10b981);
+  --btn-green-border: color-mix(in srgb, var(--app-theme-primary) 52%, #047857);
+
+  --btn-yellow-start: color-mix(in srgb, var(--app-theme-primary) 26%, #f59e0b);
+  --btn-yellow-end: color-mix(in srgb, var(--app-theme-primary) 18%, #facc15);
+  --btn-yellow-border: color-mix(in srgb, var(--app-theme-primary) 30%, #d97706);
+
+  --btn-red-start: color-mix(in srgb, var(--app-theme-contrast) 30%, #dc2626);
+  --btn-red-end: color-mix(in srgb, var(--app-theme-primary) 18%, #ef4444);
+  --btn-red-border: color-mix(in srgb, var(--app-theme-contrast) 36%, #b91c1c);
 }
 
 body {
@@ -219,18 +236,34 @@ textarea:focus {
   --app-theme-muted-surface: color-mix(in srgb, var(--app-theme-soft) 46%, #fffdf4);
 }
 
+.theme-gray {
+  --app-theme-muted-surface: color-mix(in srgb, var(--app-theme-soft) 44%, #f8fafc);
+}
+
+.theme-emerald {
+  --app-theme-muted-surface: color-mix(in srgb, var(--app-theme-soft) 46%, #ecfdf5);
+}
+
+.theme-rose {
+  --app-theme-muted-surface: color-mix(in srgb, var(--app-theme-soft) 44%, #fff1f2);
+}
+
+.theme-indigo {
+  --app-theme-muted-surface: color-mix(in srgb, var(--app-theme-soft) 44%, #eef2ff);
+}
+
 .theme-default {
-  --app-theme-muted-surface: #f8fafc;
-  --app-theme-border: #d1d5db;
-  --app-theme-primary: #475569;
-  --app-theme-soft: #f1f5f9;
-  --app-theme-contrast: #334155;
+  --app-theme-muted-surface: #f0fdfa;
+  --app-theme-border: #bae6fd;
+  --app-theme-primary: #0369a1;
+  --app-theme-soft: #ecfeff;
+  --app-theme-contrast: #0f766e;
   --app-theme-surface: #ffffff;
-  --app-theme-primary-rgb: 71 85 105;
+  --app-theme-primary-rgb: 3 105 161;
 }
 
 .theme-default body {
-  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  background: linear-gradient(145deg, #ffffff 0%, #ecfeff 52%, #f0fdfa 100%);
 }
 
 .theme-default body::before {
@@ -263,8 +296,8 @@ textarea:focus {
 
 .theme-default button[style*="linear-gradient(to right, #3b82f6, #60a5fa)"],
 .theme-default button[style*="linear-gradient(to right, #2563eb, #3b82f6)"] {
-  background: linear-gradient(90deg, #475569 0%, #64748b 100%) !important;
-  border-color: #475569 !important;
+  background: linear-gradient(90deg, #0369a1 0%, #0ea5e9 52%, #10b981 100%) !important;
+  border-color: #0369a1 !important;
 }
 
 .theme-red body {
@@ -277,6 +310,22 @@ textarea:focus {
 
 .theme-amber body {
   background: linear-gradient(140deg, #fffbeb 0%, #fff7ed 50%, #fffdf5 100%);
+}
+
+.theme-gray body {
+  background: linear-gradient(140deg, #f8fafc 0%, #f1f5f9 52%, #ffffff 100%);
+}
+
+.theme-emerald body {
+  background: linear-gradient(140deg, #ecfdf5 0%, #f0fdfa 52%, #ffffff 100%);
+}
+
+.theme-rose body {
+  background: linear-gradient(140deg, #fff1f2 0%, #ffe4e6 52%, #ffffff 100%);
+}
+
+.theme-indigo body {
+  background: linear-gradient(140deg, #eef2ff 0%, #e0e7ff 52%, #ffffff 100%);
 }
 
 .theme-red body::before {
@@ -295,4 +344,180 @@ textarea:focus {
   background:
     radial-gradient(circle at 82% 14%, rgb(217 119 6 / 0.16) 0%, transparent 42%),
     radial-gradient(circle at 12% 86%, rgb(202 138 4 / 0.11) 0%, transparent 36%);
+}
+
+.theme-gray body::before {
+  background:
+    radial-gradient(circle at 82% 14%, rgb(71 85 105 / 0.14) 0%, transparent 42%),
+    radial-gradient(circle at 12% 86%, rgb(100 116 139 / 0.10) 0%, transparent 36%);
+}
+
+.theme-emerald body::before {
+  background:
+    radial-gradient(circle at 82% 14%, rgb(5 150 105 / 0.16) 0%, transparent 42%),
+    radial-gradient(circle at 12% 86%, rgb(16 185 129 / 0.11) 0%, transparent 36%);
+}
+
+.theme-rose body::before {
+  background:
+    radial-gradient(circle at 82% 14%, rgb(225 29 72 / 0.16) 0%, transparent 42%),
+    radial-gradient(circle at 12% 86%, rgb(244 63 94 / 0.11) 0%, transparent 36%);
+}
+
+.theme-indigo body::before {
+  background:
+    radial-gradient(circle at 82% 14%, rgb(79 70 229 / 0.16) 0%, transparent 42%),
+    radial-gradient(circle at 12% 86%, rgb(99 102 241 / 0.11) 0%, transparent 36%);
+}
+
+/* Blue-green action button for prominent actions (Create/Post/Back/etc.) */
+.btn-colorful {
+  @apply inline-flex items-center px-4 py-2 rounded-md text-white shadow-md bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 hover:opacity-95;
+}
+
+.btn-colorful-sm {
+  @apply inline-flex items-center px-3 py-1.5 rounded-md text-white shadow-sm bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 hover:opacity-95 text-sm;
+}
+
+/* Global modern multi-color button system */
+button,
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+a[class*="bg-"] {
+  border-radius: 0.375rem !important;
+  border: 1px solid rgba(15, 23, 42, 0.16) !important;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.10),
+    0 8px 18px rgba(15, 23, 42, 0.10) !important;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease !important;
+}
+
+button:hover,
+input[type="button"]:hover,
+input[type="submit"]:hover,
+input[type="reset"]:hover,
+a[class*="bg-"]:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.05) brightness(1.03);
+  box-shadow:
+    0 2px 4px rgba(15, 23, 42, 0.14),
+    0 12px 22px rgba(15, 23, 42, 0.14) !important;
+}
+
+button:active,
+input[type="button"]:active,
+input[type="submit"]:active,
+input[type="reset"]:active,
+a[class*="bg-"]:active {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+button:disabled,
+input[type="button"]:disabled,
+input[type="submit"]:disabled,
+input[type="reset"]:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Blue family */
+button[class*="bg-blue-"],
+button[class*="bg-indigo-"],
+button[class*="bg-sky-"],
+button[class*="bg-cyan-"],
+a[class*="bg-blue-"],
+a[class*="bg-indigo-"],
+a[class*="bg-sky-"],
+a[class*="bg-cyan-"] {
+  background: linear-gradient(90deg, var(--btn-blue-start) 0%, var(--btn-blue-end) 100%) !important;
+  color: #ffffff !important;
+  border-color: var(--btn-blue-border) !important;
+}
+
+/* Green family */
+button[class*="bg-green-"],
+button[class*="bg-emerald-"],
+button[class*="bg-teal-"],
+a[class*="bg-green-"],
+a[class*="bg-emerald-"],
+a[class*="bg-teal-"] {
+  background: linear-gradient(90deg, var(--btn-green-start) 0%, var(--btn-green-end) 100%) !important;
+  color: #ffffff !important;
+  border-color: var(--btn-green-border) !important;
+}
+
+/* Yellow family */
+button[class*="bg-yellow-"],
+button[class*="bg-amber-"],
+button[class*="bg-orange-"],
+a[class*="bg-yellow-"],
+a[class*="bg-amber-"],
+a[class*="bg-orange-"] {
+  background: linear-gradient(90deg, var(--btn-yellow-start) 0%, var(--btn-yellow-end) 100%) !important;
+  color: #111827 !important;
+  border-color: var(--btn-yellow-border) !important;
+}
+
+/* Keep destructive actions visually dangerous (red) */
+button.deleteButton,
+button.btn-danger,
+button.bg-red-500,
+button.bg-red-600,
+button[class*="bg-red-"],
+button[data-variant="danger"],
+a[class*="bg-red-"] {
+  background: linear-gradient(90deg, var(--btn-red-start) 0%, var(--btn-red-end) 100%) !important;
+  color: #ffffff !important;
+  border-color: var(--btn-red-border) !important;
+  box-shadow:
+    0 1px 2px rgba(127, 29, 29, 0.18),
+    0 10px 18px rgba(220, 38, 38, 0.24) !important;
+}
+
+button.deleteButton:hover,
+button.btn-danger:hover,
+button.bg-red-500:hover,
+button.bg-red-600:hover,
+button[class*="bg-red-"]:hover,
+button[data-variant="danger"]:hover,
+a[class*="bg-red-"]:hover {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--btn-red-start) 88%, #7f1d1d) 0%, var(--btn-red-start) 100%) !important;
+  filter: saturate(1.02) brightness(1.01);
+}
+
+/* Auto color cycle for unstyled plain buttons: red -> blue -> green -> yellow */
+button:not([class*="bg-"]):not([class*="from-"]):not(.deleteButton):not(.btn-danger):nth-of-type(4n+1) {
+  background: linear-gradient(90deg, var(--btn-red-start) 0%, var(--btn-red-end) 100%) !important;
+  color: #ffffff !important;
+  border-color: var(--btn-red-border) !important;
+}
+
+button:not([class*="bg-"]):not([class*="from-"]):not(.deleteButton):not(.btn-danger):nth-of-type(4n+2) {
+  background: linear-gradient(90deg, var(--btn-blue-start) 0%, var(--btn-blue-end) 100%) !important;
+  color: #ffffff !important;
+  border-color: var(--btn-blue-border) !important;
+}
+
+button:not([class*="bg-"]):not([class*="from-"]):not(.deleteButton):not(.btn-danger):nth-of-type(4n+3) {
+  background: linear-gradient(90deg, var(--btn-green-start) 0%, var(--btn-green-end) 100%) !important;
+  color: #ffffff !important;
+  border-color: var(--btn-green-border) !important;
+}
+
+button:not([class*="bg-"]):not([class*="from-"]):not(.deleteButton):not(.btn-danger):nth-of-type(4n+4) {
+  background: linear-gradient(90deg, var(--btn-yellow-start) 0%, var(--btn-yellow-end) 100%) !important;
+  color: #111827 !important;
+  border-color: var(--btn-yellow-border) !important;
+}
+
+input[type="button"]:not([class*="bg-"]),
+input[type="submit"]:not([class*="bg-"]),
+input[type="reset"]:not([class*="bg-"]) {
+  background: linear-gradient(90deg, var(--btn-blue-start) 0%, var(--btn-blue-end) 100%) !important;
+  color: #ffffff !important;
+  border-color: var(--btn-blue-border) !important;
 }

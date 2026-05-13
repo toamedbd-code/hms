@@ -19,6 +19,10 @@
         'creatinine' => 'Renal Function', 'ক্রিটিনাইন' => 'Renal Function', 'urea' => 'Renal Function', 'bun' => 'Renal Function',
         'rbs' => 'Glucose', 'hba1c' => 'Glucose', 'a1c' => 'Glucose', 'glucose' => 'Glucose', 'সুগার' => 'Glucose', 'শর্করা' => 'Glucose',
         'cholesterol' => 'Lipid Profile', 'hdl' => 'Lipid Profile', 'ldl' => 'Lipid Profile', 'triglyceride' => 'Lipid Profile', 'ট্রাইগ্লিসারাইড' => 'Lipid Profile', 'লিপিড' => 'Lipid Profile',
+        // Thyroid tokens
+        'tsh' => 'Thyroid Function', 't3' => 'Thyroid Function', 't4' => 'Thyroid Function', 'ft3' => 'Thyroid Function', 'ft4' => 'Thyroid Function', 'thyroid' => 'Thyroid Function', 'thyroxine' => 'Thyroid Function',
+        // FSH (fertility test) - map to Fertility Function
+        'fsh' => 'Fertility Function', 'এফএসএইচ' => 'Fertility Function', 'এফ এস এইচ' => 'Fertility Function',
     ];
 
     foreach ($explicit as $token => $lbl) {
@@ -44,8 +48,36 @@
             }
         }
     }
+    // If still empty, synthesize a human-friendly label from the test name
+    if ($label === '') {
+        try {
+            if ($t !== '' && preg_match_all('/[\p{L}\p{N}]{2,}/u', $t, $m) && !empty($m[0])) {
+                // pick the longest token as most descriptive
+                usort($m[0], function ($a, $b) { return mb_strlen($b) <=> mb_strlen($a); });
+                $tok = $m[0][0];
+                // map common single-token test names back to function labels if possible
+                $tok_l = mb_strtolower($tok, 'UTF-8');
+                foreach ($explicit as $token => $lbl) {
+                    if (mb_stripos($tok_l, $token) !== false || $tok_l === $token) {
+                        $label = $lbl;
+                        break;
+                    }
+                }
+
+                if ($label === '') {
+                    $label = (mb_strtoupper($tok, 'UTF-8') === $tok)
+                        ? $tok
+                        : mb_convert_case($tok, MB_CASE_TITLE, 'UTF-8');
+                }
+            }
+        } catch (\Throwable $_) {
+            // ignore
+        }
+    }
 @endphp
 
 @if($label !== '')
     <div class="test-function-label" style="font-size:11px;color:#374151;margin-bottom:4px;font-weight:600;">{{ $label }}</div>
+@else
+    <div class="test-function-label" style="font-size:11px;color:#374151;margin-bottom:4px;font-weight:600;">Misc Tests</div>
 @endif

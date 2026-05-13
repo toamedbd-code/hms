@@ -1,6 +1,7 @@
 <script setup>
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { ref, onMounted } from 'vue';
+import { Link } from '@inertiajs/vue3';
 import axios from 'axios';
 
 const filters = ref({ account_id: '', from: '', to: '', q: '', numOfData: 10 });
@@ -9,6 +10,13 @@ const transactions = ref([]);
 const meta = ref({ current_page: 1, last_page: 1, per_page: 10, total: 0 });
 const loading = ref(false);
 const selectedTx = ref(null);
+const summary = ref({
+  assets: 0,
+  liabilities: 0,
+  income: 0,
+  expense: 0,
+  net_profit: 0,
+});
 
 function formatDate(d) {
   if (!d) return '';
@@ -27,6 +35,7 @@ onMounted(() => {
   filters.value.from = from.toISOString().slice(0, 10);
   filters.value.to = today.toISOString().slice(0, 10);
   loadAccounts();
+  loadFinancialSummary();
   fetchTransactions();
 });
 
@@ -56,6 +65,40 @@ async function fetchTransactions(page = 1) {
   }
 }
 
+async function loadFinancialSummary() {
+  try {
+    const res = await axios.get(route('backend.accounts.financial-summary.list'), {
+      params: {
+        from: filters.value.from || undefined,
+        to: filters.value.to || undefined,
+        as_of: filters.value.to || undefined,
+      },
+    });
+
+    summary.value = res?.data?.totals || {
+      assets: 0,
+      liabilities: 0,
+      income: 0,
+      expense: 0,
+      net_profit: 0,
+    };
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function exportLedgerCsv() {
+  const query = {
+    account_id: filters.value.account_id || undefined,
+    from: filters.value.from || undefined,
+    to: filters.value.to || undefined,
+    q: filters.value.q || undefined,
+  };
+
+  const url = route('backend.ledger.export', query);
+  window.open(url, '_blank', 'noopener');
+}
+
 function viewTx(tx) {
   selectedTx.value = tx;
 }
@@ -78,6 +121,14 @@ function goto(page) {
   <BackendLayout>
     <div class="w-full p-4 bg-white rounded-md dark:bg-slate-900">
       <h1 class="text-xl font-bold">{{ $page.props.pageTitle }}</h1>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <Link :href="route('backend.accounts.index')" class="px-3 py-2 text-sm rounded border border-slate-300 dark:border-slate-600">Chart of Accounts</Link>
+        <Link :href="route('backend.accounts.balances')" class="px-3 py-2 text-sm rounded border border-slate-300 dark:border-slate-600">Balances</Link>
+        <Link :href="route('backend.accounts.trial-balance')" class="px-3 py-2 text-sm rounded border border-slate-300 dark:border-slate-600">Trial Balance</Link>
+        <Link :href="route('backend.accounts.profit-loss')" class="px-3 py-2 text-sm rounded border border-slate-300 dark:border-slate-600">Profit & Loss</Link>
+        <Link :href="route('backend.accounts.balance-sheet')" class="px-3 py-2 text-sm rounded border border-slate-300 dark:border-slate-600">Balance Sheet</Link>
+        <Link :href="route('backend.accounts.cash-flow')" class="px-3 py-2 text-sm rounded border border-slate-300 dark:border-slate-600">Cash Flow</Link>
+      </div>
 
       <div class="mt-4 p-3 border rounded bg-gray-50">
         <div class="grid grid-cols-4 gap-3">
@@ -101,8 +152,32 @@ function goto(page) {
             <input v-model="filters.q" @keyup.enter="fetchTransactions()" placeholder="description, uuid" class="w-full border rounded p-2" />
           </div>
         </div>
-        <div class="mt-3">
-          <button @click.prevent="fetchTransactions()" class="px-3 py-2 bg-blue-600 text-white rounded">Apply</button>
+        <div class="mt-3 flex items-center gap-2">
+          <button @click.prevent="fetchTransactions(); loadFinancialSummary();" class="btn-colorful-sm">Apply</button>
+          <button @click.prevent="exportLedgerCsv" class="px-3 py-2 text-sm rounded bg-emerald-600 text-white">Export CSV</button>
+        </div>
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div class="p-3 border rounded bg-white dark:bg-slate-900">
+          <div class="text-sm text-gray-500">Total Asset</div>
+          <div class="text-lg font-semibold">{{ formatAmount(summary.assets) }}</div>
+        </div>
+        <div class="p-3 border rounded bg-white dark:bg-slate-900">
+          <div class="text-sm text-gray-500">Total Liability</div>
+          <div class="text-lg font-semibold">{{ formatAmount(summary.liabilities) }}</div>
+        </div>
+        <div class="p-3 border rounded bg-white dark:bg-slate-900">
+          <div class="text-sm text-gray-500">Total Income</div>
+          <div class="text-lg font-semibold">{{ formatAmount(summary.income) }}</div>
+        </div>
+        <div class="p-3 border rounded bg-white dark:bg-slate-900">
+          <div class="text-sm text-gray-500">Total Expense</div>
+          <div class="text-lg font-semibold">{{ formatAmount(summary.expense) }}</div>
+        </div>
+        <div class="p-3 border rounded bg-white dark:bg-slate-900">
+          <div class="text-sm text-gray-500">Net Profit</div>
+          <div class="text-lg font-semibold" :class="Number(summary.net_profit || 0) >= 0 ? 'text-emerald-600' : 'text-amber-600'">{{ formatAmount(summary.net_profit) }}</div>
         </div>
       </div>
 
@@ -119,7 +194,7 @@ function goto(page) {
               <td class="p-2">{{ formatAmount(totalFor(tx, 'debit')) }}</td>
               <td class="p-2">{{ formatAmount(totalFor(tx, 'credit')) }}</td>
               <td class="p-2">{{ tx.entries.length }}</td>
-              <td class="p-2"><button @click.prevent="viewTx(tx)" class="px-2 py-1 bg-indigo-600 text-white rounded text-sm">View</button></td>
+              <td class="p-2"><button @click.prevent="viewTx(tx)" class="btn-colorful-sm">View</button></td>
             </tr>
             <tr v-if="!transactions.length && !loading"><td class="p-4 text-center" colspan="7">No transactions</td></tr>
           </tbody>
@@ -134,14 +209,14 @@ function goto(page) {
         </div>
       </div>
 
-      <div v-if="selectedTx" class="fixed inset-0 bg-black/50 flex items-center justify-center text-white">
+      <div v-if="selectedTx" class="fixed inset-0 bg-black/50 flex items-center justify-center">
         <div class="bg-white rounded p-4 w-2/3 max-h-[80vh] overflow-auto">
           <div class="flex justify-between items-center mb-3">
             <div>
               <div class="font-semibold">Transaction: {{ selectedTx.uuid }}</div>
               <div class="text-sm text-gray-600">{{ selectedTx.description }} — {{ formatDate(selectedTx.date) }}</div>
             </div>
-            <div><button @click="closeModal" class="px-2 py-1 bg-gray-300 rounded text-white">Close</button></div>
+            <div><button @click="closeModal" class="btn-colorful-sm">Close</button></div>
           </div>
 
           <table class="w-full table-auto border-collapse">

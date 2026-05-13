@@ -28,20 +28,20 @@ const applyFilter = () => {
             <h1 class="py-2 text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
 
             <div
-                class="flex justify-between w-full p-2 py-3 space-x-2 text-white rounded-md shadow-md bg-slate-300 shadow-gray-800/50 dark:bg-gray-700 dark:text-gray-200">
+                class="flex justify-between w-full p-2 py-3 space-x-2 text-gray-700 rounded-md shadow-md bg-slate-300 shadow-gray-800/50 dark:bg-gray-700 dark:text-gray-200">
 
                 <div class="grid w-full grid-cols-1 gap-2 md:grid-cols-5">
 
                     <div class="flex space-x-2">
                         <div class="w-full">
                             <input id="name" v-model="filters.name"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 type="text" placeholder="Permission Name" @input="applyFilter" />
                         </div>
 
                         <div class="w-full">
                             <select v-model="filters.module" @change="applyFilter"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="all">All Modules</option>
                                 <option value="attendance">Attendance</option>
                                 <option value="pathology">Pathology</option>
@@ -59,7 +59,7 @@ const applyFilter = () => {
 
                         <div class="block min-w-24 md:hidden">
                             <select v-model="filters.numOfData" @change="applyFilter"
-                                class="w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="10">Show 10</option>
                                 <option value="20">Show 20</option>
                                 <option value="30">Show 30</option>
@@ -74,7 +74,7 @@ const applyFilter = () => {
 
                 <div class="hidden min-w-24 md:block">
                     <select v-model="filters.numOfData" @change="applyFilter"
-                        class="w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                        class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                         <option value="10">show 10</option>
                         <option value="20">show 20</option>
                         <option value="30">show 30</option>

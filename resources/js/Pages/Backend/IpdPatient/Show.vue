@@ -7,7 +7,6 @@ import HospitalChargeModal from '@/Components/HospitalChargeModal.vue';
 import Modal from '@/Components/Modal.vue';
 import PathologyForm from '@/Pages/Backend/PathologyTest/Form.vue';
 import 'vue-multiselect/dist/vue-multiselect.css';
-import ActionButton from '@/Components/ActionButton.vue';
 
 const APP_TIMEZONE = "Asia/Dhaka";
 
@@ -1429,7 +1428,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex items-center gap-2 flex-wrap">
-            <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2">
             <Link :href="route('backend.ipdpatient.index')"
               class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
@@ -1451,34 +1450,38 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="flex items-center gap-2">
-            <ActionButton v-if="props.ipdpatient?.id" :href="route('backend.download.ipd.invoice', { id: props.ipdpatient.id })" external variant="rose" title="IPD Invoice">
+            <a v-if="props.ipdpatient?.id" :href="route('backend.download.ipd.invoice', { id: props.ipdpatient.id })"
+              target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-rose-600 text-white rounded">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round"
                   d="M9 12h6m-6 4h6M7.5 3.75h9A2.25 2.25 0 0 1 18.75 6v12A2.25 2.25 0 0 1 16.5 20.25h-9A2.25 2.25 0 0 1 5.25 18V6A2.25 2.25 0 0 1 7.5 3.75Z" />
               </svg>
-              <span>IPD Invoice</span>
-            </ActionButton>
+              IPD Invoice
+            </a>
 
-            <ActionButton v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id" :href="route('backend.download.ipd.final-bill', { id: props.ipdpatient.id })" external variant="fuchsia" title="Final Bill">
+            <a v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id"
+              :href="route('backend.download.ipd.final-bill', { id: props.ipdpatient.id })" target="_blank" rel="noopener"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-fuchsia-700 text-white rounded">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round"
                   d="M9 12h6m-6 4h6M7.5 3.75h9A2.25 2.25 0 0 1 18.75 6v12A2.25 2.25 0 0 1 16.5 20.25h-9A2.25 2.25 0 0 1 5.25 18V6A2.25 2.25 0 0 1 7.5 3.75Z" />
               </svg>
-              <span>Final Bill</span>
-            </ActionButton>
+              Final Bill
+            </a>
           </div>
 
           <div class="flex items-center gap-2">
-            <ActionButton v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id" variant="orange" @click="regenerateBilling" title="Regenerate">
+            <button v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id" type="button"
+              @click="regenerateBilling" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-orange-600 text-white rounded">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round"
                   d="M16.023 9.348h4.992m0 0v4.992m0-4.992-4.992 4.992M7.977 14.652H3m0 0v-4.992m0 4.992 4.992-4.992" />
               </svg>
-              <span>Regenerate</span>
-            </ActionButton>
+              Regenerate
+            </button>
 
             <div class="relative" ref="printMenuRef">
               <button type="button" @click="togglePrintMenu"
@@ -1518,10 +1521,10 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <ActionButton type="button" @click="goToCreateItem" variant="success" title="Create Item">
+            <button type="button" @click="goToCreateItem" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded" title="Create Item">
               <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
-              <span>Create Item</span>
-            </ActionButton>
+              Create Item
+            </button>
             <Modal :show="showItemModal" @close="() => { showItemModal = false }" maxWidth="2xl">
               <div class="p-4">
                 <PathologyForm
@@ -1552,7 +1555,7 @@ onBeforeUnmount(() => {
               <label class="block text-xs text-gray-600 mb-1">Item Name</label>
               <div class="relative">
                 <input v-model="manualChargeForm.item_name" @input="onManualItemInput" @focus="() => { if (manualChargeForm.item_name && String(manualChargeForm.item_name).length >= 2) searchManualItems(manualChargeForm.item_name); }" @keydown.enter.prevent="onManualEnter" @keydown.down.prevent="manualSelectNext" @keydown.up.prevent="manualSelectPrev" type="text" placeholder="Item name"
-                  class="block w-full p-2 text-white rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200" />
+                  class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200" />
 
                 <div v-if="showManualSearch" class="absolute left-0 right-0 z-50 mt-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded shadow max-h-60 overflow-auto text-sm">
                   <div v-if="manualSearchLoading" class="p-2 text-xs text-gray-500">Searching...</div>
@@ -1571,13 +1574,13 @@ onBeforeUnmount(() => {
             <div>
               <label class="block text-xs text-gray-600 mb-1">Price (Tk.)</label>
               <input v-model="manualChargeForm.unit_price" type="number" step="0.01" min="0" placeholder="0.00"
-                class="block w-full p-2 text-white rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200" />
+                class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200" />
               <div v-if="manualChargeForm.errors.unit_price" class="text-xs text-red-600">{{ manualChargeForm.errors.unit_price }}</div>
             </div>
             <div>
               <label class="block text-xs text-gray-600 mb-1">Qty</label>
               <input v-model="manualChargeForm.quantity" type="number" min="1" step="1"
-                class="block w-full p-2 text-white rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200" />
+                class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200" />
             </div>
             <div class="flex items-center gap-2">
               <button type="button" @click="addManualToList" :disabled="addLock || manualChargeForm.processing"
@@ -2028,7 +2031,7 @@ onBeforeUnmount(() => {
               <option value="flat">Flat</option>
               <option value="percentage">Percentage</option>
             </select>
-            <button type="button" @click="applyDiscount" :disabled="discountForm.processing" class="px-3 py-2 text-white bg-yellow-500 text-black rounded">Apply Discount</button>
+            <button type="button" @click="applyDiscount" :disabled="discountForm.processing" class="px-3 py-2 text-xs bg-yellow-500 text-black rounded">Apply Discount</button>
           </div>
         </div>
 
@@ -2065,7 +2068,7 @@ onBeforeUnmount(() => {
                 <td class="px-2 py-2 border">{{ payment.payment_status ?? '' }}</td>
                 <td class="px-2 py-2 border">{{ payment.notes ?? '' }}</td>
                 <td class="px-2 py-2 border">
-                  <button type="button" @click="editPayment(payment)" class="px-2 py-1 text-white] bg-yellow-400 text-black rounded">Edit</button>
+                  <button type="button" @click="editPayment(payment)" class="px-2 py-1 text-[11px] bg-yellow-400 text-black rounded">Edit</button>
                 </td>
               </tr>
             </tbody>

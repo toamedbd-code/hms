@@ -32,33 +32,33 @@ const applyPerPage = () => {
         <div class="flex flex-wrap items-center gap-2">
           <a :href="route('backend.stock.item.create')" class="px-3 py-2 text-sm font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700">Store Item Setup</a>
           <a :href="route('backend.stock.grns')" class="px-3 py-2 text-sm font-semibold text-white bg-cyan-600 rounded hover:bg-cyan-700">GRN Receive</a>
-          <a :href="route('backend.stock.requisitions')" class="px-3 py-2 text-sm font-semibold text-white bg-slate-700 rounded hover:bg-slate-800">Requisitions</a>
+          <a :href="route('backend.stock.requisitions')" class="px-3 py-2 text-sm font-semibold text-white bg-teal-600 rounded hover:bg-teal-700">Requisitions</a>
           <a :href="route('backend.stock.adjustments')" class="px-3 py-2 text-sm font-semibold text-white bg-sky-600 rounded hover:bg-sky-700">Adjustments</a>
           <a :href="route('backend.stock.adjustment.create')" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700">Stock In/Out Entry</a>
           <a :href="route('backend.stock.low-stock-report')" class="px-3 py-2 text-sm font-semibold text-white bg-amber-600 rounded hover:bg-amber-700">Low Stock</a>
-          <a :href="route('backend.stock.movement-report')" class="px-3 py-2 text-sm font-semibold text-white bg-violet-600 rounded hover:bg-violet-700">Movement Report</a>
+          <a :href="route('backend.stock.movement-report')" class="px-3 py-2 text-sm font-semibold text-white bg-fuchsia-600 rounded hover:bg-fuchsia-700">Movement Report</a>
           <a :href="route('backend.stock.monthly-closing')" class="px-3 py-2 text-sm font-semibold text-white bg-rose-600 rounded hover:bg-rose-700">Monthly Closing</a>
         </div>
       </div>
 
       <div class="grid grid-cols-1 gap-3 mt-3 md:grid-cols-2 xl:grid-cols-5">
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded text-white">
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded">
           <p class="text-xs text-slate-500">Total Items</p>
           <p class="mt-1 text-lg font-semibold text-slate-800">{{ summary.total_items ?? 0 }}</p>
         </div>
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded text-white">
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded">
           <p class="text-xs text-slate-500">Active Items</p>
           <p class="mt-1 text-lg font-semibold text-slate-800">{{ summary.active_items ?? 0 }}</p>
         </div>
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded text-white">
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded">
           <p class="text-xs text-slate-500">Total Quantity</p>
           <p class="mt-1 text-lg font-semibold text-slate-800">{{ Number(summary.total_quantity ?? 0).toFixed(0) }}</p>
         </div>
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded text-white">
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded">
           <p class="text-xs text-slate-500">Inventory Value</p>
           <p class="mt-1 text-lg font-semibold text-slate-800">{{ formatMoney(summary.inventory_value) }}</p>
         </div>
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded text-white">
+        <div class="p-3 bg-slate-50 border border-slate-200 rounded">
           <p class="text-xs text-slate-500">Low Stock Items</p>
           <p class="mt-1 text-lg font-semibold text-slate-800">{{ Number(summary.low_stock_items ?? 0) }}</p>
         </div>
@@ -98,7 +98,7 @@ const applyPerPage = () => {
               <td class="px-3 py-2 border text-right">{{ formatMoney(item.unit_cost) }}</td>
               <td class="px-3 py-2 border text-right">{{ Number(item.reorder_level ?? 0).toFixed(2) }}</td>
               <td class="px-3 py-2 border text-center">
-                <span class="px-2 py-1 text-xs rounded" :class="item.status === 'Active' ? 'bg-emerald-100 text-white' : 'bg-rose-100 text-rose-700'">{{ item.status }}</span>
+                <span class="px-2 py-1 text-xs rounded" :class="item.status === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'">{{ item.status }}</span>
               </td>
             </tr>
             <tr v-if="rows.length === 0">

@@ -644,6 +644,8 @@ class RadiologyController extends Controller
                     'discount' => 0,
                     'rugound' => 0,
                     'net_amount' => floatval($test['amount']),
+                    'commissionable' => $testInfo->commissionable ?? null,
+                    'commission_rate' => $testInfo->commission_rate ?? null,
                     'status' => 'Active'
                 ]);
             }

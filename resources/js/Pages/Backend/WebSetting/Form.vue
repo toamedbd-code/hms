@@ -8,7 +8,7 @@ import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 
-const props = defineProps(['websetting', 'id', 'activeSection', 'singleSectionMode', 'availableTemplates', 'bookingDoctors']);
+const props = defineProps(['websetting', 'id', 'activeSection', 'activeModule', 'singleSectionMode', 'availableTemplates', 'bookingDoctors']);
 const bookingDoctors = props.bookingDoctors ?? [];
 const bookingPanelOpen = ref(false);
 const page = usePage();
@@ -342,6 +342,13 @@ const toggleModuleSection = (moduleKey) => {
 const getSelectedModuleSection = () => moduleSectionKeys.find((key) => moduleSections[key]) ?? '';
 
 const applyModuleSelectionFromQuery = () => {
+    const moduleFromProps = normalizeModuleSection(props.activeModule);
+    if (moduleFromProps) {
+        lockedModuleSection.value = moduleFromProps;
+        setSingleModuleSection(moduleFromProps);
+        return;
+    }
+
     if (typeof window === 'undefined') {
         return;
     }
@@ -442,6 +449,7 @@ const parseFeaturedDoctorsRows = (rawJson) => {
                 designation: String(item.designation ?? ''),
                 phone: String(item.phone ?? ''),
                 experience: String(item.experience ?? ''),
+                doctor_fee: String(item.doctor_fee ?? ''),
                 bio: String(item.bio ?? ''),
                 image_url: String(item.image_url ?? ''),
             }));
@@ -595,9 +603,39 @@ const facilityRows = ref(parseSimpleListRows(form.website_facilities_json));
 const testimonialEnRows = ref(parseTestimonialsRows(form.website_testimonials_en_json));
 const testimonialBnRows = ref(parseTestimonialsRows(form.website_testimonials_bn_json));
 
+const cmsStats = computed(() => ({
+    doctors: featuredDoctorsRows.value.filter((row) => String(row.name ?? '').trim() !== '').length,
+    services: serviceRows.value.filter((row) => String(row.label ?? '').trim() !== '').length,
+    facilities: facilityRows.value.filter((row) => String(row.label ?? '').trim() !== '').length,
+    testimonials: [...testimonialEnRows.value, ...testimonialBnRows.value]
+        .filter((row) => String(row.name ?? '').trim() !== '' && String(row.quote ?? '').trim() !== '').length,
+}));
+
+const cmsCompletionPercent = computed(() => {
+    const checkpoints = [
+        String(form.website_hero_title ?? '').trim() !== '',
+        String(form.website_hero_subtitle ?? '').trim() !== '',
+        String(form.website_about_text ?? '').trim() !== '',
+        String(form.website_cta_text ?? '').trim() !== '',
+        String(form.website_emergency_phone ?? '').trim() !== '',
+        cmsStats.value.doctors > 0,
+        cmsStats.value.services > 0,
+        cmsStats.value.facilities > 0,
+    ];
+
+    const completed = checkpoints.filter(Boolean).length;
+    return Math.round((completed / checkpoints.length) * 100);
+});
+
+const cmsCompletionTone = computed(() => {
+    if (cmsCompletionPercent.value >= 85) return 'text-emerald-700';
+    if (cmsCompletionPercent.value >= 60) return 'text-amber-700';
+    return 'text-rose-700';
+});
+
 if (featuredDoctorsRows.value.length === 0) {
     featuredDoctorsRows.value = [
-        { name: '', specialty: '', designation: '', phone: '', experience: '', bio: '', image_url: '' },
+        { name: '', specialty: '', designation: '', phone: '', experience: '', doctor_fee: '', bio: '', image_url: '' },
     ];
 }
 
@@ -634,8 +672,11 @@ const addFeaturedDoctorRow = () => {
     featuredDoctorsRows.value.push({
         name: '',
         specialty: '',
+        designation: '',
         phone: '',
         experience: '',
+        doctor_fee: '',
+        bio: '',
         image_url: '',
     });
 };
@@ -659,6 +700,7 @@ const addDoctorFromBooking = (doc) => {
         designation: '',
         phone: doc.phone ?? '',
         experience: '',
+        doctor_fee: String(doc.doctor_fee ?? doc.doctor_charge ?? ''),
         bio: '',
         image_url: '',
         admin_id: doc.id,
@@ -790,6 +832,7 @@ watch(featuredDoctorsRows, (rows) => {
             designation: String(row.designation ?? '').trim(),
             phone: String(row.phone ?? '').trim(),
             experience: String(row.experience ?? '').trim(),
+            doctor_fee: String(row.doctor_fee ?? '').trim(),
             bio: String(row.bio ?? '').trim(),
             image_url: String(row.image_url ?? '').trim(),
         }))
@@ -874,9 +917,9 @@ const handleMobileLogoChange = (event) => {
 const submit = () => {
     form.transform((data) => ({
         ...data,
+        activeSection: activeSettingsSection.value,
         report_title: data.address,
         attendance_device_options: JSON.stringify(deviceOptions.value),
-        activeSection: activeSettingsSection.value,
     })).post(route('backend.websetting.store'), {
         onSuccess: (response) => {
             displayResponse(response);
@@ -998,7 +1041,7 @@ onBeforeUnmount(() => {
 <template>
     <BackendLayout>
         <div class="w-full transition duration-1000 ease-in-out transform bg-white rounded-md">
-            <div class="flex items-center justify-between w-full text-gray-700 bg-gray-100 rounded-md">
+            <div v-if="$page.props.pageTitle" class="flex items-center justify-between w-full text-gray-700 bg-gray-100 rounded-md">
                 <h1 class="p-4 text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
             </div>
 
@@ -1151,6 +1194,7 @@ onBeforeUnmount(() => {
                             <select id="language" v-model="form.language"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300">
                                 <option value="English">English</option>
+                                <option value="Bangla">Bangla</option>
                             </select>
                             <InputError class="mt-2" :message="form.errors.language" />
                         </div>
@@ -1253,7 +1297,44 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div v-show="activeSettingsSection === 'cms'" class="border rounded-md p-4">
-                    <h2 class="text-lg font-semibold mb-4">Website Content (Dynamic CMS)</h2>
+                    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <h2 class="text-lg font-semibold">Website Content (Dynamic CMS)</h2>
+                            <p class="mt-1 text-xs text-slate-600">এই section-এ সব content no-code ভাবে edit/post করা যাবে, JSON manually edit করার দরকার নেই।</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <a href="/" target="_blank" class="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Open Website</a>
+                            <button type="button" @click="submit" class="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100">Save CMS Now</button>
+                        </div>
+                    </div>
+
+                    <div class="mb-4 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 via-cyan-50 to-emerald-50 p-4">
+                        <div class="grid grid-cols-2 gap-3 md:grid-cols-5">
+                            <div class="rounded-lg bg-white/90 p-2 text-center">
+                                <p class="text-[11px] uppercase tracking-wide text-slate-500">Doctors</p>
+                                <p class="text-lg font-semibold text-slate-800">{{ cmsStats.doctors }}</p>
+                            </div>
+                            <div class="rounded-lg bg-white/90 p-2 text-center">
+                                <p class="text-[11px] uppercase tracking-wide text-slate-500">Services</p>
+                                <p class="text-lg font-semibold text-slate-800">{{ cmsStats.services }}</p>
+                            </div>
+                            <div class="rounded-lg bg-white/90 p-2 text-center">
+                                <p class="text-[11px] uppercase tracking-wide text-slate-500">Facilities</p>
+                                <p class="text-lg font-semibold text-slate-800">{{ cmsStats.facilities }}</p>
+                            </div>
+                            <div class="rounded-lg bg-white/90 p-2 text-center">
+                                <p class="text-[11px] uppercase tracking-wide text-slate-500">Testimonials</p>
+                                <p class="text-lg font-semibold text-slate-800">{{ cmsStats.testimonials }}</p>
+                            </div>
+                            <div class="rounded-lg bg-white/90 p-2 text-center">
+                                <p class="text-[11px] uppercase tracking-wide text-slate-500">Completion</p>
+                                <p class="text-lg font-semibold" :class="cmsCompletionTone">{{ cmsCompletionPercent }}%</p>
+                            </div>
+                        </div>
+                        <div class="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                            <div class="h-full rounded-full bg-gradient-to-r from-sky-500 to-emerald-500 transition-all duration-300" :style="{ width: `${cmsCompletionPercent}%` }"></div>
+                        </div>
+                    </div>
 
                     <div class="space-y-4">
                         <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
@@ -1329,19 +1410,13 @@ onBeforeUnmount(() => {
                                 <h3 class="text-sm font-semibold text-slate-700">Featured Doctors</h3>
                                     <div class="flex items-center gap-2">
                                         <button type="button" @click.prevent.stop="addFeaturedDoctorRow"
-                                            class="inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                            style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                            onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                            onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';">
+                                            class="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">
                                             Add Doctor
                                         </button>
 
                                         <div class="relative">
                                             <button type="button" @click.prevent.stop="bookingPanelOpen = !bookingPanelOpen"
-                                                class="inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                                style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                                onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                                onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';">
+                                                class="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100">
                                                 Toggle Appointment Doctors
                                             </button>
                                             <div v-show="bookingPanelOpen" ref="bookingPanel" class="absolute right-0 z-10 mt-2 w-80 max-h-64 overflow-auto rounded border bg-white p-2 shadow">
@@ -1349,7 +1424,7 @@ onBeforeUnmount(() => {
                                                     <div v-for="doc in bookingDoctors" :key="`booking-doc-${doc.id}`" class="flex items-center justify-between gap-2 p-1 border-b last:border-b-0">
                                                         <div class="text-sm">{{ doc.name }} <div class="text-xs text-slate-500">{{ doc.phone }}</div></div>
                                                         <div>
-                                                            <button type="button" @click.prevent.stop="addDoctorFromBooking(doc)" class="inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out" style="background: linear-gradient(to right, #3b82f6, #60a5fa);" onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';" onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';">Add</button>
+                                                            <button type="button" @click.prevent.stop="addDoctorFromBooking(doc)" class="rounded border bg-sky-50 px-2 py-1 text-xs text-sky-700">Add</button>
                                                         </div>
                                                     </div>
                                                 </template>
@@ -1368,6 +1443,7 @@ onBeforeUnmount(() => {
                                                 <th class="border border-slate-200 px-2 py-2 text-left">Designation</th>
                                             <th class="border border-slate-200 px-2 py-2 text-left">Phone</th>
                                             <th class="border border-slate-200 px-2 py-2 text-left">Experience</th>
+                                                <th class="border border-slate-200 px-2 py-2 text-left">Doctor Fee</th>
                                                 <th class="border border-slate-200 px-2 py-2 text-left">Image URL</th>
                                             <th class="border border-slate-200 px-2 py-2 text-center">Action</th>
                                         </tr>
@@ -1395,6 +1471,10 @@ onBeforeUnmount(() => {
                                                     class="block w-full rounded border-slate-300 p-1 text-xs md:text-sm" />
                                             </td>
                                             <td class="border border-slate-200 p-1">
+                                                <input v-model="doctor.doctor_fee" type="number" min="0" step="0.01" placeholder="500"
+                                                    class="block w-full rounded border-slate-300 p-1 text-xs md:text-sm" />
+                                            </td>
+                                            <td class="border border-slate-200 p-1">
                                                 <div class="space-y-1">
                                                     <input v-model="doctor.image_url" type="text" placeholder="Existing image URL"
                                                         class="block w-full rounded border-slate-300 p-1 text-xs md:text-sm" />
@@ -1405,26 +1485,17 @@ onBeforeUnmount(() => {
                                             <td class="border border-slate-200 p-1 text-center">
                                                 <div class="flex items-center justify-center gap-1">
                                                 <button type="button" @click="moveFeaturedDoctorUp(index)"
-                                                    :disabled="index === 0"
-                                                    class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                                    onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                                    onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';">
+                                                    class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                                                    :disabled="index === 0">
                                                     Up
                                                 </button>
                                                 <button type="button" @click="moveFeaturedDoctorDown(index)"
-                                                    :disabled="index === featuredDoctorsRows.length - 1"
-                                                    class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                                    onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                                    onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';">
+                                                    class="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                                                    :disabled="index === featuredDoctorsRows.length - 1">
                                                     Down
                                                 </button>
                                                 <button type="button" @click="removeFeaturedDoctorRow(index)"
-                                                    class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                                    style="background: linear-gradient(to right, #ef4444, #fb923c);"
-                                                    onmouseover="this.style.background='linear-gradient(to right, #dc2626, #ef4444)';"
-                                                    onmouseout="this.style.background='linear-gradient(to right, #ef4444, #fb923c)';">
+                                                    class="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100">
                                                     Remove
                                                 </button>
                                                 </div>
@@ -1445,10 +1516,7 @@ onBeforeUnmount(() => {
                                 <button
                                     type="button"
                                     @click.prevent.stop="addSimpleRow(serviceRows)"
-                                    class="inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                    style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                    onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                    onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';"
+                                    class="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                                 >
                                     Add Service
                                 </button>
@@ -1463,21 +1531,12 @@ onBeforeUnmount(() => {
                                         class="block w-full rounded border-slate-300 p-2 text-sm"
                                     />
                                     <div class="flex items-center gap-1">
-                                        <button type="button" @click="moveSimpleRowUp(serviceRows, index)" class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                            style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                            onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                            onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';">Up</button>
-                                        <button type="button" @click="moveSimpleRowDown(serviceRows, index)" class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                            style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                            onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                            onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';">Down</button>
+                                        <button type="button" @click="moveSimpleRowUp(serviceRows, index)" class="rounded border bg-slate-50 px-2 py-1 text-xs text-slate-700">Up</button>
+                                        <button type="button" @click="moveSimpleRowDown(serviceRows, index)" class="rounded border bg-slate-50 px-2 py-1 text-xs text-slate-700">Down</button>
                                         <button
                                             type="button"
                                             @click="removeSimpleRow(serviceRows, index)"
-                                            class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                            style="background: linear-gradient(to right, #ef4444, #fb923c);"
-                                            onmouseover="this.style.background='linear-gradient(to right, #dc2626, #ef4444)';"
-                                            onmouseout="this.style.background='linear-gradient(to right, #ef4444, #fb923c)';"
+                                            class="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                                         >
                                             Remove
                                         </button>
@@ -1495,10 +1554,7 @@ onBeforeUnmount(() => {
                                 <button
                                     type="button"
                                     @click.prevent.stop="addSimpleRow(facilityRows)"
-                                    class="inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                    style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                    onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                    onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';"
+                                    class="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                                 >
                                     Add Facility
                                 </button>
@@ -1513,21 +1569,12 @@ onBeforeUnmount(() => {
                                         class="block w-full rounded border-slate-300 p-2 text-sm"
                                     />
                                     <div class="flex items-center gap-1">
-                                        <button type="button" @click="moveSimpleRowUp(facilityRows, index)" class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                            style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                            onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                            onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';">Up</button>
-                                        <button type="button" @click="moveSimpleRowDown(facilityRows, index)" class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                            style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                            onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                            onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';">Down</button>
+                                        <button type="button" @click="moveSimpleRowUp(facilityRows, index)" class="rounded border bg-slate-50 px-2 py-1 text-xs text-slate-700">Up</button>
+                                        <button type="button" @click="moveSimpleRowDown(facilityRows, index)" class="rounded border bg-slate-50 px-2 py-1 text-xs text-slate-700">Down</button>
                                         <button
                                             type="button"
                                             @click="removeSimpleRow(facilityRows, index)"
-                                            class="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                            style="background: linear-gradient(to right, #ef4444, #fb923c);"
-                                            onmouseover="this.style.background='linear-gradient(to right, #dc2626, #ef4444)';"
-                                            onmouseout="this.style.background='linear-gradient(to right, #ef4444, #fb923c)';"
+                                            class="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                                         >
                                             Remove
                                         </button>
@@ -1545,10 +1592,7 @@ onBeforeUnmount(() => {
                                 <button
                                     type="button"
                                     @click.prevent.stop="addTestimonialRow(testimonialEnRows)"
-                                    class="inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                    style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                    onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                    onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';"
+                                    class="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                                 >
                                     Add Testimonial
                                 </button>
@@ -1563,10 +1607,7 @@ onBeforeUnmount(() => {
                                     <textarea v-model="item.quote" rows="2" placeholder="Patient experience text"
                                         class="mt-2 block w-full rounded border-slate-300 p-2 text-sm"></textarea>
                                     <button type="button" @click="removeTestimonialRow(testimonialEnRows, index)"
-                                        class="mt-2 inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                        style="background: linear-gradient(to right, #ef4444, #fb923c);"
-                                        onmouseover="this.style.background='linear-gradient(to right, #dc2626, #ef4444)';"
-                                        onmouseout="this.style.background='linear-gradient(to right, #ef4444, #fb923c)';">
+                                        class="mt-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100">
                                         Remove
                                     </button>
                                 </div>
@@ -1582,10 +1623,7 @@ onBeforeUnmount(() => {
                                 <button
                                     type="button"
                                     @click.prevent.stop="addTestimonialRow(testimonialBnRows)"
-                                    class="inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                    style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
-                                    onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
-                                    onmouseout="this.style.background='linear-gradient(to right, #3b82f6, #60a5fa)';"
+                                    class="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                                 >
                                     Add Testimonial
                                 </button>
@@ -1600,10 +1638,7 @@ onBeforeUnmount(() => {
                                     <textarea v-model="item.quote" rows="2" placeholder="রোগীর অভিজ্ঞতা"
                                         class="mt-2 block w-full rounded border-slate-300 p-2 text-sm"></textarea>
                                     <button type="button" @click="removeTestimonialRow(testimonialBnRows, index)"
-                                        class="mt-2 inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-white border-0 shadow-sm transform transition-all duration-150 ease-in-out"
-                                        style="background: linear-gradient(to right, #ef4444, #fb923c);"
-                                        onmouseover="this.style.background='linear-gradient(to right, #dc2626, #ef4444)';"
-                                        onmouseout="this.style.background='linear-gradient(to right, #ef4444, #fb923c)';">
+                                        class="mt-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100">
                                         Remove
                                     </button>
                                 </div>
@@ -1921,12 +1956,12 @@ onBeforeUnmount(() => {
                         </button>
                     </div>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-                        <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-cyan-200 bg-cyan-50 text-white">
+                        <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-cyan-200 bg-cyan-50">
                             <h3 class="text-sm font-semibold text-cyan-800 mb-1">Attendance Module Settings</h3>
                             <p class="text-xs text-cyan-700">Device, sync, webhook এবং integration module settings এখানে।</p>
                         </div>
 
-                        <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-emerald-200 bg-emerald-50 text-white">
+                        <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-emerald-200 bg-emerald-50">
                             <h3 class="text-sm font-semibold text-emerald-800 mb-1">Pathology Machine Integration</h3>
                             <p class="text-xs text-emerald-700">Hematology Analyzer + Ultrasound integration এর communication settings এখানে কনফিগার করুন।</p>
                         </div>
@@ -2014,7 +2049,7 @@ onBeforeUnmount(() => {
                             </label>
                         </div>
 
-                        <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-teal-200 bg-teal-50 text-white">
+                        <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-teal-200 bg-teal-50">
                             <h3 class="text-sm font-semibold text-teal-800 mb-2">Hematology Analyzer</h3>
                             <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                                 <div>
@@ -2067,7 +2102,7 @@ onBeforeUnmount(() => {
                             </div>
                         </div>
 
-                        <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-lime-200 bg-lime-50 text-white">
+                        <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-lime-200 bg-lime-50">
                             <h3 class="text-sm font-semibold text-lime-800 mb-2">Ultrasound Integration</h3>
                             <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                                 <div>
@@ -2225,7 +2260,7 @@ onBeforeUnmount(() => {
                                 class="block w-full p-2 text-sm rounded-md border-slate-300" />
                         </form>
 
-                        <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-sky-200 bg-sky-50 text-white">
+                        <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-sky-200 bg-sky-50">
                             <h3 class="text-sm font-semibold text-sky-800 mb-2">Device Integration Modules</h3>
                             <p class="text-xs text-sky-700 mb-3">
                                 ডিভাইস থেকে attendance sync হলে কোন কোন মডিউলে data ব্যবহার হবে তা নির্বাচন করুন।
@@ -2254,7 +2289,7 @@ onBeforeUnmount(() => {
                             </div>
                         </div>
 
-                        <div v-show="moduleSections.payroll" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-violet-200 bg-violet-50 text-white">
+                        <div v-show="moduleSections.payroll" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-violet-200 bg-violet-50">
                             <h3 class="text-sm font-semibold text-violet-800 mb-2">Payroll Module Settings (Salary Sheet Default)</h3>
                             <p class="text-xs text-violet-700 mb-3">
                                 Face attendance + duty roster payroll calculation এর default setting এখানে দিন। Salary Sheet page এই মানগুলো auto load হবে।
@@ -2358,7 +2393,7 @@ onBeforeUnmount(() => {
                             </div>
                         </div>
 
-                        <div v-show="moduleSections.reporting" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-indigo-200 bg-indigo-50 text-white">
+                        <div v-show="moduleSections.reporting" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-indigo-200 bg-indigo-50">
                             <h3 class="text-sm font-semibold text-indigo-800 mb-2">Reporting Module Settings</h3>
                             <p class="text-xs text-indigo-700 mb-3">
                                 Report print page এ signature block এর উপরে-নিচে এবং পুরো report content এর left-right position এখান থেকে adjust করুন।
@@ -2403,7 +2438,7 @@ onBeforeUnmount(() => {
                             </div>
                         </div>
 
-                        <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-emerald-200 bg-emerald-50 text-white">
+                        <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-emerald-200 bg-emerald-50">
                             <h3 class="text-sm font-semibold text-emerald-800 mb-2">ZKTeco + Webhook Integration</h3>
                             <p class="text-xs text-emerald-700 mb-3">
                                 ZKTeco device থেকে webhook push করার জন্য এই ফিল্ডগুলো কনফিগার করুন।
@@ -2514,7 +2549,7 @@ onBeforeUnmount(() => {
                         <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3">
                             <InputLabel for="attendance_device_options" value="Options (JSON Preview)" />
                             <textarea id="attendance_device_options" v-model="form.attendance_device_options" rows="3" readonly
-                                class="block w-full p-2 text-white rounded-md border-slate-300 bg-slate-50"></textarea>
+                                class="block w-full p-2 text-sm rounded-md border-slate-300 bg-slate-50"></textarea>
                             <p class="mt-1 text-xs text-slate-500">এই JSON অটো-জেনারেটেড, ডিভাইস সেটিংস সেভ করলে এটিই সংরক্ষিত হবে।</p>
                         </div>
                     </div>

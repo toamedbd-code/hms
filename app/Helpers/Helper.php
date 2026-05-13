@@ -394,14 +394,9 @@ function getSideMenus($user)
         // ignore override failures
     }
 
-        // Developer full-menu bypass was historically unconditional. Restrict it
-        // so it only applies when the sidebar debug override is explicitly enabled
-        // (config/sidebar.force_full_menus + config/sidebar.allow_developers).
+        // Developer full-menu bypass: developer should always see sidebar entries.
         try {
-            $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
-            $allowDevs = config('sidebar.allow_developers', env('FORCE_FULL_SIDEBAR_ALLOW_DEVS', true));
-
-            if ($forceFull && $allowDevs && !$strictFiltering && method_exists($user, 'hasRole') && $user->hasRole('developer')) {
+            if (!$strictFiltering && method_exists($user, 'hasRole') && $user->hasRole('developer')) {
                     // Allow developers to see all menus only when the override is active.
                     $blockedSubstrings = [];
 
@@ -465,8 +460,10 @@ function getSideMenus($user)
         return $aliases[$route] ?? $route;
     };
 
-    $result = $menus->filter(function ($menu) use ($normalizeRoute, $hasMenuPermission, $strictFiltering) {
+    $result = $menus->filter(function ($menu) use ($normalizeRoute, $hasMenuPermission) {
         $menuHasPermission = $hasMenuPermission($menu->permission_name ?? null);
+        $menuPermissionName = trim((string) ($menu->permission_name ?? ''));
+        $hasExplicitMenuPermission = $menuPermissionName !== '';
 
         $menu->childrens = $menu->childrens->filter(function ($child) use ($hasMenuPermission) {
             return $hasMenuPermission($child->permission_name ?? null);
@@ -550,11 +547,10 @@ function getSideMenus($user)
             }
         }
 
-        // Strict filtering: when enabled for a user (via SIDEBAR_STRICT_EMAILS),
-        // treat the parent's permission as authoritative — hide the parent
-        // unless the parent permission itself is granted. This ensures the
-        // sidebar strictly reflects assigned permissions for targeted users.
-        if ($strictFiltering && !$menuHasPermission) {
+        // Treat explicit parent permission as authoritative: if a menu has its
+        // own permission slug and the user does not have it, hide the parent
+        // menu even when some child permissions are present.
+        if ($hasExplicitMenuPermission && !$menuHasPermission) {
             return false;
         }
 
@@ -589,7 +585,9 @@ function getSideMenus($user)
         // ignore failures; fall back to module filtering below
     }
 
-    // Filter menus by assigned modules (if menus have module_slug set)
+    // Filter menus by assigned modules (if menus have module_slug set).
+    // If module master data is not seeded yet, skip module filtering and
+    // rely on permission filtering so sidebar does not become empty.
     try {
         try {
             $userModuleSlugs = $user->modules()->pluck('slug')->map(function ($s) {
@@ -599,21 +597,35 @@ function getSideMenus($user)
             $userModuleSlugs = collect();
         }
 
-        $result = $result->filter(function ($menu) use ($userModuleSlugs) {
-            $menuModule = '';
-            if (is_array($menu)) {
-                $menuModule = trim(strtolower((string) ($menu['module_slug'] ?? '')));
-            } else {
-                $menuModule = trim(strtolower((string) ($menu->module_slug ?? '')));
-            }
+        $applyModuleFilter = true;
+        try {
+            $hasDefinedModules = \App\Models\Module::query()->exists();
+            $isDeveloper = method_exists($user, 'hasRole') && $user->hasRole('developer');
 
-            // keep menus without a module assignment
-            if ($menuModule === '') {
-                return true;
+            if (! $hasDefinedModules || ($isDeveloper && $userModuleSlugs->isEmpty())) {
+                $applyModuleFilter = false;
             }
+        } catch (\Throwable $e) {
+            // keep default behavior
+        }
 
-            return $userModuleSlugs->contains($menuModule);
-        })->values();
+        if ($applyModuleFilter) {
+            $result = $result->filter(function ($menu) use ($userModuleSlugs) {
+                $menuModule = '';
+                if (is_array($menu)) {
+                    $menuModule = trim(strtolower((string) ($menu['module_slug'] ?? '')));
+                } else {
+                    $menuModule = trim(strtolower((string) ($menu->module_slug ?? '')));
+                }
+
+                // keep menus without a module assignment
+                if ($menuModule === '') {
+                    return true;
+                }
+
+                return $userModuleSlugs->contains($menuModule);
+            })->values();
+        }
     } catch (\Throwable $e) {
         // ignore filtering errors and return as-is
     }
@@ -754,6 +766,14 @@ function web_setting_cache_ttl_seconds(): int
 function get_cached_web_setting(bool $refresh = false): ?WebSetting
 {
     $cacheKey = web_setting_cache_key();
+
+    try {
+        if (!app('db')->connection()->getSchemaBuilder()->hasTable('web_settings')) {
+            return null;
+        }
+    } catch (\Throwable $exception) {
+        return null;
+    }
 
     if ($refresh) {
         Cache::forget($cacheKey);

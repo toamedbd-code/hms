@@ -20,11 +20,17 @@ class WebSettingRequest extends FormRequest
                 'website_hero_title' => 'required|string|max:255',
                 'website_hero_subtitle' => 'nullable|string',
                 'website_cta_text' => 'required|string|max:255',
+                'website_about_text' => 'nullable|string',
+                'website_emergency_phone' => 'nullable|string|max:100',
+                'website_enabled' => 'nullable|boolean',
+                'website_template' => 'nullable|string|max:100',
                 'website_services_json' => 'nullable|string',
                 'website_facilities_json' => 'nullable|string',
                 'website_testimonials_en_json' => 'nullable|string',
                 'website_testimonials_bn_json' => 'nullable|string',
                 'website_featured_doctors_json' => 'nullable|string',
+                'website_featured_doctor_images' => 'nullable|array',
+                'website_featured_doctor_images.*' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
             ];
         }
         switch ($this->method()) {

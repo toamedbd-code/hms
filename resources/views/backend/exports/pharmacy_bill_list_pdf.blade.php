@@ -47,6 +47,8 @@
     </style>
 </head>
 <body>
+    @includeIf('prints.partials._header')
+
     <h1>Pharmacy Bill List</h1>
     <div class="meta">
         Generated: {{ $generated_at }} | Total: {{ count($rows) }}
@@ -88,5 +90,7 @@
             @endforelse
         </tbody>
     </table>
+
+    @includeIf('prints.partials._footer')
 </body>
 </html>

@@ -27,4 +27,9 @@ class LedgerTransaction extends Model
     {
         return $this->hasMany(LedgerEntry::class, 'transaction_id');
     }
+
+    public function journalEntry()
+    {
+        return $this->belongsTo(JournalEntry::class, 'journal_entry_id');
+    }
 }

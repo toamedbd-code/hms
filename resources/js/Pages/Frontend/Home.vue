@@ -12,6 +12,11 @@ const bookingDoctors = computed(() => page.props.bookingDoctors ?? []);
 const serviceItems = computed(() => page.props.serviceItems ?? []);
 const facilityItems = computed(() => page.props.facilityItems ?? []);
 const initialSection = computed(() => String(page.props.initialSection ?? 'home'));
+const normalizedSection = computed(() => {
+    const section = String(initialSection.value || 'home').trim().toLowerCase();
+    const allowed = ['home', 'services', 'doctors', 'facilities', 'appointment', 'contact'];
+    return allowed.includes(section) ? section : 'home';
+});
 
 const appointmentForm = useForm({
     patient_name: '',
@@ -27,13 +32,23 @@ const localSuccess = ref('');
 const localError = ref('');
 const languageStorageKey = 'frontend.website.language';
 
+const getServerLocale = () => {
+    const locale = String(page.props?.locale ?? '').toLowerCase();
+    return locale === 'en' || locale === 'bn' ? locale : '';
+};
+
 const getInitialLanguage = () => {
+    const fromServer = getServerLocale();
+    if (fromServer) {
+        return fromServer;
+    }
+
     if (typeof window === 'undefined') {
-        return 'bn';
+        return 'en';
     }
 
     const saved = window.localStorage.getItem(languageStorageKey);
-    return saved === 'en' || saved === 'bn' ? saved : 'bn';
+    return saved === 'en' || saved === 'bn' ? saved : 'en';
 };
 
 const currentLang = ref(getInitialLanguage());
@@ -54,12 +69,26 @@ const copy = {
         heroSub: 'Reliable diagnostics, specialist consultation and patient-first care under one roof.',
         heroBtn: 'Take Appointment',
         section: {
+            home: 'About',
             services: 'Our Services',
             doctors: 'Our Doctors',
             facilities: 'Facilities',
             appointment: 'Online Appointment',
             contact: 'Contact Information',
         },
+        contactCard: {
+            phone: 'Phone',
+            emergency: 'Emergency',
+            address: 'Address',
+        },
+        doctor: {
+            specialist: 'Specialist Doctor',
+        },
+        common: {
+            na: 'N/A',
+        },
+        testimonials: 'Testimonials',
+        role: 'Role',
         form: {
             name: 'Patient Name',
             phone: 'Phone Number',
@@ -92,12 +121,26 @@ const copy = {
         heroSub: 'বিশ্বস্ত ডায়াগনস্টিকস, বিশেষজ্ঞ ডাক্তার এবং রোগীকেন্দ্রিক সেবা এক ছাদের নিচে।',
         heroBtn: 'অ্যাপয়েন্টমেন্ট নিন',
         section: {
+            home: 'আমাদের সম্পর্কে',
             services: 'আমাদের সেবাসমূহ',
             doctors: 'আমাদের ডাক্তারবৃন্দ',
             facilities: 'সুবিধাসমূহ',
             appointment: 'অনলাইন অ্যাপয়েন্টমেন্ট',
             contact: 'যোগাযোগের তথ্য',
         },
+        contactCard: {
+            phone: 'ফোন',
+            emergency: 'জরুরি',
+            address: 'ঠিকানা',
+        },
+        doctor: {
+            specialist: 'বিশেষজ্ঞ ডাক্তার',
+        },
+        common: {
+            na: 'প্রযোজ্য নয়',
+        },
+        testimonials: 'রোগীর মতামত',
+        role: 'বিভাগ',
         form: {
             name: 'রোগীর নাম',
             phone: 'ফোন নম্বর',
@@ -126,11 +169,98 @@ const t = (path) => {
     return value ?? path;
 };
 
-const hospitalName = computed(() => webSetting.value?.company_name || 'Toamed Hospital');
-const heroTitle = computed(() => webSetting.value?.website_hero_title || hospitalName.value);
-const heroSubtitle = computed(() => webSetting.value?.website_hero_subtitle || t('heroSub'));
-const ctaText = computed(() => webSetting.value?.website_cta_text || t('heroBtn'));
-const emergencyPhone = computed(() => webSetting.value?.website_emergency_phone || webSetting.value?.phone || 'N/A');
+const pickLocalizedText = (value) => {
+    const text = String(value ?? '').trim();
+    if (!text) {
+        return '';
+    }
+
+    if (text.includes('||')) {
+        const parts = text.split('||', 2).map((item) => item.trim());
+        return currentLang.value === 'bn'
+            ? (parts[1] || parts[0] || '')
+            : (parts[0] || '');
+    }
+
+    return text;
+};
+
+const hospitalName = computed(() => pickLocalizedText(webSetting.value?.company_name) || 'Toamed Hospital');
+const heroTitle = computed(() => pickLocalizedText(webSetting.value?.website_hero_title) || hospitalName.value);
+const heroSubtitle = computed(() => pickLocalizedText(webSetting.value?.website_hero_subtitle) || t('heroSub'));
+const ctaText = computed(() => pickLocalizedText(webSetting.value?.website_cta_text) || t('heroBtn'));
+const aboutText = computed(() => pickLocalizedText(webSetting.value?.website_about_text) || '');
+const emergencyPhone = computed(() => pickLocalizedText(webSetting.value?.website_emergency_phone) || webSetting.value?.phone || t('common.na'));
+
+const localizedServiceItems = computed(() => (serviceItems.value || []).map((item) => pickLocalizedText(item)).filter((item) => item !== ''));
+const localizedFacilityItems = computed(() => (facilityItems.value || []).map((item) => pickLocalizedText(item)).filter((item) => item !== ''));
+
+const localizedDoctors = computed(() => {
+    return (doctors.value || []).map((doctor) => ({
+        ...doctor,
+        specialty: pickLocalizedText(doctor?.specialty) || t('doctor.specialist'),
+        designation: pickLocalizedText(doctor?.designation),
+        experience: pickLocalizedText(doctor?.experience),
+        bio: pickLocalizedText(doctor?.bio),
+    }));
+});
+
+const localizedBookingDoctors = computed(() => {
+    return (bookingDoctors.value || []).map((doctor) => {
+        const specialty = pickLocalizedText(doctor?.specialty);
+        const designation = pickLocalizedText(doctor?.designation);
+        const experience = pickLocalizedText(doctor?.experience);
+        const info = pickLocalizedText(doctor?.info);
+
+        const infoParts = [
+            specialty,
+            designation,
+            experience ? `${currentLang.value === 'bn' ? 'অভিজ্ঞতা' : 'Experience'}: ${experience}` : '',
+        ].filter((part) => String(part || '').trim() !== '');
+
+        return {
+            ...doctor,
+            info: infoParts.length ? infoParts.join(' | ') : info,
+        };
+    });
+});
+
+const switchLanguage = (lang) => {
+    if (lang !== 'en' && lang !== 'bn') {
+        return;
+    }
+
+    currentLang.value = lang;
+
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    window.localStorage.setItem(languageStorageKey, lang);
+    window.location.assign(route('backend.language.switch', { locale: lang }));
+};
+
+const translateFlashMessage = (message) => {
+    const text = String(message ?? '').trim();
+    if (!text) {
+        return '';
+    }
+
+    if (currentLang.value !== 'bn') {
+        return text;
+    }
+
+    const mappings = {
+        'Appointment request submitted successfully.': 'অ্যাপয়েন্টমেন্ট রিকোয়েস্ট সফলভাবে জমা হয়েছে।',
+        'Failed to submit appointment request. Please try again.': 'অ্যাপয়েন্টমেন্ট রিকোয়েস্ট জমা হয়নি। আবার চেষ্টা করুন।',
+        'Duplicate request detected. Please wait a few minutes before trying again.': 'একই রিকোয়েস্ট বারবার পাওয়া গেছে। কয়েক মিনিট পর আবার চেষ্টা করুন।',
+    };
+
+    return mappings[text] || text;
+};
+
+const flashSuccessText = computed(() => translateFlashMessage(page.props?.flash?.successMessage));
+const flashErrorText = computed(() => translateFlashMessage(page.props?.flash?.errorMessage));
 
 const navLinks = computed(() => ([
     { id: 'home', label: t('nav.home'), href: route('backend.home') },
@@ -141,8 +271,7 @@ const navLinks = computed(() => ([
     { id: 'contact', label: t('nav.contact'), href: route('backend.website.contact') },
 ]));
 
-const isHomePage = computed(() => initialSection.value === 'home');
-const showSection = (sectionId) => isHomePage.value || initialSection.value === sectionId;
+const showSection = (sectionId) => normalizedSection.value === 'home' || normalizedSection.value === sectionId;
 
 const submitAppointment = () => {
     localSuccess.value = '';
@@ -167,11 +296,11 @@ onMounted(() => {
     }
 
     nextTick(() => {
-        if (!initialSection.value || initialSection.value === 'home') {
+        if (!normalizedSection.value || normalizedSection.value === 'home') {
             return;
         }
 
-        const target = document.getElementById(initialSection.value);
+        const target = document.getElementById(normalizedSection.value);
         if (target) {
             target.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
@@ -193,8 +322,8 @@ watch(currentLang, (lang) => {
             <div class="container topbar-inner">
                 <div>{{ t('emergency') }}: <strong>{{ emergencyPhone }}</strong></div>
                 <div class="top-actions">
-                    <button type="button" class="lang-btn" :class="{ active: currentLang === 'bn' }" @click="currentLang = 'bn'">বাংলা</button>
-                    <button type="button" class="lang-btn" :class="{ active: currentLang === 'en' }" @click="currentLang = 'en'">EN</button>
+                    <button type="button" class="lang-btn" :class="{ active: currentLang === 'bn' }" @click="switchLanguage('bn')">বাংলা</button>
+                    <button type="button" class="lang-btn" :class="{ active: currentLang === 'en' }" @click="switchLanguage('en')">EN</button>
                     <a :href="route('backend.website.appointment')">{{ t('book') }}</a>
                 </div>
             </div>
@@ -210,7 +339,7 @@ watch(currentLang, (lang) => {
             </div>
         </nav>
 
-        <section id="home" class="hero">
+        <section v-if="showSection('home')" id="home" class="hero">
             <div class="container hero-inner">
                 <h1>{{ heroTitle }}</h1>
                 <p>{{ heroSubtitle }}</p>
@@ -219,21 +348,26 @@ watch(currentLang, (lang) => {
         </section>
 
         <main class="container content">
+            <section v-if="showSection('home')" class="section-card">
+                <h2>{{ t('section.home') }}</h2>
+                <p v-if="aboutText" class="muted-about">{{ aboutText }}</p>
+            </section>
+
             <section v-if="showSection('services')" id="services" class="section-card">
                 <h2>{{ t('section.services') }}</h2>
                 <div class="grid three">
-                    <article v-for="(service, i) in serviceItems" :key="`s-${i}`" class="item-card">{{ service }}</article>
+                    <article v-for="(service, i) in localizedServiceItems" :key="`s-${i}`" class="item-card">{{ service }}</article>
                 </div>
             </section>
 
             <section v-if="showSection('doctors')" id="doctors" class="section-card">
                 <h2>{{ t('section.doctors') }}</h2>
                 <div class="grid three">
-                    <article v-for="doctor in doctors" :key="`${doctor.name}-${doctor.phone}`" class="item-card">
+                    <article v-for="doctor in localizedDoctors" :key="`${doctor.name}-${doctor.phone}`" class="item-card">
                         <img v-if="doctor.image_url" :src="doctor.image_url" alt="Doctor"
                             class="doctor-image" />
                         <h3>{{ doctor.name }}</h3>
-                        <p>{{ doctor.specialty || 'Specialist' }}</p>
+                        <p>{{ doctor.specialty || t('doctor.specialist') }}</p>
                         <p v-if="doctor.phone">{{ doctor.phone }}</p>
                     </article>
                 </div>
@@ -242,7 +376,7 @@ watch(currentLang, (lang) => {
             <section v-if="showSection('facilities')" id="facilities" class="section-card">
                 <h2>{{ t('section.facilities') }}</h2>
                 <div class="chips">
-                    <span v-for="(facility, i) in facilityItems" :key="`f-${i}`">{{ facility }}</span>
+                    <span v-for="(facility, i) in localizedFacilityItems" :key="`f-${i}`">{{ facility }}</span>
                 </div>
             </section>
 
@@ -265,7 +399,7 @@ watch(currentLang, (lang) => {
                         <label>{{ t('form.doctor') }}</label>
                         <select v-model="appointmentForm.doctor_id" required>
                             <option value="">{{ t('form.placeholderDoctor') }}</option>
-                            <option v-for="doctor in bookingDoctors" :key="doctor.id" :value="doctor.id">{{ doctor.name }}</option>
+                            <option v-for="doctor in localizedBookingDoctors" :key="doctor.id" :value="doctor.id">{{ doctor.name }}{{ doctor.info ? ` - ${doctor.info}` : '' }}</option>
                         </select>
                     </div>
                     <div>
@@ -283,8 +417,8 @@ watch(currentLang, (lang) => {
                         </button>
                         <p v-if="localSuccess" class="ok">{{ localSuccess }}</p>
                         <p v-if="localError" class="err">{{ localError }}</p>
-                        <p v-if="$page.props.flash?.successMessage" class="ok">{{ $page.props.flash.successMessage }}</p>
-                        <p v-if="$page.props.flash?.errorMessage" class="err">{{ $page.props.flash.errorMessage }}</p>
+                        <p v-if="flashSuccessText" class="ok">{{ flashSuccessText }}</p>
+                        <p v-if="flashErrorText" class="err">{{ flashErrorText }}</p>
                     </div>
                 </form>
             </section>
@@ -293,16 +427,27 @@ watch(currentLang, (lang) => {
                 <h2>{{ t('section.contact') }}</h2>
                 <div class="grid three">
                     <article class="item-card">
-                        <h3>Phone</h3>
-                        <p>{{ webSetting?.phone || 'N/A' }}</p>
+                        <h3>{{ t('contactCard.phone') }}</h3>
+                        <p>{{ pickLocalizedText(webSetting?.phone) || t('common.na') }}</p>
                     </article>
                     <article class="item-card">
-                        <h3>Emergency</h3>
+                        <h3>{{ t('contactCard.emergency') }}</h3>
                         <p>{{ emergencyPhone }}</p>
                     </article>
                     <article class="item-card">
-                        <h3>Address</h3>
-                        <p>{{ webSetting?.address || 'N/A' }}</p>
+                        <h3>{{ t('contactCard.address') }}</h3>
+                        <p>{{ pickLocalizedText(webSetting?.address) || t('common.na') }}</p>
+                    </article>
+                </div>
+            </section>
+
+            <section v-if="showSection('home')" class="section-card">
+                <h2>{{ t('testimonials') }}</h2>
+                <div class="grid three">
+                    <article class="item-card" v-for="(item, i) in ($page.props.testimonialItems?.[currentLang] || $page.props.testimonialItems?.en || [])" :key="`testimonial-${i}`">
+                        <p style="margin: 0 0 10px 0; color: #334155; white-space: pre-wrap;">"{{ item.quote || '' }}"</p>
+                        <p style="margin: 0; font-weight: 700;">{{ item.name || '' }}</p>
+                        <p class="muted-about" style="margin-top: 4px;">{{ t('role') }}: {{ item.role || '' }}</p>
                     </article>
                 </div>
             </section>
@@ -326,6 +471,7 @@ watch(currentLang, (lang) => {
 
 .site-wrap { min-height: 100vh; }
 .container { width: min(1140px, calc(100% - 28px)); margin-inline: auto; }
+.muted-about { margin: 0 0 14px 0; color: #475569; white-space: pre-wrap; }
 
 .topbar {
     background: #0d4a78;

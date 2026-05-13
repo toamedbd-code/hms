@@ -34,7 +34,7 @@
                 <div class="note">Max: ৳{{ number_format($pendingAmount ?? 0, 2) }}</div>
             </div>
             <div class="actions">
-                <button type="submit" class="btn btn-primary">Submit Payment</button>
+                <button type="submit" class="btn btn-primary btn-colorful">Submit Payment</button>
                 <a href="{{ route('backend.referral.index') }}" class="btn btn-secondary">Cancel</a>
             </div>
         </form>

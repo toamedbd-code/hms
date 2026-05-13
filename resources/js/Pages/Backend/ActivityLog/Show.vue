@@ -31,7 +31,7 @@ const props = defineProps({
         <div><span class="font-semibold">Action:</span> {{ activityLog.action }}</div>
         <div>
           <span class="font-semibold">Status:</span>
-          <span class="px-2 py-1 text-xs rounded uppercase" :class="activityLog.status === 'failed' ? 'bg-rose-100 text-white' : 'bg-emerald-100 text-emerald-700'">
+          <span class="px-2 py-1 text-xs rounded uppercase" :class="activityLog.status === 'failed' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'">
             {{ activityLog.status }}
           </span>
         </div>

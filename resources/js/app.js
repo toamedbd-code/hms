@@ -2,7 +2,6 @@ import './bootstrap';
 import '../css/app.css';
 import FeatherIcon from './Components/FeatherIcon.vue';
 import eventBus from './eventBus.js';
-import ActionButton from './Components/ActionButton.vue';
 
 
 import { createApp, h } from 'vue';
@@ -542,7 +541,6 @@ createInertiaApp({
             .use(plugin)
             .use(ZiggyVue)
             .component('FeatherIcon', FeatherIcon);
-        instance.component('ActionButton', ActionButton);
 
         const mounted = instance.mount(el);
 

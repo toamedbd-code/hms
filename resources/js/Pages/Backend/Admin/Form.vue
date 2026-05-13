@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch} from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
@@ -101,8 +101,29 @@ const form = useForm({
     _method: props.user?.id ? 'put' : 'post',
 });
 
+// Determine if selected role is a Doctor by name (avoids hard-coded IDs)
+const isDoctorRole = computed(() => {
+    try {
+        const rid = form.role_id;
+        if (!rid) return false;
+        const found = (props.roles || []).find(r => Number(r.id) === Number(rid));
+        const name = found?.name ?? '';
+        return String(name).toLowerCase() === 'doctor';
+    } catch (e) {
+        return false;
+    }
+});
+
 watch(() => form.role_id, (newRoleId) => {
-    if (newRoleId != '2') {
+    // when role changes to a non-doctor, clear doctor-specific fields
+    try {
+        const found = (props.roles || []).find(r => Number(r.id) === Number(newRoleId));
+        const name = found?.name ?? '';
+        if (String(name).toLowerCase() !== 'doctor') {
+            form.doctor_charge = '';
+            form.specialist_id = '';
+        }
+    } catch (e) {
         form.doctor_charge = '';
         form.specialist_id = '';
     }
@@ -267,24 +288,24 @@ const goToRoleList = () => {
                             <InputLabel for="staff_id" value="Staff ID"><span class="text-red-500">*</span>
                             </InputLabel>
                             <input id="staff_id" v-model="form.staff_id" type="text" placeholder="Staff ID"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.staff_id" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="role_id" value="Role"><span class="text-red-500">*</span></InputLabel>
                             <select id="role_id" v-model="form.role_id"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="">Select Role</option>
                                 <option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option>
                             </select>
                             <InputError class="mt-2" :message="form.errors.role_id" />
                         </div>
 
-                        <div class="col-span-1" v-if="form.role_id == '2'">
+                        <div class="col-span-1" v-if="isDoctorRole">
                             <InputLabel for="doctor_charge" value="Doctor Charge "><span class="text-red-500">*</span></InputLabel>
                             <input id="doctor_charge" v-model="form.doctor_charge" type="number" placeholder="Doctor Charge"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.doctor_charge" />
                         </div>
 
@@ -293,7 +314,7 @@ const goToRoleList = () => {
                             <InputLabel for="designation_id" value="Designation" ><span class="text-red-500">*</span></InputLabel>
                             <div class="flex items-center justify-between">
                                 <select id="designation_id" v-model="form.designation_id"
-                                    class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                    class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                     <option value="">Select Designation</option>
                                     <option v-for="designation in designations" :key="designation.id"
                                         :value="designation.id">{{ designation.name }}</option>
@@ -316,7 +337,7 @@ const goToRoleList = () => {
                             <InputLabel for="department_id" value="Department"><span class="text-red-500">*</span></InputLabel>
                             <div class="flex items-center justify-between">
                                 <select id="department_id" v-model="form.department_id"
-                                    class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                    class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                     <option value="">Select Department</option>
                                     <option v-for="department in departments" :key="department.id"
                                         :value="department.id">{{
@@ -336,11 +357,11 @@ const goToRoleList = () => {
                         </div>
 
                         <!-- Specialist Field -->
-                        <div class="col-span-1" v-if="form.role_id == '2'">
+                        <div class="col-span-1" v-if="isDoctorRole">
                             <InputLabel for="specialist_id" value="Specialist"><span class="text-red-500">*</span></InputLabel>
                             <div class="flex items-center justify-between">
                                 <select id="specialist_id" v-model="form.specialist_id"
-                                    class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                    class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                     <option value="">Select Specialist</option>
                                     <option v-for="specialist in specialists" :key="specialist.id"
                                         :value="specialist.id">{{
@@ -363,35 +384,35 @@ const goToRoleList = () => {
                             <InputLabel for="first_name" value="First Name "><span class="text-red-500">*</span>
                             </InputLabel>
                             <input id="first_name" v-model="form.first_name" type="text" placeholder="First Name"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.first_name" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="last_name" value="Last Name" />
                             <input id="last_name" v-model="form.last_name" type="text" placeholder="Last Name"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.last_name" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="father_name" value="Father Name" />
                             <input id="father_name" v-model="form.father_name" type="text" placeholder="Father Name"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.father_name" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="mother_name" value="Mother Name" />
                             <input id="mother_name" v-model="form.mother_name" type="text" placeholder="Mother Name"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.mother_name" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="gender" value="Gender"> <span class="text-red-500">*</span></InputLabel>
                             <select id="gender" v-model="form.gender"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="">Select Gender</option>
                                 <option value="Male">Male</option>
                                 <option value="Female">Female</option>
@@ -403,7 +424,7 @@ const goToRoleList = () => {
                         <div class="col-span-1">
                             <InputLabel for="marital_status" value="Marital Status"><span class="text-red-500">*</span></InputLabel>
                             <select id="marital_status" v-model="form.marital_status"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="">Select Status</option>
                                 <option value="Single">Single</option>
                                 <option value="Married">Married</option>
@@ -416,7 +437,7 @@ const goToRoleList = () => {
                         <div class="col-span-1">
                             <InputLabel for="blood_group" value="Blood Group"><span class="text-red-500">*</span></InputLabel>
                             <select id="blood_group" v-model="form.blood_group"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="">Select Blood Group</option>
                                 <option value="A+">A+</option>
                                 <option value="A-">A-</option>
@@ -434,21 +455,21 @@ const goToRoleList = () => {
                             <InputLabel for="date_of_birth" value="Date Of Birth "><span class="text-red-500">*</span>
                             </InputLabel>
                             <input id="date_of_birth" v-model="form.date_of_birth" type="date"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.date_of_birth" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="date_of_joining" value="Date Of Joining"><span class="text-red-500">*</span></InputLabel>
                             <input id="date_of_joining" v-model="form.date_of_joining" type="date"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.date_of_joining" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="phone" value="Phone"><span class="text-red-500">*</span></InputLabel>
                             <input id="phone" v-model="form.phone" type="text" placeholder="Phone"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.phone" />
                         </div>
 
@@ -456,14 +477,14 @@ const goToRoleList = () => {
                             <InputLabel for="emergency_contact" value="Emergency Contact" />
                             <input id="emergency_contact" v-model="form.emergency_contact" type="text"
                                 placeholder="Emergency Contact"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.emergency_contact" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="email" value="Email"><span class="text-red-500">*</span></InputLabel>
                             <input id="email" v-model="form.email" type="email" placeholder="Email"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.email" />
                         </div>
 
@@ -472,7 +493,7 @@ const goToRoleList = () => {
                             <div class="relative">
                                 <input id="password" v-model="form.password" :type="showPassword ? 'text' : 'password'"
                                     placeholder="Password"
-                                    class="block w-full p-2 pr-10 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                    class="block w-full p-2 pr-10 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                 <button type="button" @click="showPassword = !showPassword"
                                     class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                                     <svg v-if="!showPassword" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5"
@@ -505,7 +526,7 @@ const goToRoleList = () => {
                                     width="60" />
                             </div>
                             <input id="photo" type="file" accept="image/*"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 @change="handlePhotoChange" />
                             <InputError class="mt-2" :message="form.errors.photo" />
                         </div>
@@ -515,48 +536,48 @@ const goToRoleList = () => {
                         <div class="col-span-1 sm:col-span-2">
                             <InputLabel for="current_address" value="Current Address" />
                             <textarea id="current_address" v-model="form.current_address" rows="2"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
                             <InputError class="mt-2" :message="form.errors.current_address" />
                         </div>
 
                         <div class="col-span-1 sm:col-span-2">
                             <InputLabel for="permanent_address" value="Permanent Address" />
                             <textarea id="permanent_address" v-model="form.permanent_address" rows="2"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
                             <InputError class="mt-2" :message="form.errors.permanent_address" />
                         </div>
                         <div class="col-span-1">
                             <InputLabel for="qualification" value="Qualification" />
                             <textarea id="qualification" v-model="form.qualification" type="text"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.qualification" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="work_experience" value="Work Experience" />
                             <textarea id="work_experience" v-model="form.work_experience" type="text"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.work_experience" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="specialization" value="Specialization" />
                             <textarea id="specialization" v-model="form.specialization" type="text"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.specialization" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="note" value="Note" />
                             <textarea id="note" v-model="form.note" type="text"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.note" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="pan_number" value="Pan Number" />
                             <input id="pan_number" v-model="form.pan_number" type="text" placeholder="Pan Number"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.pan_number" />
                         </div>
 
@@ -564,7 +585,7 @@ const goToRoleList = () => {
                             <InputLabel for="national_id_number" value="National Identification Number" />
                             <input id="national_id_number" v-model="form.national_id_number" type="text"
                                 placeholder="National ID"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.national_id_number" />
                         </div>
 
@@ -572,7 +593,7 @@ const goToRoleList = () => {
                             <InputLabel for="local_id_number" value="Local Identification Number" />
                             <input id="local_id_number" v-model="form.local_id_number" type="text"
                                 placeholder="Local ID"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.local_id_number" />
                         </div>
 
@@ -587,7 +608,7 @@ const goToRoleList = () => {
                         <div class="col-span-1">
                             <InputLabel for="epf_no" value="EPF No" />
                             <input id="epf_no" v-model="form.epf_no" type="text" placeholder="EPF Number"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.epf_no" />
                         </div>
 
@@ -595,14 +616,14 @@ const goToRoleList = () => {
                             <InputLabel for="basic_salary" value="Basic Salary" />
                             <input id="basic_salary" v-model="form.basic_salary" type="number"
                                 placeholder="Basic Salary"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.basic_salary" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="contract_type" value="Contract Type" />
                             <select id="contract_type" v-model="form.contract_type"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="">Select Contract Type</option>
                                 <option value="Permanent">Permanent</option>
                                 <option value="Probation">Probation</option>
@@ -613,14 +634,14 @@ const goToRoleList = () => {
                         <div class="col-span-1">
                             <InputLabel for="work_shift" value="Work Shift" />
                             <input id="work_shift" v-model="form.work_shift" type="text" placeholder="Work Shift"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.work_shift" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="work_location" value="Work Location" />
                             <input id="work_location" v-model="form.work_location" type="text" placeholder="Work Location"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.work_location" />
                         </div>
                     </div>
@@ -634,7 +655,7 @@ const goToRoleList = () => {
                             <InputLabel for="number_of_leaves" value="Number of Leaves" />
                             <input id="number_of_leaves" v-model="form.number_of_leaves" type="number"
                                 placeholder="Number of Leaves"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.number_of_leaves" />
                         </div>
                     </div>
@@ -648,7 +669,7 @@ const goToRoleList = () => {
                             <InputLabel for="bank_account_title" value="Account Title" />
                             <input id="bank_account_title" v-model="form.bank_account_title" type="text"
                                 placeholder="Account Title"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.bank_account_title" />
                         </div>
 
@@ -656,21 +677,21 @@ const goToRoleList = () => {
                             <InputLabel for="bank_account_no" value="Bank Account No." />
                             <input id="bank_account_no" v-model="form.bank_account_no" type="text"
                                 placeholder="Account Number"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.bank_account_no" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="bank_name" value="Bank Name" />
                             <input id="bank_name" v-model="form.bank_name" type="text" placeholder="Bank Name"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.bank_name" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="ifsc_code" value="IFSC Code" />
                             <input id="ifsc_code" v-model="form.ifsc_code" type="text" placeholder="IFSC Code"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.ifsc_code" />
                         </div>
 
@@ -678,7 +699,7 @@ const goToRoleList = () => {
                             <InputLabel for="bank_branch_name" value="Bank Branch Name" />
                             <input id="bank_branch_name" v-model="form.bank_branch_name" type="text"
                                 placeholder="Branch Name"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.bank_branch_name" />
                         </div>
                     </div>
@@ -691,21 +712,21 @@ const goToRoleList = () => {
                         <div class="col-span-1">
                             <InputLabel for="facebook_url" value="Facebook URL" />
                             <input id="facebook_url" v-model="form.facebook_url" type="url" placeholder="Facebook URL"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.facebook_url" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="linkedin_url" value="LinkedIn URL" />
                             <input id="linkedin_url" v-model="form.linkedin_url" type="url" placeholder="LinkedIn URL"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.linkedin_url" />
                         </div>
 
                         <div class="col-span-1">
                             <InputLabel for="twitter_url" value="Twitter URL" />
                             <input id="twitter_url" v-model="form.twitter_url" type="url" placeholder="Twitter URL"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.twitter_url" />
                         </div>
 
@@ -713,7 +734,7 @@ const goToRoleList = () => {
                             <InputLabel for="instagram_url" value="Instagram URL" />
                             <input id="instagram_url" v-model="form.instagram_url" type="url"
                                 placeholder="Instagram URL"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                             <InputError class="mt-2" :message="form.errors.instagram_url" />
                         </div>
                     </div>
@@ -726,7 +747,7 @@ const goToRoleList = () => {
                         <div class="col-span-1">
                             <InputLabel for="resume" value="Resume" />
                             <input id="resume" type="file" accept=".pdf,.doc,.docx"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 @change="handleResumeChange" />
                             <InputError class="mt-2" :message="form.errors.resume" />
                             <div v-if="form.resumePreview" class="mt-2 text-sm text-blue-500">
@@ -736,7 +757,7 @@ const goToRoleList = () => {
                         <div class="col-span-1">
                             <InputLabel for="joining_letter" value="Joining Letter" />
                             <input id="joining_letter" type="file" accept=".pdf,.doc,.docx"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 @change="handleJoiningLetterChange" />
                             <InputError class="mt-2" :message="form.errors.joining_letter" />
                             <div v-if="form.joining_letterPreview" class="mt-2 text-sm text-blue-500">
@@ -746,7 +767,7 @@ const goToRoleList = () => {
                         <div class="col-span-1">
                             <InputLabel for="resignation_letter" value="Resignation Letter" />
                             <input id="resignation_letter" type="file" accept=".pdf,.doc,.docx"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 @change="handleResignationLetterChange" />
                             <InputError class="mt-2" :message="form.errors.resignation_letter" />
                             <div v-if="form.resignation_letterPreview" class="mt-2 text-sm text-blue-500">
@@ -756,7 +777,7 @@ const goToRoleList = () => {
                         <div class="col-span-1">
                             <InputLabel for="other_documents" value="Other Letter" />
                             <input id="other_documents" type="file" accept=".pdf,.doc,.docx"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 @change="handleOtherDocumentsChange" />
                             <InputError class="mt-2" :message="form.errors.other_documents" />
                             <div v-if="form.other_documentsPreview" class="mt-2 text-sm text-blue-500">

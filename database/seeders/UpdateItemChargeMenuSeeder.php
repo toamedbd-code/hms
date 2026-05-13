@@ -9,13 +9,14 @@ class UpdateItemChargeMenuSeeder extends Seeder
 {
     public function run()
     {
-        // Update any existing menu entries that reference the old Hospital Test
+        // Normalize Item Charge label and permission slug.
         DB::table('menus')
-            ->where('permission_name', 'hospital-test')
+            ->whereIn('permission_name', ['hospital-test', 'item-charge'])
             ->orWhere('name', 'Hospital Test')
             ->update([
                 'name' => 'Item Charge',
                 'route' => 'backend.Itemcharge.index',
+                'permission_name' => 'item-charge',
                 'status' => 'Active',
             ]);
 

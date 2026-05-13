@@ -56,17 +56,11 @@ class RoleController extends Controller
     {
         $query = $this->roleService->list();
 
-        // Apply visibility rules: if current actor is NOT developer, hide private roles
+        // Apply visibility rules: non-developers should not see developer role.
         try {
-            $allowedModuleSlugs = $allowedModuleSlugs ?? collect();
             $actor = auth()->guard('admin')->user();
             if ($actor && method_exists($actor, 'hasRole') && !$actor->hasRole('developer')) {
-                $currentRoleId = $actor->role_id;
-                $query->where(function ($q) use ($currentRoleId) {
-                    $q->whereNull('is_private')
-                        ->orWhere('is_private', false)
-                        ->orWhere('id', $currentRoleId);
-                });
+                $query->whereRaw('LOWER(name) <> ?', ['developer']);
             }
         } catch (\Throwable $e) {
             // ignore and continue
@@ -377,6 +371,17 @@ class RoleController extends Controller
 
                 DB::commit();
 
+                // Flash success message so a full reload preserves the toast
+                session()->flash('successMessage', $message);
+
+                // If this was an Inertia request, force a full Inertia location
+                // visit so shared props (including `auth.sideMenus`) are
+                // re-evaluated by the server and the client receives the
+                // updated sidebar snapshot.
+                if (request()->header('X-Inertia')) {
+                    return Inertia::location(route('backend.role.index'));
+                }
+
                 return redirect()
                     ->back()
                     ->with('successMessage', $message);
@@ -402,6 +407,8 @@ class RoleController extends Controller
     public function edit($id)
     {
         app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $this->assertDeveloperRoleVisible((int) $id);
 
         $role = $this->roleService->spatieRoleFind($id);
 
@@ -470,6 +477,8 @@ class RoleController extends Controller
 
     public function update(RoleRequest $request, $id)
     {
+        $this->assertDeveloperRoleVisible((int) $id);
+
         DB::beginTransaction();
         try {
             $data = $request->validated();
@@ -558,8 +567,22 @@ class RoleController extends Controller
                 $role = $this->roleService->syncPermissions($id, $allowedPermissionIds);
                 $users = $this->AdminService->list()->where('status', 'Active')->where('role_id', $id)->get();
                 foreach ($users as $key => $user) {
-                    $user->syncRoles($role->id);
+                    try {
+                        // Ensure user's roles reflect the updated role only (use role name)
+                        $user->syncRoles([$role->name]);
+
+                        // Persist role_id to keep admins table in sync with assigned role
+                        try { $user->role_id = $role->id; $user->save(); } catch (\Throwable $_) { /* ignore */ }
+
+                        // Remove any direct permissions to enforce role-scoped permissions
+                        try { $user->syncPermissions([]); } catch (\Throwable $_) { /* ignore */ }
+                    } catch (\Throwable $_) {
+                        // ignore per-user failures
+                    }
                 }
+                try {
+                    app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+                } catch (\Throwable $_) { /* ignore */ }
 
                 $message = 'Role updated successfully';
                 $this->storeAdminWorkLog($id, 'roles', $message);
@@ -590,6 +613,8 @@ class RoleController extends Controller
 
     public function destroy($id)
     {
+
+        $this->assertDeveloperRoleVisible((int) $id);
 
         DB::beginTransaction();
 
@@ -626,6 +651,8 @@ class RoleController extends Controller
 
     public function changeStatus()
     {
+        $this->assertDeveloperRoleVisible((int) request()->id);
+
         DB::beginTransaction();
 
         try {
@@ -656,6 +683,37 @@ class RoleController extends Controller
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
+        }
+    }
+
+    private function assertDeveloperRoleVisible(int $roleId): void
+    {
+        if ($roleId <= 0) {
+            return;
+        }
+
+        $actor = auth()->guard('admin')->user();
+        $isActorDeveloper = false;
+        try {
+            $isActorDeveloper = $actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer');
+        } catch (\Throwable $e) {
+            $isActorDeveloper = false;
+        }
+
+        if ($isActorDeveloper) {
+            return;
+        }
+
+        try {
+            $role = \Spatie\Permission\Models\Role::query()
+                ->where('guard_name', 'admin')
+                ->find($roleId);
+
+            if ($role && strtolower((string) ($role->name ?? '')) === 'developer') {
+                abort(403, 'You are not allowed to access this role.');
+            }
+        } catch (\Throwable $e) {
+            // ignore lookup failures
         }
     }
 }

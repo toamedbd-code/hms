@@ -46,7 +46,7 @@ const submit = () => {
     <div class="w-full p-4 mt-3 bg-white rounded shadow-md">
       <div class="flex items-center justify-between p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h1>
-        <a :href="route('backend.stock.requisitions')" class="px-3 py-2 text-sm font-semibold text-white bg-gray-600 rounded hover:bg-gray-700">Back Requisitions</a>
+        <a :href="route('backend.stock.requisitions')" class="px-3 py-2 text-sm font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700">Back Requisitions</a>
       </div>
 
       <form @submit.prevent="submit" class="mt-4 space-y-4">
@@ -77,7 +77,7 @@ const submit = () => {
           </div>
 
           <div class="space-y-2">
-            <div v-for="(row, idx) in form.items" :key="idx" class="grid grid-cols-1 md:grid-cols-12 gap-2 bg-slate-50 p-2 rounded border text-white">
+            <div v-for="(row, idx) in form.items" :key="idx" class="grid grid-cols-1 md:grid-cols-12 gap-2 bg-slate-50 p-2 rounded border">
               <div class="md:col-span-5">
                 <select v-model="row.store_item_id" class="w-full p-2 text-sm border rounded">
                   <option value="">Select Item</option>

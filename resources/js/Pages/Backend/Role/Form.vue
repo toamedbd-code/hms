@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
+import { Inertia } from '@inertiajs/inertia';
 import eventBus from '@/eventBus.js';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
@@ -91,6 +92,22 @@ const submit = async () => {
                     } catch (e) {
                         // ignore
                     }
+
+                    // Final safety fallback: if the above snapshot apply did not
+                    // update the sidebar (some environments may not fire the
+                    // client-side events reliably), force Inertia to reload the
+                    // shared `auth.sideMenus` prop so the sidebar updates.
+                    try {
+                        setTimeout(() => {
+                            try {
+                                Inertia.reload({ only: ['auth.sideMenus'] });
+                            } catch (err) {
+                                try { Inertia.reload(); } catch (err2) { /* ignore */ }
+                            }
+                        }, 900);
+                    } catch (e) {
+                        // ignore
+                    }
                 });
             } catch (e) {
                 // ignore
@@ -112,8 +129,8 @@ const permissionSearch = ref('');
 
 function permissionMatches(permission, query) {
     const name = String(permission?.name ?? '').toLowerCase();
-    const formatted = formatLabel(permission?.name ?? '').toLowerCase();
-    return name.includes(query) || formatted.includes(query);
+    const display = permissionDisplayLabel(permission).toLowerCase();
+    return name.includes(query) || display.includes(query);
 }
 
 function filterPermissionTree(list, query) {
@@ -161,6 +178,36 @@ const menuPermissionOrder = computed(() => {
     return order;
 });
 
+const menuPermissionLabelMap = computed(() => {
+    const labels = new Map();
+    const sideMenus = page.props?.auth?.sideMenus ?? [];
+
+    const pushLabel = (permissionName, menuName) => {
+        const normalized = String(permissionName ?? '').trim().toLowerCase();
+        const label = String(menuName ?? '').trim();
+        if (!normalized || !label || labels.has(normalized)) {
+            return;
+        }
+        labels.set(normalized, label);
+    };
+
+    sideMenus.forEach((menu) => {
+        pushLabel(menu?.permission_name, menu?.name);
+        (menu?.childrens ?? []).forEach((child) => {
+            pushLabel(child?.permission_name, child?.name);
+        });
+    });
+
+    return labels;
+});
+
+function permissionDisplayLabel(permission) {
+    const name = String(permission?.name ?? '').trim();
+    const normalized = name.toLowerCase();
+    const menuLabel = menuPermissionLabelMap.value.get(normalized);
+    return menuLabel || formatLabel(name);
+}
+
 const initialGroupOrder = ref(new Map());
 
 onMounted(() => {
@@ -197,22 +244,22 @@ const sortedPermissionGroups = computed(() => {
         const aName = String(a?.name ?? '').toLowerCase();
         const bName = String(b?.name ?? '').toLowerCase();
 
+        // Sidebar/menu serial should win first.
+        const aMenu = order.has(aName) ? order.get(aName) : Number.MAX_SAFE_INTEGER;
+        const bMenu = order.has(bName) ? order.get(bName) : Number.MAX_SAFE_INTEGER;
+        if (aMenu !== bMenu) return aMenu - bMenu;
+
         const aInit = initialGroupOrder.value.has(aName) ? initialGroupOrder.value.get(aName) : null;
         const bInit = initialGroupOrder.value.has(bName) ? initialGroupOrder.value.get(bName) : null;
 
-        // Prefer initial captured order if available (freeze)
+        // Then keep stable initial captured order if needed.
         if (aInit !== null || bInit !== null) {
             if (aInit === null) return 1;
             if (bInit === null) return -1;
             if (aInit !== bInit) return aInit - bInit;
         }
 
-        // Fallback to menu order
-        const aMenu = order.has(aName) ? order.get(aName) : Number.MAX_SAFE_INTEGER;
-        const bMenu = order.has(bName) ? order.get(bName) : Number.MAX_SAFE_INTEGER;
-        if (aMenu !== bMenu) return aMenu - bMenu;
-
-        return formatLabel(a?.name).localeCompare(formatLabel(b?.name));
+        return permissionDisplayLabel(a).localeCompare(permissionDisplayLabel(b));
     });
 });
 
@@ -340,7 +387,7 @@ const goToRoleList = () => {
                     <div class="w-full lg:max-w-md">
                         <InputLabel for="name" value="Role Edit | Role Name | Permissions" />
                         <input id="name"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" type="text" placeholder="Role Name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -351,7 +398,7 @@ const goToRoleList = () => {
                             v-model="permissionSearch"
                             type="text"
                             placeholder="Search permission (e.g. doctor portal, website inbox)"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                         />
                     </div>
                 </div>
@@ -361,7 +408,7 @@ const goToRoleList = () => {
                         Module-wise permission list: module এ ক্লিক করলে permission গুলো open হবে।
                     </div>
                     <div class="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-                        <div class="rounded-md border border-slate-200 bg-slate-50 p-2 max-h-[540px] overflow-y-auto text-white">
+                        <div class="rounded-md border border-slate-200 bg-slate-50 p-2 max-h-[540px] overflow-y-auto">
                             <template v-for="permissionInfo in sortedPermissionGroups" :key="permissionInfo.id">
                                 <button
                                     type="button"
@@ -371,7 +418,7 @@ const goToRoleList = () => {
                                         : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'"
                                     @click="setActivePermissionGroup(permissionInfo.id)"
                                 >
-                                    <p class="font-semibold text-sm">{{ formatLabel(permissionInfo.name) }}</p>
+                                    <p class="font-semibold text-sm">{{ permissionDisplayLabel(permissionInfo) }}</p>
                                     <p class="text-xs mt-1 text-slate-500">{{ selectedCountInModule(permissionInfo) }}/{{ totalCountInModule(permissionInfo) }} selected</p>
                                 </button>
                             </template>
@@ -384,7 +431,7 @@ const goToRoleList = () => {
                         <div v-if="activePermissionGroup" class="rounded-md border border-slate-200 bg-white shadow-sm">
                             <div class="flex items-center justify-between gap-2 p-3 border-b border-slate-100">
                                 <div>
-                                    <p class="font-semibold text-sm text-slate-800">{{ formatLabel(activePermissionGroup.name) }}</p>
+                                    <p class="font-semibold text-sm text-slate-800">{{ permissionDisplayLabel(activePermissionGroup) }}</p>
                                     <p class="text-xs text-slate-500 mt-1">{{ selectedCountInModule(activePermissionGroup) }}/{{ totalCountInModule(activePermissionGroup) }} selected</p>
                                 </div>
                                 <div class="flex items-center gap-2">
@@ -406,13 +453,13 @@ const goToRoleList = () => {
                                             <label :for="'permission_' + activePermissionGroup.id"
                                                 class="ml-2 cursor-pointer font-bold"
                                                 :class="checkedPermissions.includes(activePermissionGroup.id) ? 'text-green-600' : 'text-gray-700'">
-                                                {{ formatLabel(activePermissionGroup.name) }}
+                                                {{ permissionDisplayLabel(activePermissionGroup) }}
                                             </label>
                                         </div>
 
                                         <ul v-if="activePermissionGroup.child" class="ml-1 mt-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                                             <template v-for="childInfo in activePermissionGroup.child" :key="childInfo.id">
-                                                <li class="rounded border border-slate-200 p-2 bg-slate-50 text-white">
+                                                <li class="rounded border border-slate-200 p-2 bg-slate-50">
                                                     <div class="flex items-center">
                                                         <input v-model="checkedPermissions" :value="childInfo.id"
                                                             type="checkbox" class="cursor-pointer"
@@ -420,7 +467,7 @@ const goToRoleList = () => {
                                                         <label :for="'permission_' + childInfo.id"
                                                             class="ml-2 cursor-pointer"
                                                             :class="checkedPermissions.includes(childInfo.id) ? 'text-green-600' : 'text-gray-700'">
-                                                            {{ formatLabel(childInfo.name) }}
+                                                            {{ permissionDisplayLabel(childInfo) }}
                                                         </label>
                                                     </div>
 
@@ -435,7 +482,7 @@ const goToRoleList = () => {
                                                                 <label :for="'permission_' + childChildInfo.id"
                                                                     class="ml-2 cursor-pointer"
                                                                     :class="checkedPermissions.includes(childChildInfo.id) ? 'text-green-600' : 'text-gray-700'">
-                                                                    {{ formatLabel(childChildInfo.name) }}
+                                                                    {{ permissionDisplayLabel(childChildInfo) }}
                                                                 </label>
                                                             </li>
                                                         </template>
@@ -448,7 +495,7 @@ const goToRoleList = () => {
                             </div>
                         </div>
 
-                        <div v-else class="rounded-md border border-dashed border-slate-300 bg-slate-50 p-6 text-white text-sm text-slate-500">
+                        <div v-else class="rounded-md border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
                             Permission group select করুন।
                         </div>
                     </div>

@@ -9,6 +9,9 @@ use App\Models\MedicineSupplier;
 use App\Models\MedicineCategory;
 use App\Models\MedicineInventory;
 use App\Models\SupplierPayment;
+use App\Models\Account;
+use App\Models\LedgerTransaction;
+use App\Services\LedgerService;
 use App\Traits\SystemTrait;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,8 +22,11 @@ class MedicinePurchaseController extends Controller
 {
     use SystemTrait;
 
-    public function __construct()
+    protected LedgerService $ledgerService;
+
+    public function __construct(LedgerService $ledgerService)
     {
+        $this->ledgerService = $ledgerService;
         $this->middleware('auth:admin');
         $this->middleware('permission:medicine-purchase-list');
         $this->middleware('permission:medicine-purchase-list-create', ['only' => ['create', 'store']]);
@@ -150,6 +156,8 @@ class MedicinePurchaseController extends Controller
             }
 
             $this->upsertLinkedSupplierPayment($purchase, (string) $request->purchase_date);
+            $purchase->refresh();
+            $this->syncPurchaseLedger($purchase);
 
             return $purchase;
         });
@@ -160,7 +168,7 @@ class MedicinePurchaseController extends Controller
             'Medicine purchase created: ' . $purchase->purchase_number
         );
 
-        return redirect()->route('backend.medicinepurchase.index')->with('success', 'Purchase created successfully');
+        return redirect()->route('backend.medicinepurchase.index')->with('successMessage', 'Purchase created successfully');
     }
 
     public function show(MedicinePurchase $medicinepurchase)
@@ -266,6 +274,8 @@ class MedicinePurchaseController extends Controller
 
             $medicinepurchase->refresh();
             $this->upsertLinkedSupplierPayment($medicinepurchase, (string) $request->purchase_date);
+            $medicinepurchase->refresh();
+            $this->syncPurchaseLedger($medicinepurchase);
         });
 
         $this->storeAdminWorkLog(
@@ -274,13 +284,14 @@ class MedicinePurchaseController extends Controller
             'Medicine purchase updated: ' . $medicinepurchase->purchase_number
         );
 
-        return redirect()->route('backend.medicinepurchase.index')->with('success', 'Purchase updated successfully');
+        return redirect()->route('backend.medicinepurchase.index')->with('successMessage', 'Purchase updated successfully');
     }
 
     public function destroy(MedicinePurchase $medicinepurchase)
     {
         $purchaseNumber = (string) $medicinepurchase->purchase_number;
         $purchaseId = (int) $medicinepurchase->id;
+        $this->removePurchaseLedger($purchaseId);
         $medicinepurchase->delete();
 
         $this->storeAdminWorkLog(
@@ -289,7 +300,7 @@ class MedicinePurchaseController extends Controller
             'Medicine purchase deleted: ' . $purchaseNumber
         );
 
-        return redirect()->route('backend.medicinepurchase.index')->with('success', 'Purchase deleted successfully');
+        return redirect()->route('backend.medicinepurchase.index')->with('successMessage', 'Purchase deleted successfully');
     }
 
     // Receive purchase items
@@ -383,7 +394,7 @@ class MedicinePurchaseController extends Controller
             'Receive quantity updated for purchase: ' . $medicinepurchase->purchase_number
         );
 
-        return redirect()->back()->with('success', 'Items received successfully');
+        return redirect()->back()->with('successMessage', 'Items received and stock approved successfully');
     }
 
     private function validateItemsAgainstInventory(int $supplierId, array $items): void
@@ -423,5 +434,75 @@ class MedicinePurchaseController extends Controller
                 'status' => $dueAmount > 0 ? 'pending' : 'paid',
             ]
         );
+    }
+
+    private function syncPurchaseLedger(MedicinePurchase $purchase): void
+    {
+        $this->removePurchaseLedger((int) $purchase->id);
+
+        $totalAmount = round((float) ($purchase->total_amount ?? 0), 2);
+        if ($totalAmount <= 0) {
+            return;
+        }
+
+        $paidAmount = min(max(round((float) ($purchase->paid_amount ?? 0), 2), 0), $totalAmount);
+        $dueAmount = round(max(0, $totalAmount - $paidAmount), 2);
+
+        $inventoryCode = $this->ensureSystemAccount('PHARM_INV', 'Pharmacy Inventory', 'asset', 'ASSET', false);
+        $cashCode = $this->ensureSystemAccount('CASH', 'Cash', 'asset', 'ASSET', false);
+        $payableCode = $this->ensureSystemAccount('AP_SUPPLIER', 'Supplier Payable', 'liability', 'LIABILITY', false);
+
+        $lines = [
+            ['account_code' => $inventoryCode, 'entry_type' => 'debit', 'amount' => $totalAmount],
+        ];
+
+        if ($paidAmount > 0) {
+            $lines[] = ['account_code' => $cashCode, 'entry_type' => 'credit', 'amount' => $paidAmount];
+        }
+
+        if ($dueAmount > 0) {
+            $lines[] = ['account_code' => $payableCode, 'entry_type' => 'credit', 'amount' => $dueAmount];
+        }
+
+        $description = 'Medicine purchase ' . ((string) ($purchase->purchase_number ?? $purchase->id));
+        $date = $purchase->purchase_date ? date('Y-m-d', strtotime((string) $purchase->purchase_date)) : now()->toDateString();
+        $createdBy = auth('admin')->id();
+
+        $this->ledgerService->recordTransaction(
+            $lines,
+            $description,
+            $date,
+            'MedicinePurchase',
+            $purchase->id,
+            $createdBy
+        );
+    }
+
+    private function removePurchaseLedger(int $purchaseId): void
+    {
+        $existing = LedgerTransaction::query()
+            ->where('reference_type', 'MedicinePurchase')
+            ->where('reference_id', $purchaseId)
+            ->first();
+
+        if ($existing) {
+            $this->ledgerService->deleteTransaction($existing->id);
+        }
+    }
+
+    private function ensureSystemAccount(string $code, string $name, string $type, string $group, bool $isProfitLoss): string
+    {
+        Account::query()->firstOrCreate(
+            ['code' => $code],
+            [
+                'name' => $name,
+                'type' => $type,
+                'account_group' => $group,
+                'is_profit_loss' => $isProfitLoss,
+                'is_active' => true,
+            ]
+        );
+
+        return $code;
     }
 }

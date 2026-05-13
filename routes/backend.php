@@ -44,7 +44,6 @@ use App\Http\Controllers\Backend\SampleCollectionController;
 use App\Http\Controllers\Backend\ReportingController;
 use App\Http\Controllers\Backend\ReportSettingController;
 use App\Http\Controllers\Backend\ReportDeliveryController;
-use App\Http\Controllers\Backend\DoctorSummaryController;
 use App\Http\Controllers\Backend\SetupController;
 use App\Http\Controllers\Backend\DesignationController;
 use App\Http\Controllers\Backend\DepartmentController;
@@ -76,6 +75,7 @@ use App\Http\Controllers\Backend\MedicineCategoryController;
 use App\Http\Controllers\Backend\MedicineSupplierController;
 use App\Http\Controllers\Backend\MedicineInventoryController;
 use App\Http\Controllers\Backend\MedicinePurchaseController;
+use App\Http\Controllers\Backend\SitePurchaseController;
 use App\Http\Controllers\Backend\SupplierPaymentController;
 use App\Http\Controllers\Backend\ProductReturnController;
 use App\Http\Controllers\Backend\StockManagementController;
@@ -88,6 +88,7 @@ use App\Http\Controllers\Backend\SymptomTypeController;
 use App\Http\Controllers\Backend\InvoiceDesignController;
 use App\Http\Controllers\Backend\LeaveTypeController;
 use App\Http\Controllers\Backend\ReportController;
+use App\Http\Controllers\Backend\DoctorSummaryController;
 use App\Http\Controllers\Backend\WebSettingController;
 use App\Http\Controllers\Backend\ProfileController;
 use App\Http\Controllers\Backend\BkashSettingController;
@@ -142,6 +143,18 @@ Route::get('/facilities', [HomeController::class, 'facilities'])->name('website.
 Route::get('/appointment', [HomeController::class, 'appointment'])->name('website.appointment');
 Route::get('/contact', [HomeController::class, 'contact'])->name('website.contact');
 
+Route::get('/language/{locale}', function (string $locale, Request $request) {
+    $locale = strtolower(trim($locale));
+    if (!in_array($locale, ['en', 'bn'], true)) {
+        $locale = 'en';
+    }
+
+    session(['locale' => $locale]);
+    app()->setLocale($locale);
+
+    return redirect()->back()->withCookie(cookie('locale', $locale, 60 * 24 * 30));
+})->name('language.switch');
+
 // Serve storage files when symlink may be missing (fallback)
 Route::get('/storage/{path}', [AssetController::class, 'storage'])->where('path', '.*');
 
@@ -191,7 +204,7 @@ Route::get('/dev/debug-side-menus', function (Request $request) {
     $adminGuardCheck = auth()->guard('admin')->check();
     $adminGuardUser = auth()->guard('admin')->user();
     $requestAdminUser = $request->user('admin');
-    $defaultUser = auth()->user();
+    $defaultUser = $request->user();
 
     $sideMenusCurrent = $adminGuardUser ? getSideMenus($adminGuardUser) : [];
 
@@ -335,7 +348,7 @@ Route::post('/website/appointment', [HomeController::class, 'storeAppointment'])
     ->middleware('throttle:8,1')
     ->name('website.appointment.store');
 
-Route::group(['middleware' => 'AdminAuth'], function () {
+Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], function () {
 
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('admin.dashboard');
     // Ensure a plain 'dashboard' route name exists so the final named route
@@ -355,19 +368,39 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     // Account Management (Chart of Accounts, Ledger, Audit)
     Route::get('accounts', [AccountController::class, 'index'])->name('accounts.index');
     Route::get('accounts/balances', [AccountController::class, 'balances'])->name('accounts.balances');
+    Route::get('accounts/trial-balance', [AccountController::class, 'trialBalance'])->name('accounts.trial-balance');
+    Route::get('accounts/profit-loss', [AccountController::class, 'profitLoss'])->name('accounts.profit-loss');
+    Route::get('accounts/balance-sheet', [AccountController::class, 'balanceSheet'])->name('accounts.balance-sheet');
+    Route::get('accounts/cash-flow', [AccountController::class, 'cashFlow'])->name('accounts.cash-flow');
+    Route::get('accounts/vendor-payment', [SupplierPaymentController::class, 'index'])->name('accounts.vendor-payment.index');
     Route::get('ledger', [LedgerController::class, 'index'])->name('ledger.index');
     Route::get('accounts/audit', [AccountAuditController::class, 'index'])->name('accounts.audit');
 
     // Account API (JSON) for Chart of Accounts CRUD
     Route::get('accounts/list', [AccountApiController::class, 'index'])->name('accounts.list');
+    Route::get('accounts/opening-balances/status', [AccountApiController::class, 'openingBalanceStatus'])->name('accounts.opening-balances.status');
+    Route::get('accounts/opening-balances/history', [AccountApiController::class, 'openingBalanceHistory'])->name('accounts.opening-balances.history');
     Route::get('accounts/{id}/show', [AccountApiController::class, 'show'])->name('accounts.show');
     Route::post('accounts', [AccountApiController::class, 'store'])->name('accounts.store');
+    Route::post('accounts/opening-balances/save', [AccountApiController::class, 'saveOpeningBalances'])->name('accounts.opening-balances.save');
+    Route::post('accounts/opening-balances/post', [AccountApiController::class, 'postOpeningBalances'])->name('accounts.opening-balances.post');
     Route::put('accounts/{id}', [AccountApiController::class, 'update'])->name('accounts.update');
     Route::delete('accounts/{id}', [AccountApiController::class, 'destroy'])->name('accounts.destroy');
 
     // Ledger API (JSON) for browsing transactions
     Route::get('ledger/list', [LedgerApiController::class, 'index'])->name('ledger.list');
+    Route::get('ledger/export', [LedgerApiController::class, 'export'])->name('ledger.export');
     Route::get('ledger/{id}/show', [LedgerApiController::class, 'show'])->name('ledger.show');
+    Route::get('accounts/trial-balance/list', [LedgerApiController::class, 'trialBalance'])->name('accounts.trial-balance.list');
+    Route::get('accounts/profit-loss/list', [LedgerApiController::class, 'profitLoss'])->name('accounts.profit-loss.list');
+    Route::get('accounts/balance-sheet/list', [LedgerApiController::class, 'balanceSheet'])->name('accounts.balance-sheet.list');
+    Route::get('accounts/cash-flow/list', [LedgerApiController::class, 'cashFlow'])->name('accounts.cash-flow.list');
+    Route::get('accounts/financial-summary/list', [LedgerApiController::class, 'financialSummary'])->name('accounts.financial-summary.list');
+
+    // Generic approval inbox + actions
+    Route::get('approval-requests/inbox', [\App\Http\Controllers\Backend\ApprovalRequestController::class, 'index'])->name('approval.requests.index');
+    Route::post('approval-requests/{approvalRequest}/approve', [\App\Http\Controllers\Backend\ApprovalRequestController::class, 'approve'])->name('approval.requests.approve');
+    Route::post('approval-requests/{approvalRequest}/reject', [\App\Http\Controllers\Backend\ApprovalRequestController::class, 'reject'])->name('approval.requests.reject');
 
     // bKash settings (admin)
     Route::get('settings/payment/bkash', [BkashSettingController::class, 'index'])->name('settings.payment.bkash');
@@ -591,6 +624,20 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::resource('inventory', InventoryController::class);
     Route::get('inventory/{id}/status/{status}/change', [InventoryController::class, 'changeStatus'])->name('inventory.status.change');
 
+    // Manufacturing / MRP
+    Route::resource('bom', \App\Http\Controllers\Backend\BillOfMaterialController::class);
+    Route::resource('production-order', \App\Http\Controllers\Backend\ProductionOrderController::class);
+    Route::resource('work-order', \App\Http\Controllers\Backend\WorkOrderController::class);
+
+    // Fixed Assets
+    Route::resource('fixedasset', \App\Http\Controllers\Backend\FixedAssetController::class);
+
+    // Currency & Exchange Rates
+    Route::resource('currency', \App\Http\Controllers\Backend\CurrencyController::class);
+    Route::get('exchange-rate', [\App\Http\Controllers\Backend\ExchangeRateController::class, 'index'])->name('exchange-rate.index');
+    Route::post('exchange-rate', [\App\Http\Controllers\Backend\ExchangeRateController::class, 'store'])->name('exchange-rate.store');
+    Route::delete('exchange-rate/{exchangeRate}', [\App\Http\Controllers\Backend\ExchangeRateController::class, 'destroy'])->name('exchange-rate.destroy');
+
 
     //for Certificate
     Route::resource('certificate', CertificateController::class);
@@ -616,12 +663,6 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('reporting/item/{billItem}/file', [ReportingController::class, 'viewFile'])->name('reporting.item.file');
     Route::post('reporting/item/{billItem}/import-text', [ReportingController::class, 'importStoredFileText'])->name('reporting.item.import-text');
     Route::get('reporting/print/{billItem}', [ReportingController::class, 'print'])->name('reporting.print');
-    // Report summary (formerly Doctor summary) — keep legacy URL redirect
-    Route::get('report-summary', [DoctorSummaryController::class, 'index'])->name('report-summary.index');
-    // Redirect old URL to new report-summary path
-    Route::get('doctor-summary', function () {
-        return redirect()->route('backend.report-summary.index');
-    });
 
     // for Report Delivery
     Route::get('report-delivery', [ReportDeliveryController::class, 'index'])->name('report-delivery.index');
@@ -818,6 +859,9 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::resource('medicinepurchase', \App\Http\Controllers\Backend\MedicinePurchaseController::class);
     Route::post('medicinepurchase/{medicinepurchase}/receive', [\App\Http\Controllers\Backend\MedicinePurchaseController::class, 'receiveItems'])->name('medicinepurchase.receive');
 
+    // for SitePurchase (all-site procurement)
+    Route::resource('sitepurchase', SitePurchaseController::class);
+
     // for SupplierPayment
     Route::resource('supplierpayment', \App\Http\Controllers\Backend\SupplierPaymentController::class);
     Route::post('supplierpayment/{supplierpayment}/partial', [\App\Http\Controllers\Backend\SupplierPaymentController::class, 'addPartialPayment'])->name('supplierpayment.partial');
@@ -869,6 +913,7 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     //for report
     Route::get('all-report', [ReportController::class, 'index'])->name('report.index');
     Route::get('/report/generate-pdf', [ReportController::class, 'generatePdf'])->name('report.generate-pdf');
+    Route::get('report-summary', [DoctorSummaryController::class, 'index'])->middleware('permission:report-management')->name('report-summary.index');
 
     // for General Setting (canonical URL)
     Route::get('general-setting', [WebSettingController::class, 'create'])->name('websetting.create');
@@ -877,6 +922,10 @@ Route::group(['middleware' => 'AdminAuth'], function () {
     Route::get('general-setting/section/prefix', [WebSettingController::class, 'section'])->defaults('section', 'prefix')->name('websetting.section.prefix');
     Route::get('general-setting/section/sms', [WebSettingController::class, 'section'])->defaults('section', 'sms')->name('websetting.section.sms');
     Route::get('general-setting/section/module', [WebSettingController::class, 'section'])->defaults('section', 'module')->name('websetting.section.module');
+    Route::get('general-setting/module/attendance', [WebSettingController::class, 'module'])->defaults('module', 'attendance')->name('websetting.module.attendance');
+    Route::get('general-setting/module/pathology', [WebSettingController::class, 'module'])->defaults('module', 'pathology')->name('websetting.module.pathology');
+    Route::get('general-setting/module/payroll', [WebSettingController::class, 'module'])->defaults('module', 'payroll')->name('websetting.module.payroll');
+    Route::get('general-setting/module/reporting', [WebSettingController::class, 'module'])->defaults('module', 'reporting')->name('websetting.module.reporting');
     Route::get('general-setting/section/other', [WebSettingController::class, 'section'])->defaults('section', 'other')->name('websetting.section.other');
     Route::match(['get', 'post'], 'general-setting-store', [WebSettingController::class, 'store'])->name('websetting.store');
 

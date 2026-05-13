@@ -146,7 +146,7 @@ class PermissionSeeder extends Seeder
         if (!empty($menu->permission_name)) {
             $permission = Permission::firstOrCreate(
                 ['name' => $menu->permission_name, 'guard_name' => 'admin'],
-                ['parent_id' => $parentPermissionId]
+                ['parent_id' => $parentPermissionId, 'sorting' => $menu->sorting ?? 1]
             );
 
             if ($parentPermissionId && !$permission->parent_id) {
@@ -205,10 +205,23 @@ class PermissionSeeder extends Seeder
         $existingPermission = Permission::where('name', $permissionName)->first();
 
         if (!$existingPermission) {
+            // Prefer sorting value from the Menu (if any), otherwise inherit from parent permission
+            $menu = Menu::where('permission_name', $permissionName)->first();
+            $sorting = 1;
+            if ($menu && isset($menu->sorting)) {
+                $sorting = (int) $menu->sorting;
+            } elseif (!empty($parentId)) {
+                $parentPerm = Permission::find($parentId);
+                if ($parentPerm && isset($parentPerm->sorting)) {
+                    $sorting = (int) $parentPerm->sorting;
+                }
+            }
+
             Permission::create([
                 'name' => $permissionName,
                 'parent_id' => $parentId,
                 'guard_name' => 'admin',
+                'sorting' => $sorting,
             ]);
         }
     }

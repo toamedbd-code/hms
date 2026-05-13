@@ -177,7 +177,7 @@ const goToBloodComponentList = () => {
                         <label class="block text-xs font-medium text-black">Select Patient</label>
                         <div class="flex">
                             <select id="patient_id" v-model="form.patient_id"
-                                class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="">Select Patient</option>
                                 <option v-for="data in patients" :key="data.id" :value="data.id">{{ data.name }}
                                 </option>
@@ -238,7 +238,7 @@ const goToBloodComponentList = () => {
                     <div>
                         <label class="block text-xs font-medium text-gray-700 mb-1">Hospital Doctor</label>
                         <select id="doctor_id" v-model="form.doctor_id"
-                            class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             required>
                             <option value="">Select Doctor</option>
                             <option v-for="data in doctors" :key="data.id" :value="data.id">{{ data.name }}

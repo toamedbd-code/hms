@@ -3,6 +3,8 @@
 namespace App\Support;
 
 use App\Models\Admin;
+use App\Models\Permission as AppPermission;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Spatie\Permission\Models\Permission;
@@ -16,6 +18,8 @@ class DefaultDeveloperManager
             if (!Schema::hasTable('admins') || !Schema::hasTable('roles') || !Schema::hasTable('permissions')) {
                 return null;
             }
+
+            static::bootstrapMenusAndPermissionsIfMissing();
 
             $email = trim((string) env('SINGLE_DEV_EMAIL', 'toamedbd@gmail.com'));
             $password = (string) env('SINGLE_DEV_PASSWORD', 'zxczxc');
@@ -43,6 +47,23 @@ class DefaultDeveloperManager
                 ->where('guard_name', 'admin')
                 ->pluck('name')
                 ->toArray();
+
+            // Some installations seed permissions through App\Models\Permission.
+            // Merge both sources so developer gets every permission by default.
+            try {
+                $appPermissionNames = AppPermission::query()
+                    ->where(function ($q) {
+                        $q->where('guard_name', 'admin')->orWhereNull('guard_name')->orWhere('guard_name', '');
+                    })
+                    ->pluck('name')
+                    ->toArray();
+
+                if (!empty($appPermissionNames)) {
+                    $allPermissionNames = array_values(array_unique(array_merge($allPermissionNames, $appPermissionNames)));
+                }
+            } catch (\Throwable $_) {
+                // ignore app-permission source failures
+            }
 
             if (!empty($allPermissionNames)) {
                 try {
@@ -79,6 +100,17 @@ class DefaultDeveloperManager
                 $admin->syncPermissions([]);
             } catch (\Throwable $_) {
                 // ignore role sync failures
+            }
+
+            // Defensive fallback: ensure role holds the latest full permission set.
+            if (!empty($allPermissionNames)) {
+                try {
+                    $devRole->syncPermissions($allPermissionNames);
+                    $admin->syncRoles([$devRole->name]);
+                    $admin->load('roles', 'permissions');
+                } catch (\Throwable $_) {
+                    // ignore
+                }
             }
 
             try {
@@ -123,6 +155,75 @@ class DefaultDeveloperManager
             return $roleName === 'developer';
         } catch (\Throwable $_) {
             return false;
+        }
+    }
+
+    private static function bootstrapMenusAndPermissionsIfMissing(): void
+    {
+        try {
+            if (!Schema::hasTable('menus') || !Schema::hasTable('permissions')) {
+                return;
+            }
+
+            $menuCount = (int) DB::table('menus')->count();
+            $permissionCount = (int) DB::table('permissions')->where('guard_name', 'admin')->count();
+
+            if ($menuCount === 0) {
+                foreach ([
+                    \Database\Seeders\MenuSeeder::class,
+                    \Database\Seeders\SettingsMenuSyncSeeder::class,
+                    \Database\Seeders\QuickAccessMenuPermissionSyncSeeder::class,
+                    \Database\Seeders\StoreManagementMenuSeeder::class,
+                    \Database\Seeders\SalarySheetMenuSeeder::class,
+                    \Database\Seeders\MenuDeduplicateSeeder::class,
+                ] as $seederClass) {
+                    try {
+                        if (class_exists($seederClass)) {
+                            Artisan::call('db:seed', ['--class' => $seederClass, '--force' => true]);
+                        }
+                    } catch (\Throwable $_) {
+                        // ignore individual seeder errors
+                    }
+                }
+            }
+
+            if ($permissionCount === 0) {
+                foreach ([
+                    \Database\Seeders\PermissionSeeder::class,
+                    \Database\Seeders\PermissionFixSeeder::class,
+                    \Database\Seeders\MenuPermissionCoverageSeeder::class,
+                    \Database\Seeders\ReportManagementPermissionSeeder::class,
+                    \Database\Seeders\DutyRosterPermissionSeeder::class,
+                    \Database\Seeders\SalarySheetPermissionSeeder::class,
+                ] as $seederClass) {
+                    try {
+                        if (class_exists($seederClass)) {
+                            Artisan::call('db:seed', ['--class' => $seederClass, '--force' => true]);
+                        }
+                    } catch (\Throwable $_) {
+                        // ignore individual seeder errors
+                    }
+                }
+            }
+
+            // Always ensure Salary Sheet menu exists and apply final sidebar normalization.
+            try {
+                if (class_exists(\Database\Seeders\SalarySheetMenuSeeder::class)) {
+                    Artisan::call('db:seed', ['--class' => \Database\Seeders\SalarySheetMenuSeeder::class, '--force' => true]);
+                }
+            } catch (\Throwable $_) {
+                // ignore salary-sheet menu sync failures
+            }
+
+            try {
+                if (class_exists(\Database\Seeders\SidebarPermissionStabilitySeeder::class)) {
+                    Artisan::call('db:seed', ['--class' => \Database\Seeders\SidebarPermissionStabilitySeeder::class, '--force' => true]);
+                }
+            } catch (\Throwable $_) {
+                // ignore sidebar-stability sync failures
+            }
+        } catch (\Throwable $_) {
+            // ignore bootstrap failures
         }
     }
 }

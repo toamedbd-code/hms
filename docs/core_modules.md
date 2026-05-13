@@ -91,5 +91,6 @@
 ## পরবর্তী পদক্ষেপ
 - প্রতিটি মডিউরের বিস্তারিত API স্পেসিফিকেশন তৈরি করা (`docs/api-specs/`)
 - ERD ও মাইগ্রেশন স্ক্রিপ্ট ড্রাফট করা (আমি `docs/db_schema.md` তৈরি করেছি)।
+- Week-by-week execution plan: `docs/erp_execution_roadmap.md`
 
 

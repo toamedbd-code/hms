@@ -54,7 +54,7 @@
                                 <a href="{{ route('backend.charges.import.sample') }}" class="btn btn-outline-secondary me-md-2">
                                     Download Sample CSV
                                 </a>
-                                <button type="submit" class="btn btn-primary">Import Data</button>
+                                <button type="submit" class="btn btn-primary btn-colorful">Import Data</button>
                             </div>
                         </form>
 

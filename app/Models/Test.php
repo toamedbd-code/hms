@@ -28,7 +28,14 @@ class Test extends Model
         'standard_charge',
         'amount',
         'test_parameters',
+        'commissionable',
+        'commission_rate',
         'status'
+    ];
+
+    protected $casts = [
+        'commissionable' => 'boolean',
+        'commission_rate' => 'decimal:2',
     ];
 
     // Relationships

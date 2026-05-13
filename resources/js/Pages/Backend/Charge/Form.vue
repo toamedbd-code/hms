@@ -192,7 +192,7 @@ const goToChargeList = () => {
                         <InputLabel for="charge_type_id" value="Charge Type *" />
                         <div class="flex items-center space-x-2">
                             <select id="charge_type_id"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 v-model="form.charge_type_id">
                                 <option value="">Select Charge Type</option>
                                 <option v-for="type in modalData.chargeTypes" :key="type.id" :value="type.id">
@@ -214,7 +214,7 @@ const goToChargeList = () => {
                         <InputLabel for="charge_category_id" value="Charge Category" />
                         <div class="flex items-center space-x-2">
                             <select id="charge_category_id"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 v-model="form.charge_category_id">
                                 <option value="">(Optional) Select Charge Category</option>
                                 <option v-for="cat in modalData.chargeCategories" :key="cat.id" :value="cat.id">
@@ -236,7 +236,7 @@ const goToChargeList = () => {
                         <InputLabel for="unit_type_id" value="Unit Type *" />
                         <div class="flex items-center space-x-2">
                             <select id="unit_type_id"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 v-model="form.unit_type_id">
                                 <option value="">Select</option>
                                 <option v-for="unitType in modalData.chargeUnits" :key="unitType.id"
@@ -258,7 +258,7 @@ const goToChargeList = () => {
                     <div class="col-span-1">
                         <InputLabel for="name" value="Charge Name *" />
                         <input id="name"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" type="text" placeholder="Charge Name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -270,7 +270,7 @@ const goToChargeList = () => {
                         <InputLabel for="tax_category_id" value="Tax Category *" />
                         <div class="flex items-center space-x-2">
                             <select id="tax_category_id"
-                                class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 v-model="form.tax_category_id" @change="updateTaxPercentage">
                                 <option value="">Select Tax Category</option>
                                 <option v-for="tax in modalData.taxCategories" :key="tax.id" :value="tax.id">
@@ -292,7 +292,7 @@ const goToChargeList = () => {
                         <InputLabel for="tax" value="Tax" />
                         <div class="relative">
                             <input id="tax" disabled
-                                class="block w-full p-2 pr-8 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 pr-8 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 v-model="form.tax" type="number" step="0.01" min="0" max="100" placeholder="Tax" />
                             <span
                                 class="absolute inset-y-0 right-0 flex items-center pr-3 text-sm text-gray-500">%</span>
@@ -303,7 +303,7 @@ const goToChargeList = () => {
                     <div class="col-span-1">
                         <InputLabel for="standard_charge" value="Standard Charge (Tk.) *" />
                         <input id="standard_charge"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.standard_charge" type="number" step="0.01" min="0"
                             placeholder="Standard Charge" />
                         <InputError class="mt-2" :message="form.errors.standard_charge" />
@@ -314,7 +314,7 @@ const goToChargeList = () => {
                 <div class="mb-4">
                     <InputLabel for="description" value="Description" />
                     <textarea id="description"
-                        class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                        class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                         v-model="form.description" rows="3" placeholder="Description"></textarea>
                     <InputError class="mt-2" :message="form.errors.description" />
                 </div>

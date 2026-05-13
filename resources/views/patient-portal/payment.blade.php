@@ -134,7 +134,7 @@
 
         <div class="actions">
             @if($paymentGatewayUrl !== '')
-                <a class="btn btn-primary" href="{{ $paymentGatewayUrl }}" target="_blank" rel="noopener noreferrer">Proceed to Payment Gateway</a>
+                <a class="btn btn-primary btn-colorful" href="{{ $paymentGatewayUrl }}" target="_blank" rel="noopener noreferrer">Proceed to Payment Gateway</a>
             @else
                 <span class="btn btn-muted">Payment gateway URL is not configured yet</span>
             @endif

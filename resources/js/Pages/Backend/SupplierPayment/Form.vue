@@ -4,6 +4,7 @@ import { Link, useForm } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import InputError from '@/Components/InputError.vue';
+import { displayResponse, displayWarning } from '@/responseMessage.js';
 
 const props = defineProps({
   payment: {
@@ -18,6 +19,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  payableAccounts: {
+    type: Array,
+    default: () => [],
+  },
   isEdit: {
     type: Boolean,
     default: false,
@@ -26,6 +31,7 @@ const props = defineProps({
 
 const form = useForm({
   supplier_id: props.payment?.supplier_id ?? props.prefill?.supplier_id ?? '',
+  payment_account_id: props.payment?.payment_account_id ?? props.prefill?.payment_account_id ?? '',
   total_amount: props.payment?.total_amount ?? props.prefill?.total_amount ?? '',
   paid_amount: props.payment?.paid_amount ?? props.prefill?.paid_amount ?? '',
   payment_date: props.payment?.payment_date ?? props.prefill?.payment_date ?? new Date().toISOString().slice(0, 10),
@@ -42,12 +48,21 @@ const dueAmount = computed(() => {
 });
 
 const submit = () => {
+  const callbacks = {
+    onSuccess: (response) => {
+      displayResponse(response);
+    },
+    onError: (errorObject) => {
+      displayWarning(errorObject);
+    },
+  };
+
   if (props.isEdit) {
-    form.post(route('backend.supplierpayment.update', props.payment.id));
+    form.post(route('backend.supplierpayment.update', props.payment.id), callbacks);
     return;
   }
 
-  form.post(route('backend.supplierpayment.store'));
+  form.post(route('backend.supplierpayment.store'), callbacks);
 };
 </script>
 
@@ -79,6 +94,17 @@ const submit = () => {
           <InputLabel for="payment_date" value="Payment Date" />
           <input id="payment_date" v-model="form.payment_date" type="date" class="w-full p-2 border border-gray-300 rounded" />
           <InputError class="mt-1" :message="form.errors.payment_date" />
+        </div>
+
+        <div>
+          <InputLabel for="payment_account" value="Payment Account" />
+          <select id="payment_account" v-model="form.payment_account_id" class="w-full p-2 border border-gray-300 rounded">
+            <option value="">Select Account (Default: Cash)</option>
+            <option v-for="account in payableAccounts" :key="account.id" :value="account.id">
+              {{ account.name }} ({{ account.code }})
+            </option>
+          </select>
+          <InputError class="mt-1" :message="form.errors.payment_account_id" />
         </div>
 
         <div>

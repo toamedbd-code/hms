@@ -160,7 +160,7 @@
     <div class="toolbar">
         <div class="toolbar-title">Print setup: Paper A4, Margins Default, Scale 100%</div>
         <div class="toolbar-actions">
-            <button type="button" class="btn btn-primary" onclick="window.print()">Print Birth/Death Certificate</button>
+            <button type="button" class="btn btn-primary btn-colorful" onclick="window.print()">Print Birth/Death Certificate</button>
             <button type="button" class="btn" onclick="window.close()">Close</button>
         </div>
     </div>

@@ -180,7 +180,7 @@ const formattedFieldName = (index) => {
                     <div class="col-span-1 md:col-span-2">
                         <InputLabel for="modelName" value="Model Name" />
                         <input id="modelName"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.modelName" @input="formattedModelName" type="text" placeholder="Model Name" />
                         <InputError class="mt-2" :message="form.errors.modelName" />
                     </div>
@@ -190,7 +190,7 @@ const formattedFieldName = (index) => {
                     <InputLabel for="Database Fields" value="Database Fields" />
                     <table class="w-full text-xs gray-700 text- dark:text-gray-200">
                         <thead>
-                            <tr class="text-white bg-slate-900">
+                            <tr class="text-gray-300 bg-slate-900">
                                 <th class="p-2 border border-slate-600">Sl/No</th>
                                 <th class="p-2 border border-slate-600">Field Name</th>
                                 <th class="p-2 border border-slate-600">Data Type</th>
@@ -210,14 +210,14 @@ const formattedFieldName = (index) => {
                                     <td class="p-1 border border-slate-600">
                                         <input type="text" placeholder="Database Field Name" v-model="field.field_name"
                                             @input="formattedFieldName(fieldIndex)"
-                                            class="block w-full px-2 py-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                            class="block w-full px-2 py-1 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                         <InputError class="mt-2"
                                             :message="form.errors['fields.' + fieldIndex + '.field_name']" />
                                     </td>
 
                                     <td class="p-1 border border-slate-600">
                                         <select v-model="field.data_type" @change="onDataTypeChange(fieldIndex)"
-                                            class="block w-full px-2 py-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                            class="block w-full px-2 py-1 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                             <option value="">-- Select A Data Type --</option>
                                             <template v-for="(dataType, dataIndex) in $page.props.dataTypes"
                                                 :key="dataIndex">
@@ -233,7 +233,7 @@ const formattedFieldName = (index) => {
                                                 :key="enumIndex">
                                                 <input type="text" placeholder="Add Enum Value"
                                                     v-model="enumValue.value"
-                                                    class="block w-full px-2 py-1 mt-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                                    class="block w-full px-2 py-1 mt-1 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                                 <button type="button" @click="removeEnumValue(fieldIndex, enumIndex)">
                                                     <FeatherIcon name="trash-2" size="1px" class="text-red-500" />
                                                     <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z" />
@@ -251,20 +251,20 @@ const formattedFieldName = (index) => {
                                     <td class="px-2 py-1 border border-slate-600 max-w-16">
                                         <input type="text" step="0.01" placeholder="Data Length"
                                             v-model="field.data_length" min="1"
-                                            class="block w-full px-2 py-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                            class="block w-full px-2 py-1 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                         <InputError class="mt-2" :message="form.errors['fields.' + fieldIndex + '.data_length']
                             " />
                                     </td>
                                     <td class="px-2 py-1 border border-slate-600">
                                         <input type="text" placeholder="Default Value" v-model="field.default_value"
-                                            class="block w-full px-2 py-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                            class="block w-full px-2 py-1 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                         <InputError class="mt-2"
                                             :message="form.errors['fields.' + fieldIndex + '.default_value']" />
                                     </td>
 
                                     <td class="px-2 py-1 border border-slate-600" style="text-align: -webkit-center;">
                                         <input type="checkbox" v-model="field.is_nullable"
-                                            class="block px-2 py-1 text-white border-2 rounded-md shadow-sm border-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                            class="block px-2 py-1 text-sm border-2 rounded-md shadow-sm border-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                         <InputError class="mt-2"
                                             :message="form.errors['fields.' + fieldIndex + '.is_nullable']" />
                                     </td>
@@ -272,14 +272,14 @@ const formattedFieldName = (index) => {
                                     <td class="px-2 py-1 border border-slate-600" style="text-align: -webkit-center;">
                                         <div class="flex items-center justify-center w-full space-x-2">
                                             <input type="checkbox" v-model="field.is_relation"
-                                                class="block px-2 py-1 text-white border-2 rounded-md shadow-sm border-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                                class="block px-2 py-1 text-sm border-2 rounded-md shadow-sm border-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                             <InputError class="mt-2"
                                                 :message="form.errors['fields.' + fieldIndex + '.is_relation']" />
 
                                             <div v-if="field.is_relation" class="w-full">
                                                 <select v-model="field.relation_table"
                                                     @change="onModelChange(fieldIndex)"
-                                                    class="block w-full px-2 py-1 mt-1 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                                    class="block w-full px-2 py-1 mt-1 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                                     <option value="">-- Select a Model --</option>
                                                     <template v-for="(modelType, modelIndex) in $page.props.modelsName"
                                                         :key="modelIndex">
@@ -324,7 +324,7 @@ const formattedFieldName = (index) => {
                         <template v-for="field, Index, in form.fields" :key="Index">
                             <div class="flex items-center w-full mb-2 space-x-2">
                                 <input v-if="field.field_name" :id="'from' + Index" type="checkbox" v-model="form.formField" :value="field.field_name"
-                                    class="block px-2 py-1 text-white border-2 rounded-md shadow-sm border-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                    class="block px-2 py-1 text-sm border-2 rounded-md shadow-sm border-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                 <label :for="'from' + Index"> {{ field.field_name }} </label>
                             </div>
                         </template>
@@ -339,7 +339,7 @@ const formattedFieldName = (index) => {
                         <template v-for="field, Index, in fillableAttributes" :key="Index">
                             <div class="flex items-center w-full mb-2 space-x-2">
                                 <input v-if="field" :id="'model' + Index" type="checkbox" v-model="form.relationField" :value="field"
-                                    class="block px-2 py-1 text-white border-2 rounded-md shadow-sm border-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                    class="block px-2 py-1 text-sm border-2 rounded-md shadow-sm border-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
                                 <label :for="'model' + Index"> {{ field }} </label>
                             </div>
                         </template>

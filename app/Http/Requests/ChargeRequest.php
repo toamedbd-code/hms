@@ -12,10 +12,10 @@ class ChargeRequest extends FormRequest
             case 'POST':
                 return [
                     'name' => 'required|string|max:255',
-                    'charge_type_id' => 'required',
+                    'charge_type_id' => 'nullable',
                     'charge_category_id' => 'nullable',
-                    'unit_type_id' => 'required',
-                    'tax_category_id' => 'required',
+                    'unit_type_id' => 'nullable',
+                    'tax_category_id' => 'nullable',
                     'tax' => 'nullable|numeric',
                     'standard_charge' => 'required|numeric',
                     'description' => 'nullable|string',
@@ -25,10 +25,10 @@ class ChargeRequest extends FormRequest
             case 'PUT':
                 return [
                     'name' => 'required|string|max:255',
-                    'charge_type_id' => 'required',
+                    'charge_type_id' => 'nullable',
                     'charge_category_id' => 'nullable',
-                    'unit_type_id' => 'required',
-                    'tax_category_id' => 'required',
+                    'unit_type_id' => 'nullable',
+                    'tax_category_id' => 'nullable',
                     'tax' => 'nullable|numeric',
                     'standard_charge' => 'required|numeric',
                     'description' => 'nullable|string',

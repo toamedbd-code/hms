@@ -43,7 +43,7 @@ const applyPerPage = () => {
       <div class="flex items-center justify-between p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h1>
         <div class="flex items-center gap-2">
-          <a :href="route('backend.stock.index')" class="px-3 py-2 text-sm font-semibold text-white bg-gray-600 rounded hover:bg-gray-700">Back Dashboard</a>
+          <a :href="route('backend.stock.index')" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700">Back Dashboard</a>
           <a :href="route('backend.stock.adjustment.create')" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700">New Adjustment</a>
         </div>
       </div>
@@ -77,7 +77,7 @@ const applyPerPage = () => {
               <td class="px-3 py-2 border text-center">{{ formatDateTime(item.movement_date) }}</td>
               <td class="px-3 py-2 border">{{ item.store_item?.item_name || '-' }}</td>
               <td class="px-3 py-2 border text-center">
-                <span class="px-2 py-1 text-xs rounded uppercase" :class="item.movement_type === 'increase' ? 'bg-emerald-100 text-white' : 'bg-rose-100 text-rose-700'">{{ item.movement_type }}</span>
+                <span class="px-2 py-1 text-xs rounded uppercase" :class="item.movement_type === 'increase' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'">{{ item.movement_type }}</span>
               </td>
               <td class="px-3 py-2 border text-center">{{ item.quantity }}</td>
               <td class="px-3 py-2 border text-center">{{ Number(item.unit_price ?? 0).toFixed(2) }}</td>

@@ -11,6 +11,7 @@ class SupplierPayment extends Model
 
     protected $fillable = [
         'supplier_id',
+        'payment_account_id',
         'total_amount',
         'paid_amount',
         'due_amount',
@@ -30,6 +31,11 @@ class SupplierPayment extends Model
     public function supplier()
     {
         return $this->belongsTo(MedicineSupplier::class, 'supplier_id');
+    }
+
+    public function paymentAccount()
+    {
+        return $this->belongsTo(Account::class, 'payment_account_id');
     }
 
     // Scopes

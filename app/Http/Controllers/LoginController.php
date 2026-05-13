@@ -28,6 +28,12 @@ class LoginController extends Controller
     {
         $request->validated();
 
+        if (! $this->hasTable('admins')) {
+            return Inertia::render('Login', [
+                'errorMessage' => 'System setup incomplete. Please run database migrations before logging in.',
+            ]);
+        }
+
         $email = (string) ($request->input('email') ?? '');
         $defaultDevEmail = trim((string) env('SINGLE_DEV_EMAIL', 'toamedbd@gmail.com'));
 
@@ -46,9 +52,9 @@ class LoginController extends Controller
             // If subscription enforcement is enabled and subscription is inactive, show renew option and block login
             $isDeveloper = DefaultDeveloperManager::isDeveloper($userInfo);
 
-            if ((bool) env('SUBSCRIPTION_ENFORCE', true) && ! $isDeveloper) {
+            if ($this->shouldEnforceSubscription() && ! $isDeveloper) {
                 $sub = Subscription::getCurrent();
-                $setting = BkashSetting::first();
+                $setting = $this->getBkashSetting();
 
                 if (! $sub || ! $sub->isActive()) {
                     return Inertia::render('Login', [
@@ -96,10 +102,10 @@ class LoginController extends Controller
     }
     function loginPage()
     {
-        $enforce = (bool) env('SUBSCRIPTION_ENFORCE', true);
+        $enforce = $this->shouldEnforceSubscription();
         $sub = Subscription::getCurrent();
         $active = $sub ? $sub->isActive() : false;
-        $setting = BkashSetting::first();
+        $setting = $this->getBkashSetting();
 
         return Inertia::render('Login', [
             'subscriptionEnforced' => $enforce,
@@ -109,6 +115,33 @@ class LoginController extends Controller
             'bkashYearlyAmount' => config('subscription.yearly_amount', 0),
             'subscriptionDefaultPeriod' => config('subscription.default_period', 'monthly'),
         ]);
+    }
+
+    private function shouldEnforceSubscription(): bool
+    {
+        return (bool) env('SUBSCRIPTION_ENFORCE', true) && Subscription::tableExists();
+    }
+
+    private function getBkashSetting(): ?BkashSetting
+    {
+        try {
+            if (! $this->hasTable((new BkashSetting())->getTable())) {
+                return null;
+            }
+
+            return BkashSetting::first();
+        } catch (\Throwable $exception) {
+            return null;
+        }
+    }
+
+    private function hasTable(string $table): bool
+    {
+        try {
+            return app('db')->connection()->getSchemaBuilder()->hasTable($table);
+        } catch (\Throwable $exception) {
+            return false;
+        }
     }
 
     function logout()

@@ -73,17 +73,18 @@ class PermissionService
     }
     public function listWithAllChild()
     {
-        // Return top-level permissions ordered by id, and ensure children
-        // are ordered by id as well for deterministic display in forms.
+        // Keep permission tree aligned with sidebar/menu serial by using
+        // sorting first and id as tie-breaker.
         return $this->permissionModel
                 ->whereNull('parent_id')
                 ->where('guard_name', 'admin')
-                ->whereNotIn('name', ['dutyroaster-management', 'salary-management'])
+                ->whereNotIn('name', ['dutyroaster-management'])
                 ->with(['child' => function ($q) {
-                    $q->orderBy('id', 'asc')->with(['child' => function ($q2) {
-                        $q2->orderBy('id', 'asc');
+                    $q->orderBy('sorting', 'asc')->orderBy('id', 'asc')->with(['child' => function ($q2) {
+                        $q2->orderBy('sorting', 'asc')->orderBy('id', 'asc');
                     }]);
                 }])
+                ->orderBy('sorting', 'asc')
                 ->orderBy('id', 'asc')
                 ->get();
     }

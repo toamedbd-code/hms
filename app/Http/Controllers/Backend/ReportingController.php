@@ -863,6 +863,22 @@ class ReportingController extends Controller
                     }
 
                     $name = trim((string) ($r->name ?? '')) ?: trim((string) data_get($r, 'pathologyTestParameter.name') ?? '');
+
+                    // If name is still empty, try to infer it from any stored result_html
+                    // This helps when older records stored a single HTML string like "Uric acid: 4.5"
+                    // and the structured `name` field is not populated.
+                    if ($name === '') {
+                        $rHtmlRaw = trim((string) ($r->result_html ?? ''));
+                        if ($rHtmlRaw !== '') {
+                            $posRaw = strpos($rHtmlRaw, ':');
+                            if ($posRaw !== false) {
+                                $maybeName = trim(strip_tags(substr($rHtmlRaw, 0, $posRaw)));
+                                if ($maybeName !== '') {
+                                    $name = $maybeName;
+                                }
+                            }
+                        }
+                    }
                     $unit = trim((string) ($r->unit ?? ''));
                     $val = trim((string) ($r->value ?? ''));
 
@@ -927,6 +943,8 @@ class ReportingController extends Controller
                     $plainLines[] = ($name === '' ? $displayValue : ($name . ': ' . $displayValue));
                     $printRows[] = [
                         'result_html' => $resultHtmlLine,
+                        'param' => $name,
+                        'value' => $displayValue,
                         'normal_range' => $rangeStr,
                     ];
                 }

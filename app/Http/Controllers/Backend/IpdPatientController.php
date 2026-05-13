@@ -92,7 +92,7 @@ class IpdPatientController extends Controller
         $n = strtolower(trim((string) $name));
 
         if ($n === '') {
-            return 'Medicine';
+            return 'IPD';
         }
 
         if (str_contains($n, 'path')) {
@@ -122,8 +122,16 @@ class IpdPatientController extends Controller
             return 'Doctor Visit';
         }
 
-        // Fallback to Medicine for unknown categories
-        return 'Medicine';
+        if (str_contains($n, 'ipd') || str_contains($n, 'admission') || str_contains($n, 'indoor')) {
+            return 'IPD';
+        }
+
+        if (str_contains($n, 'opd') || str_contains($n, 'outdoor')) {
+            return 'OPD';
+        }
+
+        // Fallback to IPD for unknown categories in IPD admission/discharge flows
+        return 'IPD';
     }
 
 
@@ -315,7 +323,6 @@ class IpdPatientController extends Controller
                 'bedGroups' => fn() => $this->bedGroupService->activeList(),
                 'beds' => fn() => $this->bedService->activeList()->load('bedGroup'),
                 'symptomTypes' => fn() => SymptomType::query()->where('status', 'Active')->orderBy('name')->get(),
-                'charges' => fn() => $this->chargeService->activeList(),
             ]
         );
     }
@@ -356,6 +363,7 @@ class IpdPatientController extends Controller
             // to insert a non-existent column into the `ipdpatients` table.
             $advance = (float) ($data['advance_amount'] ?? 0);
             unset($data['advance_amount']);
+            unset($data['hospital_charge_items']);
 
             $dataInfo = $this->ipdpatientService->create($data);
 
@@ -378,26 +386,31 @@ class IpdPatientController extends Controller
                     ]);
                 }
 
-                // If hospital_charge_ids were provided at admission, create a Billing with those charges
-                $hospitalChargeIds = $request->input('hospital_charge_ids', []);
-                if (is_array($hospitalChargeIds) && count($hospitalChargeIds) > 0) {
+                // If manual hospital charge items were provided at admission,
+                // create a Billing with those items.
+                $manualItems = $request->input('hospital_charge_items', []);
+                if (is_array($manualItems) && count($manualItems) > 0) {
                     $lines = [];
-                    foreach ($hospitalChargeIds as $cid) {
-                        $charge = Charge::query()->find($cid);
-                        if (!$charge) continue;
-                        $amount = (float) ($charge->standard_charge ?? 0);
-                        if ($amount <= 0) continue;
+                    foreach ($manualItems as $item) {
+                        $name = trim((string) ($item['item_name'] ?? ''));
+                        $unitPrice = (float) ($item['unit_price'] ?? 0);
+                        $quantity = max(1, (int) ($item['quantity'] ?? 1));
 
+                        if ($name === '' || $unitPrice <= 0) {
+                            continue;
+                        }
+
+                        $lineTotal = $unitPrice * $quantity;
                         $lines[] = [
-                            'item_id' => (int) $charge->id,
-                            'item_name' => (string) $charge->name,
-                            'category' => (string) ($charge->chargeCategory?->name ?? 'Service'),
-                            'unit_price' => $amount,
-                            'quantity' => 1,
-                            'total_amount' => $amount,
+                            'item_id' => null,
+                            'item_name' => $name,
+                            'category' => 'IPD',
+                            'unit_price' => $unitPrice,
+                            'quantity' => $quantity,
+                            'total_amount' => $lineTotal,
                             'discount' => 0,
                             'rugound' => 0,
-                            'net_amount' => $amount,
+                            'net_amount' => $lineTotal,
                             'status' => 'Active',
                         ];
                     }
@@ -435,7 +448,7 @@ class IpdPatientController extends Controller
                             'due_amount' => $total,
                             'delivery_date' => now(),
                             'delivery_time' => null,
-                            'remarks' => 'IPD Admission Selected Charges | IPD#' . $dataInfo->id,
+                            'remarks' => 'IPD Admission Items | IPD#' . $dataInfo->id,
                             'commission_total' => 0,
                             'physyst_amt' => 0,
                             'commission_slider' => 0,
@@ -583,7 +596,6 @@ class IpdPatientController extends Controller
                 'bedGroups' => fn() => $this->bedGroupService->activeList(),
                 'beds' => fn() => $this->bedService->activeList()->load('bedGroup'),
                 'symptomTypes' => fn() => SymptomType::query()->where('status', 'Active')->orderBy('name')->get(),
-                'charges' => fn() => $this->chargeService->activeList(),
             ]
         );
     }
@@ -628,7 +640,8 @@ class IpdPatientController extends Controller
                 $data['file'],
                 $data['created_at'],
                 $data['updated_at'],
-                $data['deleted_at']
+                $data['deleted_at'],
+                $data['hospital_charge_items']
             );
 
             $ipdpatient = $this->ipdpatientService->find($id);
@@ -654,26 +667,31 @@ class IpdPatientController extends Controller
             // Auto-sync running charges when bed changes (and also fills rate if previously 0).
             $this->ipdAutoChargeService->syncAdmissionCharges($dataInfo, auth('admin')->id());
 
-            // If hospital_charge_ids were provided during update, create or append a Billing with those charges
-            $hospitalChargeIds = $request->input('hospital_charge_ids', []);
-            if (is_array($hospitalChargeIds) && count($hospitalChargeIds) > 0) {
+            // If manual hospital charge items were provided during update,
+            // create or append Billing items.
+            $manualItems = $request->input('hospital_charge_items', []);
+            if (is_array($manualItems) && count($manualItems) > 0) {
                 $lines = [];
-                foreach ($hospitalChargeIds as $cid) {
-                    $charge = Charge::query()->find($cid);
-                    if (!$charge) continue;
-                    $amount = (float) ($charge->standard_charge ?? 0);
-                    if ($amount <= 0) continue;
+                foreach ($manualItems as $item) {
+                    $name = trim((string) ($item['item_name'] ?? ''));
+                    $unitPrice = (float) ($item['unit_price'] ?? 0);
+                    $quantity = max(1, (int) ($item['quantity'] ?? 1));
 
+                    if ($name === '' || $unitPrice <= 0) {
+                        continue;
+                    }
+
+                    $lineTotal = $unitPrice * $quantity;
                     $lines[] = [
-                        'item_id' => (int) $charge->id,
-                        'item_name' => (string) $charge->name,
-                        'category' => (string) ($charge->chargeCategory?->name ?? 'Service'),
-                        'unit_price' => $amount,
-                        'quantity' => 1,
-                        'total_amount' => $amount,
+                        'item_id' => null,
+                        'item_name' => $name,
+                        'category' => 'IPD',
+                        'unit_price' => $unitPrice,
+                        'quantity' => $quantity,
+                        'total_amount' => $lineTotal,
                         'discount' => 0,
                         'rugound' => 0,
-                        'net_amount' => $amount,
+                        'net_amount' => $lineTotal,
                         'status' => 'Active',
                     ];
                 }
@@ -717,7 +735,7 @@ class IpdPatientController extends Controller
                             'due_amount' => $total,
                             'delivery_date' => now(),
                             'delivery_time' => null,
-                            'remarks' => 'IPD Selected Charges | IPD#' . $dataInfo->id,
+                            'remarks' => 'IPD Items | IPD#' . $dataInfo->id,
                             'commission_total' => 0,
                             'physyst_amt' => 0,
                             'commission_slider' => 0,

@@ -393,6 +393,13 @@ class IpdDischargeBillingService
                     $category = $this->normalizeBillItemCategory((string) ($bi->category ?? ''));
                     $itemId = (int) ($bi->item_id ?? 0);
 
+                    // Legacy safeguard: old IPD manual/admission lines were saved as
+                    // category=Medicine with null/0 item_id. In IPD running/final bill,
+                    // these should be treated as IPD, not pharmacy medicine.
+                    if ($category === 'Medicine' && $itemId <= 0) {
+                        $category = 'IPD';
+                    }
+
                     if (in_array($category, ['Pathology', 'Radiology'], true) && $itemId > 0) {
                         $includedTestIds[$itemId] = true;
                     }
@@ -830,7 +837,7 @@ class IpdDischargeBillingService
     {
         $c = strtolower(trim($category));
         if ($c === '') {
-            return 'Medicine';
+            return 'IPD';
         }
 
         if (str_contains($c, 'path')) {
@@ -862,6 +869,14 @@ class IpdDischargeBillingService
             return 'Doctor Visit';
         }
 
-        return 'Medicine';
+        if (str_contains($c, 'ipd') || str_contains($c, 'admission') || str_contains($c, 'indoor')) {
+            return 'IPD';
+        }
+
+        if (str_contains($c, 'opd') || str_contains($c, 'outdoor')) {
+            return 'OPD';
+        }
+
+        return 'IPD';
     }
 }

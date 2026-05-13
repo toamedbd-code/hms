@@ -84,7 +84,7 @@ onMounted(() => {
       <h1 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h1>
       <div class="flex items-center gap-2">
         <button type="button" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700" @click="downloadPdf">Download PDF</button>
-        <a :href="route('backend.stock.grns')" class="px-3 py-2 text-sm font-semibold text-white bg-gray-600 rounded hover:bg-gray-700">Back</a>
+        <a :href="route('backend.stock.grns')" class="px-3 py-2 text-sm font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700">Back</a>
       </div>
     </div>
 

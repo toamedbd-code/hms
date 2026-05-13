@@ -486,7 +486,8 @@ class AppoinmentController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:admins',
+            // make email optional
+            'email' => 'nullable|string|email|max:255|unique:admins,email',
             'phone' => 'nullable|string|max:20',
             'gender' => 'required|in:Male,Female,Other',
             'doctor_charge' => 'required|numeric|min:0',
@@ -506,8 +507,9 @@ class AppoinmentController extends Controller
 
         $admin = Admin::create([
             'first_name' => $validated['name'],
-            'email' => $validated['email'],
-            'phone' => $validated['phone'],
+            // DB email column is non-nullable; store empty string when not provided
+            'email' => $validated['email'] ?? '',
+            'phone' => $validated['phone'] ?? null,
             'password' => '12345678',
             'role_id' => $role->id,
             'doctor_charge' => $validated['doctor_charge'],

@@ -62,10 +62,11 @@ class DatabaseSeeder extends Seeder
             MedicineSeeder::class,
             WebSettingSeeder::class,
             AttendanceSeeder::class,
-                SalarySheetMenuSeeder::class,
+            SalarySheetMenuSeeder::class,
             ChartOfAccountsSeeder::class,
             CurrencySeeder::class,
             EnsureDefaultDeveloperSeeder::class,
+            SidebarPermissionStabilitySeeder::class,
 
         ]);
     }

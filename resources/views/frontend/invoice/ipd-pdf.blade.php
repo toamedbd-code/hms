@@ -319,9 +319,9 @@
                 <td class="colon">:</td>
                 <td class="value">{{ $ipd_id ?? 'N/A' }}</td>
 
-                <td class="label">Printed At</td>
-                <td class="colon">:</td>
-                <td class="value">{{ $printed_at ?? '' }}</td>
+                <td class="label"></td>
+                <td class="colon"></td>
+                <td class="value"></td>
             </tr>
             <tr>
                 <td class="label">Patient Name</td>
@@ -340,15 +340,6 @@
                 <td class="label">Phone</td>
                 <td class="colon">:</td>
                 <td class="value">{{ $patientPhone ?: 'N/A' }}</td>
-            </tr>
-            <tr>
-                <td class="label">Credit Limit</td>
-                <td class="colon">:</td>
-                <td class="value">Tk {{ number_format((float) ($ipdpatient?->credit_limit ?? 0), 2) }}</td>
-
-                <td class="label"></td>
-                <td class="colon"></td>
-                <td class="value"></td>
             </tr>
             <tr>
                 <td class="label">Consultant</td>

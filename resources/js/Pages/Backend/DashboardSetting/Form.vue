@@ -60,7 +60,7 @@ const submit = () => {
             <select
               id="filter_type"
               v-model="form.filter_type"
-              class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+              class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
             >
               <option value="daily">Daily</option>
               <option value="monthly">Monthly</option>
@@ -79,7 +79,7 @@ const submit = () => {
               id="filter_from"
               v-model="form.filter_from"
               type="date"
-              class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+              class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
             />
             <InputError class="mt-2" :message="form.errors.filter_from" />
           </div>
@@ -90,7 +90,7 @@ const submit = () => {
               id="filter_to"
               v-model="form.filter_to"
               type="date"
-              class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+              class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
             />
             <InputError class="mt-2" :message="form.errors.filter_to" />
           </div>

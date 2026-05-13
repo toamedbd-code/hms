@@ -4,6 +4,8 @@ import { Link, useForm } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import InputError from '@/Components/InputError.vue';
+import Multiselect from 'vue-multiselect';
+import { displayWarning, successAlert } from '@/responseMessage.js';
 
 const props = defineProps({
   purchase: {
@@ -81,6 +83,28 @@ const removeItem = (index) => {
   form.items.splice(index, 1);
 };
 
+const supplierOptions = computed(() => {
+  return props.suppliers.map((supplier) => ({
+    id: supplier.id,
+    name: supplier.name,
+  }));
+});
+
+const categoryOptions = computed(() => {
+  return props.categories.map((category) => ({
+    id: category.id,
+    name: category.medicine_category_name ?? category.name,
+  }));
+});
+
+const selectedSupplier = computed({
+  get: () => supplierOptions.value.find((supplier) => String(supplier.id) === String(form.supplier_id)) ?? null,
+  set: (supplier) => {
+    form.supplier_id = supplier?.id ?? '';
+    onSupplierChange();
+  },
+});
+
 const medicineOptionsBySupplierAndCategory = computed(() => {
   const grouped = {};
 
@@ -124,8 +148,26 @@ const getMedicineOptions = (categoryId) => {
   return medicineOptionsBySupplierAndCategory.value.all ?? [];
 };
 
-const getSelectedMedicine = (item) => {
+const getSelectedCategory = (item) => {
+  return categoryOptions.value.find((category) => String(category.id) === String(item.medicine_category_id)) ?? null;
+};
+
+const setSelectedCategory = (index, category) => {
+  form.items[index].medicine_category_id = category?.id ?? '';
+  onCategoryChange(index);
+};
+
+const getSelectedMedicineOption = (item) => {
   return getMedicineOptions(item.medicine_category_id).find((medicine) => medicine.name === item.medicine_name) ?? null;
+};
+
+const setSelectedMedicine = (index, medicine) => {
+  form.items[index].medicine_name = medicine?.name ?? '';
+  onMedicineChange(index);
+};
+
+const getSelectedMedicine = (item) => {
+  return getSelectedMedicineOption(item);
 };
 
 const onCategoryChange = (index) => {
@@ -168,12 +210,22 @@ const dueAmount = computed(() => {
 });
 
 const submit = () => {
+  const successFallbackMessage = props.isEdit ? 'Purchase updated successfully' : 'Purchase created successfully';
+  const submitOptions = {
+    onSuccess: (response) => {
+      successAlert('Success', response?.props?.flash?.successMessage || successFallbackMessage);
+    },
+    onError: (errorObject) => {
+      displayWarning(errorObject);
+    },
+  };
+
   if (props.isEdit) {
-    form.post(route('backend.medicinepurchase.update', props.purchase.id));
+    form.post(route('backend.medicinepurchase.update', props.purchase.id), submitOptions);
     return;
   }
 
-  form.post(route('backend.medicinepurchase.store'));
+  form.post(route('backend.medicinepurchase.store'), submitOptions);
 };
 </script>
 
@@ -191,12 +243,20 @@ const submit = () => {
         <div class="grid grid-cols-1 gap-4 md:grid-cols-5">
           <div>
             <InputLabel for="supplier_id" value="Supplier" />
-            <select id="supplier_id" v-model="form.supplier_id" class="w-full p-2 border border-gray-300 rounded" @change="onSupplierChange">
-              <option value="">Select Supplier</option>
-              <option v-for="supplier in suppliers" :key="supplier.id" :value="supplier.id">
-                {{ supplier.name }}
-              </option>
-            </select>
+            <Multiselect
+              id="supplier_id"
+              v-model="selectedSupplier"
+              class="purchase-multiselect"
+              :options="supplierOptions"
+              label="name"
+              track-by="id"
+              placeholder="Select Supplier"
+              :searchable="true"
+              :allow-empty="true"
+              :show-labels="false"
+              :max-height="220"
+              open-direction="bottom"
+            />
             <InputError class="mt-1" :message="form.errors.supplier_id" />
           </div>
 
@@ -229,7 +289,8 @@ const submit = () => {
           </div>
         </div>
 
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto purchase-items-scroll">
+          <div class="purchase-items-scroll__inner">
           <table class="w-full text-sm border border-gray-200">
             <thead class="bg-gray-50">
               <tr>
@@ -249,22 +310,48 @@ const submit = () => {
             <tbody>
               <tr v-for="(item, index) in form.items" :key="index">
                 <td class="p-2 border">
-                  <select v-model="item.medicine_category_id" class="w-full p-2 border border-gray-300 rounded" @change="onCategoryChange(index)">
-                    <option value="">Select Category</option>
-                    <option v-for="category in categories" :key="category.id" :value="category.id">
-                      {{ category.medicine_category_name ?? category.name }}
-                    </option>
-                  </select>
+                  <Multiselect
+                    class="purchase-multiselect purchase-multiselect--wide"
+                    :model-value="getSelectedCategory(item)"
+                    :options="categoryOptions"
+                    label="name"
+                    track-by="id"
+                    placeholder="Select Category"
+                    :searchable="true"
+                    :allow-empty="true"
+                    :show-labels="false"
+                    :max-height="220"
+                    open-direction="bottom"
+                    @update:model-value="setSelectedCategory(index, $event)"
+                  />
                   <InputError class="mt-1" :message="form.errors[`items.${index}.medicine_category_id`]" />
                 </td>
 
                 <td class="p-2 border">
-                  <select v-model="item.medicine_name" class="w-full p-2 border border-gray-300 rounded" @change="onMedicineChange(index)">
-                    <option value="">Select Medicine</option>
-                    <option v-for="medicine in getMedicineOptions(item.medicine_category_id)" :key="`${item.medicine_category_id}-${medicine.name}`" :value="medicine.name">
-                      {{ medicine.name }}
-                    </option>
-                  </select>
+                  <Multiselect
+                    class="purchase-multiselect purchase-multiselect--wide"
+                    :model-value="getSelectedMedicineOption(item)"
+                    :options="getMedicineOptions(item.medicine_category_id)"
+                    label="name"
+                    track-by="name"
+                    placeholder="Select Medicine"
+                    :searchable="true"
+                    :allow-empty="true"
+                    :show-labels="false"
+                    :max-height="220"
+                    open-direction="bottom"
+                    @update:model-value="setSelectedMedicine(index, $event)"
+                  >
+                    <template #option="{ option }">
+                      <div class="flex items-center justify-between gap-2">
+                        <span>{{ option.name }}</span>
+                        <span class="text-xs text-gray-500">Stock: {{ Number(option.stock ?? 0).toFixed(2) }}</span>
+                      </div>
+                    </template>
+                    <template #singleLabel="{ option }">
+                      <span>{{ option.name }}</span>
+                    </template>
+                  </Multiselect>
                   <InputError class="mt-1" :message="form.errors[`items.${index}.medicine_name`]" />
                 </td>
 
@@ -316,6 +403,7 @@ const submit = () => {
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
 
         <button type="button" class="px-3 py-2 text-sm text-white bg-indigo-600 rounded hover:bg-indigo-700" @click="addItem">
@@ -335,3 +423,53 @@ const submit = () => {
     </div>
   </BackendLayout>
 </template>
+
+<style src="vue-multiselect/dist/vue-multiselect.css"></style>
+
+<style>
+.purchase-multiselect {
+  min-width: 180px;
+}
+
+.purchase-multiselect--wide {
+  min-width: 260px;
+}
+
+.purchase-multiselect .multiselect__tags {
+  min-height: 42px;
+  border-color: rgb(209 213 219);
+  border-radius: 0.25rem;
+}
+
+.purchase-multiselect .multiselect__content-wrapper {
+  max-height: 220px !important;
+  overflow-y: auto;
+}
+
+.purchase-items-scroll__inner {
+  min-width: max-content;
+  padding-bottom: 14rem;
+}
+
+.purchase-items-scroll td {
+  position: relative;
+}
+
+.purchase-multiselect.multiselect--active {
+  z-index: 40;
+}
+
+.purchase-multiselect.multiselect--active .multiselect__content-wrapper {
+  z-index: 50;
+}
+
+.purchase-multiselect--wide .multiselect__content-wrapper {
+  min-width: 260px;
+}
+
+.purchase-multiselect .multiselect__input,
+.purchase-multiselect .multiselect__single,
+.purchase-multiselect .multiselect__placeholder {
+  font-size: 0.875rem;
+}
+</style>

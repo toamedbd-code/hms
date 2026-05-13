@@ -18,12 +18,22 @@ class SingleDeveloperSeeder extends Seeder
             SettingsMenuSyncSeeder::class,
             QuickAccessMenuPermissionSyncSeeder::class,
             StoreManagementMenuSeeder::class,
+            SalarySheetMenuSeeder::class,
+            MenuDeduplicateSeeder::class,
             ChartOfAccountsSeeder::class,
             CurrencySeeder::class,
         ]);
 
         // Create permissions based on menus
-        $this->call([PermissionSeeder::class, PermissionFixSeeder::class, MenuPermissionCoverageSeeder::class, ReportManagementPermissionSeeder::class, DutyRosterPermissionSeeder::class, SalarySheetPermissionSeeder::class]);
+        $this->call([
+            PermissionSeeder::class,
+            PermissionFixSeeder::class,
+            MenuPermissionCoverageSeeder::class,
+            ReportManagementPermissionSeeder::class,
+            DutyRosterPermissionSeeder::class,
+            SalarySheetPermissionSeeder::class,
+            SidebarPermissionStabilitySeeder::class,
+        ]);
 
         // Ensure permission cache is cleared
         app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();

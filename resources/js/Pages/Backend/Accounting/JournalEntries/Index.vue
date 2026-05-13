@@ -8,7 +8,7 @@ import { Head, Link } from '@inertiajs/vue3';
   <div class="p-6">
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-semibold">Journal Entries</h1>
-      <Link :href="route('journal-entry.create')" class="inline-block rounded bg-blue-600 px-4 py-2 text-white">Create Entry</Link>
+      <Link :href="route('backend.journal-entry.create')" class="btn-colorful">Create Entry</Link>
     </div>
 
     <div class="mt-6 rounded border bg-white p-4 shadow-sm">

@@ -99,16 +99,16 @@ const goToRefferalList = () => {
                     <!-- LEFT SIDE (md:col-span-3) -->
                     <div class="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-2">
                         <div class="mb-2">
-                            <InputLabel for="name" value="Referrer Name *" class="text-xs" />
+                            <InputLabel for="name" value="Referrer Name" class="text-xs" />
                             <input id="name" class="form-input text-xs p-1 h-8" v-model="form.name" type="text"
-                                placeholder="Referrer Name" required />
+                                placeholder="Referrer Name" />
                             <InputError class="mt-1 text-xs" :message="form.errors.name" />
                         </div>
                         
                         <div class="mb-2">
-                            <InputLabel for="phone" value="Referrer Phone *" class="text-xs" />
+                            <InputLabel for="phone" value="Referrer Phone" class="text-xs" />
                             <input id="phone" class="form-input text-xs p-1 h-8" v-model="form.phone" type="text"
-                                placeholder="Referrer phone" required />
+                                placeholder="Referrer phone" />
                             <InputError class="mt-1 text-xs" :message="form.errors.phone" />
                         </div>
 
@@ -127,9 +127,8 @@ const goToRefferalList = () => {
                         </div>
 
                         <div class="mb-2">
-                            <InputLabel for="category_id" value="Category *" class="text-xs" />
-                            <select id="category_id" class="form-input text-xs h-9" v-model="form.category_id"
-                                required>
+                            <InputLabel for="category_id" value="Category" class="text-xs" />
+                            <select id="category_id" class="form-input text-xs h-9" v-model="form.category_id">
                                 <option value="">Select Category</option>
                                 <option v-for="data in categories" :key="data.id" :value="data.id">{{ data.name }}
                                 </option>
@@ -148,9 +147,9 @@ const goToRefferalList = () => {
                     <!-- RIGHT SIDE (md:col-span-1) -->
                     <div class="md:col-span-1 space-y-1">
                         <div>
-                            <InputLabel for="standard_commission" value="Std Commission (%) *" class="text-xs" />
+                            <InputLabel for="standard_commission" value="Std Commission (%)" class="text-xs" />
                             <input id="standard_commission" class="form-input text-xs p-1 h-8"
-                                v-model="form.standard_commission" type="number" step="0.01" required />
+                                v-model="form.standard_commission" type="number" step="0.01" min="0" />
                             <InputError class="mt-1 text-xs" :message="form.errors.standard_commission" />
                         </div>
 
@@ -163,49 +162,49 @@ const goToRefferalList = () => {
                         <div>
                             <InputLabel for="opd_commission" value="OPD (%)" class="text-xs" />
                             <input id="opd_commission" class="form-input text-xs p-1 h-8" v-model="form.opd_commission"
-                                type="number" step="0.01" />
+                                type="number" step="0.01" min="0" />
                             <InputError class="mt-1 text-xs" :message="form.errors.opd_commission" />
                         </div>
 
                         <div>
                             <InputLabel for="ipd_commission" value="IPD (%)" class="text-xs" />
                             <input id="ipd_commission" class="form-input text-xs p-1 h-8" v-model="form.ipd_commission"
-                                type="number" step="0.01" />
+                                type="number" step="0.01" min="0" />
                             <InputError class="mt-1 text-xs" :message="form.errors.ipd_commission" />
                         </div>
 
                         <div>
                             <InputLabel for="pharmacy_commission" value="Pharmacy (%)" class="text-xs" />
                             <input id="pharmacy_commission" class="form-input text-xs p-1 h-8"
-                                v-model="form.pharmacy_commission" type="number" step="0.01" />
+                                v-model="form.pharmacy_commission" type="number" step="0.01" min="0" />
                             <InputError class="mt-1 text-xs" :message="form.errors.pharmacy_commission" />
                         </div>
 
                         <div>
                             <InputLabel for="pathology_commission" value="Pathology (%)" class="text-xs" />
                             <input id="pathology_commission" class="form-input text-xs p-1 h-8"
-                                v-model="form.pathology_commission" type="number" step="0.01" />
+                                v-model="form.pathology_commission" type="number" step="0.01" min="0" />
                             <InputError class="mt-1 text-xs" :message="form.errors.pathology_commission" />
                         </div>
 
                         <div>
                             <InputLabel for="radiology_commission" value="Radiology (%)" class="text-xs" />
                             <input id="radiology_commission" class="form-input text-xs p-1 h-8"
-                                v-model="form.radiology_commission" type="number" step="0.01" />
+                                v-model="form.radiology_commission" type="number" step="0.01" min="0" />
                             <InputError class="mt-1 text-xs" :message="form.errors.radiology_commission" />
                         </div>
 
                         <div>
                             <InputLabel for="blood_bank_commission" value="Blood Bank (%)" class="text-xs" />
                             <input id="blood_bank_commission" class="form-input text-xs p-1 h-8"
-                                v-model="form.blood_bank_commission" type="number" step="0.01" />
+                                v-model="form.blood_bank_commission" type="number" step="0.01" min="0" />
                             <InputError class="mt-1 text-xs" :message="form.errors.blood_bank_commission" />
                         </div>
 
                         <div>
                             <InputLabel for="ambulance_commission" value="Ambulance (%)" class="text-xs" />
                             <input id="ambulance_commission" class="form-input text-xs p-1 h-8"
-                                v-model="form.ambulance_commission" type="number" step="0.01" />
+                                v-model="form.ambulance_commission" type="number" step="0.01" min="0" />
                             <InputError class="mt-1 text-xs" :message="form.errors.ambulance_commission" />
                         </div>
                     </div>

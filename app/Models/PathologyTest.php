@@ -26,6 +26,8 @@ class PathologyTest extends Model
         'standard_charge',
         'amount',
         'test_parameters',
+        'commissionable',
+        'commission_rate',
         'status'
     ];
 
@@ -55,4 +57,9 @@ class PathologyTest extends Model
     {
         return $query->where('status', 'Inactive');
     }
+
+    protected $casts = [
+        'commissionable' => 'boolean',
+        'commission_rate' => 'decimal:2',
+    ];
 }

@@ -17,6 +17,8 @@ class RadiologyTest extends Model
         'report_date',
         'tax_percentage',
         'amount',
+        'commissionable',
+        'commission_rate',
         'status'
     ];
 
@@ -25,6 +27,15 @@ class RadiologyTest extends Model
         'tax_percentage' => 'decimal:2',
         'amount' => 'decimal:2',
         'report_days' => 'integer'
+    ];
+
+    protected $casts = [
+        'report_date' => 'date',
+        'tax_percentage' => 'decimal:2',
+        'amount' => 'decimal:2',
+        'report_days' => 'integer',
+        'commissionable' => 'boolean',
+        'commission_rate' => 'decimal:2',
     ];
 
     protected $dates = [

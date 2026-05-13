@@ -107,7 +107,7 @@ const goToTestCategoryList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="name" value="Name" />
                         <input id="name"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" type="text" placeholder="Category Name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -115,7 +115,7 @@ const goToTestCategoryList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="parent_id" value="Parent Category (optional)" />
                         <select id="parent_id" v-model="form.parent_id"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                             <option value="">-- No Parent (Top Level) --</option>
                             <option v-for="option in treeOptions" :key="option.id" :value="option.id">
                                 {{ option.name }}

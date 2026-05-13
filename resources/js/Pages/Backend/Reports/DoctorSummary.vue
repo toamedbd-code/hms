@@ -1,207 +1,489 @@
-"*** Begin Replacement"
 <script setup>
-import { computed, ref, watch } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { ref, computed } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import Pagination from '@/Components/Pagination.vue';
+import { router } from '@inertiajs/vue3';
 
 const props = defineProps({
   datas: Object,
-  filters: {
-    type: Object,
-    default: () => ({}),
-  },
-  mode: {
-    type: String,
-    default: 'doctor',
-  },
-  term: {
-    type: String,
-    default: '',
-  },
-  meta: {
-    type: Object,
-    default: () => ({}),
-  },
+  mode: { type: String, default: 'doctor' },
+  filters: Object,
+  term: String,
+  meta: Object,
 });
+
+const filtersLocal = ref({
+  q: props.filters?.q ?? props.term ?? '',
+  from: props.filters?.from ?? '',
+  to: props.filters?.to ?? '',
+  mode: props.mode ?? 'doctor',
+  subcat: props.filters?.subcat ?? null,
+  numOfData: props.filters?.numOfData ?? 10,
+});
+
+const applyFilter = () => {
+  const modeMeta = selectedCategoryMeta.value;
+  filtersLocal.value.mode = modeMeta.mode;
+  filtersLocal.value.subcat = modeMeta.subcat;
+
+  const params = { ...filtersLocal.value };
+  if (params.mode !== 'test' || !params.subcat) {
+    delete params.subcat;
+  }
+  router.get(route('backend.report-summary.index'), params, { preserveState: true });
+};
 
 const rows = computed(() => props.datas?.data ?? []);
 
-const filters = ref({
-  q: props.filters?.q ?? props.term ?? '',
-  mode: props.filters?.mode ?? props.mode ?? 'doctor',
-  from: props.filters?.from ?? '',
-  to: props.filters?.to ?? '',
-  numOfData: props.filters?.numOfData ?? props.datas?.per_page ?? 10,
+const indexOffset = computed(() => Math.max(Number(props.datas?.from ?? 1) - 1, 0));
+
+const pageTotals = computed(() => {
+  const mode = activeMode.value;
+  let tests = 0;
+  let amount = 0;
+
+  (rows.value || []).forEach(r => {
+    if (mode === 'test') {
+      tests += Number(r.quantity ?? 0);
+      amount += Number(r.price ?? 0);
+    } else if (mode === 'doctor') {
+      tests += Number(r.pathology_count ?? 0);
+      amount += Number(r.total_amount ?? 0);
+    } else if (mode === 'technologist' || mode === 'collector' || mode === 'pathologist') {
+      tests += Number(r.count ?? 1);
+      amount += Number(r.price ?? 0);
+    } else if (mode === 'referrer') {
+      tests += Number(r.count ?? 0);
+    } else {
+      tests += Number(r.count ?? 0);
+      amount += Number(r.price ?? 0);
+    }
+  });
+
+  return { tests, amount };
 });
 
-// Keep local filters in sync if server props update (Inertia preserveState can
-// keep component state; syncing ensures UI shows the returned mode/values).
-watch(
-  () => props.filters,
-  (nf) => {
-    filters.value.q = nf?.q ?? props.term ?? '';
-    filters.value.mode = nf?.mode ?? props.mode ?? 'doctor';
-    filters.value.from = nf?.from ?? '';
-    filters.value.to = nf?.to ?? '';
-    filters.value.numOfData = nf?.numOfData ?? props.datas?.per_page ?? 10;
-  },
-  { immediate: true }
+const overallTotals = computed(() => {
+  const m = props.meta ?? {};
+  const tests = m.total_items ?? m.total_reports ?? m.total_collected ?? m.distinct_cases ?? props.datas?.total ?? 0;
+  const amount = m.grand_total ?? null;
+  return { tests, amount };
+});
+
+const formatCurrency = (v) => {
+  const n = Number(v ?? 0);
+  return new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+};
+
+const formatDate = (value) => {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString();
+};
+
+const csvSafe = (value) => {
+  const text = String(value ?? '');
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+};
+
+// Category dropdown state
+const categories = [
+  { label: 'Doctor', value: 'doctor' },
+  { label: 'Test Name', value: 'test' },
+  { label: 'Pathologist', value: 'pathologist' },
+  { label: 'Technologist', value: 'technologist' },
+  { label: 'Collector', value: 'collector' },
+  { label: 'Referrer', value: 'referrer' },
+  { label: 'Radiology Tests', value: 'test:Radiology', subcat: 'Radiology' },
+  { label: 'Pathology Tests', value: 'test:Pathology', subcat: 'Pathology' },
+];
+
+const selectedCategory = ref(
+  filtersLocal.value.mode === 'test' && filtersLocal.value.subcat
+    ? `test:${filtersLocal.value.subcat}`
+    : (filtersLocal.value.mode ?? 'doctor')
 );
 
-const applyFilter = () => {
-  router.get(route('backend.report-summary.index'), filters.value, { preserveState: true });
+const selectedCategoryMeta = computed(() => {
+  if (typeof selectedCategory.value !== 'string') {
+    return { mode: filtersLocal.value.mode, subcat: null };
+  }
+
+  if (selectedCategory.value.includes(':')) {
+    const [mode, subcat] = selectedCategory.value.split(':');
+    return { mode, subcat };
+  }
+
+  return { mode: selectedCategory.value, subcat: null };
+});
+
+const activeMode = computed(() => {
+  return selectedCategoryMeta.value.mode ?? filtersLocal.value.mode ?? props.mode ?? 'doctor';
+});
+
+const titleColumnLabel = computed(() => {
+  const mode = activeMode.value;
+  if (mode === 'doctor') return 'Doctor Name';
+  if (mode === 'pathologist') return 'Pathologist Name';
+  if (mode === 'technologist') return 'Technologist Name';
+  if (mode === 'collector') return 'Collector Name';
+  if (mode === 'referrer') return 'Referrer Name';
+  return 'Test Name / Item';
+});
+
+const rowTitle = (r) => {
+  const mode = activeMode.value;
+  if (mode === 'doctor') return r.doctor_name ?? r.name ?? '—';
+  if (mode === 'test') {
+    if (Array.isArray(r.matched_tests) && r.matched_tests.length) return r.matched_tests.join(', ');
+    return r.item_name ?? r.item ?? r.name ?? '—';
+  }
+  if (mode === 'pathologist') return r.reporter_name ?? r.pathologist_name ?? r.name ?? '—';
+  if (mode === 'technologist') return r.reporter_name ?? r.technologist_name ?? r.name ?? '—';
+  if (mode === 'collector') return r.collector_name ?? r.name ?? '—';
+  if (mode === 'referrer') return r.referrer_name ?? r.name ?? '—';
+  return r.name ?? r.title ?? '—';
 };
+
+const rowBillNumber = (r) => {
+  return r.bill_number ?? r.case_number ?? r.billing_id ?? r.id ?? '-';
+};
+
+const rowBillingDate = (r) => {
+  return r.billing_date ?? r.reported_at ?? r.sample_collected_at ?? r.created_at ?? '';
+};
+
+const rowPatientName = (r) => {
+  return r.patient_name ?? r.patient?.name ?? '-';
+};
+
+const rowQuantity = (r) => {
+  const mode = activeMode.value;
+  if (mode === 'test') return Number(r.quantity ?? 0);
+  if (mode === 'doctor') return Number(r.pathology_count ?? r.quantity ?? 0);
+  if (mode === 'technologist' || mode === 'collector' || mode === 'pathologist') return Number(r.count ?? r.quantity ?? 1);
+  if (mode === 'referrer') return Number(r.count ?? r.quantity ?? 0);
+  return Number(r.quantity ?? r.count ?? 0);
+};
+
+const rowAmount = (r) => {
+  const mode = activeMode.value;
+  if (mode === 'doctor') return Number(r.total_amount ?? r.price ?? 0);
+  return Number(r.price ?? r.total_amount ?? 0);
+};
+
+const totalQuantity = computed(() => Number(overallTotals.value.tests ?? pageTotals.value.tests ?? 0));
+
+const csvFileName = computed(() => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `report-summary-${filtersLocal.value.mode || 'all'}-${y}${m}${d}.csv`;
+});
+
+const exportCsv = () => {
+  const header = ['S/N', titleColumnLabel.value, 'Bill Number', 'Billing Date', 'Patient Name', 'Quantity', 'Amount'];
+
+  const lines = [header.map(csvSafe).join(',')];
+  rows.value.forEach((r, idx) => {
+    const row = [
+      indexOffset.value + idx + 1,
+      rowTitle(r),
+      rowBillNumber(r),
+      formatDate(rowBillingDate(r)),
+      rowPatientName(r),
+      rowQuantity(r),
+      Number(rowAmount(r)).toFixed(2),
+    ];
+
+    lines.push(row.map(csvSafe).join(','));
+  });
+
+  lines.push([
+    csvSafe('Grand Total'),
+    '',
+    '',
+    '',
+    '',
+    csvSafe(totalQuantity.value),
+    csvSafe(Number(overallTotals.value.amount !== null ? overallTotals.value.amount : pageTotals.value.amount).toFixed(2)),
+  ].join(','));
+
+  lines.push([
+    csvSafe('Total Quantity'),
+    '',
+    '',
+    '',
+    '',
+    csvSafe(totalQuantity.value),
+    '',
+  ].join(','));
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.setAttribute('download', csvFileName.value);
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+const printReport = () => {
+  window.print();
+};
+
 </script>
 
 <template>
   <BackendLayout>
-    <div class="w-full p-4 mt-3 bg-white rounded shadow-md">
-      <div class="flex items-center justify-between p-4 bg-gray-100 rounded">
-        <h1 class="text-lg font-semibold text-gray-800">Report Summary</h1>
-      </div>
+    <div class="w-full mt-3">
+      <section class="print-report soft-grid overflow-hidden rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-50 via-white to-emerald-50 p-4 shadow-xl shadow-slate-200/60 dark:border-slate-700 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800 dark:shadow-none md:p-6">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div class="space-y-2">
+            <h2 class="text-2xl font-bold leading-tight text-slate-800 dark:text-slate-100 md:text-3xl">
+              Report Summary
+            </h2>
+          </div>
 
-      <div class="p-4 mt-4 bg-white border rounded">
-        <div class="grid grid-cols-1 md:grid-cols-6 gap-2">
-          <select v-model="filters.mode" class="p-2 border rounded">
-            <option value="doctor">Report Summary</option>
-            <option value="test">Test Name (e.g. CBC)</option>
-            <option value="referrer">Referrer Doctor</option>
-            <option value="technologist">Technologist (reported)</option>
-            <option value="pathologist">Pathologist (reported)</option>
-            <option value="collector">Sample Collector</option>
-          </select>
+          <div class="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-stretch">
+            <div class="no-print flex flex-wrap items-center gap-2 lg:pr-1">
+              <button
+                type="button"
+                @click="exportCsv"
+                class="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+              >
+                Export CSV
+              </button>
 
-          <input v-model="filters.q" @keyup.enter="applyFilter"
-            :placeholder="filters.mode === 'test' ? 'Test name (e.g. CBC)' : 'Search term (name / id)'
-            " class="p-2 border rounded" />
-
-          <input v-model="filters.from" type="date" class="p-2 border rounded" />
-          <input v-model="filters.to" type="date" class="p-2 border rounded" />
-
-          <select v-model="filters.numOfData" @change="applyFilter" class="p-2 border rounded">
-            <option value="10">10</option>
-            <option value="20">20</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-          </select>
-
-          <button @click="applyFilter" class="px-3 py-2 bg-indigo-600 text-white rounded">Search</button>
+              <button
+                type="button"
+                @click="printReport"
+                class="inline-flex items-center rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-sky-700 transition hover:bg-sky-100 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300"
+              >
+                Print View
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div class="mt-3 p-3 bg-white border rounded">
-        <div class="flex items-center gap-4 text-sm text-gray-700">
-          <div v-if="props.meta?.total_cases">Total Cases: <strong class="ml-1">{{ props.meta.total_cases }}</strong></div>
-          <div v-if="props.meta?.total_items">Total Items: <strong class="ml-1">{{ props.meta.total_items }}</strong></div>
-          <div v-if="props.meta?.total_reports">Total Reports: <strong class="ml-1">{{ props.meta.total_reports }}</strong></div>
-          <div v-if="props.meta?.total_collected">Total Collected: <strong class="ml-1">{{ props.meta.total_collected }}</strong></div>
-          <div v-if="props.meta?.distinct_cases">Distinct Cases: <strong class="ml-1">{{ props.meta.distinct_cases }}</strong></div>
+        <div class="mt-5 rounded-2xl border border-slate-200 bg-white/90 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 md:p-4">
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <div class="xl:col-span-2">
+              <label class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Search</label>
+              <div class="flex items-center gap-2">
+                <input
+                  v-model="filtersLocal.q"
+                  @keyup.enter="applyFilter"
+                  @keydown.esc.prevent="filtersLocal.q = ''"
+                  class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-emerald-400"
+                  placeholder="Search by doctor, test, referrer..."
+                />
+                <button
+                  type="button"
+                  @click="applyFilter"
+                  class="no-print inline-flex shrink-0 items-center rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
+                >
+                  Search
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">From Date</label>
+              <input
+                type="date"
+                v-model="filtersLocal.from"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              />
+            </div>
+
+            <div>
+              <label class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">To Date</label>
+              <input
+                type="date"
+                v-model="filtersLocal.to"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              />
+            </div>
+
+            <div>
+              <label class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Per Page</label>
+              <select
+                v-model="filtersLocal.numOfData"
+                @change="applyFilter"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              >
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="500">500</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Select Category</label>
+              <select
+                v-model="selectedCategory"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              >
+                <option v-for="c in categories" :key="c.value" :value="c.value">{{ c.label }}</option>
+              </select>
+            </div>
+          </div>
+
         </div>
-      </div>
 
-      <div class="my-4 overflow-x-auto bg-white border rounded">
-        <table class="w-full text-sm border-collapse">
-          <thead>
-            <tr class="bg-gray-50">
-              <th v-if="filters.mode === 'test'" class="px-3 py-2 text-left border-b border-gray-200">Case ID</th>
-              <th v-if="filters.mode === 'test'" class="px-3 py-2 text-left border-b border-gray-200">Patient</th>
-              <th v-if="filters.mode === 'test'" class="px-3 py-2 text-left border-b border-gray-200">Matched Tests</th>
-              <th v-if="filters.mode === 'test'" class="px-3 py-2 text-right border-b border-gray-200">Price</th>
+        <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div class="rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50 to-white px-4 py-3 shadow-sm dark:border-blue-500/20 dark:from-blue-900/20 dark:to-slate-900">
+            <p class="text-sm font-semibold text-slate-800 dark:text-slate-100">Total Tests: {{ overallTotals.tests ?? pageTotals.tests }}</p>
+          </div>
 
-              <th v-if="filters.mode === 'referrer'" class="px-3 py-2 text-left border-b border-gray-200">Case ID</th>
-              <th v-if="filters.mode === 'referrer'" class="px-3 py-2 text-left border-b border-gray-200">Patient</th>
-              <th v-if="filters.mode === 'referrer'" class="px-3 py-2 text-left border-b border-gray-200">Referrer</th>
+          <div class="rounded-xl border border-amber-100 bg-gradient-to-br from-amber-50 to-white px-4 py-3 shadow-sm dark:border-amber-500/20 dark:from-amber-900/20 dark:to-slate-900">
+            <p class="text-sm font-semibold text-slate-800 dark:text-slate-100">Total Cases: {{ props.meta?.total_cases ?? props.meta?.distinct_cases ?? props.datas?.total ?? '-' }}</p>
+          </div>
 
-              <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">Reported At</th>
-              <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">Case ID</th>
-              <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">Patient</th>
-              <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">{{ filters.mode === 'pathologist' ? 'Pathologist' : 'Technologist' }}</th>
-              <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-left border-b border-gray-200">Test</th>
-              <th v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" class="px-3 py-2 text-right border-b border-gray-200">Price</th>
+          <div class="rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white px-4 py-3 shadow-sm dark:border-emerald-500/20 dark:from-emerald-900/20 dark:to-slate-900">
+            <p class="text-sm font-semibold text-slate-800 dark:text-slate-100">Total Amount: {{ overallTotals.amount !== null ? formatCurrency(overallTotals.amount) : formatCurrency(pageTotals.amount) }}</p>
+          </div>
+        </div>
 
-              <th v-if="filters.mode === 'collector'" class="px-3 py-2 text-left border-b border-gray-200">Collected At</th>
-              <th v-if="filters.mode === 'collector'" class="px-3 py-2 text-left border-b border-gray-200">Case ID</th>
-              <th v-if="filters.mode === 'collector'" class="px-3 py-2 text-left border-b border-gray-200">Patient</th>
-              <th v-if="filters.mode === 'collector'" class="px-3 py-2 text-left border-b border-gray-200">Collector</th>
-              <th v-if="filters.mode === 'collector'" class="px-3 py-2 text-left border-b border-gray-200">Test</th>
-              <th v-if="filters.mode === 'collector'" class="px-3 py-2 text-right border-b border-gray-200">Price</th>
+        <div class="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div class="overflow-x-auto">
+            <table class="min-w-full table-auto border-collapse text-sm">
+              <thead>
+                <tr class="bg-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  <th class="border-b border-slate-200 px-3 py-3 font-semibold dark:border-slate-700">S/N</th>
+                  <th class="border-b border-slate-200 px-3 py-3 font-semibold dark:border-slate-700">{{ titleColumnLabel }}</th>
+                  <th class="border-b border-slate-200 px-3 py-3 font-semibold dark:border-slate-700">Bill Number</th>
+                  <th class="border-b border-slate-200 px-3 py-3 font-semibold dark:border-slate-700">Billing Date</th>
+                  <th class="border-b border-slate-200 px-3 py-3 font-semibold dark:border-slate-700">Patient Name</th>
+                  <th class="border-b border-slate-200 px-3 py-3 text-right font-semibold dark:border-slate-700">Quantity</th>
+                  <th class="border-b border-slate-200 px-3 py-3 text-right font-semibold dark:border-slate-700">Amount</th>
+                </tr>
+              </thead>
 
-              <th v-if="filters.mode === 'doctor'" class="px-3 py-2 text-left border-b border-gray-200">Report</th>
-              <th v-if="filters.mode === 'doctor'" class="px-3 py-2 text-right border-b border-gray-200">Case Count</th>
-              <th v-if="filters.mode === 'doctor'" class="px-3 py-2 text-right border-b border-gray-200">Pathology Items</th>
-              <th v-if="filters.mode === 'doctor'" class="px-3 py-2 text-left border-b border-gray-200">Top Tests</th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- TEST MODE -->
-            <tr v-for="row in rows" v-if="filters.mode === 'test'" :key="row.id" class="hover:bg-gray-50">
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.case_number }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.patient_name }} <div class="text-xs text-gray-500">{{ row.patient_mobile }}</div></td>
-              <td class="px-3 py-2 border-b border-gray-100">
-                <div v-if="row.matched_tests && row.matched_tests.length">
-                  <div v-for="m in row.matched_tests" :key="m" class="text-xs">{{ m }}</div>
-                </div>
-              </td>
-              <td class="px-3 py-2 text-right border-b border-gray-100">{{ row.price ? Number(row.price).toFixed(2) : '0.00' }}</td>
-            </tr>
+              <tbody>
+                <tr
+                  v-for="(r, idx) in rows"
+                  :key="idx"
+                  class="transition hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10"
+                >
+                  <td class="border-b border-slate-100 px-3 py-3 align-top text-slate-600 dark:border-slate-800 dark:text-slate-300">
+                    {{ indexOffset + idx + 1 }}
+                  </td>
 
-            <!-- Totals row for Test mode -->
-            <tr v-if="filters.mode === 'test' && (props.meta?.total_items || props.meta?.grand_total)">
-              <td colspan="2" class="px-3 py-2 font-semibold">Totals</td>
-              <td class="px-3 py-2 font-semibold">Quantity: {{ props.meta.total_items ?? 0 }}</td>
-              <td class="px-3 py-2 text-right font-semibold">{{ props.meta.grand_total ? Number(props.meta.grand_total).toFixed(2) : '0.00' }}</td>
-            </tr>
+                  <td class="border-b border-slate-100 px-3 py-3 align-top dark:border-slate-800">
+                    <p class="font-semibold text-slate-800 dark:text-slate-100">{{ rowTitle(r) }}</p>
+                  </td>
 
-            <!-- REFERRER MODE -->
-            <tr v-for="row in rows" v-if="filters.mode === 'referrer'" :key="row.id" class="hover:bg-gray-50">
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.case_number }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.patient_name }} <div class="text-xs text-gray-500">{{ row.patient_mobile }}</div></td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.referrer_name ?? 'N/A' }}</td>
-            </tr>
+                  <td class="border-b border-slate-100 px-3 py-3 align-top text-slate-700 dark:border-slate-800 dark:text-slate-200">
+                    {{ rowBillNumber(r) }}
+                  </td>
 
-            <!-- TECHNOLOGIST / PATHOLOGIST MODE -->
-            <tr v-for="row in rows" v-if="filters.mode === 'technologist' || filters.mode === 'pathologist'" :key="row.id" class="hover:bg-gray-50">
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.reported_at ? new Date(row.reported_at).toLocaleString() : 'N/A' }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.case_number }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.patient_name ?? 'N/A' }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.reporter_name ?? 'N/A' }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.item_name ?? '' }}</td>
-              <td class="px-3 py-2 text-right border-b border-gray-100">{{ row.price ? Number(row.price).toFixed(2) : '0.00' }}</td>
-            </tr>
+                  <td class="border-b border-slate-100 px-3 py-3 align-top text-slate-700 dark:border-slate-800 dark:text-slate-200">
+                    {{ formatDate(rowBillingDate(r)) }}
+                  </td>
 
-            <!-- COLLECTOR MODE -->
-            <tr v-for="row in rows" v-if="filters.mode === 'collector'" :key="row.id" class="hover:bg-gray-50">
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.sample_collected_at ? new Date(row.sample_collected_at).toLocaleString() : 'N/A' }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.case_number }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.patient_name ?? 'N/A' }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.collector_name ?? 'N/A' }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.item_name ?? '' }}</td>
-              <td class="px-3 py-2 text-right border-b border-gray-100">{{ row.price ? Number(row.price).toFixed(2) : '0.00' }}</td>
-            </tr>
+                  <td class="border-b border-slate-100 px-3 py-3 align-top text-slate-700 dark:border-slate-800 dark:text-slate-200">
+                    {{ rowPatientName(r) }}
+                  </td>
 
-            <!-- DOCTOR MODE -->
-            <tr v-for="row in rows" v-if="filters.mode === 'doctor'" :key="row.doctor_id" class="hover:bg-gray-50">
-              <td class="px-3 py-2 border-b border-gray-100">{{ row.doctor_name ?? 'N/A' }}</td>
-              <td class="px-3 py-2 text-right border-b border-gray-100">{{ row.case_count ?? 0 }}</td>
-              <td class="px-3 py-2 text-right border-b border-gray-100">{{ row.pathology_count ?? 0 }}</td>
-              <td class="px-3 py-2 border-b border-gray-100">
-                <div v-if="row.top_tests && row.top_tests.length">
-                  <div v-for="t in row.top_tests.slice(0, 4)" :key="t.item_name" class="text-xs">{{ t.item_name }} ({{ t.count }})</div>
-                </div>
-              </td>
-            </tr>
+                  <td class="border-b border-slate-100 px-3 py-3 align-top text-right font-semibold text-slate-800 dark:border-slate-800 dark:text-slate-100">
+                    {{ rowQuantity(r) }}
+                  </td>
 
-            <tr v-if="rows.length === 0">
-              <td colspan="20" class="px-3 py-6 text-center text-gray-500 border-b border-gray-100">No data found.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                  <td class="border-b border-slate-100 px-3 py-3 align-top text-right font-semibold text-slate-800 dark:border-slate-800 dark:text-slate-100">
+                    {{ formatCurrency(rowAmount(r)) }}
+                  </td>
+                </tr>
 
-      <Pagination />
+                <tr v-if="rows.length === 0">
+                  <td class="px-3 py-8 text-center text-sm text-slate-500" colspan="7">
+                    No records found for this filter.
+                  </td>
+                </tr>
+              </tbody>
+
+              <tfoot>
+                <tr class="bg-slate-50 text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                  <td class="border-t border-slate-200 px-3 py-3" colspan="5">Grand Total</td>
+                  <td class="border-t border-slate-200 px-3 py-3 text-right">{{ totalQuantity }}</td>
+                  <td class="border-t border-slate-200 px-3 py-3 text-right font-bold text-slate-800 dark:text-slate-100">{{ formatCurrency(overallTotals.amount !== null ? overallTotals.amount : pageTotals.amount) }}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <Pagination />
+        </div>
+      </section>
     </div>
   </BackendLayout>
 </template>
 
-"*** End Replacement"
+<style scoped>
+.soft-grid {
+  background-image:
+    radial-gradient(circle at 12% 18%, rgba(16, 185, 129, 0.12), transparent 38%),
+    radial-gradient(circle at 88% 8%, rgba(14, 165, 233, 0.14), transparent 36%);
+}
+
+@media print {
+  :global(body *) {
+    visibility: hidden !important;
+  }
+
+  .print-report,
+  .print-report * {
+    visibility: visible !important;
+  }
+
+  .print-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  :global(.sidebar),
+  :global(header),
+  :global(nav) {
+    display: none !important;
+  }
+
+  .soft-grid {
+    background: #fff !important;
+    box-shadow: none !important;
+    border: 1px solid #d1d5db !important;
+    padding: 12px !important;
+  }
+
+  table {
+    font-size: 11px !important;
+  }
+
+  th,
+  td {
+    padding: 6px !important;
+  }
+}
+</style>

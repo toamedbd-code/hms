@@ -62,11 +62,7 @@ class AdminController extends Controller
                             return false;
                         }
 
-                        if (empty($r->is_private)) {
-                            return true;
-                        }
-
-                        return isset($user->role_id) && (int) $r->id === (int) $user->role_id;
+                        return true;
                     })->values();
                 })(),
                 'filters' => request()->only(['numOfData', 'name', 'division', 'district', 'upazila', 'union']),
@@ -101,8 +97,8 @@ class AdminController extends Controller
 
         $user = auth()->guard('admin')->user();
 
-        // Apply visibility rules: hide users whose role is private unless current user belongs to that role
-        // Developers should see all users regardless of role privacy.
+        // Apply visibility rules: non-developers should not see developer users.
+        // Developers can see all users.
         try {
             if ($user) {
                 $isDeveloper = false;
@@ -115,12 +111,7 @@ class AdminController extends Controller
                 }
 
                 if (! $isDeveloper) {
-                    $currentRoleId = $user->role_id;
-                    $query = $query->where(function ($q) use ($currentRoleId) {
-                        $q->whereNull('r.is_private')
-                            ->orWhere('r.is_private', false)
-                            ->orWhere('admins.role_id', $currentRoleId);
-                    })->whereRaw('LOWER(COALESCE(r.name, "")) <> ?', ['developer']);
+                    $query = $query->whereRaw('LOWER(COALESCE(r.name, "")) <> ?', ['developer']);
                 }
             }
         } catch (\Throwable $e) {
@@ -228,15 +219,12 @@ class AdminController extends Controller
                     $roles = $this->roleService->all();
                     try {
                         if ($user) {
-                            // Private roles are visible only to developers and to users on their own role.
-                            $canSeePrivate = (method_exists($user, 'hasRole') && $user->hasRole('developer'));
-
-                            $roles = collect($roles)->filter(function ($r) use ($user, $canSeePrivate) {
-                                if (empty($r->is_private)) return true;
-                                if ($r->id == $user->role_id) return true;
-                                if ($canSeePrivate) return true;
-                                return false;
-                            })->values();
+                            $isDeveloper = (method_exists($user, 'hasRole') && $user->hasRole('developer'));
+                            if (!$isDeveloper) {
+                                $roles = collect($roles)->filter(function ($r) {
+                                    return strtolower((string) ($r->name ?? '')) !== 'developer';
+                                })->values();
+                            }
                         }
                     } catch (\Throwable $e) {
                         // ignore and return unfiltered roles
@@ -442,14 +430,12 @@ class AdminController extends Controller
                     $roles = $this->roleService->all();
                     try {
                         if ($user) {
-                            $canSeePrivate = (method_exists($user, 'hasRole') && $user->hasRole('developer'));
-
-                            $roles = collect($roles)->filter(function ($r) use ($user, $canSeePrivate) {
-                                if (empty($r->is_private)) return true;
-                                if ($r->id == $user->role_id) return true;
-                                if ($canSeePrivate) return true;
-                                return false;
-                            })->values();
+                            $isDeveloper = (method_exists($user, 'hasRole') && $user->hasRole('developer'));
+                            if (!$isDeveloper) {
+                                $roles = collect($roles)->filter(function ($r) {
+                                    return strtolower((string) ($r->name ?? '')) !== 'developer';
+                                })->values();
+                            }
                         }
                     } catch (\Throwable $e) {
                         // ignore and return unfiltered roles

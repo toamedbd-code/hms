@@ -78,7 +78,7 @@ const goToBedGroupList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="name" value="Name" />
                         <input id="name"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.name" type="text" placeholder="Name" />
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
@@ -86,7 +86,7 @@ const goToBedGroupList = () => {
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="floor_id" value="Floor" />
                         <select id="floor_id" v-model="form.floor_id"
-                            class="block w-full p-1.5 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                            class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                             <option value="">Select Floor</option>
                             <option v-for="data in floors" :key="data.id" :value="data.id">{{ data.name }}
                             </option>
@@ -97,7 +97,7 @@ const goToBedGroupList = () => {
                     <div class="col-span-2 md:col-span-2">
                         <InputLabel for="description" value="Description" />
                         <textarea id="description"
-                            class="block w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                             v-model="form.description" type="text" placeholder="" />
                         <InputError class="mt-2" :message="form.errors.description" />
                     </div>

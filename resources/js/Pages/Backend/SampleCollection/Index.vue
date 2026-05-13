@@ -5,7 +5,6 @@ import axios from 'axios';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { displayWarning } from '@/responseMessage.js';
-import ActionButton from '@/Components/ActionButton.vue';
 
 const props = defineProps({
   datas: Object,
@@ -145,8 +144,20 @@ const goBack = () => {
             class="w-56 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-200"
             @keyup.enter="handleSearch"
           />
-          <ActionButton type="button" @click="handleSearch" variant="primary">Search</ActionButton>
-          <ActionButton type="button" @click="goBack" variant="muted">Back</ActionButton>
+          <button
+            type="button"
+            class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700"
+            @click="handleSearch"
+          >
+            Search
+          </button>
+          <button
+            type="button"
+            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50"
+            @click="goBack"
+          >
+            Back
+          </button>
         </div>
       </div>
 
@@ -171,22 +182,23 @@ const goBack = () => {
               <td class="px-3 py-2 border">{{ getItems(billing).length }}</td>
               <td class="px-3 py-2 border">
                 <div class="flex flex-wrap gap-2">
-                  <ActionButton
+                  <button
                     type="button"
-                    variant="success"
+                    class="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-md shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:bg-slate-400 disabled:hover:bg-slate-400 disabled:cursor-not-allowed"
                     :disabled="!canCollect(billing.id)"
                     @click="handleCollect(billing)"
                   >
                     Collect Sample
-                  </ActionButton>
-                  <ActionButton
+                  </button>
+                  <a
                     :href="route('backend.sample-collection.barcode', billing.id)"
-                    external
-                    variant="indigo"
+                    target="_blank"
+                    rel="noopener"
+                    class="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-md shadow-sm hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300"
                     @click="markBarcodePrinted(billing.id)"
                   >
                     Print Barcode
-                  </ActionButton>
+                  </a>
                 </div>
               </td>
             </tr>
@@ -199,36 +211,48 @@ const goBack = () => {
 
       <!-- Per-test collect modal -->
       <div v-if="showCollectModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-        <div class="bg-white rounded shadow p-4 w-full max-w-2xl text-gray-800">
+        <div class="bg-white rounded shadow p-4 w-full max-w-2xl">
           <div class="flex items-center justify-between mb-3">
-            <h2 class="text-lg font-semibold text-gray-900">Collect Samples - {{ modalBilling?.bill_number || '' }}</h2>
+            <h2 class="text-lg font-semibold">Collect Samples - {{ modalBilling?.bill_number || '' }}</h2>
             <div class="flex items-center gap-2">
-              <ActionButton type="button" variant="muted" @click="showCollectModal = false">Close</ActionButton>
-              <ActionButton type="button" variant="success" @click="collectAllFromModal">Collect All</ActionButton>
+              <button
+                type="button"
+                class="px-3 py-1 text-sm text-gray-700 bg-white border rounded hover:bg-gray-50"
+                @click="showCollectModal = false"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                class="px-3 py-1 text-sm text-white bg-green-600 rounded hover:bg-green-700"
+                @click="collectAllFromModal"
+              >
+                Collect All
+              </button>
             </div>
           </div>
 
           <div class="overflow-y-auto max-h-72">
-            <table class="w-full text-sm text-left text-gray-700">
+            <table class="w-full text-sm text-left">
               <thead>
                 <tr>
-                  <th class="pb-2 text-gray-600">Test</th>
-                  <th class="pb-2 text-right text-gray-600">Action</th>
+                  <th class="pb-2">Test</th>
+                  <th class="pb-2 text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="item in modalItems" :key="item.id" class="border-t">
                   <td class="py-2">{{ item.item_name }}</td>
                   <td class="py-2 text-right">
-                    <ActionButton
+                    <button
                       type="button"
-                      variant="success"
+                      class="px-3 py-1 text-xs text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50"
                       :disabled="collectingItemIds[item.id]"
                       @click="collectItem(item)"
                     >
                       <span v-if="collectingItemIds[item.id]">Collecting...</span>
                       <span v-else>Collect</span>
-                    </ActionButton>
+                    </button>
                   </td>
                 </tr>
                 <tr v-if="modalItems.length === 0">

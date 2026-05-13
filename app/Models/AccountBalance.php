@@ -13,8 +13,12 @@ class AccountBalance extends Model
 
     protected $guarded = [];
 
+    protected $fillable = ['account_id', 'balance', 'profit', 'loss'];
+
     protected $casts = [
         'balance' => 'decimal:2',
+        'profit' => 'decimal:2',
+        'loss' => 'decimal:2',
     ];
 
     public function account()

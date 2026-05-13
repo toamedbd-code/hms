@@ -186,60 +186,56 @@
 </head>
 
 <body class="{{ $paperSize ?? 'A4' }}">
-    <!-- Header Section -->
-    <div class="header">
-        @php
-            $resolveInlineImage = function ($value) {
-                $source = trim((string) $value);
-                if ($source === '') {
-                    return '';
-                }
+    @php
+        $resolveInlineImage = function ($value) {
+            $source = trim((string) $value);
+            if ($source === '') {
+                return '';
+            }
 
-                if (str_starts_with($source, 'data:image/')) {
-                    return $source;
-                }
+            if (str_starts_with($source, 'data:image/')) {
+                return $source;
+            }
 
-                $normalized = str_replace('\\\\', '/', $source);
-                $normalized = preg_replace('#^file:///+#', '', $normalized);
-                $normalized = preg_replace('#^/([A-Za-z]:/)#', '$1', (string) $normalized);
+            $normalized = str_replace('\\\\', '/', $source);
+            $normalized = preg_replace('#^file:///+#', '', $normalized);
+            $normalized = preg_replace('#^/([A-Za-z]:/)#', '$1', (string) $normalized);
 
-                $candidates = [$normalized];
+            $candidates = [$normalized];
 
-                $relative = ltrim($normalized, '/');
-                if (!preg_match('#^[A-Za-z]:/#', $relative) && !str_starts_with($relative, 'http://') && !str_starts_with($relative, 'https://')) {
-                    $relative = preg_replace('#^storage/#', '', $relative);
-                    $relative = preg_replace('#^public/storage/#', '', $relative);
-                    $relative = preg_replace('#^public/#', '', $relative);
+            $relative = ltrim($normalized, '/');
+            if (!preg_match('#^[A-Za-z]:/#', $relative) && !str_starts_with($relative, 'http://') && !str_starts_with($relative, 'https://')) {
+                $relative = preg_replace('#^storage/#', '', $relative);
+                $relative = preg_replace('#^public/storage/#', '', $relative);
+                $relative = preg_replace('#^public/#', '', $relative);
 
-                    $candidates[] = public_path('storage/' . $relative);
-                    $candidates[] = storage_path('app/public/' . $relative);
-                    $candidates[] = public_path($relative);
-                }
+                $candidates[] = public_path('storage/' . $relative);
+                $candidates[] = storage_path('app/public/' . $relative);
+                $candidates[] = public_path($relative);
+            }
 
-                foreach ($candidates as $filePath) {
-                    $path = str_replace('\\\\', '/', (string) $filePath);
-                    if ($path !== '' && file_exists($path)) {
-                        $mime = mime_content_type($path) ?: 'image/png';
-                        $binary = file_get_contents($path);
-                        if ($binary !== false) {
-                            return 'data:' . $mime . ';base64,' . base64_encode($binary);
-                        }
+            foreach ($candidates as $filePath) {
+                $path = str_replace('\\\\', '/', (string) $filePath);
+                if ($path !== '' && file_exists($path)) {
+                    $mime = mime_content_type($path) ?: 'image/png';
+                    $binary = file_get_contents($path);
+                    if ($binary !== false) {
+                        return 'data:' . $mime . ';base64,' . base64_encode($binary);
                     }
                 }
+            }
 
-                return str_starts_with($source, 'http://') || str_starts_with($source, 'https://')
-                    ? $source
-                    : '';
-            };
+            return str_starts_with($source, 'http://') || str_starts_with($source, 'https://')
+                ? $source
+                : '';
+        };
 
-            $headerSrc = $resolveInlineImage($header_image ?? '')
-                ?: $resolveInlineImage($header_image_path ?? '')
-                ?: $resolveInlineImage($header_image_url ?? '');
-        @endphp
-        @if($headerSrc)
-        <img src="{{ $headerSrc }}" class="header-image" alt="Clinic Header">
-        @endif
-    </div>
+        $headerSrc = $resolveInlineImage($header_image ?? '')
+            ?: $resolveInlineImage($header_image_path ?? '')
+            ?: $resolveInlineImage($header_image_url ?? '');
+    @endphp
+
+    @includeIf('prints.partials._header', ['header_image' => $headerSrc, 'printed_at' => $appointment_date ?? null])
 
     <!-- Content Section -->
     <div class="content">

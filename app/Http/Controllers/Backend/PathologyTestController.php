@@ -177,6 +177,23 @@ class PathologyTestController extends Controller
             $skipped = 0;
             $duplicates = 0;
 
+            $normalizeKeyPart = static function ($value): string {
+                $value = preg_replace('/\s+/', ' ', trim((string) $value));
+                return Str::lower($value ?? '');
+            };
+
+            // Build an in-memory key map once so repeated imports do not create duplicates.
+            $existingRowKeys = Test::withTrashed()
+                ->select(['category_type', 'test_name'])
+                ->get()
+                ->mapWithKeys(function ($test) use ($normalizeKeyPart) {
+                    $key = $normalizeKeyPart($test->category_type) . '|' . $normalizeKeyPart($test->test_name);
+                    return [$key => true];
+                })
+                ->all();
+
+            $seenInCurrentCsv = [];
+
             while (($row = fgetcsv($handle)) !== false) {
                 if (!array_filter($row, fn($cell) => trim((string) $cell) !== '')) {
                     continue;
@@ -201,11 +218,17 @@ class PathologyTestController extends Controller
                     continue;
                 }
 
-                $exists = Test::query()
-                    ->where('test_name', $testName)
-                    ->exists();
+                $normalizedCategoryType = ucfirst($categoryType);
+                $rowKey = $normalizeKeyPart($normalizedCategoryType) . '|' . $normalizeKeyPart($testName);
 
-                if ($exists) {
+                if (isset($seenInCurrentCsv[$rowKey])) {
+                    $duplicates++;
+                    continue;
+                }
+
+                $seenInCurrentCsv[$rowKey] = true;
+
+                if (isset($existingRowKeys[$rowKey])) {
                     $duplicates++;
                     continue;
                 }
@@ -385,7 +408,7 @@ class PathologyTestController extends Controller
                 }
 
                 $test = Test::create([
-                    'category_type' => ucfirst($categoryType),
+                    'category_type' => $normalizedCategoryType,
                     'test_name' => $testName,
                     'test_short_name' => $shortName,
                     'test_type' => $testType,
@@ -401,6 +424,8 @@ class PathologyTestController extends Controller
                     'test_parameters' => $importedParameters,
                     'status' => 'Active',
                 ]);
+
+                $existingRowKeys[$rowKey] = true;
 
                 // Ensure a corresponding Charge exists so this test appears in IPD hospital charges
                 try {

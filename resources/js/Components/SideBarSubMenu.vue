@@ -67,11 +67,9 @@ const close = () => { open.value = false; };
 
 <template>
   <div class="relative">
-    <div @click.stop="toggle" :class="open ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-600' : ''">
+    <div @click.stop="toggle" :class="open ? 'bg-emerald-500 text-white border-l-2 border-emerald-600 rounded-md' : 'bg-white rounded-md'">
       <slot name="trigger" />
     </div>
-
-    <div v-if="open" class="" @click="close"></div>
 
     <transition
       enter-active-class="transition duration-200 ease-out"
@@ -85,7 +83,6 @@ const close = () => { open.value = false; };
         v-if="open"
         class="rounded-md"
         :class="[widthClass, alignmentClasses]"
-        @click="close"
       >
         <div :class="[...contentClasses, 'bg-white rounded-md border border-gray-100']">
           <slot name="content" />

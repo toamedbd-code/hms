@@ -41,7 +41,7 @@
                 </div>
 
                 <div class="form-group mb-0">
-                    <button type="submit" class="btn btn-primary">Update</button>
+                    <button type="submit" class="btn btn-primary btn-colorful">Update</button>
                     <a href="{{ route('backend.attendance.face.encodings') }}" class="btn btn-light">Cancel</a>
                 </div>
             </form>

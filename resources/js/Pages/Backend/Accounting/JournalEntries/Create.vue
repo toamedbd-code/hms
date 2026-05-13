@@ -38,7 +38,7 @@ function removeLine(i) {
 
 function save(status = 'Draft') {
   form.status = status;
-  form.post(route('journal-entry.store'));
+  form.post(route('backend.journal-entry.store'));
 }
 </script>
 
@@ -48,10 +48,14 @@ function save(status = 'Draft') {
   <div class="p-6">
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-semibold">Create Journal Entry</h1>
-      <Link :href="route('journal-entry.index')" class="text-sm text-gray-600">Back to list</Link>
+      <Link :href="route('backend.journal-entry.index')" class="btn-colorful text-sm">Back to list</Link>
     </div>
 
     <div class="mt-6 rounded border bg-white p-4 shadow-sm">
+      <div v-if="form.errors.lines" class="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        {{ form.errors.lines }}
+      </div>
+
       <div class="grid grid-cols-3 gap-4">
         <div>
           <label class="block text-sm font-medium text-gray-700">Date</label>
@@ -104,14 +108,14 @@ function save(status = 'Draft') {
         </table>
 
         <div class="mt-2">
-          <button type="button" class="btn btn-secondary" @click="addLine">Add line</button>
+          <button type="button" class="btn-colorful-sm" @click="addLine">Add line</button>
         </div>
       </div>
 
       <div class="mt-6 flex gap-2">
-        <button type="button" class="btn btn-primary" @click="save('Posted')">Post</button>
-        <button type="button" class="btn btn-secondary" @click="save('Draft')">Save Draft</button>
-        <Link :href="route('journal-entry.index')" class="btn">Cancel</Link>
+        <button type="button" class="btn-colorful" @click="save('Posted')">Post</button>
+        <button type="button" class="btn-colorful-sm" @click="save('Draft')">Save Draft</button>
+        <Link :href="route('backend.journal-entry.index')" class="btn-colorful-sm">Cancel</Link>
       </div>
     </div>
   </div>

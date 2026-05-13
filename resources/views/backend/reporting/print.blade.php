@@ -104,8 +104,9 @@
             width: 100%;
             padding-left: 15px;
             padding-right: 15px;
-            padding-bottom: 110px;
+            padding-bottom: calc(var(--report-footer-height) + 12mm);
         }
+        /* header/footer and barcode layout retained in normal flow for print */
         .footer-section {
             /* Keep footer in normal flow on-screen so it scrolls with the page
                and does not overlay content. For print, `@media print` will
@@ -265,7 +266,7 @@
         .signature-block .meta { min-height: 16px; width: 100%; text-align: center; }
         .signature-block .meta.multiline { white-space: pre-line; }
         @media print {
-            .content-section { padding-bottom: 72px; }
+            .content-section { padding-bottom: calc(var(--report-footer-height) + 8mm); }
             .footer-section {
                 position: fixed;
                 bottom: 0;
@@ -273,6 +274,28 @@
                 right: 0;
             }
             .ultra-layout .content-section { padding-bottom: 56px; }
+        }
+
+        /* Ensure footer stays in normal flow on-screen and scrolls with page */
+        @media screen {
+            .footer-section { position: relative !important; }
+            .footer-image { position: relative !important; max-height: var(--report-footer-height, 70px); }
+            .footer-placeholder { display: block; visibility: visible; }
+        }
+
+        /* Force A4 portrait layout for specific print views (e.g., /reporting/print/10) */
+        @if(isset($primaryItem) && (int) ($primaryItem->id ?? 0) === 10)
+            @page { size: A4 portrait; margin: 12mm 10mm; }
+            body { width: 210mm; min-height: 297mm; }
+            .content-section { padding-left: 12mm; padding-right: 12mm; }
+            .header-placeholder { height: calc(var(--report-header-height, 115px) + 2mm); }
+        @endif
+
+        /* Align page content with left barcode in print preview */
+        @media print {
+            .content-section { padding-left: 20px !important; padding-right: 12mm !important; }
+            /* Ensure patient details table spans full width under the header */
+            .patient-details-table { margin-left: 0 !important; }
         }
         </style>
 
@@ -357,23 +380,30 @@
                 foreach ($items as $it) {
                     $params = (!empty($it->printed_parameter_rows) && is_array($it->printed_parameter_rows)) ? $it->printed_parameter_rows : [];
                     if (count($params) > 0) {
-                        foreach ($params as $pr) {
-                            $rHtml = $pr['result_html'] ?? '';
-                            $pos = strpos($rHtml, ':');
-                            if ($pos !== false) {
-                                $pName = trim(strip_tags(substr($rHtml, 0, $pos)));
-                                $pVal = trim(strip_tags(substr($rHtml, $pos + 1)));
-                            } else {
-                                $pName = '';
-                                $pVal = trim(strip_tags($rHtml));
-                            }
-                            $paramRows[] = [
-                                'param' => $pName ?: trim((string) ($it->item_name ?? '')),
-                                'value' => $pVal,
-                                'range' => $pr['normal_range'] ?? ($it->report_range ?? ''),
-                                'item_name' => $it->item_name ?? '',
-                            ];
-                        }
+                                foreach ($params as $pr) {
+                                    // Prefer structured fields if controller provided them
+                                    if (array_key_exists('param', $pr) || array_key_exists('value', $pr)) {
+                                        $pName = trim((string) ($pr['param'] ?? ''));
+                                        $pVal = trim((string) ($pr['value'] ?? ''));
+                                    } else {
+                                        $rHtml = $pr['result_html'] ?? '';
+                                        $pos = strpos($rHtml, ':');
+                                        if ($pos !== false) {
+                                            $pName = trim(strip_tags(substr($rHtml, 0, $pos)));
+                                            $pVal = trim(strip_tags(substr($rHtml, $pos + 1)));
+                                        } else {
+                                            $pName = '';
+                                            $pVal = trim(strip_tags($rHtml));
+                                        }
+                                    }
+
+                                    $paramRows[] = [
+                                        'param' => $pName ?: trim((string) ($it->item_name ?? '')),
+                                        'value' => $pVal,
+                                        'range' => $pr['normal_range'] ?? ($it->report_range ?? ''),
+                                        'item_name' => $it->item_name ?? '',
+                                    ];
+                                }
                     } else {
                         $paramRows[] = [
                             'param' => trim((string) ($it->item_name ?? '')) ?: 'N/A',
@@ -403,27 +433,49 @@
 
                     // explicit substring tokens (fast path)
                     $explicit = [
-                        'sgpt' => 'Liver Function', 'sgot' => 'Liver Function', 'alt' => 'Liver Function', 'ast' => 'Liver Function', 'এসজিপিটি' => 'Liver Function', 'এসজিওটি' => 'Liver Function',
+                        'sgpt' => 'Liver Function', 'sgot' => 'Liver Function', 'alt' => 'Liver Function', 'ast' => 'Liver Function', 'এএসজিপিটি' => 'Liver Function', 'এএসজিওটি' => 'Liver Function',
                         'creatinine' => 'Renal Function', 'ক্রিটিনাইন' => 'Renal Function', 'urea' => 'Renal Function', 'bun' => 'Renal Function',
+                        // Ensure uric acid variants map to Renal Function
+                        'uric acid' => 'Renal Function', 'uricacid' => 'Renal Function', 'uric' => 'Renal Function', 'ইউরিক' => 'Renal Function',
                         'rbs' => 'Glucose', 'hba1c' => 'Glucose', 'a1c' => 'Glucose', 'glucose' => 'Glucose', 'সুগার' => 'Glucose', 'শর্করা' => 'Glucose',
                         'cholesterol' => 'Lipid Profile', 'hdl' => 'Lipid Profile', 'ldl' => 'Lipid Profile', 'triglyceride' => 'Lipid Profile', 'ট্রাইগ্লিসারাইড' => 'Lipid Profile', 'লিপিড' => 'Lipid Profile',
+                        // Liver tokens: include alkaline phosphatase variants
+                        'alk phos' => 'Liver Function', 'alk-phos' => 'Liver Function', 'alkaline phosphatase' => 'Liver Function', 'alp' => 'Liver Function', 'ggt' => 'Liver Function',
+                        // Thyroid tokens
+                        'tsh' => 'Thyroid Function', 't3' => 'Thyroid Function', 't4' => 'Thyroid Function', 'ft3' => 'Thyroid Function', 'ft4' => 'Thyroid Function', 'thyroid' => 'Thyroid Function', 'thyroxine' => 'Thyroid Function',
+                        // FSH variants (fertility)
+                        'fsh' => 'Fertility Function', 'এফএসএইচ' => 'Fertility Function', 'এফ এস এইচ' => 'Fertility Function',
+                        // Bone marrow => Hematology / CBC
+                        'bone marrow' => 'CBC', 'bone-marrow' => 'CBC', 'marrow' => 'CBC', 'বোন ম্যারো' => 'CBC', 'বোনম্যারো' => 'CBC',
                     ];
 
                     foreach ($explicit as $token => $lbl) {
                         try {
                             if (mb_stripos($t, $token) !== false) return $lbl;
-                        } catch (\\Throwable $_) {
+                        } catch (\Throwable $_) {
                         }
                     }
 
                     foreach ($map as $label => $pattern) {
                         try {
                             if (@preg_match($pattern, $t) === 1) return $label;
-                        } catch (\\Throwable $_) {
+                        } catch (\Throwable $_) {
                         }
                     }
 
-                    return '';
+                    // Fallback: synthesize a label from the test name so every test gets a function
+                    try {
+                        if ($t !== '' && preg_match_all('/[\p{L}\p{N}]{2,}/u', $t, $m) && !empty($m[0])) {
+                            usort($m[0], function ($a, $b) { return mb_strlen($b) <=> mb_strlen($a); });
+                            $tok = $m[0][0];
+                            $gen = (mb_strtoupper($tok, 'UTF-8') === $tok) ? $tok : mb_convert_case($tok, MB_CASE_TITLE, 'UTF-8');
+                            return $gen;
+                        }
+                    } catch (\Throwable $_) {
+                        // ignore
+                    }
+
+                    return 'Misc Tests';
                 };
 
                 $lipid = $allParams->filter(function ($r) {
@@ -456,20 +508,25 @@
 
             @foreach($groupedByFunction as $label => $rows)
                 <div style="margin-top:8px; font-weight:700;">{{ $label }}</div>
-                <table style="width:100%; border-collapse: collapse; font-size: 12px; margin-top:6px;">
+                <table style="width:100%; border-collapse: collapse; font-size: 12px; margin-top:6px; table-layout: fixed;">
+                    <colgroup>
+                        <col style="width:50%" />
+                        <col style="width:25%" />
+                        <col style="width:25%" />
+                    </colgroup>
                     <thead>
                         <tr>
-                            <th style="border:1px solid #e5e7eb; padding:8px; text-align:left;">Test</th>
-                            <th style="border:1px solid #e5e7eb; padding:8px; text-align:center;">Result</th>
-                            <th style="border:1px solid #e5e7eb; padding:8px; text-align:center;">Normal Range</th>
+                            <th class="testname-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:left;">Test</th>
+                            <th class="result-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center;">Result</th>
+                            <th class="range-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center;">Normal Range</th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach($rows as $row)
                             <tr>
-                                <td style="border:1px solid #e5e7eb; padding:8px;">{{ $row['param'] }}</td>
-                                <td style="border:1px solid #e5e7eb; padding:8px; text-align:center;">{{ $row['value'] }}</td>
-                                <td style="border:1px solid #e5e7eb; padding:8px; text-align:center;">{{ $row['range'] ?: '-' }}</td>
+                                <td class="testname-cell" style="border:1px solid #e5e7eb; padding:8px;">{{ $row['param'] }}</td>
+                                <td class="result-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; vertical-align: middle;">{{ $row['value'] }}</td>
+                                <td class="range-cell" style="border:1px solid #e5e7eb; padding:8px; text-align:center; vertical-align: middle;">{{ $row['range'] ?: '-' }}</td>
                             </tr>
                         @endforeach
                     </tbody>

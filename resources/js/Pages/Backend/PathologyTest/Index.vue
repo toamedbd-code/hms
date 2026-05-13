@@ -27,36 +27,6 @@ const importForm = useForm({
     csv_file: null,
 });
 
-const csvRequiredFields = [
-    'category_type',
-    'test_name',
-    'test_category',
-];
-
-const csvTestInfoFields = [
-    'test_short_name',
-    'test_type',
-    'test_sub_category',
-    'method',
-    'report_days',
-];
-
-const csvChargeFields = [
-    'charge_category_id',
-    'charge_name',
-    'tax',
-    'standard_charge',
-    'amount',
-];
-
-const csvParameterFields = [
-    'parameter_name',
-    'reference_from',
-    'reference_to',
-    'unit',
-    'normal_range',
-];
-
 const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
     if (!file) return;
@@ -139,72 +109,21 @@ const handleFileChange = (event) => {
                 </div>
             </div>
 
-            <div class="mb-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100">
-                <p class="font-semibold">CSV Upload Format</p>
-                <p class="mt-1 text-xs">Use exact header names. `category_type`, `test_name`, `test_category` are required.</p>
-
-                <div class="mt-3 grid gap-3 md:grid-cols-2">
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-wide">Required</p>
-                        <div class="mt-2 flex flex-wrap gap-2">
-                            <span v-for="field in csvRequiredFields" :key="`required-${field}`"
-                                class="rounded-md bg-white px-2 py-1 text-xs font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-100 dark:ring-emerald-700">
-                                {{ field }}
-                            </span>
-                        </div>
-                    </div>
-
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-wide">Item Info</p>
-                        <div class="mt-2 flex flex-wrap gap-2">
-                            <span v-for="field in csvTestInfoFields" :key="`info-${field}`"
-                                class="rounded-md bg-white px-2 py-1 text-xs font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-100 dark:ring-emerald-700">
-                                {{ field }}
-                            </span>
-                        </div>
-                    </div>
-
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-wide">Charge</p>
-                        <div class="mt-2 flex flex-wrap gap-2">
-                            <span v-for="field in csvChargeFields" :key="`charge-${field}`"
-                                class="rounded-md bg-white px-2 py-1 text-xs font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-100 dark:ring-emerald-700">
-                                {{ field }}
-                            </span>
-                        </div>
-                    </div>
-
-                    <div>
-                        <p class="text-xs font-semibold uppercase tracking-wide">Item Parameters</p>
-                        <div class="mt-2 flex flex-wrap gap-2">
-                            <span v-for="field in csvParameterFields" :key="`param-${field}`"
-                                class="rounded-md bg-white px-2 py-1 text-xs font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-100 dark:ring-emerald-700">
-                                {{ field }}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-
-                <p class="mt-3 text-xs">
-                    Tip: Multiple parameters in one row দিতে চাইলে `|` ব্যবহার করুন। Example: `parameter_name` = `Hemoglobin|WBC`
-                </p>
-            </div>
-
             <div
-                class="flex justify-between w-full p-2 py-3 space-x-2 text-white rounded-md bg-slate-300 shadow-gray-800/50 dark:bg-gray-700 dark:text-gray-200">
+                class="flex justify-between w-full p-2 py-3 space-x-2 text-gray-700 rounded-md bg-slate-300 shadow-gray-800/50 dark:bg-gray-700 dark:text-gray-200">
 
                 <div class="grid w-full grid-cols-1 gap-2 md:grid-cols-5">
 
                     <div class="flex space-x-2">
                         <div class="w-full">
                             <input id="name" v-model="filters.test_name"
-                                class="block w-full p-2 text-white rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 type="text" placeholder="Item Name" @input="applyFilter" />
                         </div>
 
                         <div class="block min-w-24 md:hidden">
                             <select v-model="filters.numOfData" @change="applyFilter"
-                                class="w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="10">Show 10</option>
                                 <option value="20">Show 20</option>
                                 <option value="30">Show 30</option>
@@ -219,7 +138,7 @@ const handleFileChange = (event) => {
 
                 <div class="hidden min-w-24 md:block">
                     <select v-model="filters.numOfData" @change="applyFilter"
-                        class="w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                        class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                         <option value="10">show 10</option>
                         <option value="20">show 20</option>
                         <option value="30">show 30</option>

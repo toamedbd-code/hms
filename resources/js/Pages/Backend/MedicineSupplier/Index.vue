@@ -87,6 +87,7 @@ const submitCollect = () => {
         preserveScroll: true,
         onSuccess: () => {
             closeCollectModal(true);
+            router.reload({ only: ['datas'], preserveScroll: true });
         },
         onFinish: () => {
             isCollecting.value = false;
@@ -134,13 +135,13 @@ const submitCollect = () => {
             <div class="flex space-x-2">
                 <div class="w-full">
                     <input id="name" v-model="filters.name"
-                        class="block w-full p-2 text-gray-700 rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                        class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                         type="text" placeholder="Name" @input="applyFilter" />
                 </div>
 
                 <div class="block min-w-24 md:hidden">
                     <select v-model="filters.numOfData" @change="applyFilter"
-                        class="w-full p-2 text-gray-700 rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                        class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                         <option value="10">Show 10</option>
                         <option value="20">Show 20</option>
                         <option value="30">Show 30</option>
@@ -155,7 +156,7 @@ const submitCollect = () => {
 
         <div class="hidden min-w-24 md:block">
             <select v-model="filters.numOfData" @change="applyFilter"
-                class="w-full p-2 text-white rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                class="w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                 <option value="10">show 10</option>
                 <option value="20">show 20</option>
                 <option value="30">show 30</option>
@@ -173,8 +174,8 @@ const submitCollect = () => {
     <Pagination />
 </div>
 
-            <div v-if="showCollectModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-        <div class="w-full max-w-md rounded-lg bg-white shadow-xl text-gray-800">
+    <div v-if="showCollectModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div class="w-full max-w-md rounded-lg bg-white shadow-xl">
             <div class="flex items-center justify-between border-b px-5 py-3">
                 <h3 class="text-base font-semibold text-gray-800">Supplier Due Payment</h3>
                 <button

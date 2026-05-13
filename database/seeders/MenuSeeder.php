@@ -14,7 +14,7 @@ class MenuSeeder extends Seeder
      */
     public function run()
     {
-        foreach ($this->datas() as $key => $value) {
+        foreach ($this->datas() as $value) {
             $this->createMenu($value);
         }
     }
@@ -121,12 +121,75 @@ class MenuSeeder extends Seeder
                         'status' => 'Active',
                     ],
                     [
+                        'name' => 'Journal Entries',
+                        'icon' => 'book',
+                        'route' => 'backend.journal-entry.index',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'journal-entry',
+                        'status' => 'Active',
+                    ],
+                    [
                         'name' => 'Account Balances',
                         'icon' => 'balance',
                         'route' => 'backend.accounts.balances',
                         'description' => null,
                         'sorting' => 1,
                         'permission_name' => 'account-balances',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Trial Balance',
+                        'icon' => 'bar-chart-2',
+                        'route' => 'backend.accounts.trial-balance',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'trial-balance',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Profit & Loss',
+                        'icon' => 'trending-up',
+                        'route' => 'backend.accounts.profit-loss',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'profit-loss',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Balance Sheet',
+                        'icon' => 'scale',
+                        'route' => 'backend.accounts.balance-sheet',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'balance-sheet',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Cash Flow',
+                        'icon' => 'activity',
+                        'route' => 'backend.accounts.cash-flow',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'cash-flow',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Currency',
+                        'icon' => 'dollar-sign',
+                        'route' => 'backend.currency.index',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'currency-list',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Exchange Rates',
+                        'icon' => 'repeat',
+                        'route' => 'backend.exchange-rate.index',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'exchange-rate-list',
                         'status' => 'Active',
                     ],
                     [
@@ -138,6 +201,15 @@ class MenuSeeder extends Seeder
                         'permission_name' => 'activity-log-view',
                         'status' => 'Active',
                     ],
+                    [
+                        'name' => 'Vendor Payment',
+                        'icon' => 'list',
+                        'route' => 'backend.accounts.vendor-payment.index',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'vendor-payment-list',
+                        'status' => 'Active',
+                    ],
                 ],
             ],
             [
@@ -146,7 +218,7 @@ class MenuSeeder extends Seeder
                 'route' => null,
                 'description' => null,
                 'sorting' => 1,
-                'permission_name' => 'user-management',
+                'permission_name' => 'human-resource',
                 'status' => 'Active',
                 'children' => [
                     // [
@@ -1280,7 +1352,7 @@ class MenuSeeder extends Seeder
                 'route' => null,
                 'description' => null,
                 'sorting' => 1,
-                'permission_name' => 'hospital-test',
+                'permission_name' => 'item-charge',
                 'status' => 'Active',
                 'children' => [
                     // [
@@ -1361,7 +1433,7 @@ class MenuSeeder extends Seeder
             [
                 'name' => 'Inventory',
                 'icon' => 'inventory',
-                'route' => null,
+                'route' => 'backend.inventory.index',
                 'description' => null,
                 'sorting' => 1,
                 'permission_name' => 'inventory-management',
@@ -1393,6 +1465,75 @@ class MenuSeeder extends Seeder
                         'description' => null,
                         'sorting' => 1,
                         'permission_name' => 'medicine-inventory-list',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Site Purchase',
+                        'icon' => 'shopping-cart',
+                        'route' => 'backend.sitepurchase.index',
+                        'description' => 'All site procurement and purchase tracking',
+                        'sorting' => 2,
+                        'permission_name' => 'site-purchase-list',
+                        'status' => 'Active',
+                    ],
+                ],
+            ],
+
+            [
+                'name' => 'Manufacturing',
+                'icon' => 'factory',
+                'route' => null,
+                'description' => 'Bill of Materials and Production Orders',
+                'sorting' => 1,
+                'permission_name' => 'manufacturing-management',
+                'status' => 'Active',
+                'children' => [
+                    [
+                        'name' => 'Bill of Materials',
+                        'icon' => 'clipboard',
+                        'route' => 'backend.bom.index',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'bom-list',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Production Orders',
+                        'icon' => 'shopping-cart',
+                        'route' => 'backend.production-order.index',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'production-order-list',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Work Orders',
+                        'icon' => 'settings',
+                        'route' => 'backend.work-order.index',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'work-order-list',
+                        'status' => 'Active',
+                    ],
+                ],
+            ],
+
+            [
+                'name' => 'Fixed Assets',
+                'icon' => 'hard-drive',
+                'route' => null,
+                'description' => 'Assets and depreciation',
+                'sorting' => 1,
+                'permission_name' => 'fixed-assets-management',
+                'status' => 'Active',
+                'children' => [
+                    [
+                        'name' => 'Fixed Asset List',
+                        'icon' => 'list',
+                        'route' => 'backend.fixedasset.index',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'fixed-asset-list',
                         'status' => 'Active',
                     ],
                 ],
@@ -1455,7 +1596,7 @@ class MenuSeeder extends Seeder
                     [
                         'name' => 'Product Return',
                         'icon' => 'list',
-                        'route' => 'backend.pharmacy.return.index',
+                        'route' => 'backend.productreturn.index',
                         'description' => null,
                         'sorting' => 1,
                         'permission_name' => 'product-return-list',
@@ -1476,7 +1617,7 @@ class MenuSeeder extends Seeder
             [
                 'name' => 'InvoiceDesign Manage',
                 'icon' => 'invoice-design',
-                'route' => null,
+                'route' => 'backend.invoicedesign.index',
                 'description' => null,
                 'sorting' => 1,
                 'permission_name' => 'invoicedesign-management',
@@ -1537,7 +1678,7 @@ class MenuSeeder extends Seeder
                         'route' => 'backend.report-summary.index',
                         'description' => null,
                         'sorting' => 2,
-                        'permission_name' => 'report-management',
+                        'permission_name' => 'report-summary',
                         'status' => 'Active',
                     ],
                 ],
@@ -1576,7 +1717,7 @@ class MenuSeeder extends Seeder
                         'route' => 'backend.websetting.section.cms',
                         'description' => null,
                         'sorting' => 5,
-                        'permission_name' => 'websetting-add',
+                        'permission_name' => 'cms-setting',
                         'status' => 'Active',
                     ],
                     [
@@ -1585,7 +1726,7 @@ class MenuSeeder extends Seeder
                         'route' => 'backend.websetting.section.general',
                         'description' => null,
                         'sorting' => 9,
-                        'permission_name' => 'websetting-add',
+                        'permission_name' => 'general-setting',
                         'status' => 'Active',
                     ],
                     [
@@ -1594,7 +1735,7 @@ class MenuSeeder extends Seeder
                         'route' => 'backend.websetting.section.prefix',
                         'description' => null,
                         'sorting' => 10,
-                        'permission_name' => 'websetting-add',
+                        'permission_name' => 'prefix-setting',
                         'status' => 'Active',
                     ],
                     [
@@ -1603,16 +1744,7 @@ class MenuSeeder extends Seeder
                         'route' => 'backend.websetting.section.sms',
                         'description' => null,
                         'sorting' => 11,
-                        'permission_name' => 'websetting-add',
-                        'status' => 'Active',
-                    ],
-                    [
-                        'name' => 'Module Setting',
-                        'icon' => 'grid',
-                        'route' => 'backend.websetting.section.module',
-                        'description' => null,
-                        'sorting' => 12,
-                        'permission_name' => 'websetting-add',
+                        'permission_name' => 'sms-setting',
                         'status' => 'Active',
                     ],
                     [
@@ -1621,7 +1753,7 @@ class MenuSeeder extends Seeder
                         'route' => 'backend.websetting.section.other',
                         'description' => null,
                         'sorting' => 13,
-                        'permission_name' => 'websetting-add',
+                        'permission_name' => 'other-setting',
                         'status' => 'Active',
                     ],
                     [
@@ -1657,7 +1789,7 @@ class MenuSeeder extends Seeder
                         'route' => 'backend.activity-logs.index',
                         'description' => null,
                         'sorting' => 7,
-                        'permission_name' => 'activity-log-view',
+                        'permission_name' => 'activity-logs',
                         'status' => 'Active',
                     ],
                     [
@@ -1666,7 +1798,7 @@ class MenuSeeder extends Seeder
                         'route' => 'backend.activity-logs.print',
                         'description' => null,
                         'sorting' => 8,
-                        'permission_name' => 'activity-log-view',
+                        'permission_name' => 'activity-logs-print',
                         'status' => 'Active',
                     ],
                     // [
@@ -1746,6 +1878,15 @@ class MenuSeeder extends Seeder
                         "description" => null,
                         "sorting" => 3,
                         "permission_name" => "face-attendance",
+                        "status" => "Active",
+                    ],
+                    [
+                        "name" => "Salary Sheet",
+                        "icon" => "file-text",
+                        "route" => "backend.staffattendance.salary-sheet",
+                        "description" => null,
+                        "sorting" => 4,
+                        "permission_name" => "salary-sheet",
                         "status" => "Active",
                     ],
                     // [

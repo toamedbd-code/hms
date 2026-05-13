@@ -13,6 +13,7 @@
             padding: 10px 12px;
             margin-bottom: 10px;
         }
+        /* patient PDF header/footer retain normal flow */
         .title { margin: 0; font-size: 22px; letter-spacing: 0.4px; }
         .sub { margin-top: 4px; color: #475569; font-size: 11px; }
         .meta { width: 100%; border-collapse: collapse; margin-top: 8px; }
@@ -103,23 +104,39 @@
                 'creatinine' => 'Renal Function', 'ক্রিটিনাইন' => 'Renal Function', 'urea' => 'Renal Function', 'bun' => 'Renal Function',
                 'rbs' => 'Glucose', 'hba1c' => 'Glucose', 'a1c' => 'Glucose', 'glucose' => 'Glucose', 'সুগার' => 'Glucose', 'শর্করা' => 'Glucose',
                 'cholesterol' => 'Lipid Profile', 'hdl' => 'Lipid Profile', 'ldl' => 'Lipid Profile', 'triglyceride' => 'Lipid Profile', 'ট্রাইগ্লিসারাইড' => 'Lipid Profile', 'লিপিড' => 'Lipid Profile',
+                // Thyroid tokens
+                'tsh' => 'Thyroid Function', 't3' => 'Thyroid Function', 't4' => 'Thyroid Function', 'ft3' => 'Thyroid Function', 'ft4' => 'Thyroid Function', 'thyroid' => 'Thyroid Function', 'thyroxine' => 'Thyroid Function',
+                // FSH variants (fertility)
+                'fsh' => 'Fertility Function', 'এফএসএইচ' => 'Fertility Function', 'এফ এস এইচ' => 'Fertility Function',
             ];
 
-            foreach ($explicit as $token => $lbl) {
-                try {
-                    if (mb_stripos($t, $token) !== false) return $lbl;
-                } catch (\\Throwable $_) {
+                    foreach ($explicit as $token => $lbl) {
+                        try {
+                            if (mb_stripos($t, $token) !== false) return $lbl;
+                        } catch (\Throwable $_) {
+                        }
+                    }
+
+                    foreach ($map as $label => $pattern) {
+                        try {
+                            if (@preg_match($pattern, $t) === 1) return $label;
+                        } catch (\Throwable $_) {
+                        }
+                    }
+
+            // Fallback synthesize label from text so each test has a function name
+            try {
+                if ($t !== '' && preg_match_all('/[\p{L}\p{N}]{2,}/u', $t, $m) && !empty($m[0])) {
+                    usort($m[0], function ($a, $b) { return mb_strlen($b) <=> mb_strlen($a); });
+                    $tok = $m[0][0];
+                    $gen = (mb_strtoupper($tok, 'UTF-8') === $tok) ? $tok : mb_convert_case($tok, MB_CASE_TITLE, 'UTF-8');
+                    return $gen;
                 }
+            } catch (\Throwable $_) {
+                // ignore
             }
 
-            foreach ($map as $label => $pattern) {
-                try {
-                    if (@preg_match($pattern, $t) === 1) return $label;
-                } catch (\\Throwable $_) {
-                }
-            }
-
-            return '';
+            return 'Misc Tests';
         };
 
         $grouped = $all->groupBy(function ($it) use ($inferCategory) {
