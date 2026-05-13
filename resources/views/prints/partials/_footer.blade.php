@@ -232,6 +232,15 @@
         /* On print, make footer stick to bottom of each printed page and ensure image + content are visible */
         html, body { margin: 0 !important; padding: 0 !important; height: auto !important; overflow: visible !important; }
 
+        /* Prevent transformed ancestors from changing fixed positioning context.
+           Some templates apply `transform`/`translateZ` which makes `position: fixed`
+           behave like `position: absolute` relative to that ancestor. Clear them. */
+        html, body, .invoice-container, .sheet, .page, .container, .card {
+            transform: none !important;
+            -webkit-transform: none !important;
+            -ms-transform: none !important;
+        }
+
         .footer-wrapper {
             position: fixed !important;
             left: 0 !important;
@@ -241,29 +250,38 @@
             overflow: visible !important;
             z-index: 9999 !important;
             background: transparent !important;
+            /* ensure the footer is rendered in the viewport stacking context */
+            transform: none !important;
+            -webkit-transform: none !important;
         }
 
-        /* Put the image inside an absolute area anchored to footer bottom */
+        /* Put the image inside an absolute area anchored to footer bottom.
+           Ensure image sits under the content (lower z-index) and is decorative only. */
         .footer-image-area {
             position: absolute !important;
             left: 0 !important;
             right: 0 !important;
             bottom: 0 !important;
             height: 100% !important;
-            z-index: 1 !important;
+            z-index: 0 !important; /* keep image below content */
             overflow: visible !important;
         }
 
         .footer-wrapper .footer-image-area img.footer-image,
         .footer-image {
+            position: absolute !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
             display: block !important;
             width: 100% !important;
             height: 100% !important;
-            object-fit: contain !important;
+            object-fit: cover !important;
             object-position: center bottom !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-            z-index: 1 !important;
+            z-index: 0 !important;
+            pointer-events: none !important;
         }
 
         /* Footer content in print: by default overlay centered inside image.
@@ -275,8 +293,8 @@
             right: 0 !important;
             top: 0 !important;
             bottom: 0 !important;
-            z-index: 10000 !important;
-            pointer-events: none !important;
+            z-index: 100000 !important; /* ensure content always sits above image */
+            pointer-events: auto !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important; /* center horizontally */
@@ -295,8 +313,8 @@
            and render as a single-line row with left/right alignment. */
         .footer-content-area.above {
             top: auto !important;
-            /* move content down by ~5mm relative to previous placement so it sits closer to image */
-            bottom: calc(100% - 5mm) !important;
+            /* move content above the footer image so it is never covered */
+            bottom: calc(var(--report-footer-height) - 10mm) !important;
             justify-content: space-between !important;
             padding: 4px 6mm !important;
         }
@@ -338,6 +356,9 @@
             padding-bottom: calc(var(--report-footer-height) + 12mm) !important;
             overflow: visible !important;
         }
+
+        /* Ensure the placeholder is present when blade falls back to it */
+        .footer-placeholder { display: block !important; visibility: visible !important; height: var(--report-footer-height) !important; }
 
         /* Avoid parent containers hiding overflow during print */
         html *, body *, .content-section, .page, .sheet, .container { overflow: visible !important; }

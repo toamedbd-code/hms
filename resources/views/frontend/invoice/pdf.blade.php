@@ -6,35 +6,8 @@
     <title>Billing Invoice</title>
     <style>
         @php
-            // Determine whether to show header/footer; prefer controller-provided variable
-            $__inv_show = isset($showHeaderFooter) ? (bool) $showHeaderFooter : (isset($show_header_footer) ? (bool) $show_header_footer : null);
-            if ($__inv_show === null) {
-                $__ws = function_exists('get_cached_web_setting') ? get_cached_web_setting() : null;
-                $__attendance = is_array($__ws?->attendance_device_options) ? $__ws->attendance_device_options : (is_string($__ws?->attendance_device_options) && trim($__ws?->attendance_device_options) !== '' ? json_decode($__ws?->attendance_device_options, true) : []);
-                $__reporting = is_array($__attendance) ? data_get($__attendance, 'reporting', []) : [];
-                $__settingShowHeader = array_key_exists('show_header', $__reporting) ? (bool) $__reporting['show_header'] : null;
-                $__settingShowFooter = array_key_exists('show_footer', $__reporting) ? (bool) $__reporting['show_footer'] : null;
-                if ($__settingShowHeader !== null || $__settingShowFooter !== null) {
-                    $__inv_show = ($__settingShowHeader ?? true) && ($__settingShowFooter ?? true);
-                } else {
-                    $__inv_show = array_key_exists('show_header_footer', $__reporting) ? (bool) $__reporting['show_header_footer'] : true;
-                }
-                $__layout = data_get($__reporting, 'layout', []);
-            } else {
-                $__layout = [];
-            }
-
-            // Prefer reporting layout heights if controller passed them, otherwise fall back to template vars
-            $__inv_reportHeaderH = isset($reportHeaderHeight) ? (int) $reportHeaderHeight : null;
-            $__inv_reportFooterH = isset($reportFooterHeight) ? (int) $reportFooterHeight : null;
-
-            $__inv_header_h = $__inv_reportHeaderH ?? (int) ($header_height ?? ($__layout['header_height'] ?? 115));
-            $__inv_footer_h = $__inv_reportFooterH ?? (int) ($footer_height ?? ($__layout['footer_height'] ?? 70));
-
-            if (! $__inv_show) {
-                $__inv_header_h = 0;
-                $__inv_footer_h = 0;
-            }
+            $__inv_header_h = (int) ($header_height ?? 115);
+            $__inv_footer_h = (int) ($footer_height ?? 70);
         @endphp
         * {
             margin: 0;
@@ -191,40 +164,6 @@
             overflow-wrap: break-word;
         }
 
-        /* IPD-style info table (match IPD invoice alignment) */
-        .info-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 10px;
-        }
-
-        .info-table td {
-            padding: 2px 0;
-            vertical-align: top;
-        }
-
-        .info-table .label {
-            font-weight: bold;
-            width: 18%;
-            white-space: nowrap;
-        }
-
-        .info-table .colon {
-            width: 2%;
-            text-align: center;
-        }
-
-        .info-table .value {
-            width: 30%;
-        }
-
-        .info-table .refd-by-value {
-            width: auto;
-            white-space: normal;
-            overflow-wrap: break-word;
-            word-break: break-word;
-        }
-
         /* Items table */
         .items-table {
             width: 100%;
@@ -357,17 +296,59 @@
             margin-top: 8px;
         }
 
-        /* Legacy invoice footer CSS renamed to avoid clashing with shared footer partial
-           The actual footer is rendered by prints.partials._footer (uses .footer-wrapper etc.). */
-        .invoice-legacy-footer-section { }
+        /* Footer Section (static like report print) */
+        .footer-section {
+            position: fixed; /* keep footer image fixed at bottom */
+            bottom: 0;
+            left: 0;
+            right: 0;
+            width: 100%;
+            text-align: center;
+            padding-bottom: 0px;
+            min-height: {{ $__inv_footer_h }}px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            z-index: 10;
+        }
 
-        .invoice-legacy-footer-placeholder { display: none; }
+        .footer-placeholder {
+            width: 100%;
+            height: {{ $__inv_footer_h }}px;
+            visibility: hidden;
+        }
 
-        .invoice-legacy-footer-image { display: none; }
+        .footer-image {
+            width: 100%;
+            height: auto;
+            max-height: {{ $__inv_footer_h + 10 }}px;
+            object-fit: contain;
+        }
 
-        .invoice-legacy-footer-content { display: none; }
+        .footer-content {
+            /* position relative so it sits above the footer image inside the footer area */
+            position: relative;
+            left: 0;
+            right: 0;
+            margin: 0 auto;
+            font-size: 14px;
+            text-align: center;
+            padding: 6px 20px 0;
+            width: 100%;
+            z-index: 60;
+            background: transparent;
+        }
 
-        .invoice-legacy-footer-date-time { display: none; }
+        .footer-date-time {
+            font-size: 14px;
+            text-align: left;
+            margin-top: 4px;
+            color: #000000ff;
+            width: 100%;
+            padding: 0 20px;
+            margin-bottom: 5px;
+        }
 
         /* Print specific styles */
         @media print {
@@ -541,15 +522,14 @@
 
 <body>
     <div class="invoice-container">
-        {{-- Use shared header partial for consistent header across prints --}}
-        @includeIf('prints.partials._header', [
-            'header_image' => $header_image ?? null,
-            'headerHeight' => $__inv_header_h,
-            'footerHeight' => $__inv_footer_h,
-            'printed_at' => $invoiceDateTime ?? ($printed_at ?? null),
-            'showHeaderFooter' => $__inv_show,
-            'allowInvoiceDesignFallback' => false,
-        ])
+        <!-- Header Section -->
+        <div class="header-section">
+            @if($header_image)
+            <img src="{{ $header_image }}" alt="Header" class="header-image">
+            @else
+            <div class="header-placeholder"></div>
+            @endif
+        </div>
 
         <div class="content-section">
             <table class="title-section-table">
@@ -566,56 +546,38 @@
                 </tr>
             </table>
 
-            <!-- Patient / IPD Details Section (aligned like IPD invoice) -->
-            @if(!empty($ipd_id))
-            <table class="info-table">
+            <!-- Patient Details Section -->
+            <table class="patient-details-table" style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
                 <tr>
-                    <td class="label">Bill No</td><td class="colon">:</td><td class="value">{{ $bill_number }}</td>
-                    <td class="label">Date & Time</td><td class="colon">:</td><td class="value">{{ $invoiceDateTime ?? '' }}</td>
+                    <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Bill No</td>
+                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
+                    <td style="width: 28%; vertical-align: top; padding: 2px 0;">{{ $bill_number }}</td>
+                    <td style="width: 20%; vertical-align: top; padding: 2px 0; font-weight: bold;">Date & Time</td>
+                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
+                    <td style="width: 28%; vertical-align: top; padding: 2px 0;">{{ $invoiceDateTime }}</td>
                 </tr>
                 <tr>
-                    <td class="label">IPD ID</td><td class="colon">:</td><td class="value">{{ $ipd_id }}</td>
-                    <td class="label">Case</td><td class="colon">:</td><td class="value">{{ $case ?? '' }}</td>
+                    <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Name</td>
+                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
+                    <td style="width: 28%; vertical-align: top; padding: 2px 0;">{{ $patient_name }}</td>
+                    <td style="width: 20%; vertical-align: top; padding: 2px 0; font-weight: bold;">Age</td>
+                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
+                    <td style="width: 28%; vertical-align: top; padding: 2px 0;">{{ $age }}</td>
                 </tr>
                 <tr>
-                    <td class="label">Patient Name</td><td class="colon">:</td><td class="value">{{ $patient_name }}</td>
-                    <td class="label">Age</td><td class="colon">:</td><td class="value">{{ $age }}</td>
+                    <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Contact No</td>
+                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
+                    <td style="width: 28%; vertical-align: top; padding: 2px 0;">{{ $contact_no }}</td>
+                    <td style="width: 20%; vertical-align: top; padding: 2px 0; font-weight: bold;">Gender</td>
+                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
+                    <td style="width: 28%; vertical-align: top; padding: 2px 0;">{{ $gender }}</td>
                 </tr>
                 <tr>
-                    <td class="label">Gender</td><td class="colon">:</td><td class="value">{{ $gender }}</td>
-                    <td class="label">Phone</td><td class="colon">:</td><td class="value">{{ $contact_no }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Bed</td><td class="colon">:</td><td class="value">{{ $bed ?? '' }}</td>
-                    <td class="label">Admission</td><td class="colon">:</td><td class="value">{{ $admission ?? '' }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Bed Group</td><td class="colon">:</td><td class="value">{{ $bed_group ?? '' }}</td>
-                    <td class="label">Discharge</td><td class="colon">:</td><td class="value">{{ $discharge ?? '' }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Consultant</td><td class="colon">:</td><td class="value" colspan="4">{{ $consultant ?? $refd_by ?? '' }}</td>
-                </tr>
-            </table>
-            @else
-            <table class="info-table">
-                <tr>
-                    <td class="label">Bill No</td><td class="colon">:</td><td class="value">{{ $bill_number }}</td>
-                    <td class="label">Date & Time</td><td class="colon">:</td><td class="value">{{ $invoiceDateTime }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Name</td><td class="colon">:</td><td class="value">{{ $patient_name }}</td>
-                    <td class="label">Age</td><td class="colon">:</td><td class="value">{{ $age }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Contact No</td><td class="colon">:</td><td class="value">{{ $contact_no }}</td>
-                    <td class="label">Gender</td><td class="colon">:</td><td class="value">{{ $gender }}</td>
-                </tr>
-                <tr>
-                    <td class="label">Refd. By</td><td class="colon">:</td><td class="value refd-by-value" colspan="4">{{ $refd_by }}</td>
+                    <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Refd. By</td>
+                    <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
+                    <td colspan="4" style="width: 78%; vertical-align: top; padding: 2px 0;">{{ $refd_by }}</td>
                 </tr>
             </table>
-            @endif
 
             <!-- NEW: Full line for Refd. By -->
             <!-- <div class="full-line-detail-row">
@@ -692,19 +654,10 @@ $portalLoginUrl = $portalToken !== ''
 $portalQrCode = $portalLoginUrl !== ''
     ? 'data:image/png;base64,' . (new \Milon\Barcode\DNS2D())->getBarcodePNG($portalLoginUrl, 'QRCODE', 5, 5)
     : '';
-// Compute Medicine and Laboratory subtotals if bill items provide category
-$billItemsCollection = collect($bill_items ?? []);
-$medicineTotal = $billItemsCollection->filter(function($it){
-    return strtolower(trim($it->category ?? '')) === 'medicine';
-})->sum('total_amount');
-$labTotal = $billItemsCollection->filter(function($it){
-    $c = strtolower(trim($it->category ?? ''));
-    return in_array($c, ['pathology','radiology']);
-})->sum('total_amount');
 @endphp
 
 
-@if (!isset($ipd_id) && $delivery_date)
+@if ($delivery_date)
 <div class="delivery-date">
     Delivery Date & Time:
     {{ Carbon::parse($delivery_date)->format('d-M-Y, h:i A') }}
@@ -757,20 +710,6 @@ $labTotal = $billItemsCollection->filter(function($it){
 <strong>{{ number_format($total_amount, 2) }}</strong>
 </td>
 </tr>
-
-@if(($module ?? '') === 'ipd' && (float) ($medicineTotal ?? 0) > 0)
-<tr>
-<td class="label-col">Medicine Bill</td>
-<td class="amount-col">{{ number_format($medicineTotal, 2) }}</td>
-</tr>
-@endif
-
-@if((isset($ipd_id) && (float) ($labTotal ?? 0) > 0))
-<tr>
-<td class="label-col">Laboratory Bill</td>
-<td class="amount-col">{{ number_format($labTotal, 2) }}</td>
-</tr>
-@endif
 
 <tr>
 <td class="label-col">Vat Tk.</td>
@@ -878,14 +817,45 @@ Discount ({{ number_format($discount, 2) }}%)
   {{ $amount_in_words }}
 </div>
 
-        @includeIf('prints.partials._footer', [
-            'footer_image' => $footer_image ?? null,
-            'footer_content' => $footer_content ?? null,
-            'footer_content_position' => $footer_content_position ?? 'above',
-            'footerHeight' => $__inv_footer_h,
-            'showHeaderFooter' => $__inv_show,
-            'allowInvoiceDesignFallback' => false,
-        ])
+        <!-- Footer Section -->
+        <div class="footer-section">
+            @php
+                $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
+                $footerPrintedAt = trim((string) ($printed_at ?? ''));
+            @endphp
+
+            @if(!empty($footer_image))
+                @if(!empty($footer_content))
+                    <div class="footer-content" style="position:relative; z-index:11;">{!! $footer_content !!}</div>
+                @endif
+
+                @if($footerFallbackLine !== '' || $footerPrintedAt !== '')
+                <div class="footer-date-time">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="text-align: left; padding-right: 12px;">
+                                    {{ $footerFallbackLine }}
+                            </td>
+                            <td style="text-align: right; white-space: nowrap; padding-right: 40px;">
+                                @if($footerPrintedAt !== '')
+                                    Printing Date: {{ $footerPrintedAt }}
+                                @endif
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                @endif
+
+                <img src="{{ $footer_image }}" alt="Footer" class="footer-image">
+            @else
+                <div class="footer-placeholder"></div>
+                @if(!empty($footer_content))
+                    <div class="footer-content">{!! $footer_content !!}</div>
+                @elseif($footerFallbackLine !== '')
+                    <div class="footer-content">{{ $footerFallbackLine }}@if(!empty($footerPrintedAt)) , Printing Date: {{ $footerPrintedAt }}@endif</div>
+                @endif
+            @endif
+        </div>
     </div>
 </body>
 </html>
