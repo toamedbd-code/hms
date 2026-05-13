@@ -99,8 +99,9 @@
         /* NOTE: reserve space for footer only when printing. Do not affect normal screen layout. */
 
     .footer-wrapper {
-        /* Keep footer anchored to bottom for invoice previews and print. */
-        position: fixed;
+        /* Default: keep footer in normal flow on screen so it doesn't overlay content.
+           Print-specific rules (below) will switch to fixed positioning for page bottoms. */
+        position: relative;
         left: 0;
         right: 0;
         bottom: 0;
