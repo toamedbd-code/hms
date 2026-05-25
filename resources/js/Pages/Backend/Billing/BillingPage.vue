@@ -1245,6 +1245,93 @@ const commissionBreakdown = computed(() => {
   return breakdown;
 });
 
+// Normalize hospitalCharges to ensure `module` is readable and comparable
+const normalizedHospitalCharges = computed(() => {
+  // Prefer Inertia page props (server-provided) first, then component props
+  const inertiaProps = page?.props ?? {};
+  const sourceCharges = Array.isArray(inertiaProps.itemCharges) && inertiaProps.itemCharges.length > 0
+    ? inertiaProps.itemCharges
+    : (Array.isArray(inertiaProps.charges) && inertiaProps.charges.length > 0
+      ? inertiaProps.charges
+      : (Array.isArray(inertiaProps.hospitalCharges) && inertiaProps.hospitalCharges.length > 0
+        ? inertiaProps.hospitalCharges
+        : (Array.isArray(props.itemCharges) && props.itemCharges.length > 0 ? props.itemCharges : (Array.isArray(props.charges) && props.charges.length > 0 ? props.charges : (Array.isArray(props.hospitalCharges) ? props.hospitalCharges : [])))));
+
+  if (!Array.isArray(sourceCharges)) return [];
+
+  // Expand possible module representations (string, JSON string, array, comma-separated)
+  const out = [];
+  try {
+    sourceCharges.forEach((charge) => {
+      let raw = '';
+      if (charge.module) raw = charge.module;
+      else if (charge.chargeType && (charge.chargeType.modules || charge.chargeType.module)) raw = charge.chargeType.modules ?? charge.chargeType.module;
+
+      let modulesArr = [];
+      if (Array.isArray(raw)) {
+        modulesArr = raw;
+      } else if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (trimmed === '') modulesArr = [];
+        else {
+          // try JSON parse
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) modulesArr = parsed;
+            else modulesArr = [String(parsed)];
+          } catch (e) {
+            // not JSON: split by comma
+            modulesArr = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+          }
+        }
+      }
+
+      // If still empty, but charge has module-like values elsewhere, fallback
+      if (modulesArr.length === 0 && charge.module) modulesArr = [String(charge.module).trim()];
+
+      modulesArr.forEach((m) => {
+        out.push({
+          id: charge.id,
+          name: charge.name,
+          module: String(m ?? '').trim(),
+          amount: charge.amount ?? charge.standard_charge ?? 0,
+          type: charge.type ?? 'charge',
+        });
+      });
+    });
+  } catch (e) {
+    // fallback: map original structure
+    return props.hospitalCharges.map((charge) => ({
+      id: charge.id,
+      name: charge.name,
+      module: String(charge.module ?? '').trim(),
+      amount: charge.amount ?? charge.standard_charge ?? 0,
+    }));
+  }
+
+  return out;
+});
+
+// Debugging helper: log hospitalCharges and normalized entries when category changes
+watch(() => itemForm.value.category, (cat) => {
+  try {
+    console.log('[BillingPage] selected category ->', cat);
+    console.log('[BillingPage] props.hospitalCharges (raw) ->', props.hospitalCharges);
+    try {
+      console.log('[BillingPage] props.hospitalCharges (spread) ->', [...props.hospitalCharges]);
+      console.log('[BillingPage] props.hospitalCharges (stringified) ->', JSON.stringify([...props.hospitalCharges]));
+    } catch (e) {
+      console.warn('[BillingPage] could not stringify/spread props.hospitalCharges', e);
+    }
+    console.log('[BillingPage] normalizedHospitalCharges ->', normalizedHospitalCharges.value);
+    const selectedCategory = String(cat ?? '').toLowerCase();
+    const matches = normalizedHospitalCharges.value.filter(c => String(c.module ?? '').toLowerCase() === selectedCategory);
+    console.log('[BillingPage] charges matching selected category ->', matches);
+  } catch (e) {
+    console.error('[BillingPage] debug logging error', e);
+  }
+});
+
 const allAvailableItems = computed(() => {
   const tests = props.pathologyAndRadiologyTests.map((test) => ({
     id: test.id,
@@ -1265,7 +1352,7 @@ const allAvailableItems = computed(() => {
       type: "medicine",
     }));
 
-  const hospitalCharges = props.hospitalCharges.map((charge) => ({
+  const hospitalCharges = normalizedHospitalCharges.value.map((charge) => ({
     id: charge.id,
     name: charge.name,
     category: charge.module,
@@ -1288,14 +1375,43 @@ const deliveryDateFormatted = computed(() => {
 });
 
 const filteredItems = computed(() => {
-  const query = searchQuery.value.toLowerCase();
-  let itemsToFilter = [];
+  const query = String(searchQuery.value ?? '').toLowerCase();
 
+  // If there is a query, always search across all items (ignore category filter)
+  if (query) {
+    const matches = allAvailableItems.value.filter((item) => item.name && item.name.toLowerCase().includes(query));
+
+    const priority = { medicine: 1, test: 2, charge: 3 };
+
+    matches.sort((a, b) => {
+      const pa = priority[a.type] || 99;
+      const pb = priority[b.type] || 99;
+      if (pa !== pb) return pa - pb;
+      const ia = (a.name || '').toLowerCase().indexOf(query);
+      const ib = (b.name || '').toLowerCase().indexOf(query);
+      if (ia !== ib) return ia - ib;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+    // Deduplicate by normalized name + category to avoid double suggestions
+    const seen = new Map();
+    const unique = [];
+    for (const it of matches) {
+      const key = `${String(it.name||'').trim().toLowerCase()}::${String(it.category||'').trim().toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.set(key, true);
+        unique.push(it);
+      }
+    }
+    return unique;
+  }
+
+  // No query: filter by selected category (if any) or return all
   if (itemForm.value.category) {
     const selectedCategory = itemForm.value.category.toLowerCase();
 
     if (selectedCategory === "medicine") {
-      itemsToFilter = props.medicineInventories
+      const list = props.medicineInventories
         .filter((medicine) => medicine.status === "Active")
         .map((medicine) => ({
           id: medicine.id,
@@ -1305,9 +1421,15 @@ const filteredItems = computed(() => {
           stock: medicine.medicine_quantity,
           type: "medicine",
         }));
+      // dedupe
+      const seen = new Map();
+      return list.filter(it => {
+        const key = `${String(it.name||'').trim().toLowerCase()}::${String(it.category||'').trim().toLowerCase()}`;
+        if (seen.has(key)) return false; seen.set(key, true); return true;
+      });
     } else if (["opd", "ipd", "appointment"].includes(selectedCategory)) {
-      itemsToFilter = props.hospitalCharges
-        .filter((charge) => charge.module.toLowerCase() === selectedCategory)
+      const list = normalizedHospitalCharges.value
+        .filter((charge) => String(charge.module ?? '').toLowerCase() === selectedCategory)
         .map((charge) => ({
           id: charge.id,
           name: charge.name,
@@ -1315,12 +1437,14 @@ const filteredItems = computed(() => {
           unitPrice: charge.amount,
           type: "charge",
         }));
+      const seen = new Map();
+      return list.filter(it => {
+        const key = `${String(it.name||'').trim().toLowerCase()}::${String(it.category||'').trim().toLowerCase()}`;
+        if (seen.has(key)) return false; seen.set(key, true); return true;
+      });
     } else {
-      itemsToFilter = props.pathologyAndRadiologyTests
-        .filter(
-          (test) =>
-            test.category_type.toLowerCase() === itemForm.value.category.toLowerCase()
-        )
+      const list = props.pathologyAndRadiologyTests
+        .filter((test) => String(test.category_type ?? '').toLowerCase() === itemForm.value.category.toLowerCase())
         .map((test) => ({
           id: test.id,
           name: test.test_name,
@@ -1328,16 +1452,26 @@ const filteredItems = computed(() => {
           unitPrice: test.amount,
           type: "test",
         }));
+      const seen = new Map();
+      return list.filter(it => {
+        const key = `${String(it.name||'').trim().toLowerCase()}::${String(it.category||'').trim().toLowerCase()}`;
+        if (seen.has(key)) return false; seen.set(key, true); return true;
+      });
     }
-  } else {
-    itemsToFilter = allAvailableItems.value;
   }
 
-  if (query) {
-    return itemsToFilter.filter((item) => item.name.toLowerCase().includes(query));
-  } else {
-    return itemsToFilter;
+  // No category and no query: return de-duplicated master list
+  const base = allAvailableItems.value || [];
+  const seen = new Map();
+  const unique = [];
+  for (const it of base) {
+    const key = `${String(it.name||'').trim().toLowerCase()}::${String(it.category||'').trim().toLowerCase()}`;
+    if (!seen.has(key)) {
+      seen.set(key, true);
+      unique.push(it);
+    }
   }
+  return unique;
 });
 
 const addItem = () => {
@@ -1391,6 +1525,8 @@ const addItem = () => {
     }
   }
 
+  const prevCategory = itemForm.value.category;
+
   items.value.push({
     id: itemForm.value.itemId,
     name: itemForm.value.itemName,
@@ -1403,14 +1539,22 @@ const addItem = () => {
     netAmount: parseFloat(itemForm.value.totalAmount),
   });
 
+  // Preserve the selected category so user can keep adding items of same category
   itemForm.value = {
-    category: "",
+    category: prevCategory,
     itemName: "",
     itemId: null,
     unitPrice: 0,
     quantity: 1,
     totalAmount: 0,
   };
+
+  // Ensure category select DOM reflects preserved category
+  try {
+    setCategory(prevCategory);
+  } catch (e) {
+    // ignore
+  }
 
   updateSummary();
 
@@ -1691,12 +1835,13 @@ const updateSummary = () => {
 };
 
 const selectItem = (item) => {
-  itemForm.value.category = item.category;
+  setCategory(item.category);
   itemForm.value.itemName = item.name;
   searchQuery.value = item.name;
   itemForm.value.itemId = item.id;
   itemForm.value.unitPrice = parseFloat(item.unitPrice);
 
+  // default quantity for selected items
   if (!itemForm.value.quantity || itemForm.value.quantity <= 0) {
     itemForm.value.quantity = 1;
   }
@@ -1707,6 +1852,16 @@ const selectItem = (item) => {
 
   searchQuery.value = "";
   selectedIndex.value = -1;
+
+  // If this is a charge (hospital charge like OPD/IPD/Appointment), auto-add to cart
+  if (item.type === 'charge') {
+    // ensure category select updates in DOM before adding
+    nextTick(() => {
+      addItem();
+    });
+    return;
+  }
+
   nextTick(() => {
     quantityInput.value.focus();
     quantityInput.value.select();
@@ -1746,13 +1901,103 @@ const handleKeyDown = (event, fieldName) => {
 const handleItemInput = (event) => {
   searchQuery.value = event.target.value;
   selectedIndex.value = -1;
+  const q = String(searchQuery.value ?? '').trim();
+
+  // If query is empty, ensure category is cleared and don't auto-select
+  if (q === '') {
+    try { setCategory(''); } catch (e) {}
+    selectedIndex.value = -1;
+    return;
+  }
 
   nextTick(() => {
     if (filteredItems.value && filteredItems.value.length > 0) {
       selectedIndex.value = 0;
     }
   });
+
+  // Auto-select category when searching across all items
+  try {
+    if (q.length >= 2 && filteredItems.value && filteredItems.value.length > 0) {
+      // Prefer a non-medicine match so pathology/radiology/IPD get selected
+      const nonMed = filteredItems.value.find(i => String(i.type || '').toLowerCase() !== 'medicine');
+      if (nonMed && nonMed.category) {
+        setCategory(nonMed.category);
+      } else if (filteredItems.value.length === 1) {
+        const top = filteredItems.value[0];
+        if (top && top.category) {
+          setCategory(top.category);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[BillingPage] auto-select category error', e);
+  }
 };
+
+// Normalize category string for selection and display
+const normalizeCategoryForSelect = (cat) => {
+  if (!cat) return cat;
+  const s = String(cat).trim();
+  const low = s.toLowerCase();
+  if (low === 'opd') return 'OPD';
+  if (low === 'ipd') return 'IPD';
+  if (low === 'appointment') return 'Appointment';
+  if (low === 'medicine') return 'Medicine';
+  if (low === 'pathology') return 'Pathology';
+  if (low === 'radiology') return 'Radiology';
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+};
+
+const categorySelect = ref(null);
+
+const setCategory = async (cat) => {
+  try {
+    const normalized = normalizeCategoryForSelect(cat);
+    itemForm.value.category = normalized;
+    await nextTick();
+    if (categorySelect && categorySelect.value) {
+      try {
+        categorySelect.value.value = normalized;
+        categorySelect.value.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (e) {
+        // ignore
+      }
+    }
+  } catch (e) {
+    console.warn('[BillingPage] setCategory error', e);
+  }
+};
+
+// Auto-add single match: when filteredItems reduces to one result,
+// auto-select and add it to cart for non-medicine items.
+watch(filteredItems, (list) => {
+  try {
+    if (!Array.isArray(list)) return;
+    if (list.length !== 1) return;
+
+    const item = list[0];
+
+    // Require either a category selected or a non-empty searchQuery
+    if (!itemForm.value.category && !searchQuery.value.trim()) return;
+
+    // Don't auto-add medicines (need explicit quantity/stock check)
+    if (String(item.type).toLowerCase() === 'medicine') return;
+
+    // Auto-select and add: selectItem will auto-add for 'charge'
+    nextTick(() => {
+      selectItem(item);
+      if (String(item.type).toLowerCase() === 'item' || String(item.type).toLowerCase() === 'test') {
+        // ensure selectItem's DOM updates applied
+        nextTick(() => {
+          addItem();
+        });
+      }
+    });
+  } catch (e) {
+    console.error('[BillingPage] auto-add watcher error', e);
+  }
+}, { deep: false });
 
 const validateNewPatientForm = () => {
   if (!isNewPatient.value) return true;
@@ -2068,15 +2313,81 @@ const saveBill = (backendInvoice = false) => {
     formData.backend_invoice = true;
   }
 
-  // If this is Save & Print flow, open a blank window synchronously
-  // so popup blockers don't prevent the invoice from opening later.
+  // If this is Save & Print flow, open a popup synchronously and POST the
+  // billing form directly into that popup so the server can return the
+  // invoice page immediately (faster UX, avoids XHR roundtrip delay).
   let invoiceWindow = null;
   if (!backendInvoice) {
     try {
+      const popupName = 'invoice_popup_' + Date.now();
       const features = 'noopener,noreferrer,width=1000,height=800,left=200,top=200,resizable,scrollbars';
-      // open a plain new tab (no popup feature string)
-      invoiceWindow = window.open('', '_blank');
+      // Open an explicit about:blank popup with features so it's a fresh window
+      invoiceWindow = window.open('about:blank', popupName, features);
       try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
+
+      // Write a minimal blank document so user doesn't see loading text.
+      try {
+        if (invoiceWindow && invoiceWindow.document) {
+          invoiceWindow.document.open();
+          invoiceWindow.document.write('<!doctype html><html><head><title></title><meta charset="utf-8"></head><body style="margin:0;background:#fff;"></body></html>');
+          invoiceWindow.document.close();
+          try { invoiceWindow.focus(); } catch (e) { /* ignore focus errors */ }
+        }
+      } catch (e) {
+        // ignore cross-origin or write errors
+      }
+
+      // Build and submit a plain HTML form (non-AJAX) targeting the popup so
+      // the server can render the invoice directly into that window.
+      try {
+        const plainForm = document.createElement('form');
+        plainForm.method = 'POST';
+        plainForm.action = route('backend.billing.store');
+        plainForm.target = popupName;
+
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const addInput = (name, value) => {
+          const inp = document.createElement('input');
+          inp.type = 'hidden';
+          inp.name = name;
+          inp.value = value ?? '';
+          plainForm.appendChild(inp);
+        };
+
+        // CSRF + instruct backend to return invoice page
+        addInput('_token', csrfToken);
+        addInput('open_invoice', '1');
+
+        // Flatten formData into inputs. Items need array-style names.
+        Object.entries(formData).forEach(([key, val]) => {
+          if (key === 'items' && Array.isArray(val)) {
+            val.forEach((it, idx) => {
+              Object.entries(it).forEach(([p, v]) => {
+                addInput(`items[${idx}][${p}]`, v == null ? '' : String(v));
+              });
+            });
+            return;
+          }
+
+          if (val === null || val === undefined) {
+            addInput(key, '');
+          } else if (typeof val === 'object') {
+            addInput(key, JSON.stringify(val));
+          } else {
+            addInput(key, String(val));
+          }
+        });
+
+        document.body.appendChild(plainForm);
+        plainForm.submit();
+        document.body.removeChild(plainForm);
+
+        // We submitted the billing as a standard POST into the popup window.
+        // Do not continue with the Inertia/XHR submission to avoid duplicate creation.
+        return;
+      } catch (e) {
+        console.error('Failed to submit billing via popup form:', e);
+      }
     } catch (e) {
       invoiceWindow = null;
     }
@@ -2264,6 +2575,29 @@ onMounted(() => {
   startBillingLiveClock();
   if (!billingDateTouched.value) {
     setCurrentBillingDateTime();
+  }
+
+  // Debug helpers: expose props for console inspection
+  try {
+    const inertiaProps = (page && page.props) ? page.props : {};
+    window.__billing_props = {
+      // prefer page.props which contains all Inertia props
+      itemCharges: inertiaProps.itemCharges ?? props.itemCharges ?? [],
+      charges: inertiaProps.charges ?? props.charges ?? [],
+      hospitalCharges: inertiaProps.hospitalCharges ?? props.hospitalCharges ?? []
+    };
+    console.log('[BillingPage] __billing_props set — use __billing_props.itemCharges / .charges / .hospitalCharges');
+    console.log('[BillingPage] page.props.itemCharges ->', inertiaProps.itemCharges);
+    console.log('[BillingPage] page.props.charges ->', inertiaProps.charges);
+    console.log('[BillingPage] page.props.hospitalCharges (raw) ->', inertiaProps.hospitalCharges);
+    try {
+      console.log('[BillingPage] page.props.hospitalCharges (spread) ->', [...(inertiaProps.hospitalCharges ?? [])]);
+      console.log('[BillingPage] page.props.hospitalCharges (stringified) ->', JSON.stringify(inertiaProps.hospitalCharges ?? []));
+    } catch (e) {
+      console.log('[BillingPage] could not stringify page.props.hospitalCharges', e);
+    }
+  } catch (e) {
+    console.log('[BillingPage] debug setup failed', e);
   }
 });
 
@@ -2531,7 +2865,7 @@ const handleDoctorSearchInput = (event) => {
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-2 items-end">
               <div class="lg:col-span-2">
                 <InputLabel for="category" value="Category" class="text-xs mb-1" />
-                <select v-model="itemForm.category" id="category"
+                <select v-model="itemForm.category" id="category" ref="categorySelect"
                   class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200">
                   <option value="">Select</option>
                   <option value="Pathology">Pathology</option>
@@ -2552,7 +2886,7 @@ const handleDoctorSearchInput = (event) => {
                   <div v-if="searchQuery || (itemForm.category && filteredItems.length > 0)"
                     class="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto dark:bg-slate-700 dark:border-gray-600">
                     <ul>
-                      <li v-for="(item, index) in filteredItems" :key="`${item.type}-${item.category}-${item.id}`" @click="selectItem(item)"
+                      <li v-for="(item, index) in filteredItems" :key="`${item.type}-${item.category}-${item.name}`" @click="selectItem(item)"
                         @keypress.enter="selectItem(item);" :class="['list-focus px-3 py-2 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-600',
                           { 'bg-slate-300 dark:bg-slate-500 text-slate-900 dark:text-white font-semibold': index === selectedIndex }]"
                         :ref="(el) => { if (index === selectedIndex) selectedItemRef = el }">
