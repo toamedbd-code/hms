@@ -53,72 +53,65 @@ const renew = (period = null) => {
             <div class="absolute -bottom-24 left-1/4 h-72 w-72 rounded-full bg-[#e2b95f]/15 blur-3xl"></div>
         </div>
 
-        <div class="relative z-10 mx-auto flex min-h-screen max-w-6xl items-center px-4 py-6 sm:px-6 lg:px-8">
+        <div class="relative z-10 mx-auto flex min-h-screen max-w-6xl items-center px-4 py-12 sm:px-6 lg:px-8">
             <div class="w-full">
-                <div class="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-                    <section class="hidden rounded-[32px] border border-white/20 bg-gradient-to-br from-[#0f3a37] via-[#16524f] to-[#1f5f5b] p-6 text-white shadow-2xl backdrop-blur-xl lg:grid">
-                        <div class="flex h-full flex-col justify-center gap-6">
+                <div class="grid gap-8 items-center lg:grid-cols-2">
+                    <section class="hidden overflow-hidden rounded-2xl bg-gradient-to-br from-[#0f3a37] via-[#16524f] to-[#1f5f5b] p-8 text-white shadow-2xl backdrop-blur-xl lg:flex lg:flex-col lg:justify-center lg:gap-6">
+                        <div class="flex flex-col gap-6">
                             <div>
-                                <span class="inline-flex rounded-full bg-white/15 px-4 py-1 text-xs uppercase tracking-[0.25em]">{{ page.props.loginTexts.banner }}</span>
-                                <h1 class="mt-8 text-5xl font-semibold leading-tight">{{ page.props.loginTexts.title }}</h1>
-                                <p class="mt-6 max-w-md text-base text-white/80">{{ page.props.loginTexts.subtitle }}</p>
+                                <span class="inline-flex rounded-full bg-white/12 px-4 py-1 text-xs uppercase tracking-[0.25em]">{{ page.props.loginTexts.banner }}</span>
+                                <h1 class="mt-6 text-4xl font-extrabold leading-tight">{{ page.props.loginTexts.title }}</h1>
+                                <p class="mt-4 max-w-md text-base text-white/80">{{ page.props.loginTexts.subtitle }}</p>
                             </div>
-
-                            <div class="grid gap-4">
-                                <div class="rounded-3xl bg-white/10 p-5 backdrop-blur-sm border border-white/15">
-                                    <p class="text-sm text-white/70">Smooth workflow</p>
-                                    <p class="mt-3 text-2xl font-semibold">45+</p>
+                            <div class="grid gap-4 grid-cols-1 sm:grid-cols-2">
+                                <div class="rounded-2xl bg-white/10 p-4 backdrop-blur-sm border border-white/10">
+                                    <p class="text-sm text-white/70">Trusted by</p>
+                                    <p class="mt-2 text-xl font-semibold">500+ clinics</p>
                                 </div>
-                                <div class="rounded-3xl bg-white/10 p-5 backdrop-blur-sm border border-white/15">
+                                <div class="rounded-2xl bg-white/10 p-4 backdrop-blur-sm border border-white/10">
                                     <p class="text-sm text-white/70">Uptime</p>
-                                    <p class="mt-3 text-2xl font-semibold">99.9%</p>
-                                </div>
-                                <div class="rounded-3xl bg-white/10 p-5 backdrop-blur-sm border border-white/15">
-                                    <p class="text-sm text-white/70">Support</p>
-                                    <p class="mt-3 text-2xl font-semibold">24/7</p>
+                                    <p class="mt-2 text-xl font-semibold">99.9%</p>
                                 </div>
                             </div>
                         </div>
                     </section>
 
-                    <section class="rounded-[32px] border border-[#dcd7cf] bg-white/95 p-5 shadow-[0_30px_90px_-40px_rgba(20,33,31,0.35)] sm:p-6 lg:p-8 h-full">
-                        <div class="flex h-full flex-col gap-4 justify-between">
+                    <section class="rounded-2xl border border-transparent bg-white p-6 shadow-lg sm:p-8 lg:py-12 lg:px-10">
+                        <div class="mx-auto max-w-md lg:max-w-lg">
                             <div class="text-center lg:text-left">
                                 <p class="text-xs uppercase tracking-[0.25em] text-[#1f5f5b] font-semibold">Secure Sign In</p>
-                                <h2 class="mt-3 text-3xl font-semibold sm:text-4xl">Admin Login</h2>
-                                <p class="mt-3 text-sm text-[#4f5e5b]">Enter your credentials to access the dashboard and renew subscription if required.</p>
+                                <h2 class="mt-3 text-3xl font-extrabold sm:text-4xl">Admin Login</h2>
+                                <p class="mt-3 text-sm text-[#586b67]">Enter your credentials to access the dashboard and renew subscription if required.</p>
                             </div>
 
-                            <div class="space-y-3">
+                            <div class="mt-6 space-y-4">
                                 <div v-if="errorMessage" class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{{ errorMessage }}</div>
                                 <div v-if="successMessage" class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">{{ successMessage }}</div>
                                 <div v-if="warningMessage" class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">{{ warningMessage }}</div>
                             </div>
 
-                            <div v-if="(showSubscriptionRenewal || (subscriptionEnforced && !subscriptionActive)) && bkashEnabled" class="rounded-[20px] border border-slate-200 bg-slate-50 p-4 text-slate-700 shadow-sm">
-                                <div>
-                                    <p class="text-sm font-semibold text-slate-900">Subscription Payment</p>
-                                    <p class="mt-2 text-sm text-slate-600">Renew your access using bKash and continue using the system seamlessly.</p>
+                            <div v-if="(showSubscriptionRenewal || (subscriptionEnforced && !subscriptionActive)) && bkashEnabled" class="mt-6 rounded-2xl border-l-4 border-[#1f5f5b] bg-gradient-to-r from-white to-slate-50 p-4 shadow-sm">
+                                <div class="flex items-start justify-between gap-4">
+                                    <div>
+                                        <p class="text-sm font-semibold text-slate-900">Subscription Payment</p>
+                                        <p class="mt-1 text-sm text-slate-600">Renew your access using bKash to continue using the system.</p>
+                                    </div>
+                                    <div class="text-sm text-slate-500">Auto renew supported</div>
                                 </div>
                                 <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                                    <button
-                                        v-if="bkashMonthlyAmount"
-                                        @click.prevent="renew('monthly')"
-                                        class="rounded-2xl bg-[#1f5f5b] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#174946]"
-                                    >
-                                        Pay Monthly — {{ bkashMonthlyAmount }}
+                                    <button v-if="bkashMonthlyAmount" @click.prevent="renew('monthly')" class="w-full rounded-xl bg-[#1f5f5b] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#174946]">
+                                        Pay Monthly — ৳{{ bkashMonthlyAmount }}
                                     </button>
-                                    <button
-                                        v-if="bkashYearlyAmount"
-                                        @click.prevent="renew('yearly')"
-                                        class="rounded-2xl border border-[#1f5f5b] bg-white px-4 py-3 text-sm font-semibold text-[#1f5f5b] transition hover:bg-[#f5faf8]"
-                                    >
-                                        Pay Yearly — {{ bkashYearlyAmount }}
+                                    <button v-if="bkashYearlyAmount" @click.prevent="renew('yearly')" class="w-full rounded-xl border border-[#1f5f5b] bg-white px-4 py-3 text-sm font-semibold text-[#1f5f5b] transition hover:bg-[#f5faf8]">
+                                        Pay Yearly — ৳{{ bkashYearlyAmount }}
                                     </button>
+                                </div>
+                                <div class="mt-3 text-right">
+                                    <a :href="route('payment.bkash.unsubscribe.public')" class="text-xs text-red-600 hover:underline">Cancel subscription (trial)</a>
                                 </div>
                             </div>
 
-                            <form @submit.prevent="submit" class="space-y-4">
+                            <form @submit.prevent="submit" class="mt-6 space-y-4">
                                 <div>
                                     <label for="email" class="mb-2 block text-sm font-medium text-[#2c3b38]">Email</label>
                                     <input
@@ -159,7 +152,7 @@ const renew = (period = null) => {
                                     </Link>
                                 </div>
 
-                                <button type="submit" :disabled="form.processing" class="group relative w-full overflow-hidden rounded-2xl bg-[#1f5f5b] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#174946] disabled:cursor-not-allowed disabled:opacity-60">
+                                <button type="submit" :disabled="form.processing" class="group relative w-full overflow-hidden rounded-2xl bg-gradient-to-r from-[#1f5f5b] to-[#144d49] px-5 py-3 text-sm font-semibold text-white transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60">
                                     <span class="relative">{{ form.processing ? 'Signing in...' : 'Log In' }}</span>
                                 </button>
                             </form>
