@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Payment;
 
 use App\Http\Controllers\Controller;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\BkashSetting;
@@ -24,10 +26,15 @@ class BkashController extends Controller
             return redirect()->back()->with('errorMessage', 'Payments are disabled by system configuration.');
         }
 
-        if (empty($setting) || ! $setting->is_enabled) {
+        $bkashEnabled = config('payment.enabled') && ($setting ? ($setting->is_enabled ?? false) : true);
+        if (! $bkashEnabled) {
             return redirect()->back()->with('errorMessage', 'bKash payments are not enabled.');
         }
 
+        $subscription = Subscription::getCurrent();
+        if ($subscription && $subscription->expires_at && Carbon::now()->lt($subscription->expires_at)) {
+            return redirect()->back()->with('errorMessage', 'Renewal is available after ' . $subscription->expires_at->toDateString() . '.');
+        }
         if ((float) $amount <= 0) {
             return redirect()->back()->with('errorMessage', 'Invalid amount.');
         }
@@ -37,6 +44,7 @@ class BkashController extends Controller
             'amount' => $amount,
             'payment_method' => 'bkash',
             'status' => 'initiated',
+            'metadata' => ['approval_token' => \Illuminate\Support\Str::random(40)],
         ]);
 
         try {
@@ -83,6 +91,7 @@ class BkashController extends Controller
         $sub->expires_at = now()->addMonth();
         $sub->last_payment_id = $payment->provider_payment_id;
         $sub->save();
+        Subscription::clearCurrentCache();
 
         return redirect()->route('settings.payment.bkash')->with('successMessage', 'Simulated payment applied. Subscription active until ' . $sub->expires_at->toDateString());
     }
@@ -116,8 +125,16 @@ class BkashController extends Controller
             return redirect()->route($loginRoute)->with('errorMessage', 'Payments are disabled by system configuration.');
         }
 
-        if (empty($setting) || ! $setting->is_enabled) {
+        $bkashEnabled = config('payment.enabled') && ($setting ? ($setting->is_enabled ?? false) : true);
+        if (! $bkashEnabled) {
             return redirect()->route($loginRoute)->with('errorMessage', 'bKash payments are not enabled.');
+        }
+
+        // Use DB setting to decide sandbox vs production. Do not force sandbox here.
+
+        $subscription = Subscription::getCurrent();
+        if ($subscription && $subscription->expires_at && now()->lt($subscription->expires_at)) {
+            return redirect()->route($loginRoute)->with('errorMessage', 'Renewal is available after ' . $subscription->expires_at->toDateString() . '.');
         }
 
         if ((float) $amount <= 0) {
@@ -129,11 +146,12 @@ class BkashController extends Controller
             'amount' => $amount,
             'payment_method' => 'bkash',
             'status' => 'initiated',
-            'metadata' => ['period' => $period],
+            'metadata' => array_merge(['period' => $period], ['approval_token' => \Illuminate\Support\Str::random(40)]),
         ]);
 
         try {
-            $result = $service->createCheckout($payment, 'payment.bkash.simulate.approve');
+            // If configured for sandbox, the service will return a simulate page.
+            $result = $service->createPayment($payment);
 
             if (! empty($result['payment_id'])) {
                 $payment->provider_payment_id = $result['payment_id'];
@@ -147,7 +165,7 @@ class BkashController extends Controller
             return redirect()->route($loginRoute)->with('errorMessage', 'No redirect URL returned from bKash service');
         } catch (\Exception $e) {
             $payment->status = 'failed';
-            $payment->metadata = ['error' => $e->getMessage()];
+            $payment->metadata = array_merge($payment->metadata ?? [], ['error' => $e->getMessage()]);
             $payment->save();
 
             return redirect()->route($loginRoute)->with('errorMessage', 'Payment initiation failed: ' . $e->getMessage());
@@ -158,7 +176,7 @@ class BkashController extends Controller
      * Public simulate approval endpoint (sandbox) — marks payment successful and activates subscription,
      * then redirects to login page with success message.
      */
-    public function publicSimulateApprove(Payment $payment)
+    public function publicSimulateApprove(Request $request, Payment $payment)
     {
         $loginRoute = \Illuminate\Support\Facades\Route::has('backend.auth.login2') ? 'backend.auth.login2' : 'auth.login2';
 
@@ -170,18 +188,58 @@ class BkashController extends Controller
             return redirect()->route($loginRoute)->with('successMessage', 'Payment already completed.');
         }
 
+        $token = $request->input('approval_token');
+        $stored = data_get($payment->metadata, 'approval_token');
+        if (! $token || ! $stored || $token !== $stored) {
+            return redirect()->route($loginRoute)->with('errorMessage', 'Invalid or missing approval token.');
+        }
+
         $payment->status = 'success';
         $payment->provider_payment_id = $payment->provider_payment_id ?: ('SIM-' . $payment->id);
+        // remove token to avoid re-use
+        $meta = $payment->metadata ?? [];
+        unset($meta['approval_token']);
+        $payment->metadata = $meta;
         $payment->save();
 
+        $period = $payment->metadata['period'] ?? ($meta['period'] ?? 'monthly');
         $sub = Subscription::ensureExists();
         $sub->is_active = true;
-        $sub->expires_at = now()->addMonth();
+        $sub->expires_at = $period === 'yearly' ? now()->addYear() : now()->addMonth();
         $sub->last_payment_id = $payment->provider_payment_id;
         $sub->save();
+        Subscription::clearCurrentCache();
 
-        $loginRoute = \Illuminate\Support\Facades\Route::has('backend.auth.login2') ? 'backend.auth.login2' : 'auth.login2';
         return redirect()->route($loginRoute)->with('successMessage', 'Simulated payment applied. Subscription active until ' . $sub->expires_at->toDateString());
+    }
+
+    public function publicUnsubscribe(Request $request)
+    {
+        $loginRoute = \Illuminate\Support\Facades\Route::has('backend.auth.login2') ? 'backend.auth.login2' : 'auth.login2';
+        $sub = Subscription::ensureExists();
+
+        $sub->is_active = false;
+        $sub->expires_at = now();
+        $sub->save();
+        Subscription::clearCurrentCache();
+
+        return redirect()->route($loginRoute)->with('successMessage', 'Subscription has been cancelled. You can renew anytime from the login page.');
+    }
+
+    public function publicSimulatePage(Payment $payment)
+    {
+        if (! config('payment.enabled')) {
+            return redirect()->route('backend.auth.login2')->with('errorMessage', 'Payments are disabled by system configuration.');
+        }
+
+        if (! in_array($payment->status, ['initiated', 'pending', null], true)) {
+            return redirect()->route('backend.auth.login2')->with('successMessage', 'This payment has already been processed.');
+        }
+
+        return view('payment.bkash.simulate-public', [
+            'payment' => $payment,
+            'loginRoute' => \Illuminate\Support\Facades\Route::has('backend.auth.login2') ? 'backend.auth.login2' : 'auth.login2',
+        ]);
     }
 
     /**
