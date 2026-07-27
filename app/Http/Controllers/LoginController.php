@@ -60,7 +60,7 @@ class LoginController extends Controller
                     return Inertia::render('Login', [
                         'errorMessage' => 'Subscription inactive. Please renew subscription to log in.',
                         'showSubscriptionRenewal' => true,
-                        'bkashEnabled' => config('payment.enabled') && ($setting->is_enabled ?? false),
+                        'bkashEnabled' => config('payment.enabled') && ($setting ? ($setting->is_enabled ?? false) : true),
                         'bkashMonthlyAmount' => config('subscription.monthly_amount', $setting->monthly_amount ?? 0),
                         'bkashYearlyAmount' => config('subscription.yearly_amount', 0),
                         'subscriptionDefaultPeriod' => config('subscription.default_period', 'monthly'),
@@ -110,7 +110,7 @@ class LoginController extends Controller
         return Inertia::render('Login', [
             'subscriptionEnforced' => $enforce,
             'subscriptionActive' => $active,
-            'bkashEnabled' => config('payment.enabled') && ($setting->is_enabled ?? false),
+            'bkashEnabled' => config('payment.enabled') && ($setting ? ($setting->is_enabled ?? false) : true),
             'bkashMonthlyAmount' => config('subscription.monthly_amount', $setting->monthly_amount ?? 0),
             'bkashYearlyAmount' => config('subscription.yearly_amount', 0),
             'subscriptionDefaultPeriod' => config('subscription.default_period', 'monthly'),
