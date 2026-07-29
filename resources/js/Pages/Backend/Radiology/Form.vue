@@ -89,6 +89,7 @@ const createTestRow = () => ({
     testId: '',
     test_name: '',
     reportDays: '',
+    roomNo: '',
     reportDate: '',
     tax: 0,
     amount: 0,
@@ -131,6 +132,7 @@ onMounted(() => {
             testId: test.testId || '',
             test_name: test.test_name || '',
             reportDays: test.reportDays || '',
+            roomNo: test.room_no || '',
             reportDate: test.reportDate || '',
             tax: parseFloat(test.tax || 0),
             amount: parseFloat(test.amount || 0),
@@ -335,6 +337,7 @@ const handleDropdownClick = (index, selectedTest) => {
     test.testId = selectedTest.id;
     test.test_name = selectedTest.test_name;
     test.reportDays = selectedTest.report_days || 0;
+    test.roomNo = selectedTest.room_no || '';
     test.tax = parseFloat(selectedTest.tax || 0);
     test.amount = parseFloat(selectedTest.amount || selectedTest.standard_charge || 0);
 
@@ -529,6 +532,7 @@ const submit = () => {
         testId: test.testId,
         testName: test.test_name,
         reportDays: test.reportDays || 0,
+        room_no: test.roomNo || '',
         reportDate: test.reportDate,
         tax: test.tax || 0,
         amount: test.amount,
@@ -541,12 +545,40 @@ const submit = () => {
         net_amount: netAmount.value,
     };
 
-    // Open blank tab synchronously to avoid popup blockers when navigating later
+    // Open blank tab synchronously to avoid popup blockers when navigating later and attach print_token
     let invoiceWindow = null;
+    let __pendingInvoiceTimeout = null;
+    let printToken = null;
     try {
-        // open a plain new tab (no popup feature string)
-        invoiceWindow = window.open('', '_blank');
-        try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
+        const token = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'pt_' + Date.now();
+        printToken = token;
+        form.print_token = token;
+
+        // Open the server-side preview page directly instead of writing HTML into
+        // about:blank. This avoids potential rendering/print layout issues.
+        try {
+            const previewUrl = route('backend.download.invoice.preview', { print_token: token, module: 'radiology' });
+            invoiceWindow = window.open(previewUrl, '_blank');
+            try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
+        } catch (e) {
+            // Fallback: prepare preview data for possible client-side usage (not injected)
+            try {
+                const previewData = {
+                    bill_number: 'Draft',
+                    patient_name: form.patient_id?.name || form.patient_id || 'Walk-in Patient',
+                    invoiceDateTime: new Date().toLocaleString(),
+                    bill_items: testRows.value.map((r, idx) => ({ itemName: r.test_name || r.testName, quantity: 1, totalAmount: r.amount || 0 })),
+                    total_amount: netAmount.value || 0,
+                    net_payable: netAmount.value || 0,
+                    due: netAmount.value - (parseFloat(form.payment_amount)||0) || 0,
+                    prepared_by: (usePage().props.authInfo?.admin?.name) || 'Staff',
+                };
+                const checkUrl = route('backend.download.invoice.preview.check', { print_token: 'REPLACE' }).replace('REPLACE', encodeURIComponent(token));
+                const invoiceRouteTemplate = route('backend.download.invoice', { id: 'REPLACE_ID', module: 'radiology' });
+            } catch (innerErr) {
+                // ignore preview generation errors
+            }
+        }
     } catch (e) {
         invoiceWindow = null;
     }
@@ -554,6 +586,7 @@ const submit = () => {
     form.transform(() => ({
         ...formData,
         patient_id: typeof formData.patient_id === 'object' ? formData.patient_id.id : formData.patient_id,
+        print_token: printToken,
     })).post(routeName, {
         onSuccess: (response) => {
             if (props.id) {
@@ -564,13 +597,24 @@ const submit = () => {
                         const successMessage = response?.props?.flash?.successMessage;
                         const billId = response?.props?.flash?.billId;
 
-                        if (billId) {
+                            if (billId) {
                             const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'radiology' });
                             try {
                                     if (invoiceWindow && !invoiceWindow.closed) {
-                                        invoiceWindow.location = invoiceUrl;
+                                        try { invoiceWindow.location = invoiceUrl; invoiceWindow.focus(); } catch (e) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                                        try { if (__pendingInvoiceTimeout) { clearTimeout(__pendingInvoiceTimeout); __pendingInvoiceTimeout = null; } } catch (ct) { /* ignore */ }
+                                        __pendingInvoiceTimeout = setTimeout(() => {
+                                            try {
+                                                if (!invoiceWindow || invoiceWindow.closed) {
+                                                    window.open(invoiceUrl, '_blank');
+                                                } else {
+                                                    try { invoiceWindow.location.href = invoiceUrl; invoiceWindow.focus(); } catch (err) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                                                }
+                                            } catch (err) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                                            __pendingInvoiceTimeout = null;
+                                        }, 800);
                                     } else {
-                                        try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
+                                        window.open(invoiceUrl, '_blank');
                                     }
                             } catch (e) {
                                 try { window.open(invoiceUrl, '_blank', 'noopener,noreferrer'); } catch (ee) { window.open(invoiceUrl, '_blank'); }
@@ -592,7 +636,18 @@ const submit = () => {
                     const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'radiology' });
                     try {
                         if (invoiceWindow && !invoiceWindow.closed) {
-                            invoiceWindow.location = invoiceUrl;
+                            try { invoiceWindow.location = invoiceUrl; invoiceWindow.focus(); } catch (e) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                            try { if (__pendingInvoiceTimeout) { clearTimeout(__pendingInvoiceTimeout); __pendingInvoiceTimeout = null; } } catch (ct) { /* ignore */ }
+                            __pendingInvoiceTimeout = setTimeout(() => {
+                                try {
+                                    if (!invoiceWindow || invoiceWindow.closed) {
+                                        window.open(invoiceUrl, '_blank');
+                                    } else {
+                                        try { invoiceWindow.location.href = invoiceUrl; invoiceWindow.focus(); } catch (err) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                                    }
+                                } catch (err) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                                __pendingInvoiceTimeout = null;
+                            }, 800);
                         } else {
                             try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
                         }
@@ -615,6 +670,14 @@ const formatCurrency = (amount) => {
 };
 
 const goToRadiologyList = () => {
+    router.visit(route('backend.radiology.index'));
+};
+
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
     router.visit(route('backend.radiology.index'));
 };
 </script>
@@ -646,6 +709,15 @@ const goToRadiologyList = () => {
                 </div>
                 <div class="p-2 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button @click="goBack"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gray-500 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gray-600">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                            </svg>
+                            Back
+                        </button>
+
                         <button @click="goToRadiologyList"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-400 to-blue-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-blue-500 hover:to-blue-700 ml-2">
                             <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -672,6 +744,15 @@ const goToRadiologyList = () => {
                                     <span class="text-sm font-medium text-black">Item Name</span>
                                     <span class="text-red-500 ml-1">*</span>
                                 </div>
+
+                                    <div>
+                                        <div class="mb-2">
+                                            <span class="text-sm font-medium text-black">Room No</span>
+                                        </div>
+                                        <input v-model="test.roomNo" type="text"
+                                            class="block w-full px-3 py-2 text-sm border border-gray-300 rounded focus:border-blue-500 focus:outline-none" />
+                                        <InputError class="mt-1" :message="form.errors[`tests.${index}.room_no`]" />
+                                    </div>
                                 <input :id="`testSearch_${index}`" v-model="searchQueries[test.id]"
                                     @input="handleTestSearch(index, $event.target.value)"
                                     @focus="handleTestFocus(index)" @blur="handleTestBlur(index, $event)"

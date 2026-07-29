@@ -114,7 +114,9 @@ class ReportController extends Controller
                 $expenseGrouped = $this->getExpenseDataByDate($dateConditions);
                 $totalExpense = abs((float) $expenseGrouped->sum('amount'));
                 $totalDueCollection = $this->getDueCollectionTotalByDate($dateConditions);
-                $finalIncome = (($opdTotals['paid_amount'] ?? 0) + $totalDueCollection) - $totalExpense;
+                $totalReturnAmount = $this->accountingService->getRefundTotal($dateConditions);
+                $actualDue = $this->getOutstandingDueTotal([], false);
+                $finalIncome = (($opdTotals['paid_amount'] ?? 0) + $totalDueCollection) - $totalReturnAmount - $totalExpense;
 
                 $data = [
                     'title' => $this->getReportTitle($selectedModule),
@@ -128,9 +130,10 @@ class ReportController extends Controller
                         'net_amount' => $opdTotals['net_amount'] ?? 0,
                         'paid_amount' => $opdTotals['paid_amount'] ?? 0,
                         'due_amount' => $opdTotals['due_amount'] ?? 0,
-                        'actual_due' => $opdTotals['actual_due'] ?? 0,
+                        'actual_due' => $actualDue,
                         'due_collection' => $totalDueCollection,
                         'total_expense' => $totalExpense,
+                        'total_return_amount' => $totalReturnAmount,
                         'final_income' => $finalIncome,
                     ],
                     'billRows' => collect(),
@@ -381,6 +384,7 @@ class ReportController extends Controller
                     'total_records' => $moduleReportData['total'] ?? 0,
                     'total_revenue' => $moduleReportData['revenue'] ?? 0,
                     'average_revenue' => $moduleReportData['average'] ?? 0,
+                    'total_return_amount' => 0,
                 ],
                 'billRows' => collect(),
                 'billTotals' => [],
@@ -532,7 +536,10 @@ class ReportController extends Controller
 
     private function applyDateFilter($query, $dateConditions, $dateField = 'created_at')
     {
-        if (isset($dateConditions['single_date'])) {
+        if (isset($dateConditions['single_date_range']) && is_array($dateConditions['single_date_range']) && count($dateConditions['single_date_range']) === 2) {
+            [$start, $end] = $dateConditions['single_date_range'];
+            $query->whereBetween($dateField, [$start, $end]);
+        } elseif (isset($dateConditions['single_date'])) {
             $query->whereDate($dateField, $dateConditions['single_date']->toDateString());
         } elseif (isset($dateConditions['date_from']) && isset($dateConditions['date_to'])) {
             $query->where(function ($q) use ($dateField, $dateConditions) {
@@ -548,9 +555,9 @@ class ReportController extends Controller
         return $query;
     }
 
-    private function getOutstandingDueTotal(array $dateConditions): float
+    private function getOutstandingDueTotal(array $dateConditions, bool $filterByDate = true): float
     {
-        if (empty($dateConditions)) {
+        if ($filterByDate && empty($dateConditions)) {
             $dateConditions['single_date'] = Carbon::today();
         }
 
@@ -564,33 +571,35 @@ class ReportController extends Controller
             })
             ->where('balance_amount', '>', 0);
 
-        $this->applyDateFilter($billingQuery, $dateConditions, 'created_at');
+        if ($filterByDate) {
+            $this->applyDateFilter($billingQuery, $dateConditions, 'created_at');
 
-        if (isset($dateConditions['single_date'])) {
-            $opdQuery->where(function ($q) use ($dateConditions) {
-                $targetDate = $dateConditions['single_date']->toDateString();
-                $q->whereDate('appointment_date', $targetDate)
-                    ->orWhereDate('created_at', $targetDate);
-            });
-        } elseif (isset($dateConditions['date_from']) && isset($dateConditions['date_to'])) {
-            $from = $dateConditions['date_from']->toDateString();
-            $to = $dateConditions['date_to']->toDateString();
-            $opdQuery->where(function ($q) use ($from, $to) {
-                $q->whereBetween('appointment_date', [$from, $to])
-                    ->orWhereBetween('created_at', [$from . ' 00:00:00', $to . ' 23:59:59']);
-            });
-        } elseif (isset($dateConditions['date_from'])) {
-            $from = $dateConditions['date_from']->toDateString();
-            $opdQuery->where(function ($q) use ($from) {
-                $q->whereDate('appointment_date', '>=', $from)
-                    ->orWhereDate('created_at', '>=', $from);
-            });
-        } elseif (isset($dateConditions['date_to'])) {
-            $to = $dateConditions['date_to']->toDateString();
-            $opdQuery->where(function ($q) use ($to) {
-                $q->whereDate('appointment_date', '<=', $to)
-                    ->orWhereDate('created_at', '<=', $to);
-            });
+            if (isset($dateConditions['single_date'])) {
+                $opdQuery->where(function ($q) use ($dateConditions) {
+                    $targetDate = $dateConditions['single_date']->toDateString();
+                    $q->whereDate('appointment_date', $targetDate)
+                        ->orWhereDate('created_at', $targetDate);
+                });
+            } elseif (isset($dateConditions['date_from']) && isset($dateConditions['date_to'])) {
+                $from = $dateConditions['date_from']->toDateString();
+                $to = $dateConditions['date_to']->toDateString();
+                $opdQuery->where(function ($q) use ($from, $to) {
+                    $q->whereBetween('appointment_date', [$from, $to])
+                        ->orWhereBetween('created_at', [$from . ' 00:00:00', $to . ' 23:59:59']);
+                });
+            } elseif (isset($dateConditions['date_from'])) {
+                $from = $dateConditions['date_from']->toDateString();
+                $opdQuery->where(function ($q) use ($from) {
+                    $q->whereDate('appointment_date', '>=', $from)
+                        ->orWhereDate('created_at', '>=', $from);
+                });
+            } elseif (isset($dateConditions['date_to'])) {
+                $to = $dateConditions['date_to']->toDateString();
+                $opdQuery->where(function ($q) use ($to) {
+                    $q->whereDate('appointment_date', '<=', $to)
+                        ->orWhereDate('created_at', '<=', $to);
+                });
+            }
         }
 
         $billingDue = (float) $billingQuery->sum('due_amount');
@@ -915,7 +924,7 @@ class ReportController extends Controller
 
         $totalNetAmount = $billTotals['net_amount'] ?? 0;
         $totalPaidAmount = $billTotals['paid_amount'] ?? 0;
-        $totalDueAmount = $this->getOutstandingDueTotal($dateConditions);
+        $totalDueAmount = $this->getOutstandingDueTotal($dateConditions, true);
         $billDueCollection = (float) ($billTotals['due_collected'] ?? 0);
         $directDueCollection = $this->getDueCollectionTotalByDate($dateConditions);
 
@@ -927,8 +936,9 @@ class ReportController extends Controller
 
         $incomeTotals = $this->accountingService->calculateFinalIncomeTotals($billRows, $dateConditions);
         $totalExpense = $incomeTotals['total_expense'] ?? 0;
-        $finalIncome = ($totalPaidAmount + $totalDueCollection) - $totalExpense;
-        $actualDue = $totalDueAmount;
+        $totalReturnAmount = $incomeTotals['total_return_amount'] ?? 0;
+        $finalIncome = ($totalPaidAmount + $totalDueCollection) - $totalReturnAmount - $totalExpense;
+        $actualDue = $this->getOutstandingDueTotal([], false);
 
         $totals = [
             'net_amount' => $totalNetAmount,
@@ -937,6 +947,7 @@ class ReportController extends Controller
             'due_collection' => $totalDueCollection,
             'total_expense' => $totalExpense,
             'final_income' => $finalIncome,
+            'total_return_amount' => $totalReturnAmount,
             'actual_due' => $actualDue,
             'total_amount' => $billTotals['total_amount'] ?? 0,
             'discount_amount' => $billTotals['discount_amount'] ?? 0,
@@ -1246,6 +1257,14 @@ class ReportController extends Controller
         $pageMarginTop = isset($layout['page_margin_top']) ? (int) $layout['page_margin_top'] : 10;
         $pageMarginBottom = isset($layout['page_margin_bottom']) ? (int) $layout['page_margin_bottom'] : 10;
 
+        // Force a fixed half-inch (approx 48px at 96dpi) top margin for
+        // listing reports so Report Settings changes don't affect these PDFs.
+        // Listing reports are generated with a `selectedModule` value.
+        $listingModules = ['all_module', 'billing', 'pharmacy', 'medicine', 'opd', 'ipd'];
+        if (isset($data['selectedModule']) && in_array($data['selectedModule'], $listingModules, true)) {
+            $pageMarginTop = 48; // px (approx 0.5in)
+        }
+
         // convert px to mm for mPDF margins (approx, assuming 96dpi)
         $pxToMm = function ($px) {
             return round(((float) $px) * 25.4 / 96, 2);
@@ -1254,13 +1273,17 @@ class ReportController extends Controller
         $marginHeaderMm = $showHeaderFooter ? $pxToMm($reportHeaderHeightPx) : 0;
         $marginFooterMm = $showHeaderFooter ? $pxToMm($reportFooterHeightPx) : 0;
 
+        // convert px to mm for mPDF margins when passing to constructor
+        $marginTopForMpdf = $pxToMm($pageMarginTop);
+        $marginBottomForMpdf = $pxToMm($pageMarginBottom);
+
         $mpdf = new Mpdf([
             'mode' => 'utf-8',
             'format' => 'A4',
             'margin_left' => 8,
             'margin_right' => 8,
-            'margin_top' => max(0, (int) $pageMarginTop),
-            'margin_bottom' => max(0, (int) $pageMarginBottom),
+            'margin_top' => max(0, (float) $marginTopForMpdf),
+            'margin_bottom' => max(0, (float) $marginBottomForMpdf),
             'margin_header' => $marginHeaderMm,
             'margin_footer' => $marginFooterMm,
             'default_font' => 'dejavusanscondensed',

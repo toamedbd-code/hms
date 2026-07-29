@@ -8,7 +8,6 @@ use App\Models\DueCollection;
 use App\Models\InvoiceDesign;
 use App\Models\IpdPatient;
 use App\Models\Payment;
-use App\Models\PharmacyBill;
 use App\Models\ProductReturn;
 use App\Models\WebSetting;
 use Illuminate\Http\Request;
@@ -28,6 +27,7 @@ use Milon\Barcode\DNS1D;
 use Milon\Barcode\DNS2D;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 use ValueError;
 use Throwable;
 
@@ -59,6 +59,33 @@ class InvoiceController extends Controller
 
     public function downloadInvoice(Request $request)
     {
+        $printToken = trim((string) ($request->input('print_token') ?? ''));
+        $fastOpen = $request->boolean('fast_open');
+        $autoPrint = $request->boolean('auto_print') || ($fastOpen && $printToken !== '');
+
+        if (!$request->filled('id') && $printToken !== '') {
+            $resolvedBillId = Cache::get('print_token_' . $printToken);
+            if ($resolvedBillId) {
+                $request->merge(['id' => (int) $resolvedBillId]);
+            } else {
+                $module = (string) ($request->input('module') ?? 'billing');
+                $safeModule = in_array($module, self::ALLOWED_BILLING_MODULES, true) ? $module : 'billing';
+                $refreshUrl = route('backend.download.invoice', [
+                    'print_token' => $printToken,
+                    'module' => $safeModule,
+                    'fast_open' => $fastOpen ? 1 : 0,
+                    'auto_print' => $autoPrint ? 1 : 0,
+                    '_ts' => now()->timestamp,
+                ]);
+
+                return response(
+                    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice</title><style>html,body{margin:0;padding:0;background:#fff;}</style><script>(function(){var base=' . json_encode($refreshUrl) . ';var tick=function(){try{window.location.replace(base+"&_r="+Date.now());}catch(e){window.location.href=base+"&_r="+Date.now();}};setTimeout(tick,30);})();</script><noscript><meta http-equiv="refresh" content="0.2;url=' . e($refreshUrl) . '"></noscript></head><body></body></html>',
+                    200,
+                    ['Content-Type' => 'text/html; charset=UTF-8']
+                );
+            }
+        }
+
         // Backward-compatible: older callers may send module as an empty string.
         $request->merge([
             'module' => $request->input('module') ?: null,
@@ -82,33 +109,104 @@ class InvoiceController extends Controller
         $billing = Billing::query()
             ->with([
                 'patient',
-                'billItems',
+                // load billItems with trashed so we can decide to restore if needed
+                'billItems' => function ($q) {
+                    $q->withTrashed();
+                },
                 'dueCollections',
                 'payments',
                 'admin',
             ])
             ->findOrFail($validated['id']);
 
+        // If this billing was generated from an IPD discharge, ensure any
+        // payments recorded against the IPD (but not yet linked to billing)
+        // are attached so invoice totals correctly reflect paid/return amounts.
+        try {
+            $remarks = (string) ($billing->remarks ?? '');
+            if (preg_match('/IPD#(\d+)/i', $remarks, $m)) {
+                $ipdId = (int) ($m[1] ?? 0);
+                if ($ipdId > 0) {
+                    \App\Models\Payment::query()
+                        ->whereNull('deleted_at')
+                        ->where('status', 'Active')
+                        ->where('ipd_patient_id', $ipdId)
+                        ->whereNull('billing_id')
+                        ->update(['billing_id' => $billing->id]);
+
+                    // Reload relationships after attaching payments
+                    $billing->loadMissing(['payments', 'dueCollections', 'billItems']);
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('InvoiceController::downloadInvoice - failed to attach IPD payments to billing', ['err' => $e->getMessage(), 'billing_id' => $billing->id]);
+        }
+
         $invoiceDateTime = $billing->created_at
             ? $billing->created_at->format('d-M-Y h:i:s A')
             : now()->format('d-M-Y h:i:s A');
 
-        $billItems = $this->filterBillItemsByModule($billing->billItems ?? collect(), $module);
+        // If active bill items are missing but there are trashed IPD items
+        // (Admission, surgeon fees etc.), restore those trashed IPD items
+        // so they appear on the invoice rather than being hidden.
+        try {
+            // If there are trashed IPD-type bill items but no active IPD items,
+            // restore only the trashed IPD items. This handles the case where
+            // bed charges exist (active) but admission/surgeon IPD lines are
+            // soft-deleted and therefore missing from the invoice.
+            $activeIpdCount = $billing->billItems()->whereNull('deleted_at')
+                ->whereRaw('LOWER(COALESCE(category, "")) = ?', ['ipd'])
+                ->count();
 
-        // Legacy fix: older IPD admission/manual lines were mistakenly saved as
-        // category=Medicine with item_id=0/null. For IPD billings, treat these
-        // rows as IPD at render time so Medicine Bill reflects pharmacy only.
-        if (Str::startsWith((string) ($billing->case_number ?? ''), 'IPD-')) {
-            $billItems = $billItems->map(function ($item) {
-                $category = strtolower(trim((string) ($item->category ?? '')));
-                $itemId = (int) ($item->item_id ?? 0);
+            $trashedIpd = \App\Models\BillItem::withTrashed()
+                ->where('billing_id', $billing->id)
+                ->whereNotNull('deleted_at')
+                ->whereRaw('LOWER(COALESCE(category, "")) = ?', ['ipd'])
+                ->get();
 
-                if ($category === 'medicine' && $itemId <= 0) {
-                    $item->category = 'IPD';
+            if ($trashedIpd->isNotEmpty() && $activeIpdCount === 0) {
+                foreach ($trashedIpd as $t) {
+                    try {
+                        $t->restore();
+                    } catch (\Throwable $inner) {
+                        // ignore restore failures for individual rows
+                    }
                 }
 
-                return $item;
-            });
+                // Reload bill items after restore
+                $billing->loadMissing(['billItems']);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('InvoiceController::downloadInvoice - failed to restore trashed IPD bill items', ['err' => $e->getMessage(), 'billing_id' => $billing->id]);
+        }
+
+        // For display prefer active (non-deleted) bill items so duplicates
+        // from previous regenerations (soft-deleted) don't appear multiple times.
+        $rawBillItems = $billing->billItems()->whereNull('deleted_at')->get() ?? collect();
+
+        $billItems = $this->filterBillItemsByModule($rawBillItems, $module);
+
+        // If module is billing, collapse duplicate bill items (same name+category)
+        // to avoid duplicate bed-charge lines created by multiple regenerations.
+        if ($module === 'billing') {
+            $grouped = collect($billItems)->groupBy(function ($it) {
+                $name = trim((string) ($it->item_name ?? $it->description ?? ''));
+                $cat = trim((string) ($it->category ?? ''));
+                return strtolower($name . '||' . $cat);
+            })->map(function ($group) {
+                $first = $group->first();
+                $quantity = (float) $group->sum(function ($g) { return (float) ($g->quantity ?? $g->qty ?? 1); });
+                $totalAmount = (float) $group->sum(function ($g) { return (float) ($g->total_amount ?? $g->net_amount ?? 0); });
+
+                return (object) [
+                    'item_name' => $first->item_name ?? ($first->description ?? 'Item'),
+                    'quantity' => $quantity,
+                    'total_amount' => $totalAmount,
+                    'category' => $first->category ?? '',
+                ];
+            })->values();
+
+            $billItems = $grouped;
         }
 
         $patient = $billing->patient;
@@ -125,13 +223,35 @@ class InvoiceController extends Controller
         }
 
         $totals = $this->calculateFilteredTotals($billItems, $billing, $module);
+
+        // Compute a deterministic base total derived from the rendered bill items so
+        // invoice templates can always display the pre-discount/pre-vat item sum.
+        // Prefer the grouped billItems totals (used for display) when available.
+        $baseTotalFromItems = 0.0;
+        try {
+            $baseTotalFromItems = (float) collect($billItems)->sum(function ($it) {
+                return (float) ($it->total_amount ?? $it->net_amount ?? 0);
+            });
+        } catch (\Throwable $e) {
+            $baseTotalFromItems = (float) ($totals['total_amount'] ?? 0);
+        }
+
+        $baseTotalFromItems = round($baseTotalFromItems, 2);
+
         $productReturnAmount = (float) ProductReturn::query()
             ->where('billing_id', $billing->id)
             ->whereIn('status', ['approved', 'processed'])
             ->sum('total_amount');
-        $cashReturnAmount = max(0, (float) ($billing->receiving_amt ?? 0) - (float) ($billing->invoice_amount ?? 0));
-        $returnAmount = $productReturnAmount + $cashReturnAmount;
+        $returnAmount = $this->resolveInvoiceReturnAmount($billing, $request, $productReturnAmount);
         $adjustedDue = max(0, (float) $totals['due'] - $returnAmount);
+
+        // Respect global VAT enable/disable setting: if VAT is disabled in WebSetting,
+        // do not expose VAT values even if they are stored on the billing record.
+        $ws = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
+        $globalVatEnabled = !empty($ws) ? (bool) ($ws->vat_enabled ?? false) : true;
+
+        $vatPercentage = $globalVatEnabled ? (float) ($billing->vat_percentage ?? 0) : 0.0;
+        $vatAmount = $globalVatEnabled ? (float) ($billing->vat_amount ?? 0) : 0.0;
 
         $data = [
             'billing' => $billing,
@@ -145,7 +265,11 @@ class InvoiceController extends Controller
             'refd_by' => $billing->doctor_name ?? 'N/A',
             'bill_items' => $billItems,
             'total_amount' => $totals['total_amount'],
-            'vat' => 0,
+            // Provide an explicit base_total (sum of displayed items) so templates
+            // can consistently show the original items total before discounts/VAT.
+            'base_total' => $baseTotalFromItems,
+            'vat' => $vatAmount,
+            'vat_percentage' => $vatPercentage,
             'net_payable' => $totals['net_payable'],
             'discount' => $totals['discount'],
             'discount_type' => $billing->discount_type,
@@ -162,10 +286,13 @@ class InvoiceController extends Controller
             'footer_image' => $designAssets['footer_image'],
             'footer_content' => $designAssets['footer_content'],
                 'footer_content_position' => $designAssets['footer_content_position'] ?? 'above',
+                'footer_font_size' => $designAssets['footer_font_size'] ?? 14,
                 'header_height' => $designAssets['header_height'],
                 'footer_height' => $designAssets['footer_height'],
             'barcode' => $barcode,
             'module' => $module,
+            'auto_print' => $autoPrint,
+            'is_fast_open' => $fastOpen,
         ];
 
         // Prefer web-served Bengali font URL when available so PDF renderer can fetch it.
@@ -175,7 +302,14 @@ class InvoiceController extends Controller
             $banglaFontUrl = asset('fonts/NotoSansBengali-Regular.ttf');
         }
 
+        // Expose normalized absolute path so blade can embed font as data-uri reliably on Windows/Linux.
+        $banglaFontPath = '';
+        if (is_file($banglaFontFile)) {
+            $banglaFontPath = str_replace('\\', '/', $banglaFontFile);
+        }
+
         $data['banglaFontUrl'] = $banglaFontUrl;
+        $data['banglaFontPath'] = $banglaFontPath;
 
         // Read invoice-specific settings from WebSetting (do NOT apply reporting toggles to invoices)
         $websettingActive = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
@@ -222,6 +356,17 @@ class InvoiceController extends Controller
             ->replaceMatches('/[^A-Za-z0-9_-]+/', '_')
             ->toString();
         $filename = 'invoice_' . $safeBillNo . '_' . $safeModule . '.pdf';
+
+        // Fast open mode: return full invoice Blade HTML directly to avoid
+        // PDF rendering delay while keeping the same invoice layout.
+        if ($fastOpen) {
+            return response(view('frontend.invoice.pdf', $data)->render(), 200, [
+                'Content-Type' => 'text/html; charset=UTF-8',
+                'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+                'Pragma' => 'no-cache',
+                'Expires' => '0',
+            ]);
+        }
 
         try {
             // Keep original invoice look with DejaVu Sans as primary font.
@@ -280,7 +425,10 @@ class InvoiceController extends Controller
 
         return response($pdfOutput, 200, [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'inline; filename="' . $filename . '"'
+            'Content-Disposition' => 'inline; filename="' . $filename . '"',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
         ]);
     }
 
@@ -355,19 +503,41 @@ class InvoiceController extends Controller
 
         // Billing (full invoice) totals
         if ($module === 'billing') {
-            $total = (float) ($billing->total ?? 0);
+            // Prefer authoritative bill items sum when available (use active items only)
+            $totalFromItems = (float) \App\Models\BillItem::where('billing_id', $billing->id)->sum('net_amount');
+            $total = $totalFromItems > 0 ? $totalFromItems : (float) ($billing->total ?? 0);
 
-            if ($billing->discount_type === 'percentage') {
-                $discountPercent = (float) ($billing->discount ?? 0);
-                $discountAmount = max(0, ($total * $discountPercent) / 100);
-            } else {
-                $discountPercent = null;
-                $discountAmount = max(0, (float) ($billing->discount ?? 0));
-            }
-
+            // When payable_amount exists on the billing, it represents the actual
+            // post-discount invoice amount and should drive the final due logic.
+            $billingPayableAmount = max(0, (float) ($billing->payable_amount ?? 0));
             $extraDiscount = max(0, (float) ($billing->extra_flat_discount ?? 0));
+            $vatAmount = (float) ($billing->vat_amount ?? 0);
 
-            $netPayable = max(0, $total - $discountAmount - $extraDiscount);
+            if ($billingPayableAmount > 0) {
+                $discountPercent = $billing->discount_type === 'percentage'
+                    ? (float) ($billing->discount ?? 0)
+                    : null;
+                $discountAmount = $billing->discount_type === 'percentage'
+                    ? max(0, ($total * $discountPercent) / 100)
+                    : max(0, (float) ($billing->discount ?? 0));
+
+                $netPayable = $billingPayableAmount;
+            } elseif ($totalFromItems > 0) {
+                // Bill items already include discounts; do not subtract billing->discount again.
+                $discountPercent = null;
+                $discountAmount = 0;
+                $netPayable = max(0, $total - $extraDiscount + $vatAmount);
+            } else {
+                if ($billing->discount_type === 'percentage') {
+                    $discountPercent = (float) ($billing->discount ?? 0);
+                    $discountAmount = max(0, ($total * $discountPercent) / 100);
+                } else {
+                    $discountPercent = null;
+                    $discountAmount = max(0, (float) ($billing->discount ?? 0));
+                }
+
+                $netPayable = max(0, $total - $discountAmount - $extraDiscount + $vatAmount);
+            }
 
             // Determine payments as of invoice creation time (so "Paid (Invoice Time)" shows
             // amounts paid before/at the bill's created_at). Also compute total paid
@@ -384,16 +554,34 @@ class InvoiceController extends Controller
 
             $paidAtInvoice = max(0, $paymentsAtInvoice + $dueCollectedAtInvoice);
 
-            $paymentsSum = (float) \App\Models\Payment::where('billing_id', $billing->id)->sum('amount');
+            $paymentsSum = (float) \App\Models\Payment::where('billing_id', $billing->id)->whereNull('deleted_at')->sum('amount');
             $dueCollected = (float) \App\Models\DueCollection::where('billing_id', $billing->id)->sum('collected_amount');
 
-            $totalPaid = max(0, $paymentsSum + $dueCollected);
-            $computedDue = max(0, $netPayable - $totalPaid);
+            // Use the largest reliable paid amount source and then subtract any
+            // return/refund amount. This ensures invoices reflect both normal
+            // payments and later due-collections without undercounting the paid total.
+            $billingPaid = (float) ($billing->paid_amt ?? 0);
+            $receivingAmt = (float) ($billing->receiving_amt ?? 0);
+            $billingReturnAmt = (float) ($billing->return_amt ?? $billing->return_amount ?? 0);
+
+            $grossPaidFromReceiving = max(0, $receivingAmt);
+            $grossPaidFromTransactions = max(0, $paymentsSum + $dueCollected);
+            $grossPaidFromBilling = max(0, $billingPaid);
+            $grossPaid = max($grossPaidFromReceiving, $grossPaidFromTransactions, $grossPaidFromBilling);
+
+            // `return_amt` already exists on billing, so subtract it to compute net paid.
+            $totalPaid = max(0, round($grossPaid - $billingReturnAmt, 2));
+            $computedDue = max(0, round($netPayable - $totalPaid, 2));
+
+            // For display: show the billing-level discount value for clarity
+            $displayDiscount = $billing->discount_type === 'percentage'
+                ? round((float) ($billing->discount ?? 0), 2)
+                : round((float) ($billing->discount ?? $discountAmount), 2);
 
             return [
                 'total_amount' => round($total, 2),
-                // For templates: if percentage discount, return percentage value; otherwise return amount
-                'discount' => $billing->discount_type === 'percentage' ? round($discountPercent, 2) : round($discountAmount, 2),
+                'discount' => $displayDiscount,
+                'vat' => round($vatAmount, 2),
                 'net_payable' => round($netPayable, 2),
                 'paid_at_invoice' => round($paidAtInvoice, 2),
                 'paid' => round($totalPaid, 2),
@@ -402,8 +590,20 @@ class InvoiceController extends Controller
         }
 
         // Module-filtered totals (pathology/pharmacy/radiology)
-        $itemTotal = $filteredItems->sum('total_amount');
-        $itemDiscount = $filteredItems->sum('discount');
+        $itemTotal = $filteredItems->sum(function ($item) {
+            if (is_array($item)) {
+                return (float) ($item['total_amount'] ?? $item['net_amount'] ?? 0);
+            }
+
+            return (float) ($item->total_amount ?? $item->net_amount ?? 0);
+        });
+        $itemDiscount = $filteredItems->sum(function ($item) {
+            if (is_array($item)) {
+                return (float) ($item['discount'] ?? 0);
+            }
+
+            return (float) ($item->discount ?? 0);
+        });
 
         // Allocate billing-level discount appropriately
         $proportionalDiscountAmount = 0;
@@ -419,19 +619,60 @@ class InvoiceController extends Controller
 
         $netPayable = $itemTotal - $itemDiscount - $proportionalDiscountAmount;
 
-        $proportionalPaid = 0;
-        if ($billing->payable_amount > 0 && $billing->paid_amt > 0) {
-            $proportionalPaid = ($netPayable / $billing->payable_amount) * $billing->paid_amt;
-        }
+        $paidAmount = max(0, (float) ($billing->receiving_amt ?? $billing->paid_amt ?? 0));
 
-        $due = $netPayable - $proportionalPaid;
+        // IPD final bill is assembled from the live running-bill lines, so its total
+        // should follow the running summary directly. Using billing->payable_amount
+        // as a proportional denominator is incorrect when the stored billing record
+        // still carries stale totals from an older snapshot.
+        $paid = $module === 'ipd'
+            ? min($paidAmount, $netPayable)
+            : (function () use ($billing, $netPayable) {
+                $proportionalPaid = 0;
+                if ((float) ($billing->payable_amount ?? 0) > 0 && (float) ($billing->paid_amt ?? 0) > 0) {
+                    $proportionalPaid = ($netPayable / (float) ($billing->payable_amount ?? 0)) * (float) ($billing->paid_amt ?? 0);
+                }
+
+                return $proportionalPaid;
+            })();
+
+        $due = $netPayable - $paid;
 
         return [
             'total_amount' => round($itemTotal, 2),
             'discount' => $billing->discount_type === 'percentage' ? round($discountPercent ?? 0, 2) : round($itemDiscount + $proportionalDiscountAmount, 2),
             'net_payable' => round($netPayable, 2),
-            'paid' => round($proportionalPaid, 2),
+            'paid' => round($paid, 2),
             'due' => max(0, round($due, 2))
+        ];
+    }
+
+    private function calculateFastOpenTotals($filteredItems, Billing $billing): array
+    {
+        $totalAmountFromItems = (float) $filteredItems->sum(function ($item) {
+            return (float) ($item->amount ?? 0) * (float) ($item->qty ?? 1);
+        });
+
+        $totalAmount = $totalAmountFromItems > 0
+            ? $totalAmountFromItems
+            : (float) ($billing->total ?? $billing->invoice_amount ?? 0);
+
+        $netPayable = (float) ($billing->invoice_amount ?? $totalAmount);
+        if (($billing->discount_type ?? '') === 'percentage') {
+            $discount = (float) ($billing->discount ?? 0);
+        } else {
+            $discount = max(0, $totalAmount - $netPayable);
+        }
+        $paid = max(0, (float) ($billing->receiving_amt ?? 0));
+        $due = max(0, $netPayable - $paid);
+
+        return [
+            'total_amount' => $totalAmount,
+            'net_payable' => $netPayable,
+            'discount' => $discount,
+            'paid' => $paid,
+            'paid_at_invoice' => $paid,
+            'due' => $due,
         ];
     }
 
@@ -440,6 +681,189 @@ class InvoiceController extends Controller
         $dns1d = new DNS1D();
         $barcode = $dns1d->getBarcodePNG($billNumber, 'C128', 3, 60);
         return 'data:image/png;base64,' . $barcode;
+    }
+
+    protected function resolveInvoiceReturnAmount(Billing $billing, Request $request, float $productReturnAmount = 0.0): float
+    {
+        $hasRequestedReturn = $request->exists('return_amount') || $request->exists('return_amt');
+        $requestedReturn = (float) ($request->input('return_amount') ?? $request->input('return_amt') ?? 0);
+        if ($hasRequestedReturn) {
+            return round($requestedReturn, 2);
+        }
+
+        $persistedReturn = (float) ($billing->return_amt ?? $billing->return_amount ?? 0);
+        if ($persistedReturn > 0) {
+            return round($persistedReturn, 2);
+        }
+
+        $invoiceAmount = (float) ($billing->invoice_amount ?? $billing->payable_amount ?? 0);
+        $receivingAmount = (float) ($billing->receiving_amt ?? 0);
+        $payableAmount = (float) ($billing->payable_amount ?? $billing->total ?? 0);
+        $paidAmount = (float) ($billing->paid_amt ?? 0);
+
+        $cashReturnAmount = 0.0;
+        if ($invoiceAmount > 0) {
+            $cashReturnAmount = max(0, $receivingAmount - $invoiceAmount);
+        }
+
+        $overpaymentReturn = max(0, $paidAmount - $payableAmount);
+        $derivedReturn = $productReturnAmount + max($cashReturnAmount, $overpaymentReturn);
+
+        return round($derivedReturn, 2);
+    }
+
+    protected function resolveIpdInvoiceLineItems($billingLineItems, array $runningLineItems = []): array
+    {
+        $normalizeLine = function ($line) {
+            if (is_array($line)) {
+                return [
+                    'item_name' => $line['item_name'] ?? ($line['description'] ?? 'Item'),
+                    'quantity' => isset($line['quantity']) ? (float) $line['quantity'] : 1,
+                    'unit_price' => isset($line['unit_price']) ? (float) $line['unit_price'] : 0,
+                    'net_amount' => isset($line['net_amount']) ? (float) $line['net_amount'] : (float) ($line['total_amount'] ?? 0),
+                    'category' => $line['category'] ?? '',
+                ];
+            }
+
+            return [
+                'item_name' => $line->item_name ?? ($line->description ?? 'Item'),
+                'quantity' => isset($line->quantity) ? (float) $line->quantity : 1,
+                'unit_price' => isset($line->unit_price) ? (float) $line->unit_price : 0,
+                'net_amount' => isset($line->net_amount) ? (float) $line->net_amount : (float) ($line->total_amount ?? 0),
+                'category' => $line->category ?? '',
+            ];
+        };
+
+        $billingItems = collect($billingLineItems ?? [])->map($normalizeLine)->values();
+        $runningItems = collect($runningLineItems ?? [])->map($normalizeLine)->values();
+
+        if ($billingItems->isEmpty()) {
+            return $runningItems->all();
+        }
+
+        $buildSignature = function (array $line): string {
+            $name = strtolower(trim((string) ($line['item_name'] ?? '')));
+            $category = strtolower(trim((string) ($line['category'] ?? '')));
+            $unitPrice = number_format((float) ($line['unit_price'] ?? 0), 2, '.', '');
+            $quantity = number_format((float) ($line['quantity'] ?? 1), 2, '.', '');
+            $netAmount = number_format((float) ($line['net_amount'] ?? 0), 2, '.', '');
+
+            return implode('|', [$category, $name, $unitPrice, $quantity, $netAmount]);
+        };
+
+        $merged = [];
+        $seen = [];
+
+        foreach ($billingItems as $line) {
+            $signature = $buildSignature($line);
+            if ($signature === '' || isset($seen[$signature])) {
+                continue;
+            }
+            $seen[$signature] = true;
+            $merged[] = $line;
+        }
+
+        foreach ($runningItems as $line) {
+            $signature = $buildSignature($line);
+            if ($signature === '' || isset($seen[$signature])) {
+                continue;
+            }
+            $seen[$signature] = true;
+            $merged[] = $line;
+        }
+
+        return $merged;
+    }
+
+    protected function resolveIpdInvoiceDueCollections(IpdPatient $ipdpatient)
+    {
+        $query = DueCollection::query();
+
+        if (!empty($ipdpatient->billing_id)) {
+            $query->where(function ($q) use ($ipdpatient) {
+                $q->where('billing_id', $ipdpatient->billing_id);
+                $q->orWhere(function ($sub) use ($ipdpatient) {
+                    $sub->whereNotNull('note')
+                        ->where(function ($noteQuery) use ($ipdpatient) {
+                            $noteQuery->where('note', 'like', '%ipd_patient_id:' . $ipdpatient->id . '%')
+                                ->orWhere('note', 'like', '%ipd_patient_id: ' . $ipdpatient->id . '%')
+                                ->orWhere('note', 'like', '%Collected via IPD payment%');
+                        });
+                });
+            });
+        } else {
+            $query->where(function ($q) use ($ipdpatient) {
+                $q->whereNotNull('note')
+                    ->where(function ($noteQuery) use ($ipdpatient) {
+                        $noteQuery->where('note', 'like', '%ipd_patient_id:' . $ipdpatient->id . '%')
+                            ->orWhere('note', 'like', '%ipd_patient_id: ' . $ipdpatient->id . '%')
+                            ->orWhere('note', 'like', '%Collected via IPD payment%');
+                    });
+            });
+        }
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('due_collections', 'deleted_at')) {
+            $query->whereNull('deleted_at');
+        }
+
+        return $query->orderBy('collected_at')->orderBy('created_at')->get();
+    }
+
+    protected function normalizeIpdInvoicePaymentsAndDueCollections($payments, $dueCollections, $invoiceTime): array
+    {
+        $normalizedPayments = collect();
+        $invoiceTimePaidAmount = 0.0;
+
+        foreach (collect($payments ?? []) as $p) {
+            $paymentAmount = (float) ($p->amount ?? 0);
+            $paymentCreatedAt = $p->created_at ?? now();
+            if ($paymentCreatedAt <= $invoiceTime) {
+                $invoiceTimePaidAmount += $paymentAmount;
+            }
+
+            $normalizedPayments->push((object) [
+                'type' => 'payment',
+                'created_at' => $paymentCreatedAt,
+                'payment_method' => $p->payment_method ?? 'Cash',
+                'transaction_id' => $p->transaction_id ?? '',
+                'notes' => $p->notes ?? '',
+                'amount' => $paymentAmount,
+            ]);
+        }
+
+        foreach (collect($dueCollections ?? []) as $d) {
+            $dueCollectionAmount = (float) ($d->collected_amount ?? $d->amount ?? 0);
+            $dueCollectionCreatedAt = $d->collected_at ?? $d->created_at ?? now();
+            if ($dueCollectionCreatedAt <= $invoiceTime) {
+                $invoiceTimePaidAmount += $dueCollectionAmount;
+            }
+
+            $normalizedPayments->push((object) [
+                'type' => 'due_collection',
+                'created_at' => $dueCollectionCreatedAt,
+                'payment_method' => $d->payment_method ?? 'Due Collection',
+                'transaction_id' => '',
+                'notes' => $d->note ?? '',
+                'amount' => $dueCollectionAmount,
+            ]);
+        }
+
+        $normalizedPayments = $normalizedPayments->sortBy(function ($row) {
+            return $row->created_at ?? now();
+        })->values();
+
+        $paymentsHistory = $normalizedPayments->where('type', 'payment')->values();
+        $dueCollectionsList = $normalizedPayments->where('type', 'due_collection')->values();
+        $paymentsOnlyTotal = (float) $paymentsHistory->sum('amount');
+        $dueCollectionsTotal = (float) $dueCollectionsList->sum('amount');
+
+        return [
+            'normalized_payments' => $normalizedPayments,
+            'payments' => $paymentsHistory,
+            'due_collections' => $dueCollectionsList,
+            'invoice_time_paid_amount' => round($invoiceTimePaidAmount, 2),
+            'total_paid' => round($paymentsOnlyTotal + $dueCollectionsTotal, 2),
+        ];
     }
 
     private function resolveInvoiceDesign(string $module): ?InvoiceDesign
@@ -470,16 +894,24 @@ class InvoiceController extends Controller
             ->first();
     }
 
-    private function getInvoiceDesignAssets(?InvoiceDesign $invoiceDesign): array
+    private function getInvoiceDesignAssets(?InvoiceDesign $invoiceDesign, bool $fastOpen = false): array
     {
+        $headerImage = $fastOpen
+            ? $this->storageInvoiceImageToBrowserUrl($invoiceDesign?->header_photo_path)
+            : $this->storageInvoiceImageToDataUri($invoiceDesign?->header_photo_path);
+        $footerImage = $fastOpen
+            ? $this->storageInvoiceImageToBrowserUrl($invoiceDesign?->footer_photo_path)
+            : $this->storageInvoiceImageToDataUri($invoiceDesign?->footer_photo_path);
+
         return [
-            'header_image' => $this->storageInvoiceImageToDataUri($invoiceDesign?->header_photo_path),
-            'footer_image' => $this->storageInvoiceImageToDataUri($invoiceDesign?->footer_photo_path),
+            'header_image' => $headerImage,
+            'footer_image' => $footerImage,
             'footer_content' => $this->sanitizeHtmlForPdf((string) ($invoiceDesign?->footer_content ?? '')),
             // per-design option: whether footer content appears "above" or "below" the footer image
             'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below'])
                 ? strtolower((string) $invoiceDesign->footer_content_position)
                 : 'above',
+            'footer_font_size' => max(6, min(72, (int) ($invoiceDesign?->footer_font_size ?? 14))),
             'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
             'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
         ];
@@ -720,17 +1152,6 @@ class InvoiceController extends Controller
         .meta { width: 100%; margin-bottom: 2px; }
         .meta td { width: 50%; padding: 2px 0; vertical-align: top; }
         .meta strong { display: inline-block; min-width: 72px; }
-        .meta td[colspan='2'] { width: 100%; }
-        .refd-by-line {
-            padding-left: 86px;
-            text-indent: -86px;
-            word-break: break-word;
-        }
-        .refd-by-label {
-            display: inline-block;
-            min-width: 72px;
-            font-weight: 700;
-        }
         .items-table {
             width: 100%;
             border-collapse: collapse;
@@ -851,7 +1272,7 @@ class InvoiceController extends Controller
             <td><strong>Gender</strong>: {$gender}</td>
         </tr>
         <tr>
-            <td colspan='2' class='refd-by-line'><span class='refd-by-label'>Refd. By</span>: {$refdBy}</td>
+            <td colspan='2'><strong>Refd. By</strong>: {$refdBy}</td>
         </tr>
     </table>
 
@@ -984,6 +1405,34 @@ class InvoiceController extends Controller
         return 'data:' . $mime . ';base64,' . base64_encode($content);
     }
 
+    private function storageInvoiceImageToBrowserUrl(?string $publicStorageUrl): string
+    {
+        if (!$publicStorageUrl) {
+            return '';
+        }
+
+        $rawPath = trim((string) $publicStorageUrl);
+        if ($rawPath === '') {
+            return '';
+        }
+
+        if (str_starts_with($rawPath, 'data:image/')) {
+            return $rawPath;
+        }
+
+        if (preg_match('/^https?:\/\//i', $rawPath) === 1) {
+            return $rawPath;
+        }
+
+        $resolvedUrl = publicStorageUrl($rawPath);
+        if ($resolvedUrl) {
+            return $resolvedUrl;
+        }
+
+        $normalizedPath = ltrim(str_replace('\\', '/', $rawPath), '/');
+        return asset($normalizedPath);
+    }
+
     private function numberToWords($number)
     {
         $ones = [
@@ -1102,6 +1551,7 @@ class InvoiceController extends Controller
         }
 
         $opdId = prefixed_serial('opd_no_prefix', 'OPDN', $opdPatient->id, 3);
+        $barcode = '';
 
         if ($opdPatient) {
             $barcode = $this->generateBarcode($opdId);
@@ -1175,6 +1625,7 @@ class InvoiceController extends Controller
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
                 'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
+                'footer_font_size' => max(6, min(72, (int) ($invoiceDesign?->footer_font_size ?? 14))),
                 'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
                 'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
             'printed_at' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i:s a'),
@@ -1268,6 +1719,7 @@ class InvoiceController extends Controller
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
                 'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
+                'footer_font_size' => max(6, min(72, (int) ($invoiceDesign?->footer_font_size ?? 14))),
                 'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
                 'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
             'printed_at' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i:s a'),
@@ -1293,9 +1745,21 @@ class InvoiceController extends Controller
         ]);
     }
 
-        public function downloadIpdFinalBill(Request $request, IpdDischargeBillingService $ipdDischargeBillingService)
+        protected function resolveIpdFinalBillViewOptions(Request $request): array
+    {
+        $fastOpen = $request->boolean('fast_open');
+        $autoPrint = $request->boolean('auto_print') || $fastOpen;
+
+        return [
+            'auto_print' => $autoPrint,
+            'is_fast_open' => $fastOpen,
+        ];
+    }
+
+    public function downloadIpdFinalBill(Request $request, IpdDischargeBillingService $ipdDischargeBillingService)
     {
         $ipdPatientId = $request->get('id');
+        $viewOptions = $this->resolveIpdFinalBillViewOptions($request);
 
         if (!$ipdPatientId) {
             abort(422, 'IPD patient id is required.');
@@ -1305,18 +1769,12 @@ class InvoiceController extends Controller
             ->with([
                 'patient',
                 'doctor.details.designation',
-                'bed.bedGroup',
+                'bed',
                 'billing.billItems',
                 'billing.dueCollections',
                 'billing.admin',
             ])
             ->findOrFail($ipdPatientId);
-
-        $payments = Payment::query()
-            ->where('ipd_patient_id', $ipdpatient->id)
-            ->whereNull('deleted_at')
-            ->orderBy('created_at')
-            ->get();
 
         if (empty($ipdpatient->billing_id) || !$ipdpatient->billing) {
             if ($ipdpatient->status !== 'Inactive') {
@@ -1339,7 +1797,7 @@ class InvoiceController extends Controller
         $ipdpatient->loadMissing(['billing.billItems', 'billing.dueCollections', 'billing.admin']);
 
         // This view expects the same variables as the normal billing money receipt.
-        $module = 'billing';
+        $module = 'ipd';
         $invoiceDateTime = $billing->created_at
             ? $billing->created_at->format('d-M-Y h:i:s A')
             : now()->format('d-M-Y h:i:s A');
@@ -1397,15 +1855,19 @@ class InvoiceController extends Controller
 
         $barcode = $this->generateBarcode($billing->bill_number ?? ('IPD' . $ipdpatient->id));
 
-        // Running summary contains total/paid/due as computed by the
-        // running-bill assembler. Use those values to populate invoice
-        // totals for the final IPD bill PDF.
-        $runningSummary = $running['summary'] ?? ['total' => 0, 'paid' => 0, 'due' => 0];
-        $totalAmount = (float) ($runningSummary['total'] ?? 0);
-        // For IPD money receipt, show actually received IPD amount.
-        $paidAmount = (float) ($payments->sum('amount') ?? 0);
-        $dueAmount = max($totalAmount - $paidAmount, 0);
-        $receiptNos = $payments->pluck('id')->map(fn($v) => 'P#' . $v)->implode(', ');
+        $totals = $this->calculateFilteredTotals($billItems, $billing, $module);
+        $totalAmount = (float) ($totals['total_amount'] ?? 0);
+        $invoicePaidAmount = (float) ($totals['paid_at_invoice'] ?? $totals['paid'] ?? 0);
+        $totalPaidAmount = (float) ($totals['paid'] ?? $invoicePaidAmount);
+        $dueAmount = (float) ($totals['due'] ?? max($totalAmount - $totalPaidAmount, 0));
+
+        // Compute return amount for view (prefer billing field, fall back to computed)
+        $returnAmount = (float) ($billing->return_amt ?? $billing->return_amount ?? 0);
+        if ($returnAmount <= 0) {
+            $receiving = (float) ($billing->receiving_amt ?? $billing->paid_amt ?? 0);
+            $payable = (float) ($billing->payable_amount ?? $billing->total ?? 0);
+            $returnAmount = max(0, $receiving - $payable);
+        }
 
         $data = [
             'billing' => $billing,
@@ -1419,36 +1881,49 @@ class InvoiceController extends Controller
             'bill_items' => $billItems,
             'total_amount' => round($totalAmount, 2),
             'vat' => 0,
-            'net_payable' => round($totalAmount, 2),
-            'discount' => 0,
+            'net_payable' => round((float) ($totals['net_payable'] ?? $totalAmount), 2),
+            'discount' => round((float) ($totals['discount'] ?? 0), 2),
             'discount_type' => $billing['discount_type'] ?? 'flat',
             'extra_flat_discount' => 0,
-            'paid' => round($paidAmount, 2),
-            'paid_at_invoice' => round($paidAmount, 2),
+            'paid' => round($totalPaidAmount, 2),
+            'paid_at_invoice' => round($invoicePaidAmount, 2),
             'due' => round($dueAmount, 2),
+            'return_amount' => round($returnAmount, 2),
+            'show_return_amount' => $returnAmount > 0,
             'delivery_date' => $billing->delivery_date,
-            // Use the exact remarks block requested by user; include IPD id twice
-            'remarks' => 'IPD Selected Charges | IPD#' . $ipdpatient->id . ' | IPD#' . $ipdpatient->id,
+            'remarks' => $this->normalizeIpdFinalBillRemark($billing->remarks ?? ''),
             'prepared_by' => 'Toamed Admin',
             'amount_in_words' => $this->numberToWords($totalAmount),
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
             'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
+            'showHeaderFooter' => true,
+            'show_header_footer' => true,
+            'header_title' => 'TOAMED HOSPITAL',
+            'header_subtitle' => 'IPD Final Bill',
             'barcode' => $barcode,
             'module' => $module,
+            'auto_print' => $viewOptions['auto_print'],
+            'is_fast_open' => $viewOptions['is_fast_open'],
             // IPD specific display fields
             'ipd_id' => function_exists('prefixed_serial') ? prefixed_serial('ipd_no_prefix', 'IPDN', $ipdpatient->id, 4) : ('IPD' . str_pad($ipdpatient->id, 4, '0', STR_PAD_LEFT)),
             'printed_at' => $invoiceDateTime,
             'consultant' => $ipdpatient->doctor?->name ?? $billing->doctor_name ?? '',
             'bed' => $ipdpatient->bed?->name ?? '',
-            'bed_group' => $ipdpatient->bed?->bedGroup?->name ?? '',
             'admission' => !empty($ipdpatient->admission_date) ? \Carbon\Carbon::parse($ipdpatient->admission_date)->format('d-m-Y h:i A') : '',
             'discharge' => !empty($ipdpatient->discharged_at) ? \Carbon\Carbon::parse($ipdpatient->discharged_at)->format('d-m-Y h:i A') : '',
-            'credit_limit' => (float) ($ipdpatient->credit_limit ?? $patient->credit_limit ?? 0),
             'case' => $ipdpatient->case ?? '',
-            'receipt_nos' => $receiptNos,
         ];
+
+        if ($viewOptions['is_fast_open']) {
+            return response(view('frontend.invoice.pdf', $data)->render(), 200, [
+                'Content-Type' => 'text/html; charset=UTF-8',
+                'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+                'Pragma' => 'no-cache',
+                'Expires' => '0',
+            ]);
+        }
 
         $pdf = Pdf::loadView('frontend.invoice.pdf', $data);
 
@@ -1471,9 +1946,35 @@ class InvoiceController extends Controller
         ]);
     }
 
+    private function normalizeIpdFinalBillRemark(string $remarks): string
+    {
+        $remarks = trim($remarks);
+        if ($remarks === '') {
+            return '';
+        }
+
+        $autoPrefixes = [
+            'IPD Selected Charges',
+            'IPD Discharge Billing (Auto)',
+            'IPD Discharge Billing (Auto/Regen)',
+            'IPD Admission Items',
+            'IPD Items',
+            'IPD Manual Charge',
+        ];
+
+        foreach ($autoPrefixes as $prefix) {
+            if (stripos($remarks, $prefix) === 0) {
+                return '';
+            }
+        }
+
+        return $remarks;
+    }
+
     public function printIpdFinalBill(Request $request, IpdDischargeBillingService $ipdDischargeBillingService)
     {
         $ipdPatientId = $request->get('id');
+        $viewOptions = $this->resolveIpdFinalBillViewOptions($request);
 
         if (!$ipdPatientId) {
             abort(422, 'IPD patient id is required.');
@@ -1483,18 +1984,12 @@ class InvoiceController extends Controller
             ->with([
                 'patient',
                 'doctor.details.designation',
-                'bed.bedGroup',
+                'bed',
                 'billing.billItems',
                 'billing.dueCollections',
                 'billing.admin',
             ])
             ->findOrFail($ipdPatientId);
-
-        $payments = Payment::query()
-            ->where('ipd_patient_id', $ipdpatient->id)
-            ->whereNull('deleted_at')
-            ->orderBy('created_at')
-            ->get();
 
         if (empty($ipdpatient->billing_id) || !$ipdpatient->billing) {
             if ($ipdpatient->status !== 'Inactive') {
@@ -1516,13 +2011,11 @@ class InvoiceController extends Controller
         $billing = $ipdDischargeBillingService->refreshBillingTotals($ipdpatient, auth('admin')->id());
         $ipdpatient->loadMissing(['billing.billItems', 'billing.dueCollections', 'billing.admin']);
 
-        $module = 'billing';
+        $module = 'ipd';
         $invoiceDateTime = $billing->created_at
             ? $billing->created_at->format('d-M-Y h:i:s A')
             : now()->format('d-M-Y h:i:s A');
 
-        // Keep print preview aligned with download final bill.
-        // Use running lines so bed rent/doctor visit/OT and manual IPD items are included.
         $running = $ipdDischargeBillingService->getRunningDetails($ipdpatient);
         $runningLines = $running['lines'] ?? [];
         $billItems = collect($runningLines)->map(function ($ln) {
@@ -1571,11 +2064,19 @@ class InvoiceController extends Controller
 
         $barcode = $this->generateBarcode($billing->bill_number ?? ('IPD' . $ipdpatient->id));
 
-        $runningSummary = $running['summary'] ?? ['total' => 0, 'paid' => 0, 'due' => 0];
-        $totalAmount = (float) ($runningSummary['total'] ?? 0);
-        $paidAmount = (float) ($payments->sum('amount') ?? 0);
-        $dueAmount = max($totalAmount - $paidAmount, 0);
-        $receiptNos = $payments->pluck('id')->map(fn($v) => 'P#' . $v)->implode(', ');
+        $totals = $this->calculateFilteredTotals($billItems, $billing, $module);
+        $totalAmount = (float) ($totals['total_amount'] ?? 0);
+        $invoicePaidAmount = (float) ($totals['paid_at_invoice'] ?? $totals['paid'] ?? 0);
+        $totalPaidAmount = (float) ($totals['paid'] ?? $invoicePaidAmount);
+        $dueAmount = (float) ($totals['due'] ?? max($totalAmount - $totalPaidAmount, 0));
+
+        // Compute return amount for view (prefer billing field, fall back to computed)
+        $returnAmount = (float) ($billing->return_amt ?? $billing->return_amount ?? 0);
+        if ($returnAmount <= 0) {
+            $receiving = (float) ($billing->receiving_amt ?? $billing->paid_amt ?? 0);
+            $payable = (float) ($billing->payable_amount ?? $billing->total ?? 0);
+            $returnAmount = max(0, $receiving - $payable);
+        }
 
         $data = [
             'billing' => $billing,
@@ -1589,34 +2090,39 @@ class InvoiceController extends Controller
             'bill_items' => $billItems,
             'total_amount' => round($totalAmount, 2),
             'vat' => 0,
-            'net_payable' => round($totalAmount, 2),
-            'discount' => 0,
-            'discount_type' => $billing['discount_type'] ?? 'flat',
-            'extra_flat_discount' => 0,
-            'paid' => round($paidAmount, 2),
-            'paid_at_invoice' => round($paidAmount, 2),
+            'net_payable' => round((float) ($totals['net_payable'] ?? $totalAmount), 2),
+            'discount' => round((float) ($totals['discount'] ?? 0), 2),
+            'discount_type' => $billing->discount_type ?? 'flat',
+            'extra_flat_discount' => (float) ($billing->extra_flat_discount ?? 0),
+            'paid' => round($totalPaidAmount, 2),
+            'paid_at_invoice' => round($invoicePaidAmount, 2),
             'due' => round($dueAmount, 2),
+            'return_amount' => round($returnAmount, 2),
+            'show_return_amount' => $returnAmount > 0,
             'delivery_date' => $billing->delivery_date,
-            'remarks' => trim((string) ($billing->remarks ?? '') . ' | IPD#' . $ipdpatient->id),
+            'remarks' => $this->normalizeIpdFinalBillRemark($billing->remarks ?? ''),
             'prepared_by' => $billing?->admin?->name ?? '',
-            'amount_in_words' => $this->numberToWords($totalAmount),
+            'amount_in_words' => $this->numberToWords((float) ($totals['net_payable'] ?? $totalAmount)),
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
             'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
+            'showHeaderFooter' => true,
+            'show_header_footer' => true,
+            'header_title' => 'TOAMED HOSPITAL',
+            'header_subtitle' => 'IPD Final Bill',
             'barcode' => $barcode,
             'module' => $module,
+            'auto_print' => $viewOptions['auto_print'],
+            'is_fast_open' => $viewOptions['is_fast_open'],
             // IPD specific display fields
             'ipd_id' => function_exists('prefixed_serial') ? prefixed_serial('ipd_no_prefix', 'IPDN', $ipdpatient->id, 4) : ('IPD' . str_pad($ipdpatient->id, 4, '0', STR_PAD_LEFT)),
             'printed_at' => $invoiceDateTime,
             'consultant' => $ipdpatient->doctor?->name ?? $billing->doctor_name ?? '',
             'bed' => $ipdpatient->bed?->name ?? '',
-            'bed_group' => $ipdpatient->bed?->bedGroup?->name ?? '',
             'admission' => !empty($ipdpatient->admission_date) ? \Carbon\Carbon::parse($ipdpatient->admission_date)->format('d-m-Y h:i A') : '',
             'discharge' => !empty($ipdpatient->discharged_at) ? \Carbon\Carbon::parse($ipdpatient->discharged_at)->format('d-m-Y h:i A') : '',
-            'credit_limit' => (float) ($ipdpatient->credit_limit ?? $patient->credit_limit ?? 0),
             'case' => $ipdpatient->case ?? '',
-            'receipt_nos' => $receiptNos,
         ];
 
         return view('frontend.invoice.pdf', $data);
@@ -1626,6 +2132,8 @@ class InvoiceController extends Controller
     {
         $requestData = $request->all();
         $ipdPatientId = $requestData['id'] ?? null;
+        $fastOpen = $request->boolean('fast_open');
+        $autoPrint = $request->boolean('auto_print');
 
         if (!$ipdPatientId) {
             abort(422, 'IPD patient id is required.');
@@ -1635,9 +2143,51 @@ class InvoiceController extends Controller
             ->with(['patient', 'doctor.details.designation', 'bed'])
             ->findOrFail($ipdPatientId);
 
-        // If an itemized Billing exists for this IPD admission, forward to the billing invoice
+        // If an itemized Billing exists for this IPD admission, attempt to
+        // regenerate billing items, but log running lines and final bill items
+        // to help diagnose missing charges (e.g., Pathology/Pharmacy not found).
         if (!empty($ipdpatient->billing_id)) {
-            return redirect()->route('backend.download.invoice', ['id' => $ipdpatient->billing_id]);
+            try {
+                $runningBefore = $ipdDischargeBillingService->getRunningDetails($ipdpatient);
+                $runningLines = $runningBefore['lines'] ?? [];
+                $counts = collect($runningLines)->groupBy(function ($ln) {
+                    return strtolower(trim($ln['category'] ?? '')) ?: 'ipd';
+                })->map->count()->toArray();
+
+                Log::info('InvoiceController::downloadIpdInvoice - running lines before regenerate', ['ipd_id' => $ipdpatient->id, 'counts' => $counts]);
+            } catch (\Throwable $e) {
+                Log::warning('InvoiceController::downloadIpdInvoice - failed to compute running lines', ['err' => $e->getMessage(), 'ipd_id' => $ipdpatient->id]);
+            }
+
+            // Ensure billing items are up-to-date (rebuild from IPD charges)
+            try {
+                $ipdDischargeBillingService->regenerateForDischarge($ipdpatient, auth('admin')->id());
+            } catch (\Throwable $e) {
+                Log::warning('InvoiceController::downloadIpdInvoice - failed to regenerate billing for IPD', ['err' => $e->getMessage(), 'ipd_id' => $ipdpatient->id]);
+            }
+
+            try {
+                $billing = \App\Models\Billing::query()->with(['billItems' => function ($q) { $q->withTrashed(); }])->find($ipdpatient->billing_id);
+                $billItems = $billing?->billItems ?? [];
+
+                $billCategories = collect($billItems)->map(function ($it) {
+                    return strtolower(trim($it->category ?? '')) ?: 'ipd';
+                })->unique()->values()->all();
+
+                $billCounts = collect($billItems)->groupBy(function ($it) {
+                    return strtolower(trim($it->category ?? '')) ?: 'ipd';
+                })->map->count()->toArray();
+
+                Log::info('InvoiceController::downloadIpdInvoice - billing items after regenerate', ['billing_id' => $ipdpatient->billing_id, 'counts' => $billCounts, 'categories' => $billCategories]);
+
+                // Keep the IPD-specific invoice rendering path so the payment history,
+                // due collections, and invoice-time totals render consistently for IPD.
+            } catch (\Throwable $e) {
+                Log::warning('InvoiceController::downloadIpdInvoice - failed to load billing items after regenerate', ['err' => $e->getMessage(), 'billing_id' => $ipdpatient->billing_id]);
+            }
+
+            // Fallthrough: billing exists but only has bed charges (or none) — continue
+            // to build the running-lines IPD PDF so other items are visible.
         }
 
         $payments = Payment::query()
@@ -1646,8 +2196,36 @@ class InvoiceController extends Controller
             ->orderBy('created_at')
             ->get();
 
-        $totalPaid = (float) $payments->sum('amount');
+        $invoiceTime = null;
+        $billingRecord = null;
 
+        // Allow caller to pass an explicit billing_id (e.g. from Billing list)
+        $requestedBillingId = $request->input('billing_id');
+        if (!empty($requestedBillingId)) {
+            $billingRecord = \App\Models\Billing::query()->find($requestedBillingId);
+        }
+
+        // Fallback to ipdpatient linked billing if no explicit billing provided
+        if (empty($billingRecord) && !empty($ipdpatient->billing_id)) {
+            $billingRecord = \App\Models\Billing::query()->find($ipdpatient->billing_id);
+        }
+
+        if ($billingRecord?->created_at) {
+            $invoiceTime = $billingRecord->created_at;
+        } elseif ($ipdpatient->created_at) {
+            $invoiceTime = $ipdpatient->created_at;
+        } else {
+            $invoiceTime = now();
+        }
+
+        // Include any due collections associated with the billing (if present)
+        $dueCollections = $this->resolveIpdInvoiceDueCollections($ipdpatient);
+
+        $summary = $this->normalizeIpdInvoicePaymentsAndDueCollections($payments, $dueCollections, $invoiceTime);
+        $invoiceTimePaidAmount = (float) ($summary['invoice_time_paid_amount'] ?? 0);
+        $totalPaid = (float) ($summary['total_paid'] ?? 0);
+        $payments = $summary['payments'] ?? collect();
+        $due_collections = $summary['due_collections'] ?? collect();
         $module = 'ipd';
 
         $invoiceDesign = InvoiceDesign::where('status', 'Active')->where('module', $module)->first();
@@ -1684,10 +2262,24 @@ class InvoiceController extends Controller
         $ipdId = prefixed_serial('ipd_no_prefix', 'IPDN', $ipdpatient->id, 4);
         $barcode = $this->generateBarcode($ipdId);
 
-        // Compute running details to extract lab subtotals for IPD invoice
         $running = $ipdDischargeBillingService->getRunningDetails($ipdpatient);
         $runningLines = $running['lines'] ?? [];
+        $runningSummary = $running['summary'] ?? [];
         $runningCollection = collect($runningLines);
+        $runningLineItems = $runningCollection->map(function ($ln) {
+            return [
+                'item_name' => $ln['item_name'] ?? ($ln['description'] ?? 'Item'),
+                'quantity' => isset($ln['quantity']) ? (float) $ln['quantity'] : 1,
+                'unit_price' => isset($ln['unit_price']) ? (float) $ln['unit_price'] : 0,
+                'net_amount' => isset($ln['net_amount']) ? (float) $ln['net_amount'] : (float) ($ln['total_amount'] ?? 0),
+                'category' => $ln['category'] ?? '',
+            ];
+        })->values()->all();
+        $medicineTotal = $runningCollection->filter(function ($ln) {
+            return strtolower(trim($ln['category'] ?? '')) === 'medicine';
+        })->sum(function ($ln) {
+            return (float) ($ln['net_amount'] ?? $ln['total_amount'] ?? 0);
+        });
         $labTotal = $runningCollection->filter(function ($ln) {
             $c = strtolower(trim($ln['category'] ?? ''));
             return in_array($c, ['pathology', 'radiology']);
@@ -1695,62 +2287,176 @@ class InvoiceController extends Controller
             return (float) ($ln['net_amount'] ?? $ln['total_amount'] ?? 0);
         });
 
-        // Medicine bill in IPD invoice should come only from PharmacyBill.
-        // If there is no pharmacy bill in the admission period, medicine stays 0.
-        $admissionAt = !empty($ipdpatient->admission_date)
-            ? \Carbon\Carbon::parse($ipdpatient->admission_date)
-            : now();
-        $dischargeAt = !empty($ipdpatient->discharged_at)
-            ? \Carbon\Carbon::parse($ipdpatient->discharged_at)
-            : now();
+        $billingLineItems = collect();
+        if (!empty($ipdpatient->billing_id)) {
+            $billingRecordForItems = \App\Models\Billing::query()
+                ->with(['billItems' => function ($q) {
+                    $q->whereNull('deleted_at');
+                }])
+                ->find($ipdpatient->billing_id);
 
-        $reference = trim((string) ($ipdpatient->case ?? ''));
-        $pharmacyQuery = PharmacyBill::query()
-            ->whereNull('deleted_at')
-            ->where('status', 'Active')
-            ->where('patient_id', $ipdpatient->patient_id);
-
-        if ($reference !== '' && PharmacyBill::query()->where('case_id', $reference)->exists()) {
-            $pharmacyQuery->where('case_id', $reference);
-        } else {
-            $pharmacyQuery->whereBetween('date', [
-                $admissionAt->toDateString(),
-                $dischargeAt->toDateString(),
-            ]);
+            $billingLineItems = collect($billingRecordForItems?->billItems ?? [])
+                ->filter(function ($item) {
+                    return !empty($item->item_name) || !empty($item->description) || (float) ($item->net_amount ?? $item->total_amount ?? 0) > 0;
+                })
+                ->map(function ($item) {
+                    return [
+                        'item_name' => $item->item_name ?? ($item->description ?? 'Item'),
+                        'quantity' => isset($item->quantity) ? (float) $item->quantity : 1,
+                        'unit_price' => isset($item->unit_price) ? (float) $item->unit_price : 0,
+                        'net_amount' => isset($item->net_amount) ? (float) $item->net_amount : (float) ($item->total_amount ?? 0),
+                        'category' => $item->category ?? '',
+                    ];
+                });
         }
 
-        $medicineTotal = 0.0;
-        foreach ($pharmacyQuery->get() as $pharmacyBill) {
-            $products = is_string($pharmacyBill->products)
-                ? json_decode($pharmacyBill->products, true)
-                : $pharmacyBill->products;
+        $displayLineItems = $this->resolveIpdInvoiceLineItems($billingLineItems, $runningLineItems);
 
-            if (!is_array($products)) {
-                continue;
+        $runningTotal = collect($displayLineItems)->sum(function ($ln) {
+            return (float) ($ln['net_amount'] ?? $ln['total_amount'] ?? 0);
+        });
+
+        $paymentsOnlyTotal = (float) $payments->sum('amount');
+        $dueCollectionsTotal = (float) collect($due_collections ?? [])->sum(function ($d) {
+            return (float) ($d->collected_amount ?? $d->amount ?? 0);
+        });
+
+        $netPayable = $runningTotal;
+        $totalPaid = round(max(0, $paymentsOnlyTotal + $dueCollectionsTotal), 2);
+        $dueAmount = max(0, round($netPayable - $totalPaid, 2));
+        $changeAmount = max(0, round($paymentsOnlyTotal - $runningTotal, 2));
+
+        $discountAmount = 0.0;
+        $discountType = 'flat';
+        $extraFlatDiscount = 0.0;
+        $vatAmount = 0.0;
+
+        if ($billingRecord) {
+            $billingTotals = $this->calculateFilteredTotals($runningLineItems, $billingRecord, 'ipd');
+            $runningTotal = (float) ($billingTotals['total_amount'] ?? $runningTotal);
+            $netPayable = (float) ($billingTotals['net_payable'] ?? $runningTotal);
+            $totalPaid = round((float) ($billingTotals['paid'] ?? $totalPaid), 2);
+            $dueAmount = max(0, round($netPayable - $totalPaid, 2));
+            $changeAmount = max(0, (float) ($billingRecord->change_amt ?? $billingRecord->return_amount ?? $billingRecord->return_amt ?? 0));
+            $discountAmount = (float) ($billingTotals['discount'] ?? 0);
+            $discountType = $billingRecord->discount_type ?? 'flat';
+            $extraFlatDiscount = (float) ($billingRecord->extra_flat_discount ?? 0);
+        }
+
+        $preparedBy = auth('admin')->user()?->name ?? 'Toamed Admin';
+        $amountInWords = $this->numberToWords((float) $netPayable);
+
+        // Prepare billing display info (prefer explicit billing_id if provided)
+        $billingInfo = null;
+        if (!empty($billingRecord)) {
+            $billingPatient = null;
+            if (!empty($billingRecord->patient_id)) {
+                $billingPatient = \App\Models\Patient::query()->find($billingRecord->patient_id);
             }
 
-            foreach ($products as $row) {
-                $medicineTotal += (float) ($row['amount'] ?? 0);
+            $ageDisplay = 'N/A';
+            try {
+                if (!empty($billingPatient?->age)) {
+                    $ageDisplay = (string) $billingPatient->age . ' years';
+                } elseif (!empty($billingPatient?->dob)) {
+                    $ageDisplay = \Carbon\Carbon::parse($billingPatient->dob)->age . ' years';
+                }
+            } catch (\Throwable $_e) {
+                $ageDisplay = 'N/A';
             }
+
+            $billingInfo = [
+                'bill_no' => $billingRecord->bill_number ?? '',
+                'bill_date_time' => $billingRecord->created_at ? $billingRecord->created_at->format('d-M-Y h:i:s A') : ($invoiceTime?->format('d-M-Y h:i:s A') ?? now()->format('d-M-Y h:i:s A')),
+                'patient_name' => $billingPatient?->name ?? $billingRecord->patient_name ?? ($ipdpatient->patient?->name ?? ''),
+                'age_display' => $ageDisplay,
+                'gender' => $billingPatient?->gender ?? $billingRecord->gender ?? ($ipdpatient->patient?->gender ?? 'N/A'),
+                'phone' => $billingPatient?->phone ?? $billingRecord->patient_mobile ?? ($ipdpatient->patient?->phone ?? ''),
+                'refd_by' => $billingRecord->doctor_name ?? '',
+            ];
         }
 
         $data = [
             'ipd_id' => $ipdId,
             'ipdpatient' => $ipdpatient,
             'patient' => $ipdpatient->patient,
+            // Patient summary fields (mirror billing invoice fields)
+            'patient_name' => $ipdpatient->patient?->name ?? 'N/A',
+            'name' => $ipdpatient->patient?->name ?? 'N/A',
+            'age' => $ipdpatient->patient?->age ?? 'N/A',
+            'age_display' => (function () use ($ipdpatient) {
+                $raw = $ipdpatient->patient?->age ?? '';
+                if ($raw === null || $raw === '') return 'N/A';
+                $rawStr = (string) $raw;
+                // If already contains 'year' or 'yrs', return as-is
+                if (preg_match('/\b(years?|yrs?)\b/i', $rawStr)) {
+                    return $rawStr;
+                }
+                // If numeric, append ' years'
+                if (is_numeric($rawStr)) {
+                    return trim($rawStr) . ' years';
+                }
+                return $rawStr;
+            })(),
+            'contact_no' => $ipdpatient->patient?->mobile ?? $ipdpatient->patient?->phone ?? ($ipdpatient->patient_mobile ?? '00'),
+            'gender' => $ipdpatient->patient?->gender ?? ($ipdpatient->gender ?? ''),
+            'refd_by' => $ipdpatient->doctor?->name ?? '',
             'doctor' => $ipdpatient->doctor,
             'bed' => $ipdpatient->bed,
             'payments' => $payments,
-            'total_paid' => $totalPaid,
+            'due_collections' => $due_collections ?? collect(),
+            'total_paid' => round($totalPaid, 2),
+            'invoice_time_paid_amount' => round($invoiceTimePaidAmount, 2),
+            'due_amount' => round($dueAmount, 2),
+            'return_amount' => round($changeAmount, 2),
+            'total_amount' => round($runningTotal, 2),
+            'net_payable' => round($netPayable, 2),
+            'amount_in_words' => $amountInWords,
+            'prepared_by' => $preparedBy,
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
             'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
             'barcode' => $barcode,
+            // Billing display (preserve billing list values when provided)
+            'bill_no' => $billingInfo['bill_no'] ?? ($billingRecord?->bill_number ?? ''),
+            'bill_date_time' => $billingInfo['bill_date_time'] ?? ($billingRecord?->created_at ? $billingRecord->created_at->format('d-M-Y h:i:s A') : ($invoiceTime?->format('d-M-Y h:i:s A') ?? now()->format('d-M-Y h:i:s A'))),
+            'billing_info' => $billingInfo,
             'printed_at' => now()->timezone('Asia/Dhaka')->format('d-M-Y h:i:s A'),
             'medicineTotal' => (float) $medicineTotal,
             'labTotal' => (float) $labTotal,
+            'runningLines' => $displayLineItems,
+            'bill_items' => $displayLineItems,
+            'header_height' => (int) ($invoiceDesign->header_height ?? 115),
+            'footer_height' => (int) ($invoiceDesign->footer_height ?? 70),
+            'showHeaderFooter' => true,
+            'auto_print' => $autoPrint,
+            // Billing identifiers (if billing exists for this IPD admission)
+            'bill_no' => $billingRecord?->bill_number ?? ($billing?->bill_number ?? ''),
+            'bill_date_time' => $billingRecord?->created_at
+                ? $billingRecord->created_at->format('d-M-Y h:i:s A')
+                : ($invoiceTime?->format('d-M-Y h:i:s A') ?? now()->timezone('Asia/Dhaka')->format('d-M-Y h:i:s A')),
+            // Additional IPD display fields
+            'admission' => !empty($ipdpatient->admission_date) ? \Carbon\Carbon::parse($ipdpatient->admission_date)->format('d-m-Y h:i A') : 'N/A',
+            'discharge' => !empty($ipdpatient->discharged_at) ? \Carbon\Carbon::parse($ipdpatient->discharged_at)->format('d-m-Y h:i A') : 'N/A',
+            'consultant' => $ipdpatient->doctor?->name ?? '',
+            'case' => $ipdpatient->case ?? '',
         ];
+
+        // Attach billing identifiers to the data so invoice shows Bill No and Date & Time
+        $data['bill_no'] = $billingRecord?->bill_number ?? '';
+        $data['bill_date_time'] = $billingRecord?->created_at
+            ? $billingRecord->created_at->format('d-M-Y h:i:s A')
+            : ($invoiceTime?->format('d-M-Y h:i:s A') ?? now()->timezone('Asia/Dhaka')->format('d-M-Y h:i:s A'));
+
+        if ($fastOpen) {
+            return response(view('frontend.invoice.ipd-pdf', $data)->render(), 200, [
+                'Content-Type' => 'text/html; charset=UTF-8',
+                'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+                'Pragma' => 'no-cache',
+                'Expires' => '0',
+            ]);
+        }
 
         $pdf = Pdf::loadView('frontend.invoice.ipd-pdf', $data)
             ->setPaper('A4', 'portrait')
@@ -1773,6 +2479,7 @@ class InvoiceController extends Controller
     {
         $requestData = $request->all();
         $ipdPatientId = $requestData['id'] ?? null;
+        $autoPrint = $request->boolean('auto_print');
 
         if (!$ipdPatientId) {
             abort(422, 'IPD patient id is required.');
@@ -1788,7 +2495,26 @@ class InvoiceController extends Controller
             ->orderBy('created_at')
             ->get();
 
-        $totalPaid = (float) $payments->sum('amount');
+        $invoiceTime = null;
+        $billingRecord = null;
+        if (!empty($ipdpatient->billing_id)) {
+            $billingRecord = \App\Models\Billing::query()->find($ipdpatient->billing_id);
+        }
+        if ($billingRecord?->created_at) {
+            $invoiceTime = $billingRecord->created_at;
+        } elseif ($ipdpatient->created_at) {
+            $invoiceTime = $ipdpatient->created_at;
+        } else {
+            $invoiceTime = now();
+        }
+
+        $dueCollections = $this->resolveIpdInvoiceDueCollections($ipdpatient);
+
+        $summary = $this->normalizeIpdInvoicePaymentsAndDueCollections($payments, $dueCollections, $invoiceTime);
+        $invoiceTimePaidAmount = (float) ($summary['invoice_time_paid_amount'] ?? 0);
+        $totalPaid = (float) ($summary['total_paid'] ?? 0);
+        $payments = $summary['payments'] ?? collect();
+        $due_collections = $summary['due_collections'] ?? collect();
 
         $module = 'ipd';
 
@@ -1826,10 +2552,19 @@ class InvoiceController extends Controller
         $ipdId = prefixed_serial('ipd_no_prefix', 'IPDN', $ipdpatient->id, 4);
         $barcode = $this->generateBarcode($ipdId);
 
-        // Compute running details to extract medicine/lab subtotals for IPD invoice
         $running = $ipdDischargeBillingService->getRunningDetails($ipdpatient);
         $runningLines = $running['lines'] ?? [];
+        $runningSummary = $running['summary'] ?? [];
         $runningCollection = collect($runningLines);
+        $runningLineItems = $runningCollection->map(function ($ln) {
+            return [
+                'item_name' => $ln['item_name'] ?? ($ln['description'] ?? 'Item'),
+                'quantity' => isset($ln['quantity']) ? (float) $ln['quantity'] : 1,
+                'unit_price' => isset($ln['unit_price']) ? (float) $ln['unit_price'] : 0,
+                'net_amount' => isset($ln['net_amount']) ? (float) $ln['net_amount'] : (float) ($ln['total_amount'] ?? 0),
+                'category' => $ln['category'] ?? '',
+            ];
+        })->values()->all();
         $medicineTotal = $runningCollection->filter(function ($ln) {
             return strtolower(trim($ln['category'] ?? '')) === 'medicine';
         })->sum(function ($ln) {
@@ -1842,6 +2577,72 @@ class InvoiceController extends Controller
             return (float) ($ln['net_amount'] ?? $ln['total_amount'] ?? 0);
         });
 
+        $billingLineItems = collect();
+        if (!empty($ipdpatient->billing_id)) {
+            $billingRecordForItems = \App\Models\Billing::query()
+                ->with(['billItems' => function ($q) {
+                    $q->whereNull('deleted_at');
+                }])
+                ->find($ipdpatient->billing_id);
+
+            $billingLineItems = collect($billingRecordForItems?->billItems ?? [])
+                ->filter(function ($item) {
+                    return !empty($item->item_name) || !empty($item->description) || (float) ($item->net_amount ?? $item->total_amount ?? 0) > 0;
+                })
+                ->map(function ($item) {
+                    return [
+                        'item_name' => $item->item_name ?? ($item->description ?? 'Item'),
+                        'quantity' => isset($item->quantity) ? (float) $item->quantity : 1,
+                        'unit_price' => isset($item->unit_price) ? (float) $item->unit_price : 0,
+                        'net_amount' => isset($item->net_amount) ? (float) $item->net_amount : (float) ($item->total_amount ?? 0),
+                        'category' => $item->category ?? '',
+                    ];
+                });
+        }
+
+        $displayLineItems = !empty($runningLineItems)
+            ? $runningLineItems
+            : ($billingLineItems->isNotEmpty() ? $billingLineItems->values()->all() : []);
+
+        $runningTotal = collect($displayLineItems)->sum(function ($ln) {
+            return (float) ($ln['net_amount'] ?? $ln['total_amount'] ?? 0);
+        });
+
+        $paymentsOnlyTotal = (float) $payments->sum('amount');
+        $dueCollectionsTotal = (float) collect($due_collections ?? [])->sum(function ($d) {
+            return (float) ($d->collected_amount ?? $d->amount ?? 0);
+        });
+
+        $billingPaid = $billingRecord ? (float) ($billingRecord->paid_amt ?? 0) : 0;
+        if ($billingPaid <= 0) {
+            $billingPaid = max(0, $paymentsOnlyTotal + $dueCollectionsTotal);
+        }
+
+        $totalPaid = round(max(0, $billingPaid), 2);
+        $discountAmount = 0.0;
+        $discountType = 'flat';
+        $extraFlatDiscount = 0.0;
+        $vatAmount = 0.0;
+
+        if ($billingRecord) {
+            $billingTotals = $this->calculateFilteredTotals($runningLineItems, $billingRecord, 'ipd');
+            $runningTotal = (float) ($billingTotals['total_amount'] ?? $runningTotal);
+            $netPayable = (float) ($billingTotals['net_payable'] ?? $runningTotal);
+            $totalPaid = round((float) ($billingTotals['paid'] ?? $totalPaid), 2);
+            $dueAmount = round((float) ($billingTotals['due'] ?? max(0, $netPayable - $totalPaid)), 2);
+            $changeAmount = max(0, (float) ($billingRecord->change_amt ?? $billingRecord->return_amount ?? $billingRecord->return_amt ?? 0));
+            $discountAmount = (float) ($billingTotals['discount'] ?? 0);
+            $discountType = $billingRecord->discount_type ?? 'flat';
+            $extraFlatDiscount = (float) ($billingRecord->extra_flat_discount ?? 0);
+        } else {
+            $netPayable = $runningTotal;
+            $dueAmount = max(0, round($runningTotal - $totalPaid, 2));
+            $changeAmount = max(0, round($paymentsOnlyTotal - $runningTotal, 2));
+        }
+
+        $preparedBy = auth('admin')->user()?->name ?? 'Toamed Admin';
+        $amountInWords = $this->numberToWords((float) $netPayable);
+
         $data = [
             'ipd_id' => $ipdId,
             'ipdpatient' => $ipdpatient,
@@ -1849,7 +2650,19 @@ class InvoiceController extends Controller
             'doctor' => $ipdpatient->doctor,
             'bed' => $ipdpatient->bed,
             'payments' => $payments,
-            'total_paid' => $totalPaid,
+            'due_collections' => $due_collections ?? collect(),
+            'total_paid' => round($totalPaid, 2),
+            'invoice_time_paid_amount' => round($invoiceTimePaidAmount, 2),
+            'due_amount' => round($dueAmount, 2),
+            'return_amount' => round($changeAmount, 2),
+            'total_amount' => round($runningTotal, 2),
+            'vat' => round($vatAmount, 2),
+            'discount' => round($discountAmount, 2),
+            'discount_type' => $discountType,
+            'extra_flat_discount' => round($extraFlatDiscount, 2),
+            'net_payable' => round($netPayable, 2),
+            'amount_in_words' => $amountInWords,
+            'prepared_by' => $preparedBy,
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
@@ -1858,9 +2671,14 @@ class InvoiceController extends Controller
             'printed_at' => now()->timezone('Asia/Dhaka')->format('d-M-Y h:i:s A'),
             'medicineTotal' => (float) $medicineTotal,
             'labTotal' => (float) $labTotal,
+            'runningLines' => $displayLineItems,
+            'bill_items' => $displayLineItems,
+            'header_height' => (int) ($invoiceDesign->header_height ?? 115),
+            'footer_height' => (int) ($invoiceDesign->footer_height ?? 70),
+            'showHeaderFooter' => true,
+            'auto_print' => $autoPrint,
         ];
 
         return view('frontend.invoice.ipd-pdf', $data);
     }
 }
-

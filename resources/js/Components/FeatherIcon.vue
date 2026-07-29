@@ -23,20 +23,24 @@ export default {
   },
   computed: {
     classes() {
-      return `icon icon-${this.name} ${this.class}`;
+      const name = String(this.name || '').trim();
+      return `icon icon-${name || 'unknown'} ${this.class}`;
     },
 
     iconSvg() {
+      const name = String(this.name || '').trim();
+      if (!name) return null;
+
       // First priority: Check Feather icons
-      if (feather.icons[this.name]) {
-        return feather.icons[this.name].toSvg({
+      if (feather.icons[name]) {
+        return feather.icons[name].toSvg({
           width: this.size,
           height: this.size,
         });
       }
 
       // Second priority: Check Lucide icons (manually defined common ones)
-      const lucideIcon = this.getLucideIcon(this.name);
+      const lucideIcon = this.getLucideIcon(name);
       if (lucideIcon) {
         return lucideIcon;
       }
@@ -45,7 +49,8 @@ export default {
     },
 
     fallbackIcon() {
-      console.warn(`Icon "${this.name}" not found in Feather or Lucide icons.`);
+      const name = String(this.name || '').trim();
+      if (name) console.warn(`Icon "${name}" not found in Feather or Lucide icons.`);
       return `<svg width="${this.size}" height="${this.size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10" />
         <text x="12" y="16" font-size="10" text-anchor="middle" fill="currentColor">?</text>
@@ -59,8 +64,12 @@ export default {
         'balance': 'finance',
         'activity-log': 'activity',
         'factory': 'industry',
+        'doctor': 'stethoscope',
+        'x-ray': 'activity',
+        'xray': 'activity',
       };
 
+      const mappedName = aliasMap[iconName] || iconName;
       const lucideIcons = {
         'bed': `<svg width="${this.size}" height="${this.size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M2 4v16"/>

@@ -28,6 +28,17 @@ class UpdateItemChargeMenuSeeder extends Seeder
                 ->where('parent_id', $parent->id)
                 ->where('name', 'like', '%Test%')
                 ->update(['name' => DB::raw("REPLACE(name, 'Test', 'Item')")]);
+
+            // Fix legacy Item List permission slug for existing installations.
+            DB::table('menus')
+                ->where('parent_id', $parent->id)
+                ->where('permission_name', 'test-list')
+                ->update([
+                    'permission_name' => 'itemcharge-list',
+                    'name' => 'Item List',
+                    'route' => 'backend.itemcharge.index',
+                    'status' => 'Active',
+                ]);
         }
     }
 }

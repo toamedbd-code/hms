@@ -12,10 +12,10 @@
     ?>
 
     <title inertia><?php echo e(config('app.name', 'Laravel')); ?></title>
-    <?php if($initialFavicon): ?>
-        <link rel="icon" href="<?php echo e($initialFavicon); ?>" data-app-favicon="true" data-favicon-rel="icon">
-        <link rel="shortcut icon" href="<?php echo e($initialFavicon); ?>" data-app-favicon="true" data-favicon-rel="shortcut icon">
-    <?php endif; ?>
+    <!-- Favicon declarations: use the static site favicon on initial render for reliable tab icons -->
+    <link rel="icon" type="image/x-icon" href="<?php echo e(asset('favicon.ico')); ?>">
+    <link rel="shortcut icon" type="image/x-icon" href="<?php echo e(asset('favicon.ico')); ?>">
+    <link rel="apple-touch-icon" href="<?php echo e(asset('favicon.ico')); ?>">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -45,7 +45,7 @@
     <?php $__inertiaSsrResponse = app(\Inertia\Ssr\SsrState::class)->setPage($page)->dispatch();  if ($__inertiaSsrResponse) { echo $__inertiaSsrResponse->head; } ?>
 </head>
 
-<body class="font-sans antialiased duration-1000 overflow-hidden">
+<body class="font-sans antialiased duration-1000">
     <?php $__inertiaSsrResponse = app(\Inertia\Ssr\SsrState::class)->setPage($page)->dispatch();  if ($__inertiaSsrResponse) { echo $__inertiaSsrResponse->body; } else { ?><script data-page="app" type="application/json"><?php echo json_encode($page); ?></script><div id="app"></div><?php } ?>
 </body>
 

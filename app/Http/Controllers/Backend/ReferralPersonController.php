@@ -40,7 +40,7 @@ class ReferralPersonController extends Controller
         return Inertia::render(
             'Backend/ReferralPerson/Index',
             [
-                'pageTitle' => fn() => 'Referral List',
+                'pageTitle' => fn() => 'Referral Person List',
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
@@ -80,6 +80,12 @@ class ReferralPersonController extends Controller
             }
             if (!empty($data->radiology_commission) && $data->radiology_commission > 0) {
                 $commissionParts[] = 'Radiology -' . number_format($data->radiology_commission, 0) . '%' . '<br>';
+            }
+            if (!empty($data->ecg_commission) && $data->ecg_commission > 0) {
+                $commissionParts[] = 'ECG -' . number_format($data->ecg_commission, 0) . '%' . '<br>';
+            }
+            if (!empty($data->ultrasound_commission) && $data->ultrasound_commission > 0) {
+                $commissionParts[] = 'Ultrasound -' . number_format($data->ultrasound_commission, 0) . '%' . '<br>';
             }
             if (!empty($data->blood_bank_commission) && $data->blood_bank_commission > 0) {
                 $commissionParts[] = 'Blood Bank -' . number_format($data->blood_bank_commission, 0) . '%' . '<br>';

@@ -184,6 +184,7 @@ const canApproveStock = (payment) => {
       <div class="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">Supplier Payment List</h1>
         <div class="flex items-center gap-2">
+          <Link :href="route('backend.dashboard')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">Back</Link>
           <Link :href="route('backend.supplierpayment.report.stock-due')" class="px-3 py-2 text-sm text-white bg-amber-600 rounded hover:bg-amber-700">
             Stock Due Report
           </Link>

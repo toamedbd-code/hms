@@ -239,6 +239,14 @@ const printReport = () => {
   window.print();
 };
 
+const goBack = () => {
+  if (window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+  router.visit(route('backend.dashboard'));
+};
+
 </script>
 
 <template>
@@ -253,6 +261,16 @@ const printReport = () => {
           </div>
 
           <div class="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-stretch">
+            <button
+              type="button"
+              @click="goBack"
+              class="no-print inline-flex items-center justify-center rounded-lg border-0 bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
+            >
+              <svg class="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+              </svg>
+              Back
+            </button>
             <div class="no-print flex flex-wrap items-center gap-2 lg:pr-1">
               <button
                 type="button"

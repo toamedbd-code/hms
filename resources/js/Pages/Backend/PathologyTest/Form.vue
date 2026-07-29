@@ -84,12 +84,13 @@ const form = useForm({
     test_category_id: props.pathologytest?.test_category_id ?? '',
     test_sub_category_id: props.pathologytest?.test_sub_category_id ?? '',
     method: props.pathologytest?.method ?? '',
-    report_days: props.pathologytest?.report_days ?? '',
+    room_no: props.pathologytest?.room_no ?? '',
     charge_id: props.pathologytest?.charge_category_id ?? '', // Fixed field mapping
     charge_name: props.pathologytest?.charge_name ?? '',
     tax: props.pathologytest?.tax ?? '',
     standard_charge: props.pathologytest?.standard_charge ?? '',
     amount: props.pathologytest?.amount ?? '',
+    referral_percentage: props.pathologytest?.referral_percentage ?? '',
 
     parameters: props.pathologytest?.parameters ?? [{
         test_parameter_id: '',
@@ -114,20 +115,48 @@ const availableSubCategories = computed(() => {
         return [];
     }
 
-    // Get all descendants recursively of the selected category
-    const getAllDescendants = (parentId) => {
-        const directChildren = categories.value.filter(cat => cat.parent_id == parentId);
+    // Get all descendants recursively of the selected category.
+    // Protect against cyclic category parent relationships to avoid max call stack.
+    const getAllDescendants = (parentId, visited = new Set()) => {
+        if (visited.has(parentId)) {
+            return [];
+        }
+
+        visited.add(parentId);
+        const directChildren = categories.value.filter(cat => cat.parent_id == parentId && cat.id !== parentId);
         let allDescendants = [...directChildren];
 
-        // For each direct child, get their descendants too
         directChildren.forEach(child => {
-            allDescendants = [...allDescendants, ...getAllDescendants(child.id)];
+            allDescendants = [...allDescendants, ...getAllDescendants(child.id, visited)];
         });
 
         return allDescendants;
     };
 
-    return getAllDescendants(form.test_category_id);
+    const descendants = getAllDescendants(form.test_category_id);
+
+    // If there are descendants, return them.
+    if (descendants.length > 0) return descendants;
+
+    // Special case: if selected main category is "Disposable", include the
+    // main category itself as an available "sub-category" so the UI shows
+    // a selectable option. This ensures Disposable items can be assigned
+    // to a Disposable subcategory (used for no-discount logic).
+    const parentCat = categories.value.find(cat => cat.id == form.test_category_id);
+    if (parentCat && String(parentCat.name || '').trim().toLowerCase() === 'disposable') {
+        return [parentCat];
+    }
+
+    return [];
+});
+
+// Show/hide subcategory field: hide when selected main category is 'Disposable'
+const showSubCategoryField = computed(() => {
+    if (!form.test_category_id) return false;
+    const parentCat = categories.value.find(cat => cat.id == form.test_category_id);
+    if (!parentCat) return false;
+    if (String(parentCat.name || '').trim().toLowerCase() === 'disposable') return false;
+    return availableSubCategories.value.length > 0;
 });
 
 // Helper function to get category hierarchy display name
@@ -243,6 +272,38 @@ const handleCategoryCreated = (newCategory) => {
             categories.value = page.props.testCategories || [];
         }
     });
+};
+
+// Permissions helper
+const userPermissions = computed(() => {
+    const raw = page.props?.auth?.permissions ?? [];
+    return Array.isArray(raw) ? raw.map(p => String(p).trim().toLowerCase()) : [];
+});
+
+const canCreateCategory = computed(() => userPermissions.value.includes('test-category-list-create'));
+const canEditCategory = computed(() => userPermissions.value.includes('test-category-list-edit'));
+const canDeleteCategory = computed(() => userPermissions.value.includes('test-category-list-delete'));
+
+// Edit/Delete helpers for selected main category
+const editSelectedCategory = () => {
+    if (!form.test_category_id) return;
+    router.visit(route('backend.pathologycategory.edit', form.test_category_id));
+};
+
+const deleteSelectedCategory = async () => {
+    if (!form.test_category_id) return;
+    if (!confirm('Are you sure you want to delete the selected category? This will affect related items.')) return;
+
+    try {
+        await window.axios.post(route('backend.pathologycategory.destroy', form.test_category_id), { _method: 'delete' });
+        // reload categories
+        router.reload({ only: ['testCategories'], preserveState: true, preserveScroll: true, onSuccess: (page) => {
+            categories.value = page.props.testCategories || [];
+            form.test_category_id = '';
+        }});
+    } catch (err) {
+        displayWarning(err.response?.data || err);
+    }
 };
 
 const addParameter = () => {
@@ -507,31 +568,9 @@ const submit = () => {
             // reset form when created (not editing)
             if (!props.id) form.reset();
             displayResponse(response);
-            // If the page was opened with an ipd_id query param OR ipdId prop provided, add the created item's charge to that IPD
-            try {
-                const url = new URL(window.location.href);
-                const ipdId = props.ipdId || url.searchParams.get('ipd_id') || url.searchParams.get('ipd');
-                if (ipdId) {
-                    // Try to find the created test/charge by name
-                    const q = (form.test_name || form.charge_name || '').toString().trim();
-                    if (q) {
-                        const searchRes = await window.axios.get(route('backend.itemcharge.search'), { params: { q } });
-                        const results = (searchRes?.data?.results) || [];
-                        // Prefer exact test_name match, fallback to first result
-                        let chosen = results.find(r => (r.test_name || '').toString().toLowerCase() === q.toLowerCase()) || results[0];
-                        const chargeId = chosen?.charge_id || null;
-                        if (chargeId) {
-                            // Post as hospital charge to the IPD
-                            await window.axios.post(route('backend.ipdpatient.charges.hospital.store', ipdId), { hospital_charge_ids: [chargeId] });
-                            // Navigate to IPD show so overview/running bill is visible
-                            try { router.visit(route('backend.ipdpatient.show', ipdId)); } catch (e) { /* ignore */ }
-                        }
-                    }
-                }
-            } catch (e) {
-                // non-blocking: ignore any errors here but log to console for debugging
-                console.error('IPD auto-add failed:', e);
-            }
+            // IPD auto-add disabled: previously this code would auto-post the created
+            // item as a hospital charge to an IPD when `ipd_id` was present in the
+            // URL or props. Disabled to prevent unintended automatic additions.
 
             // Emit created event when embedded so parent can react (close modal / refresh)
             try {
@@ -550,6 +589,14 @@ const submit = () => {
     router.visit(route('backend.itemcharge.index'));
 };
 
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    router.visit(route('backend.itemcharge.index'));
+};
+
 </script>
 
 <template>
@@ -561,8 +608,17 @@ const submit = () => {
                     <h1 class="p-4 text-xl font-bold dark:text-white">{{ pageTitle }}</h1>
                 </div>
 
-                    <div class="p-2 py-2 flex items-center space-x-2">
+                <div class="p-2 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button @click="goBack"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gray-500 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gray-600">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                            </svg>
+                            Back
+                        </button>
+
                         <!-- Header Add-to-IPD removed per UX request -->
 
                         <button @click="goToTestList"
@@ -593,6 +649,9 @@ const submit = () => {
                             <option value="IPD">IPD</option>
                             <option value="Pathology">Pathology</option>
                             <option value="Radiology">Radiology</option>
+                            <option value="ECG">ECG</option>
+                            <option value="Ultrasound">Ultrasound</option>
+                            <option value="Disposable">Disposable</option>
                             <option value="Blood Bank">Blood Bank</option>
                             <option value="Ambulance">Ambulance</option>
                         </select>
@@ -630,15 +689,19 @@ const submit = () => {
                                     {{ cat.name }}
                                 </option>
                             </select>
-                            <button type="button" @click="openCategoryModal"
-                                class="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200"
-                                title="Add New Category">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                                    stroke-width="2">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6">
-                                    </path>
-                                </svg>
-                            </button>
+                            <div class="flex items-center space-x-2">
+                                <button v-if="canCreateCategory" type="button" @click="openCategoryModal"
+                                    class="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200"
+                                    title="Add New Category">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                        stroke-width="2">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6">
+                                        </path>
+                                    </svg>
+                                </button>
+
+                                <!-- Edit/Delete buttons removed per request -->
+                            </div>
                         </div>
                         <InputError :message="form.errors.test_category_id" />
 
@@ -649,7 +712,7 @@ const submit = () => {
                     </div>
 
                     <!-- Sub Category (Shows when main category is selected and has subcategories) -->
-                    <div v-if="availableSubCategories.length > 0">
+                    <div v-if="showSubCategoryField">
                         <InputLabel for="test_sub_category_id" value="Sub Category" />
                         <select id="test_sub_category_id" v-model="form.test_sub_category_id" class="form-input">
                             <option value="">Select Sub Category</option>
@@ -667,11 +730,11 @@ const submit = () => {
                         <InputError :message="form.errors.method" />
                     </div>
 
-                    <!-- Report Days -->
+                    <!-- Room No -->
                     <div>
-                        <InputLabel for="report_days" value="Report Days" />
-                        <input id="report_days" v-model="form.report_days" type="number" class="form-input" />
-                        <InputError :message="form.errors.report_days" />
+                        <InputLabel for="room_no" value="Room No" />
+                        <input id="room_no" v-model="form.room_no" type="text" class="form-input" />
+                        <InputError :message="form.errors.room_no" />
                     </div>
 
                     <!-- Charge Selection removed as requested -->
@@ -704,6 +767,13 @@ const submit = () => {
                         <InputLabel for="amount" value="Total Amount" />
                         <input id="amount" v-model="form.amount" type="number" step="0.01" class="form-input" />
                         <InputError :message="form.errors.amount" />
+                    </div>
+
+                    <!-- Referral Percentage -->
+                    <div>
+                        <InputLabel for="referral_percentage" value="Referral Percentage (%)" />
+                        <input id="referral_percentage" v-model="form.referral_percentage" type="number" step="0.01" min="0" max="100" class="form-input" />
+                        <InputError :message="form.errors.referral_percentage" />
                     </div>
                 </div>
 

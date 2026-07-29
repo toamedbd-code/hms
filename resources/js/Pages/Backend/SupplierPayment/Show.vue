@@ -37,7 +37,7 @@ const canApproveStock = () => {
           >
             Approve Stock
           </Link>
-          <Link :href="route('backend.supplierpayment.index')" class="px-3 py-2 text-sm text-white bg-gray-600 rounded hover:bg-gray-700">
+          <Link :href="route('backend.supplierpayment.index')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">
             Back
           </Link>
         </div>

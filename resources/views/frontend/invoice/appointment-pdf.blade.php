@@ -342,6 +342,10 @@
                     <td><span class="summary-label">Net Amount</span></td>
                     <td class="amount-col">Tk. {{ number_format($appointment->doctor_fee, 2) }}</td>
                 </tr>
+                @php
+                    $discountCalculated = round((float) ($appointment->doctor_fee * ($appointment->discount_percentage / 100)), 2);
+                @endphp
+                @if ($discountCalculated != 0)
                 <tr>
                     <td><span class="summary-label">Discount( {{ $appointment->discount_percentage }}% )</span></td>
                     <td class="amount-col">
@@ -352,6 +356,7 @@
                         @endif
                     </td>
                 </tr>
+                @endif
                 <tr>
                     <td><span class="summary-label">Paid Amount</span></td>
                     <td class="amount-col">Tk. {{ number_format($appointment->doctor_fee - ($appointment->doctor_fee * ($appointment->discount_percentage / 100)), 2) }}</td>

@@ -161,7 +161,12 @@ class PatientController extends Controller
 
             if ($dataInfo) {
                 $message = 'Patient created successfully';
-                $this->storeAdminWorkLog($dataInfo->id, 'patients', $message);
+                try {
+                    $this->storeAdminWorkLog($dataInfo->id, 'patients', $message);
+                } catch (\Throwable $logEx) {
+                    // Ensure admin work log failures do not break the happy path.
+                    $this->storeSystemError('Backend', 'PatientController', 'store.worklog', substr($logEx->getMessage(), 0, 1000));
+                }
 
                 DB::commit();
 
@@ -180,24 +185,37 @@ class PatientController extends Controller
                     ->with('successMessage', $message);
             } else {
                 DB::rollBack();
+                                // Commit the transaction first to ensure persistence. Any subsequent
+                                // administrative logging should not fail the primary operation.
+                                DB::commit();
 
-                $message = "Failed To create Patient.";
-                if ($request->wantsJson() && !$request->header('X-Inertia')) {
-                    return response()->json(['errorMessage' => $message], 500);
-                }
-
+                                try {
+                                    $this->storeAdminWorkLog($dataInfo->id, 'patients', $message);
+                                } catch (\Throwable $_logEx) {
+                                    // Log the logging failure for later inspection but do not
+                                    // convert the successful create into an error for the user.
+                                    $this->storeSystemError('Backend', 'PatientController', 'store->worklog', substr($_logEx->getMessage(), 0, 1000));
+                                }
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
             }
-        } catch (Exception $err) {
-            //   dd($err);
+        } catch (\Throwable $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'PatientController', 'store', substr($err->getMessage(), 0, 1000));
-            //dd($err);
-            DB::commit();
-            $message = "Server Errors Occur. Please Try Again.";
-            // dd($message);
+
+            $isDebug = env('APP_DEBUG', false);
+            $debugMsg = $isDebug ? $err->getMessage() : 'Server Errors Occur. Please Try Again.';
+
+            if ($request->wantsJson() && !$request->header('X-Inertia')) {
+                $payload = ['errorMessage' => $debugMsg];
+                if ($isDebug) {
+                    $payload['exception'] = $err->getMessage();
+                }
+                return response()->json($payload, 500);
+            }
+
+            $message = $debugMsg;
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
@@ -257,10 +275,9 @@ class PatientController extends Controller
                     ->back()
                     ->with('errorMessage', $message);
             }
-        } catch (Exception $err) {
+        } catch (\Throwable $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'PatientController', 'update', substr($err->getMessage(), 0, 1000));
-            DB::commit();
             $message = "Server Errors Occur. Please Try Again.";
             return redirect()
                 ->back()
@@ -292,10 +309,9 @@ class PatientController extends Controller
                     ->back()
                     ->with('errorMessage', $message);
             }
-        } catch (Exception $err) {
+        } catch (\Throwable $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'PatientController', 'destroy', substr($err->getMessage(), 0, 1000));
-            DB::commit();
             $message = "Server Errors Occur. Please Try Again.";
             return redirect()
                 ->back()

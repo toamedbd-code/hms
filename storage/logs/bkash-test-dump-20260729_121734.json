@@ -1,0 +1,139 @@
+{
+    "timestamp": "2026-07-29T12:17:34+06:00",
+    "probe_summary": {
+        "checked": 14,
+        "non403": 0
+    },
+    "probe_full": [
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/tokenized\/checkout\/token",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Forbidden\"}",
+            "json": {
+                "message": "Forbidden"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/tokenized\/checkout\/token\/grant",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Forbidden\"}",
+            "json": {
+                "message": "Forbidden"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/checkout\/token",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Forbidden\"}",
+            "json": {
+                "message": "Forbidden"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/checkout\/token\/grant",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Forbidden\"}",
+            "json": {
+                "message": "Forbidden"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/token",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Forbidden\"}",
+            "json": {
+                "message": "Forbidden"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/v2\/tokenized\/checkout\/token",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Missing Authentication Token\"}",
+            "json": {
+                "message": "Missing Authentication Token"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/v2\/tokenized\/checkout\/token\/grant",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Missing Authentication Token\"}",
+            "json": {
+                "message": "Missing Authentication Token"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/v2\/checkout\/token",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Missing Authentication Token\"}",
+            "json": {
+                "message": "Missing Authentication Token"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/v2\/checkout\/token\/grant",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Missing Authentication Token\"}",
+            "json": {
+                "message": "Missing Authentication Token"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/v2\/token",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Missing Authentication Token\"}",
+            "json": {
+                "message": "Missing Authentication Token"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/v1.0.0-beta\/tokenized\/checkout\/token",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Forbidden\"}",
+            "json": {
+                "message": "Forbidden"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/v1.0.0-beta\/tokenized\/checkout\/token\/grant",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Forbidden\"}",
+            "json": {
+                "message": "Forbidden"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/v2\/v1.0.0-beta\/tokenized\/checkout\/token",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Missing Authentication Token\"}",
+            "json": {
+                "message": "Missing Authentication Token"
+            }
+        },
+        {
+            "url": "https:\/\/tokenized.sandbox.bka.sh\/v2\/v1.0.0-beta\/tokenized\/checkout\/token\/grant",
+            "status": 403,
+            "successful": false,
+            "body": "{\"message\":\"Missing Authentication Token\"}",
+            "json": {
+                "message": "Missing Authentication Token"
+            }
+        }
+    ],
+    "checkout": {
+        "redirect_url": "http:\/\/hms.test\/payment\/bkash\/simulate-public\/910",
+        "payment_id": "SIM-910"
+    }
+}

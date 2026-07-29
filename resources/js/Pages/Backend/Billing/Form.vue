@@ -28,7 +28,7 @@ const handlePhotoChange = (event) => {
 };
 
 const submit = () => {
-    const routeName = props.id ? route('backend.billing.update', props.id) : route('backend.billing.store');
+    const routeName = props.id ? route('backend.billing.update', { billing: props.id }) : route('backend.billing.store');
     form.transform(data => ({
         ...data,
         remember: '',

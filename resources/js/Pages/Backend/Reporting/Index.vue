@@ -15,6 +15,10 @@ const props = defineProps({
     type: String,
     default: 'Reporting',
   },
+  department: {
+    type: String,
+    default: '',
+  },
 });
 
 const rows = computed(() => props.datas?.data ?? []);
@@ -41,7 +45,23 @@ const submitSearch = () => {
     return;
   }
 
-  router.get(route('backend.reporting.index'), { bill_number: value, include_reported: 1 }, { preserveScroll: true });
+  // Preserve the current reporting department (ultrasound/xray/pathology)
+  // so searches performed from a department page remain in that context.
+  const params = { bill_number: value, include_reported: 1 };
+  if (props.department && props.department !== '') {
+    params.department = props.department;
+  }
+
+  router.get(route('backend.reporting.index'), params, { preserveScroll: true });
+};
+
+const buildEditRoute = (billing, includeReported = false) => {
+  const base = { billing: billing.id };
+  if (props.department && props.department !== '') {
+    base.department = props.department;
+  }
+  if (includeReported) base.include_reported = 1;
+  return route('backend.reporting.edit', base);
 };
 </script>
 
@@ -98,14 +118,14 @@ const submitSearch = () => {
                 <Link
                   v-if="hasPendingItems(billing)"
                   class="px-3 py-1 text-xs text-white bg-emerald-600 rounded hover:bg-emerald-700"
-                  :href="route('backend.reporting.edit', billing.id)"
+                  :href="buildEditRoute(billing, false)"
                 >
                   Add Report
                 </Link>
                 <Link
                   v-else-if="hasReportedItems(billing)"
                   class="px-3 py-1 text-xs text-white bg-indigo-600 rounded hover:bg-indigo-700"
-                  :href="route('backend.reporting.edit', { billing: billing.id, include_reported: 1 })"
+                  :href="buildEditRoute(billing, true)"
                 >
                   Edit Report
                 </Link>

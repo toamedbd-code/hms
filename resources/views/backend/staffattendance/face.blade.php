@@ -2,6 +2,12 @@
 
 @section('content')
 <div class="container">
+    <div style="margin-bottom: 12px;">
+        <a href="javascript:history.back()" style="display:inline-block;padding:8px 14px;background:#dc2626;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;">
+            Back
+        </a>
+    </div>
+
     <h2>Webcam Face-Detect Attendance</h2>
 
     <div style="max-width:720px">

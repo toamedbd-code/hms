@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Response as BaseResponse;
 use Illuminate\Support\Traits\Macroable;
+use Inertia\Ssr\DisablesSsr;
 use Inertia\Ssr\ExcludesSsrPaths;
 use Inertia\Ssr\Gateway;
 use Inertia\Support\Header;
@@ -71,6 +72,13 @@ class ResponseFactory
      * @var Closure|null
      */
     protected $urlResolver;
+
+    /**
+     * The component transformer callback.
+     *
+     * @var Closure|null
+     */
+    protected $componentTransformer;
 
     /**
      * Set the root view template for Inertia responses. This template
@@ -161,6 +169,14 @@ class ResponseFactory
     }
 
     /**
+     * Set the component transformer.
+     */
+    public function transformComponentUsing(?Closure $componentTransformer = null): void
+    {
+        $this->componentTransformer = $componentTransformer;
+    }
+
+    /**
      * Clear the browser history on the next visit.
      */
     public function clearHistory(): void
@@ -184,6 +200,20 @@ class ResponseFactory
     public function encryptHistory($encrypt = true): void
     {
         $this->encryptHistory = $encrypt;
+    }
+
+    /**
+     * Disable server-side rendering, optionally based on a condition.
+     */
+    public function disableSsr(Closure|bool $condition = true): void
+    {
+        $gateway = app(Gateway::class);
+
+        if (! $gateway instanceof DisablesSsr) {
+            throw new LogicException('The configured SSR gateway does not support disabling server-side rendering conditionally.');
+        }
+
+        $gateway->disable($condition);
     }
 
     /**
@@ -213,9 +243,9 @@ class ResponseFactory
     /**
      * Create a deferred property.
      */
-    public function defer(callable $callback, string $group = 'default'): DeferProp
+    public function defer(callable $callback, string $group = 'default', bool $rescue = false): DeferProp
     {
-        return new DeferProp($callback, $group);
+        return new DeferProp($callback, $group, $rescue);
     }
 
     /**
@@ -294,6 +324,21 @@ class ResponseFactory
     }
 
     /**
+     * Transform the component name.
+     *
+     * @param  mixed  $component
+     * @return mixed
+     */
+    protected function transformComponent($component)
+    {
+        if (! $this->componentTransformer) {
+            return $component;
+        }
+
+        return ($this->componentTransformer)($component) ?? $component;
+    }
+
+    /**
      * Create an Inertia response.
      *
      * @param  BackedEnum|UnitEnum|string  $component
@@ -301,6 +346,8 @@ class ResponseFactory
      */
     public function render($component, $props = []): Response
     {
+        $component = $this->transformComponent($component);
+
         $component = match (true) {
             $component instanceof BackedEnum => $component->value,
             $component instanceof UnitEnum => $component->name,
@@ -404,7 +451,7 @@ class ResponseFactory
             $flash = [$key => $value];
         }
 
-        session()->now(SessionKey::FLASH_DATA, [
+        session()->flash(SessionKey::FLASH_DATA, [
             ...$this->getFlashed(),
             ...$flash,
         ]);
@@ -432,5 +479,17 @@ class ResponseFactory
         $request ??= request();
 
         return $request->hasSession() ? $request->session()->get(SessionKey::FLASH_DATA, []) : [];
+    }
+
+    /**
+     * Retrieve and remove the flashed data from the session.
+     *
+     * @return array<string, mixed>
+     */
+    public function pullFlashed(?HttpRequest $request = null): array
+    {
+        $request ??= request();
+
+        return $request->hasSession() ? $request->session()->pull(SessionKey::FLASH_DATA, []) : [];
     }
 }

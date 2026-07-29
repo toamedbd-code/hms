@@ -19,9 +19,12 @@ class ReferralPersonRequest extends FormRequest
             'pharmacy_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'pathology_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'radiology_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'ecg_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'ultrasound_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'blood_bank_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'ambulance_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'apply_to_all' => 'sometimes|boolean',
+            'use_item_referral' => 'sometimes|boolean',
         ];
 
         switch ($this->method()) {
@@ -55,6 +58,8 @@ class ReferralPersonRequest extends FormRequest
             'pharmacy_commission.required_without_all' => __('At least one commission field must be filled.'),
             'pathology_commission.required_without_all' => __('At least one commission field must be filled.'),
             'radiology_commission.required_without_all' => __('At least one commission field must be filled.'),
+            'ecg_commission.required_without_all' => __('At least one commission field must be filled.'),
+            'ultrasound_commission.required_without_all' => __('At least one commission field must be filled.'),
             'blood_bank_commission.required_without_all' => __('At least one commission field must be filled.'),
             'ambulance_commission.required_without_all' => __('At least one commission field must be filled.'),
             
@@ -71,6 +76,10 @@ class ReferralPersonRequest extends FormRequest
             'pathology_commission.min' => __('Pathology commission must be at least 0.01.'),
             'radiology_commission.numeric' => __('Radiology commission must be a number.'),
             'radiology_commission.min' => __('Radiology commission must be at least 0.01.'),
+            'ecg_commission.numeric' => __('ECG commission must be a number.'),
+            'ecg_commission.min' => __('ECG commission must be at least 0.01.'),
+            'ultrasound_commission.numeric' => __('Ultrasound commission must be a number.'),
+            'ultrasound_commission.min' => __('Ultrasound commission must be at least 0.01.'),
             'blood_bank_commission.numeric' => __('Blood bank commission must be a number.'),
             'blood_bank_commission.min' => __('Blood bank commission must be at least 0.01.'),
             'ambulance_commission.numeric' => __('Ambulance commission must be a number.'),

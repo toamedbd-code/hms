@@ -1,7 +1,7 @@
 <script setup>
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
-import { router, useForm } from '@inertiajs/vue3';
+import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import BillingModal from '@/Components/BillingModal.vue';
@@ -9,6 +9,13 @@ import BillingModal from '@/Components/BillingModal.vue';
 const searchForm = useForm({
     case_id: '',
 });
+
+const page = usePage();
+const userPermissions = computed(() => {
+    const raw = page.props?.auth?.permissions ?? [];
+    return Array.isArray(raw) ? raw : [];
+});
+const canEditBilling = computed(() => userPermissions.value.includes('billing-edit'));
 
 const showAddBillModal = ref(false);
 
@@ -158,7 +165,33 @@ const openAddBillButton = () => {
 };
 
 const openListBillButton = () => {
-    router.visit(route('backend.billing.list'));
+    try {
+        const url = route('backend.billing.list');
+        if (url) {
+            window.location.assign(url);
+            return;
+        }
+    } catch (e) {
+        // fallback to route helper path if route name resolution fails
+    }
+    window.location.assign('/view-billing-list-page');
+};
+
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    try {
+        const url = route('backend.dashboard');
+        if (url) {
+            window.location.assign(url);
+            return;
+        }
+    } catch (e) {
+        // fallback to dashboard path if route helper fails
+    }
+    window.location.assign('/dashboard');
 };
 
 const selectBillingTypeFromModal = (type) => {
@@ -188,6 +221,13 @@ const clearSearch = () => {
                             <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-200">Single Module Billing
                             </h2>
                             <div class="flex gap-2">
+                                <button @click="goBack"
+                                    class="px-4 py-2 bg-red-600 text-white text-sm rounded-md shadow-md hover:bg-red-700 transition-all duration-200 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                    Back
+                                </button>
                                 <button @click="openListBillButton"
                                     class="px-4 py-2 bg-gradient-to-r from-indigo-500 via-blue-500 to-cyan-500 text-white text-sm rounded-md shadow-md hover:shadow-lg hover:from-indigo-600 hover:via-blue-600 hover:to-cyan-600 transition-all duration-200 flex items-center gap-2">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none"
@@ -365,8 +405,9 @@ const clearSearch = () => {
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
 
                                                     <button
-                                                        v-if="result.payment_status == 'Partial' || result.payment_status == 'Pending'"
-                                                        @click="router.visit(route('backend.billing.edit', { id: result.id }))"
+                                                        v-if="canEditBilling && (result.payment_status == 'Partial' || result.payment_status == 'Pending')"
+                                                        type="button"
+                                                        @click="window.open(route('backend.billing.edit', { id: result.id }), '_blank', 'noopener,noreferrer')"
                                                         class="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300">
                                                         Edit
                                                     </button>

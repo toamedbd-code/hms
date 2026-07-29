@@ -59,6 +59,15 @@ const resetFilter = () => {
   applyFilter();
 };
 
+const goBack = () => {
+  if (typeof window !== 'undefined' && window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+
+  router.visit(route('backend.dashboard'));
+};
+
 const printUrl = computed(() => route('backend.activity-logs.print', filterForm.value));
 const exportUrl = computed(() => route('backend.activity-logs.export', filterForm.value));
 </script>
@@ -69,10 +78,17 @@ const exportUrl = computed(() => route('backend.activity-logs.export', filterFor
       <div class="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h1>
         <div class="flex items-center gap-2">
-          <a :href="printUrl" target="_blank" rel="noopener noreferrer" class="px-3 py-2 text-sm text-white bg-slate-700 rounded hover:bg-slate-800">
+          <button
+            type="button"
+            @click="goBack"
+            class="px-6 py-3 text-base font-bold text-white bg-red-600 rounded hover:bg-red-700"
+          >
+            Back
+          </button>
+          <a :href="printUrl" target="_blank" rel="noopener noreferrer" class="px-6 py-3 text-base font-bold text-white bg-slate-700 rounded hover:bg-slate-800">
             Print
           </a>
-          <a :href="exportUrl" class="px-3 py-2 text-sm text-white bg-emerald-600 rounded hover:bg-emerald-700">
+          <a :href="exportUrl" class="px-6 py-3 text-base font-bold text-white bg-emerald-600 rounded hover:bg-emerald-700">
             Export CSV
           </a>
         </div>
@@ -116,8 +132,8 @@ const exportUrl = computed(() => route('backend.activity-logs.export', filterFor
           </select>
         </div>
         <div class="flex items-center gap-2">
-          <button type="button" class="w-full px-2 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700" @click="applyFilter">Filter</button>
-          <button type="button" class="w-full px-2 py-2 text-sm text-white bg-gray-500 rounded hover:bg-gray-600" @click="resetFilter">Reset</button>
+          <button type="button" class="w-full px-6 py-3 text-base font-bold text-white bg-green-600 rounded hover:bg-green-700" @click="applyFilter">Filter</button>
+          <button type="button" class="w-full px-6 py-3 text-base font-bold text-white bg-gray-500 rounded hover:bg-gray-600" @click="resetFilter">Reset</button>
         </div>
       </div>
 

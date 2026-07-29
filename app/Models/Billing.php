@@ -40,11 +40,14 @@ class Billing extends Model
         'total',
         'discount',
         'discount_type',
+        'vat_percentage',
+        'vat_amount',
         'payable_amount',
         'paid_amt',
         'invoice_amount',
         'change_amt',
         'receiving_amt',
+        'return_amt',
         'due_amount',
         'extra_flat_discount',
 
@@ -61,6 +64,8 @@ class Billing extends Model
         'created_by',
         'payment_status',
         'status',
+        'created_at',
+        'updated_at',
     ];
 
     protected $casts = [
@@ -70,12 +75,65 @@ class Billing extends Model
         'paid_amt' => 'decimal:2',
         'change_amt' => 'decimal:2',
         'receiving_amt' => 'decimal:2',
+        'return_amt' => 'decimal:2',
+        'vat_percentage' => 'decimal:2',
+        'vat_amount' => 'decimal:2',
         'commission_total' => 'decimal:2',
         'physyst_amt' => 'decimal:2',
         'commission_slider' => 'integer',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'delivery_date' => 'datetime',
     ];
+
+    public function getEffectiveRefundAmount(): float
+    {
+        $persistedReturn = (float) ($this->return_amt ?? 0);
+        if ($persistedReturn > 0.0001) {
+            return round($persistedReturn, 2);
+        }
+
+        if ($this->exists) {
+            $hasRefundHistory = false;
+            try {
+                $hasRefundHistory = \Illuminate\Support\Facades\DB::table('refund_transactions')
+                    ->where('billing_id', $this->id)
+                    ->exists();
+            } catch (\Throwable $e) {
+                $hasRefundHistory = false;
+            }
+
+            if ($hasRefundHistory) {
+                return 0.0;
+            }
+        }
+
+        $payableAmount = (float) ($this->payable_amount ?? $this->total ?? 0);
+        $paidAmount = (float) ($this->paid_amt ?? 0);
+
+        if ($paidAmount > $payableAmount + 0.0001) {
+            return round($paidAmount - $payableAmount, 2);
+        }
+
+        return 0.0;
+    }
+
+    public function getPaymentStatus(): string
+    {
+        $paidAmount = (float) ($this->paid_amt ?? 0);
+        $payableAmount = (float) ($this->payable_amount ?? $this->total ?? 0);
+        $returnAmount = (float) ($this->return_amt ?? 0);
+
+        if ($paidAmount >= $payableAmount) {
+            return $returnAmount > 0.0001 ? 'Partial' : 'Paid';
+        }
+
+        if ($paidAmount > 0.0001) {
+            return 'Partial';
+        }
+
+        return 'Pending';
+    }
 
     protected static function boot()
     {
@@ -92,6 +150,28 @@ class Billing extends Model
             if (empty($billing->case_number)) {
                 $billing->case_number = self::generateCaseNumber();
             }
+        });
+
+        static::saving(function ($billing) {
+            $hasExplicitReturn = $billing->isDirty('return_amt');
+            $existingReturn = (float) ($billing->return_amt ?? 0);
+
+            if ($hasExplicitReturn) {
+                $billing->return_amt = round($existingReturn, 2);
+            } elseif ($billing->exists && $billing->getOriginal('return_amt') !== null) {
+                $billing->return_amt = round((float) $billing->getOriginal('return_amt'), 2);
+            } else {
+                $payableAmount = (float) ($billing->payable_amount ?? $billing->total ?? 0);
+                $paidAmount = (float) ($billing->paid_amt ?? 0);
+
+                if ($paidAmount > $payableAmount + 0.0001) {
+                    $billing->return_amt = round($paidAmount - $payableAmount, 2);
+                } else {
+                    $billing->return_amt = 0.0;
+                }
+            }
+
+            $billing->payment_status = $billing->getPaymentStatus();
         });
     }
 

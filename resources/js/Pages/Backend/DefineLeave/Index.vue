@@ -22,6 +22,14 @@ const goToDefineLeaveAdd = () => {
     router.visit(route('backend.defineleave.create'));
 };
 
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+    } else {
+        router.visit(route('backend.dashboard'));
+    }
+};
+
 </script>
 
 <template>
@@ -37,6 +45,15 @@ const goToDefineLeaveAdd = () => {
 
                 <div class="p-4 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button @click="goBack"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-red-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-red-700">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                            </svg>
+                            Back
+                        </button>
+
                         <button @click="goToDefineLeaveAdd"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out"
                             style="background: linear-gradient(to right, #3b82f6, #60a5fa);"

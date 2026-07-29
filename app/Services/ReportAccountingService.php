@@ -5,9 +5,11 @@ namespace App\Services;
 use App\Models\Billing;
 use App\Models\DueCollection;
 use App\Models\Expense;
+use App\Models\OpdPatient;
 use App\Models\Payment;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class ReportAccountingService
 {
@@ -26,7 +28,8 @@ class ReportAccountingService
             'discount_type',
             'extra_flat_discount',
             'payable_amount',
-            'due_amount'
+            'due_amount',
+            'return_amt'
         ]);
 
         $dueCollectionsInRange = DueCollection::query();
@@ -54,7 +57,8 @@ class ReportAccountingService
                 'discount_type',
                 'extra_flat_discount',
                 'payable_amount',
-                'due_amount'
+                'due_amount',
+                'return_amt'
             ])
             ->sortBy('created_at')
             ->values();
@@ -63,14 +67,21 @@ class ReportAccountingService
             return [$billing->id => Carbon::parse($billing->created_at)->format('d-M-Y')];
         });
 
-        $payments = Payment::whereIn('billing_id', $billingIds)
-            ->get(['billing_id', 'amount', 'created_at']);
+        $useDateRangeAmounts = $this->hasDateFilter($dateConditions);
 
-        $paidAtBillingById = $payments->groupBy('billing_id')->map(function ($items, $billingId) use ($billingDateById) {
-            $billingDate = $billingDateById->get($billingId);
-            return $items->filter(function ($payment) use ($billingDate) {
-                return Carbon::parse($payment->created_at)->format('d-M-Y') === $billingDate;
-            })->sum('amount');
+        $paymentsQuery = Payment::whereIn('billing_id', $billingIds);
+        $payments = $paymentsQuery->get(['billing_id', 'amount', 'created_at']);
+
+        $paymentsInRangeQuery = Payment::whereIn('billing_id', $billingIds);
+        $this->applyDateFilter($paymentsInRangeQuery, $dateConditions, 'created_at');
+        $paymentsInRange = $paymentsInRangeQuery->get(['billing_id', 'amount', 'created_at']);
+
+        $paidAtBillingById = $payments->groupBy('billing_id')->map(function ($items) {
+            return $items->sum('amount');
+        });
+
+        $paidAtBillingByIdInRange = $paymentsInRange->groupBy('billing_id')->map(function ($items) {
+            return $items->sum('amount');
         });
 
         $dueCollectionsAll = DueCollection::whereIn('billing_id', $billingIds)
@@ -78,14 +89,14 @@ class ReportAccountingService
             ->groupBy('billing_id')
             ->pluck('total_collected', 'billing_id');
 
-        $dueCollectionsInRange = DueCollection::whereIn('billing_id', $billingIds);
-        $this->applyDateFilter($dueCollectionsInRange, $dateConditions, 'collected_at');
-        $dueCollectionsByBillingInRange = $dueCollectionsInRange
+        $dueCollectionsInRangeQuery = DueCollection::whereIn('billing_id', $billingIds);
+        $this->applyDateFilter($dueCollectionsInRangeQuery, $dateConditions, 'collected_at');
+        $dueCollectionsByBillingInRange = $dueCollectionsInRangeQuery
             ->selectRaw('billing_id, SUM(collected_amount) as total_collected')
             ->groupBy('billing_id')
             ->pluck('total_collected', 'billing_id');
 
-        return $billings->map(function ($billing) use ($paidAtBillingById, $dueCollectionsAll, $dueCollectionsByBillingInRange) {
+        return $billings->map(function ($billing) use ($useDateRangeAmounts, $paidAtBillingById, $paidAtBillingByIdInRange, $dueCollectionsAll, $dueCollectionsByBillingInRange) {
             $discountAmount = $billing->discount_type === 'percentage'
                 ? (($billing->total * $billing->discount) / 100)
                 : $billing->discount;
@@ -94,8 +105,12 @@ class ReportAccountingService
             $extraDiscount = max(0, (float) $billing->extra_flat_discount);
             $netAmount = max(0, (float) $billing->total - $discountAmount - $extraDiscount);
 
-            $paidAmount = (float) $paidAtBillingById->get($billing->id, 0);
-            $dueCollectedTotal = (float) $dueCollectionsAll->get($billing->id, 0);
+            $paidAmount = (float) ($useDateRangeAmounts
+                ? $paidAtBillingByIdInRange->get($billing->id, 0)
+                : $paidAtBillingById->get($billing->id, 0));
+            $dueCollectedTotal = (float) ($useDateRangeAmounts
+                ? $dueCollectionsByBillingInRange->get($billing->id, 0)
+                : $dueCollectionsAll->get($billing->id, 0));
             $dueCollectedInRange = (float) $dueCollectionsByBillingInRange->get($billing->id, 0);
             $computedDueAmount = max(0, $netAmount - $paidAmount - $dueCollectedTotal);
             $storedDueAmount = $billing->due_amount;
@@ -110,17 +125,25 @@ class ReportAccountingService
                     : $computedDueAmount;
             }
 
+            $vatPercent = max(0, (float) ($billing->vat_percentage ?? 0));
+            $vatAmount = max(0, (float) ($billing->vat_amount ?? 0));
+            $computedPayable = max(0, $netAmount + $vatAmount);
+
             return [
+                'billing_id' => $billing->id,
                 'bill_no' => $billing->bill_number ?? $billing->invoice_number ?? 'N/A',
                 'billing_date' => Carbon::parse($billing->created_at)->format('d-M-Y'),
                 'total_amount' => round((float) $billing->total, 2),
                 'discount_amount' => round($discountAmount, 2),
                 'extra_discount' => round($extraDiscount, 2),
-                'net_amount' => round($netAmount, 2),
+                'vat_percent' => round($vatPercent, 2),
+                'vat_amount' => round($vatAmount, 2),
+                'net_amount' => round($computedPayable, 2),
                 'paid_amount' => round($paidAmount, 2),
                 'due_amount' => round($dueAmount, 2),
                 'due_collected' => round($dueCollectedInRange, 2),
-                'due_collected_total' => round($dueCollectedTotal, 2)
+                'due_collected_total' => round($dueCollectedTotal, 2),
+                'return_amt' => round((float) $billing->return_amt, 2)
             ];
         });
     }
@@ -135,6 +158,7 @@ class ReportAccountingService
             'total_amount' => $billRows->sum('total_amount'),
             'discount_amount' => $billRows->sum('discount_amount'),
             'extra_discount' => $billRows->sum('extra_discount'),
+            'vat_amount' => $billRows->sum('vat_amount'),
             'net_amount' => $billRows->sum('net_amount'),
             'paid_amount' => $billRows->sum('paid_amount'),
             'due_amount' => $billRows->sum('due_amount'),
@@ -151,19 +175,155 @@ class ReportAccountingService
         $this->applyDateFilter($expenseQuery, $dateConditions, 'date');
         $totalExpense = $expenseQuery->sum('amount');
 
-        $finalIncome = ($totalPaidAmount + $totalDueCollected) - $totalExpense;
+        // Calculate total processed refunds from refund transactions in the selected date range.
+        // Some callers pass single_date/date_from/date_to conditions instead of single_date_range,
+        // so use the shared date filter rather than assuming the array key is always present.
+        $refundQuery = DB::table('refund_transactions');
+        $this->applyDateFilter($refundQuery, $dateConditions, 'created_at');
+        $totalRefundAmount = (float) $refundQuery->sum('refund_amount');
+
+        // Net Income = (Paid + Due Collected) - Expenses - Processed Refunds
+        $finalIncome = ($totalPaidAmount + $totalDueCollected) - $totalExpense - $totalRefundAmount;
 
         return [
             'total_paid' => $totalPaidAmount,
             'total_due_collected' => $totalDueCollected,
             'total_expense' => $totalExpense,
+            // Keep legacy key but also provide the controller-expected key
+            'total_return' => $totalRefundAmount,
+            'total_return_amount' => $totalRefundAmount,
             'final_income' => $finalIncome
         ];
     }
 
+    public function getExpenseTotal(array $dateConditions): float
+    {
+        $expenseQuery = Expense::where('status', 'Active');
+        $this->applyDateFilter($expenseQuery, $dateConditions, 'date');
+
+        return (float) $expenseQuery->sum('amount');
+    }
+
+    public function getRefundTotal(array $dateConditions): float
+    {
+        $refundQuery = DB::table('refund_transactions');
+        $this->applyDateFilter($refundQuery, $dateConditions, 'created_at');
+
+        return (float) $refundQuery->sum('refund_amount');
+    }
+
+    public function getDueCollectionTotal(array $dateConditions): float
+    {
+        $query = DueCollection::query();
+        $this->applyDateFilter($query, $dateConditions, 'collected_at');
+        $rows = $query->get(['billing_id', 'collected_amount', 'payment_method', 'note']);
+
+        $billingIds = $rows
+            ->pluck('billing_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        $activeBillingMap = Billing::query()
+            ->whereIn('id', $billingIds)
+            ->where('status', 'Active')
+            ->whereNull('deleted_at')
+            ->pluck('id')
+            ->flip();
+
+        $opdIds = $rows
+            ->filter(function ($row) {
+                return strtolower((string) ($row->payment_method ?? '')) === 'opd' && empty($row->billing_id);
+            })
+            ->map(function ($row) {
+                $matches = [];
+                preg_match('/opd_patient_id:\s*(\d+)/i', (string) ($row->note ?? ''), $matches);
+                return isset($matches[1]) ? (int) $matches[1] : null;
+            })
+            ->filter()
+            ->unique()
+            ->values();
+
+        $activeOpdMap = OpdPatient::query()
+            ->whereIn('id', $opdIds)
+            ->whereNull('deleted_at')
+            ->pluck('id')
+            ->flip();
+
+        return (float) $rows->sum(function ($row) use ($activeBillingMap, $activeOpdMap) {
+            $billingId = $row->billing_id;
+            if (!empty($billingId)) {
+                return $activeBillingMap->has((int) $billingId)
+                    ? (float) ($row->collected_amount ?? 0)
+                    : 0;
+            }
+
+            if (strtolower((string) ($row->payment_method ?? '')) === 'opd') {
+                $matches = [];
+                preg_match('/opd_patient_id:\s*(\d+)/i', (string) ($row->note ?? ''), $matches);
+                $opdId = isset($matches[1]) ? (int) $matches[1] : null;
+
+                if ($opdId && !$activeOpdMap->has($opdId)) {
+                    return 0;
+                }
+            }
+
+            return (float) ($row->collected_amount ?? 0);
+        });
+    }
+
+    public function getIncomeReportNetIncome(array $dateConditions): float
+    {
+        $billingQuery = Billing::query()
+            ->where('status', 'Active')
+            ->where('payment_status', 'Paid');
+
+        $this->applyDateFilter($billingQuery, $dateConditions, 'created_at');
+
+        $billings = $billingQuery->get([
+            'paid_amt',
+            'total',
+            'discount',
+            'discount_type',
+            'extra_flat_discount',
+            'return_amt',
+        ]);
+
+        $totalPaidAmount = (float) $billings->sum('paid_amt');
+
+        $totalDiscount = (float) $billings->sum(function ($billing) {
+            $discountAmount = ($billing->discount_type === 'percentage')
+                ? (($billing->total ?? 0) * $billing->discount) / 100
+                : $billing->discount;
+
+            return max(0, (float) $discountAmount) + max(0, (float) ($billing->extra_flat_discount ?? 0));
+        });
+
+        $totalReturnAmount = (float) $billings->sum(fn ($billing) => (float) ($billing->return_amt ?? 0));
+        $totalDueCollected = $this->getDueCollectionTotal($dateConditions);
+
+        return $totalPaidAmount + $totalDueCollected - $totalDiscount - $totalReturnAmount;
+    }
+
+    public function getTotalIncome(array $dateConditions): float
+    {
+        $billRows = $this->getBillRowsByDate($dateConditions);
+        $totals = $this->calculateFinalIncomeTotals($billRows, $dateConditions);
+
+        return (float) (($totals['total_paid'] ?? 0) + ($totals['total_due_collected'] ?? 0));
+    }
+
+    private function hasDateFilter(array $dateConditions): bool
+    {
+        return !empty($dateConditions['single_date_range'])
+            || isset($dateConditions['single_date'])
+            || isset($dateConditions['date_from'])
+            || isset($dateConditions['date_to']);
+    }
+
     private function applyDateFilter($query, array $dateConditions, string $dateField = 'created_at')
     {
-        if (isset($dateConditions['single_date_range'])) {
+        if (isset($dateConditions['single_date_range']) && is_array($dateConditions['single_date_range']) && count($dateConditions['single_date_range']) === 2) {
             [$start, $end] = $dateConditions['single_date_range'];
             $query->whereBetween($dateField, [$start, $end]);
         } elseif (isset($dateConditions['single_date'])) {

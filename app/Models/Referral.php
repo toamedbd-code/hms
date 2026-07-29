@@ -130,6 +130,10 @@ private function getCommissionRateByCategory($payee, $category)
             return $payee->pathology_commission ?? 0;
         case 'radiology':
             return $payee->radiology_commission ?? 0;
+            case 'ecg':
+                return $payee->ecg_commission ?? 0;
+            case 'ultrasound':
+                return $payee->ultrasound_commission ?? 0;
         case 'medicine':
             case 'pharmacy':
             return $payee->pharmacy_commission ?? 0;

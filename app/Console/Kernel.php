@@ -50,5 +50,7 @@ class Kernel extends ConsoleKernel
         Commands\RunDepreciation::class,
         Commands\SyncExpenseLedgerCommand::class,
         Commands\SyncPurchaseLedgerCommand::class,
+        Commands\GenerateInvoiceFullPdf::class,
+        Commands\RecomputeRefundAmounts::class,
     ];
 }

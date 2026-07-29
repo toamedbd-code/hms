@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>bKash Payment Simulation</title>
+    <style>
+        body { font-family: sans-serif; background: #f4f4f6; color: #1f2937; margin: 0; padding: 0; }
+        .page { max-width: 520px; margin: 4rem auto; background: #fff; border-radius: 24px; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12); overflow: hidden; }
+        .header { background: #d61260; color: #fff; padding: 28px 30px; text-align: center; }
+        .body { padding: 28px 30px; }
+        .badge { display: inline-block; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,0.2); font-size: 0.8rem; margin-bottom: 12px; }
+        .section { margin-bottom: 24px; }
+        .section h2 { margin: 0 0 12px; font-size: 1.1rem; }
+        .card { background: #fafafa; border: 1px solid #e5e7eb; border-radius: 18px; padding: 18px; }
+        .row { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .label { font-size: 0.9rem; color: #374151; }
+        .value { font-size: 1rem; font-weight: 600; }
+        .button { display: inline-flex; justify-content: center; align-items: center; width: 100%; padding: 14px 18px; border: none; border-radius: 14px; font-weight: 700; color: #fff; background: #171717; text-decoration: none; cursor: pointer; }
+        .button-primary { background: #d61260; }
+        .button-secondary { background: #4b5563; }
+        .hint { font-size: 0.9rem; color: #6b7280; line-height: 1.65; }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header">
+            <div class="badge">bKash Payment Simulation</div>
+            <h1>Pay with bKash</h1>
+            <p style="margin:0.75rem 0 0; color: rgba(255,255,255,0.88);">Enter your wallet number, verify OTP, then confirm PIN.</p>
+        </div>
+
+        <div class="body">
+            <div class="section">
+                <div class="card">
+                    <div class="row">
+                        <div class="label">Payment ID</div>
+                        <div class="value">#{{ $payment->id }}</div>
+                    </div>
+                    <div class="row">
+                        <div class="label">Amount</div>
+                        <div class="value">{{ number_format($payment->amount, 2) }}</div>
+                    </div>
+                    <div class="row">
+                        <div class="label">Status</div>
+                        <div class="value">{{ ucfirst($payment->status ?: 'initiated') }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Simulated bKash flow</h2>
+                <p class="hint">This page stands in for the gateway landing page. Press "Confirm Payment" to complete the payment and activate your subscription.</p>
+            </div>
+
+            <div class="section">
+                @php
+                    $approveRoute = null;
+                    if (\Illuminate\Support\Facades\Route::has('backend.payment.bkash.simulate.approve.public')) {
+                        $approveRoute = route('backend.payment.bkash.simulate.approve.public', ['payment' => $payment->id]);
+                    } elseif (\Illuminate\Support\Facades\Route::has('payment.bkash.simulate.approve.public')) {
+                        $approveRoute = route('payment.bkash.simulate.approve.public', ['payment' => $payment->id]);
+                    } else {
+                        $approveRoute = url('/payment/bkash/simulate-public/' . $payment->id . '/approve');
+                    }
+                    $approvalToken = data_get($payment->metadata, 'approval_token');
+                @endphp
+
+                <div id="gateway-flow">
+                    <!-- Step 1: Enter mobile and request OTP -->
+                    <div id="step-1" class="card">
+                        <h3 style="margin:0 0 8px;">1) Enter bKash wallet</h3>
+                        <p class="hint">Enter a mobile number to receive a simulated OTP.</p>
+                        <input id="mobile" type="text" placeholder="01XXXXXXXXX" style="width:100%; padding:10px; border-radius:8px; border:1px solid #e5e7eb; margin-top:8px;" />
+                        <button id="send-otp" class="button button-primary" style="margin-top:12px;">Send OTP</button>
+                    </div>
+
+                    <!-- Step 2: Verify OTP and enter PIN -->
+                    <div id="step-2" class="card" style="display:none; margin-top:12px;">
+                        <h3 style="margin:0 0 8px;">2) Verify OTP & Confirm</h3>
+                        <p class="hint">We sent a simulated OTP to your mobile. Enter it below, then provide a 4-digit PIN to confirm.</p>
+                        <div style="display:flex; gap:8px; margin-top:8px;">
+                            <input id="otp" type="text" placeholder="OTP" style="flex:1; padding:10px; border-radius:8px; border:1px solid #e5e7eb;" />
+                            <input id="pin" type="password" maxlength="6" placeholder="PIN" style="width:110px; padding:10px; border-radius:8px; border:1px solid #e5e7eb;" />
+                        </div>
+
+                        <form id="approve-form" method="POST" action="{{ $approveRoute }}" style="margin-top:12px;">
+                            @csrf
+                            <input type="hidden" name="approval_token" value="{{ $approvalToken }}" />
+                            <input type="hidden" name="otp_value" id="otp_value" value="" />
+                            <input type="hidden" name="pin_value" id="pin_value" value="" />
+                            <button id="confirm-payment" type="submit" class="button button-primary" disabled>Confirm Payment</button>
+                        </form>
+                        <p id="otp-sent" class="hint" style="display:none; margin-top:8px;"></p>
+                    </div>
+                </div>
+
+                <script>
+                    (function(){
+                        const sendBtn = document.getElementById('send-otp');
+                        const mobileInput = document.getElementById('mobile');
+                        const step1 = document.getElementById('step-1');
+                        const step2 = document.getElementById('step-2');
+                        const otpInput = document.getElementById('otp');
+                        const pinInput = document.getElementById('pin');
+                        const confirmBtn = document.getElementById('confirm-payment');
+                        const otpSentText = document.getElementById('otp-sent');
+                        const otpValueField = document.getElementById('otp_value');
+                        const pinValueField = document.getElementById('pin_value');
+
+                        let currentOtp = null;
+
+                        function genOtp(){
+                            return Math.floor(100000 + Math.random() * 900000).toString();
+                        }
+
+                        sendBtn.addEventListener('click', function(e){
+                            e.preventDefault();
+                            const mobile = mobileInput.value.trim();
+                            if (!mobile.match(/^01[0-9]{9}$/)) {
+                                alert('দয়া করে ভ্যালিড মোবাইল নম্বর দিন (01XXXXXXXXX)');
+                                return;
+                            }
+                            currentOtp = genOtp();
+                            // show step 2
+                            step1.style.display = 'none';
+                            step2.style.display = '';
+                            otpSentText.style.display = '';
+                            otpSentText.textContent = 'Simulated OTP: ' + currentOtp + ' (use this to confirm)';
+                            otpInput.focus();
+                        });
+
+                        function updateConfirmState(){
+                            const otpVal = otpInput.value.trim();
+                            const pinVal = pinInput.value.trim();
+                            if (otpVal !== '' && pinVal.length >= 4 && otpVal === currentOtp) {
+                                confirmBtn.disabled = false;
+                            } else {
+                                confirmBtn.disabled = true;
+                            }
+                        }
+
+                        otpInput.addEventListener('input', updateConfirmState);
+                        pinInput.addEventListener('input', updateConfirmState);
+
+                        // before submit, set hidden fields so server can log them if needed
+                        document.getElementById('approve-form').addEventListener('submit', function(){
+                            otpValueField.value = otpInput.value.trim();
+                            pinValueField.value = pinInput.value.trim();
+                        });
+                    })();
+                </script>
+            </div>
+
+            <div class="section">
+                <a href="{{ route($loginRoute) }}" class="button button-secondary" style="margin-top: 8px;">Back to Login</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

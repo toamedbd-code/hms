@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 
 class Subscription extends Model
 {
@@ -45,11 +46,20 @@ class Subscription extends Model
 
     public static function getCurrent(): ?self
     {
-        if (!static::tableExists()) {
-            return null;
-        }
+        // Cache subscription for a short time to reduce database queries during login.
+        // This cache is cleared whenever the subscription is updated.
+        return Cache::remember('subscription_current', 300, function () {
+            if (!static::tableExists()) {
+                return null;
+            }
+            return static::first();
+        });
+    }
 
-        return static::first();
+    public static function clearCurrentCache(): void
+    {
+        Cache::forget('subscription_current');
+        Cache::forget('login_subscription_status');
     }
 
     public static function ensureExists(): self

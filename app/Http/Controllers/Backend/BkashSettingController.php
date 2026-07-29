@@ -5,6 +5,10 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\BkashSetting;
+use App\Services\BkashService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
 
 class BkashSettingController extends Controller
 {
@@ -46,5 +50,35 @@ class BkashSettingController extends Controller
         return redirect()
             ->route('backend.settings.payment.bkash')
             ->with('success', 'bKash settings updated.');
+    }
+
+    /**
+     * Test bKash connection by attempting to obtain a token.
+     */
+    public function test(Request $request, BkashService $service): JsonResponse
+    {
+        // simple permission check could be added here
+        try {
+            $token = $service->grantToken();
+            if ($token) {
+                $result = ['ok' => true, 'message' => 'Connection OK. Token obtained.'];
+                Cache::put('bkash_test_last', $result, 3600);
+                return response()->json($result);
+            }
+
+            // gather more debug info: probe all token endpoint candidates and return the raw responses
+            $probeResults = $service->probeTokenEndpoints();
+            $result = [
+                'ok' => false,
+                'message' => 'Unable to obtain a token from any candidate endpoint.',
+                'results' => $probeResults,
+            ];
+            Cache::put('bkash_test_last', $result, 3600);
+            return response()->json($result, 422);
+        } catch (\Throwable $e) {
+            $result = ['ok' => false, 'message' => 'Error: ' . $e->getMessage()];
+            Cache::put('bkash_test_last', $result, 3600);
+            return response()->json($result, 500);
+        }
     }
 }

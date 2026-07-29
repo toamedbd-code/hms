@@ -82,6 +82,7 @@ const summary = ref({
   takingAmt: 0.0,
   returnAmt: 0.0,
   deliveryDate: "",
+  deliveryTime: "",
   remarks: "",
 });
 
@@ -124,7 +125,13 @@ onMounted(() => {
   if (!props.id || !props.editData) {
     const today = new Date();
     const formattedDate = today.toISOString().split('T')[0];
-    summary.value.deliveryDate = formattedDate;
+    // Default delivery date + time: if now >= 17:00 schedule next day 19:00
+    const now = new Date();
+    const useTomorrow = now.getHours() >= 17;
+    const d = useTomorrow ? new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) : now;
+    const dateStr = d.toISOString().split('T')[0];
+    summary.value.deliveryDate = dateStr + 'T19:00';
+    summary.value.deliveryTime = '19:00';
   }
 });
 
@@ -829,6 +836,7 @@ const addItem = () => {
     name: itemForm.value.itemName,
     category: itemForm.value.category,
     unitPrice: parseFloat(itemForm.value.unitPrice),
+    roomNo: (allAvailableItems.value.find(i => i.id === itemForm.value.itemId) || {}).room_no ?? '',
     quantity: parseFloat(itemForm.value.quantity),
     totalAmount: parseFloat(itemForm.value.totalAmount),
     discount: 0,
@@ -1018,6 +1026,7 @@ const initializeEditMode = () => {
         discount: item.discount || 0,
         rugound: item.rugound || 0,
         netAmount: parseFloat(item.net_amount),
+        roomNo: item.room_no ?? item.roomNo ?? '',
       }));
     }
     const paidAmount = parseFloat(props.editData.paid_amt || 0);
@@ -1105,6 +1114,7 @@ const saveBill = () => {
     discount: item.discount,
     rugound: item.rugound || 0,
     net_amount: item.netAmount,
+    room_no: item.room_no ?? item.roomNo ?? null,
   }));
   const formData = {
     patient_id: patientForm.value.patient_id || null,
@@ -1142,17 +1152,25 @@ const saveBill = () => {
   }
   console.log('Complete Form Data:', formData);
   const form = useForm(formData);
-  // Open blank tab synchronously to avoid popup blockers when navigating later
+  // Open preview tab synchronously with a print_token to avoid popup blockers
+  // and allow backend to map token -> billing id for instant preview.
   let invoiceWindow = null;
+  let __pendingInvoiceTimeout = null;
   try {
-    // open a plain new tab (no popup feature string) so the browser opens a normal tab
-    invoiceWindow = window.open('', '_blank');
-    try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
+    const token = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'pt_' + Date.now();
+    form.print_token = token;
+    try {
+      const previewUrl = route('backend.download.invoice.preview', { print_token: token, module: 'billing' });
+      invoiceWindow = window.open(previewUrl, '_blank');
+      try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
+    } catch (e) {
+      invoiceWindow = window.open('', '_blank');
+    }
   } catch (e) {
     invoiceWindow = null;
   }
   if (props.id) {
-    form.put(route("backend.billing.update", props.id), {
+    form.put(route("backend.billing.update", { billing: props.id }), {
       onSuccess: (response) => {
         displayResponse(response);
         const successMessage = response?.props?.flash?.successMessage;
@@ -1162,12 +1180,23 @@ const saveBill = () => {
           const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'billing' });
           try {
             if (invoiceWindow && !invoiceWindow.closed) {
-              invoiceWindow.location = invoiceUrl;
+              try { invoiceWindow.location = invoiceUrl; invoiceWindow.focus(); } catch (e) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+              try { if (__pendingInvoiceTimeout) { clearTimeout(__pendingInvoiceTimeout); __pendingInvoiceTimeout = null; } } catch (ct) { /* ignore */ }
+              __pendingInvoiceTimeout = setTimeout(() => {
+                try {
+                  if (!invoiceWindow || invoiceWindow.closed) {
+                    window.open(invoiceUrl, '_blank');
+                  } else {
+                    try { invoiceWindow.focus(); } catch (e) { /* ignore */ }
+                  }
+                } catch (err) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                __pendingInvoiceTimeout = null;
+              }, 800);
             } else {
-              try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
+              window.open(invoiceUrl, '_blank');
             }
           } catch (e) {
-            try { window.open(invoiceUrl, '_blank'); } catch (ee) { window.open(invoiceUrl, '_blank'); }
+            try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ }
           }
         }
       },
@@ -1195,7 +1224,18 @@ const saveBill = () => {
           const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'billing' });
           try {
             if (invoiceWindow && !invoiceWindow.closed) {
-              invoiceWindow.location = invoiceUrl;
+                try { invoiceWindow.location = invoiceUrl; invoiceWindow.focus(); } catch (e) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                try { if (__pendingInvoiceTimeout) { clearTimeout(__pendingInvoiceTimeout); __pendingInvoiceTimeout = null; } } catch (ct) { /* ignore */ }
+                __pendingInvoiceTimeout = setTimeout(() => {
+                  try {
+                    if (!invoiceWindow || invoiceWindow.closed) {
+                      window.open(invoiceUrl, '_blank');
+                    } else {
+                      try { invoiceWindow.focus(); } catch (e) { /* ignore */ }
+                    }
+                  } catch (err) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                  __pendingInvoiceTimeout = null;
+                }, 800);
             } else {
               try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
             }
@@ -1235,7 +1275,9 @@ const resetAllForms = () => {
     receivingAmt: 0.0,
     takingAmt: 0.0,
     returnAmt: 0.0,
-    deliveryDate: new Date().toISOString().split('T')[0], // Set to current date
+    // Set default delivery date/time: if now >= 17:00 schedule next day 19:00
+    deliveryDate: (function(){ const now=new Date(); const useTomorrow = now.getHours()>=17; const d = useTomorrow? new Date(now.getFullYear(), now.getMonth(), now.getDate()+1) : now; return d.toISOString().split('T')[0] + 'T19:00'; })(),
+    deliveryTime: '19:00',
     remarks: "",
   };
   commission.value = {
@@ -1389,7 +1431,16 @@ const cancelBill = () => {
 };
 
 const openListBillButton = () => {
-  router.visit(route("backend.billing.list"));
+  try {
+    const url = route("backend.billing.list");
+    if (url) {
+      window.location.assign(url);
+      return;
+    }
+  } catch (e) {
+    // fallback route if named route fails
+  }
+  window.location.assign('/view-billing-list-page');
 };
 </script>
 
@@ -1428,6 +1479,8 @@ const openListBillButton = () => {
                   <option value="" disabled>Select Category</option>
                   <option value="Pathology">Pathology</option>
                   <option value="Radiology">Radiology</option>
+                  <option value="ECG">ECG</option>
+                  <option value="Ultrasound">Ultrasound</option>
                   <option value="Medicine">Medicine</option>
                 </select>
               </div>

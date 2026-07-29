@@ -2,11 +2,11 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\Branch;
-use App\Models\Company;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ResolveOrganizationContext
 {
@@ -55,11 +55,17 @@ class ResolveOrganizationContext
             ?? data_get($admin, 'company_id')
         );
 
-        if ($requestedCompanyId && Company::query()->whereKey($requestedCompanyId)->exists()) {
-            return $requestedCompanyId;
+        $companyQuery = $this->baseTableQuery('companies');
+
+        if ($requestedCompanyId) {
+            $companyQuery->where('id', $requestedCompanyId);
+
+            if ($companyQuery->exists()) {
+                return $requestedCompanyId;
+            }
         }
 
-        $fallbackCompanyId = Company::query()->value('id');
+        $fallbackCompanyId = $this->baseTableQuery('companies')->value('id');
 
         return $fallbackCompanyId ? (int) $fallbackCompanyId : null;
     }
@@ -75,9 +81,9 @@ class ResolveOrganizationContext
         );
 
         if ($requestedBranchId) {
-            $branchQuery = Branch::query()->whereKey($requestedBranchId);
+            $branchQuery = $this->baseTableQuery('branches')->where('id', $requestedBranchId);
 
-            if ($companyId) {
+            if ($companyId && Schema::hasColumn('branches', 'company_id')) {
                 $branchQuery->where('company_id', $companyId);
             }
 
@@ -90,13 +96,29 @@ class ResolveOrganizationContext
             return null;
         }
 
-        $fallbackBranchId = Branch::query()
-            ->where('company_id', $companyId)
+        $fallbackBranchQuery = $this->baseTableQuery('branches');
+
+        if (Schema::hasColumn('branches', 'company_id')) {
+            $fallbackBranchQuery->where('company_id', $companyId);
+        }
+
+        $fallbackBranchId = $fallbackBranchQuery
             ->orderByRaw("CASE WHEN LOWER(status) = 'active' THEN 0 ELSE 1 END")
             ->orderBy('id')
             ->value('id');
 
         return $fallbackBranchId ? (int) $fallbackBranchId : null;
+    }
+
+    protected function baseTableQuery(string $table)
+    {
+        $query = DB::table($table);
+
+        if (Schema::hasColumn($table, 'deleted_at')) {
+            $query->whereNull('deleted_at');
+        }
+
+        return $query;
     }
 
     protected function toInt($value): ?int

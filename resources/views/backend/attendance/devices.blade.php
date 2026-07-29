@@ -76,7 +76,7 @@
         <div class="form-group"><label>Identifier (IP or serial)</label><input name="identifier" class="form-control" required /></div>
         <div class="form-group"><label>Type</label><select name="type" class="form-control"><option value="fingerprint">Fingerprint</option><option value="face">Face</option></select></div>
         <div class="form-group"><label>Secret (optional)</label><input name="secret" class="form-control" /></div>
-        <button type="submit" class="btn btn-primary btn-colorful">Register Device</button>
+        <button type="submit" class="btn btn-success" style="background-color: #16a34a; border-color: #16a34a; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: bold;">Register Device</button>
     </form>
 
     <hr />
@@ -88,10 +88,10 @@
 </div>
 
 <div class="container mb-3">
-    <a href="{{ route('backend.attendance.face') }}" class="btn btn-success btn-sm mr-2">Open Face Attendance</a>
-    <a href="{{ route('backend.attendance.face.register') }}" class="btn btn-info btn-sm mr-2">Open Face Register</a>
-    <a href="{{ route('backend.attendance.face.encodings') }}" class="btn btn-secondary btn-sm mr-2">Face Encoding List</a>
-    <a href="{{ route('backend.websetting.create') }}" class="btn btn-primary btn-sm btn-colorful-sm">Open Device Settings</a>
+    <a href="{{ route('backend.attendance.face') }}" class="btn btn-success" style="padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: bold; margin-right: 0.5rem;">Open Face Attendance</a>
+    <a href="{{ route('backend.attendance.face.register') }}" class="btn btn-info" style="padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: bold; margin-right: 0.5rem;">Open Face Register</a>
+    <a href="{{ route('backend.attendance.face.encodings') }}" class="btn btn-secondary" style="padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: bold; margin-right: 0.5rem;">Face Encoding List</a>
+    <a href="{{ route('backend.websetting.create') }}" class="btn btn-primary" style="background-color: #16a34a; border-color: #16a34a; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: bold;">Open Device Settings</a>
 </div>
 
 <script>
@@ -101,7 +101,7 @@ async function loadDevices(){
   const tbody = document.querySelector('#devices-table tbody'); tbody.innerHTML='';
   items.forEach(d=>{
     const tr = document.createElement('tr');
-    tr.innerHTML=`<td>${d.id}</td><td>${d.name||''}</td><td>${d.identifier||''}</td><td>${d.type||''}</td><td>${d.secret? '***':''}</td><td>${d.status||''}</td><td><button data-id="${d.id}" class="deact">Deactivate</button> <button data-id="${d.id}" class="delperm">Delete Permanently</button></td>`;
+    tr.innerHTML=`<td>${d.id}</td><td>${d.name||''}</td><td>${d.identifier||''}</td><td>${d.type||''}</td><td>${d.secret? '***':''}</td><td>${d.status||''}</td><td><button data-id="${d.id}" class="deact btn btn-warning btn-sm" style="padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: bold;">Deactivate</button> <button data-id="${d.id}" class="delperm btn btn-danger btn-sm" style="padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: bold;">Delete</button></td>`;
     tbody.appendChild(tr);
   });
   document.querySelectorAll('.deact').forEach(btn=>btn.addEventListener('click', async e=>{
@@ -130,6 +130,8 @@ async function loadDevices(){
     const syncBtn = document.createElement('button');
     syncBtn.type = 'button';
     syncBtn.textContent = 'Sync Device Attendance';
+    syncBtn.className = 'btn btn-success';
+    syncBtn.style.cssText = 'background-color: #16a34a; border-color: #16a34a; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: bold; color: white; margin-bottom: 1rem;';
     syncBtn.addEventListener('click', async ()=>{
       if(!confirm('Sync attendance from all active devices now?')) return;
       await fetch('{{ route("backend.attendance.sync") }}', {method:'POST', headers:{'X-CSRF-TOKEN':'{{ csrf_token() }}'}});

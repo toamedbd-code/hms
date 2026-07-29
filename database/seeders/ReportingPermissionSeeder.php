@@ -27,6 +27,13 @@ class ReportingPermissionSeeder extends Seeder
             'reporting-delete',
         ];
 
+        // Department-specific reporting permissions
+        $departmentPermissions = [
+            'ultrasound-reporting',
+            'xray-reporting',
+            // Pathology reports were missing; add pathology-reporting
+            'pathology-reporting',
+        ];
         foreach ($children as $childName) {
             Permission::firstOrCreate(
                 ['name' => $childName, 'guard_name' => 'admin'],
@@ -34,13 +41,24 @@ class ReportingPermissionSeeder extends Seeder
             );
         }
 
+        // Create department-specific reporting permissions under the reporting parent
+        foreach ($departmentPermissions as $permName) {
+            Permission::firstOrCreate(
+                ['name' => $permName, 'guard_name' => 'admin'],
+                ['parent_id' => $parent->id, 'sorting' => 1]
+            );
+        }
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
-        // Assign all new permissions to Admin role
-        $adminRole = Role::where('name', 'Admin')->where('guard_name', 'admin')->first();
-        if ($adminRole) {
-            $allPermissions = Permission::pluck('name')->toArray();
-            $adminRole->syncPermissions($allPermissions);
+        // Assign all new permissions to core roles (Admin + developer)
+        $roles = Role::query()->whereIn('name', ['Admin', 'developer'])->where('guard_name', 'admin')->get();
+        $allPermissions = Permission::pluck('name')->toArray();
+        foreach ($roles as $role) {
+            try {
+                $role->syncPermissions($allPermissions);
+            } catch (\Throwable $e) {
+                // ignore assignment errors to keep seeder idempotent
+            }
         }
 
         $this->command->info('Reporting permissions added successfully.');

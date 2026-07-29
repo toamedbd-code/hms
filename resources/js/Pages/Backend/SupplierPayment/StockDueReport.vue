@@ -216,7 +216,7 @@ const resetFilter = () => {
     <div ref="printSectionRef" class="w-full p-4 mt-3 bg-white rounded shadow-md">
       <div class="flex items-center justify-between p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">Supplier Stock & Due Report</h1>
-        <Link :href="route('backend.supplierpayment.index')" class="px-3 py-2 text-sm text-white bg-gray-600 rounded hover:bg-gray-700">
+        <Link :href="route('backend.supplierpayment.index')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">
           Back
         </Link>
       </div>

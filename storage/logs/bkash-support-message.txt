@@ -1,0 +1,37 @@
+Subject: Help needed: sandbox token API signing / credential scope mismatch
+
+Hi bKash Support,
+
+We are integrating with your sandbox token API at:
+  POST https://tokenized.sandbox.bka.sh/v2/tokenized/checkout/token
+
+Problem summary:
+- We attempt to obtain an auth token using the provided sandbox credentials (app_key, app_secret, username, password) but the API does not return a token (calls result in 403 / Missing Authentication Token responses).
+- We computed an AWS4-style signature and attached it in the Authorization header, but the gateway rejects the request with credential-scope / service / terminator related errors.
+
+What we tried (technical):
+- Endpoint used (first candidate): https://tokenized.sandbox.bka.sh/v2/tokenized/checkout/token
+- Payload (JSON) sent: {"app_key":"[app_key]","app_secret":"[app_secret]","username":"[username]","password":"[password]"}
+- Computed canonical request, string-to-sign and Authorization header using the following values:
+  - Credential scope: 20260728/sandbox/execute-api/aws4_request
+  - Algorithm: AWS4-HMAC-SHA256
+  - Signed headers: accept;content-type;date;host;x-amz-content-sha256;x-amz-date;x-sandbox-date
+  - Example Authorization header (computed):
+    AWS4-HMAC-SHA256 Credential=0vWQuCRGiUX7EPVjQDr0EUAYtc/20260728/sandbox/execute-api/aws4_request, SignedHeaders=accept;content-type;date;host;x-amz-content-sha256;x-amz-date;x-sandbox-date, Signature=685a70d0052c13535d01f78190bee188867ac994697ae7e5fa86eb026026c2af
+
+Files we can provide for debugging (already generated on our side):
+- Canonical-request + string-to-sign + computed Authorization header (masked): storage/logs/bkash-signed-dump-20260728_153004.json
+- Full probe results (attempts across candidate endpoints): storage/logs/bkash-test-dump-20260728_152426.json
+
+Questions / requests:
+1) Please confirm the exact expected signing parameters for the token endpoint: the required `service`, `region`, and `terminator` values (credential scope format), and the definitive list of required headers. For example, should `service` be `execute-api` or `tokenized`? Should the terminator be `aws4_request` or `tokenized4_request`?
+2) Does our `app_key` need to be whitelisted/registered on your sandbox token gateway? If yes, please advise the registration/whitelisting steps or confirm if you have an existing sandbox account mapping for `app_key=0vWQuCRGiUX7EPVjQDr0EUAYtc` (we can provide it securely).
+3) If you prefer, we can share the full (non-masked) signed request and raw HTTP logs via a secure channel — please tell us the preferred channel (secure upload, email, or support portal attachment) and any required metadata.
+
+Notes:
+- We can re-run tests and attach additional variants (different credential-scope combos) if that helps.
+- Local test flow falls back to an internal simulate page when token acquisition fails; we want to use the official sandbox token flow instead.
+
+Thank you,
+[Your Team Name]
+ToaMed / HMS

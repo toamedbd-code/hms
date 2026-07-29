@@ -4,6 +4,7 @@ import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { router, usePage } from '@inertiajs/vue3';
+import { useModalSubmissionGuard } from '@/Composables/useModalSubmissionGuard';
 
 let props = defineProps({
     filters: Object,
@@ -15,7 +16,7 @@ const filters = ref({
 });
 
 const applyFilter = () => {
-    router.get(route('backend.billing.list'), filters.value, { preserveState: true });
+    router.get(route('backend.pending.list'), filters.value, { preserveState: true });
 };
 
 const goToBillingAdd = () => {
@@ -24,6 +25,14 @@ const goToBillingAdd = () => {
 
 const page = usePage();
 const showDueModal = ref(false);
+const {
+    isSubmitting: isSubmittingDue,
+    prepareSubmissionToken,
+    ensureSubmissionToken,
+    beginSubmission,
+    endSubmission,
+    resetSubmissionToken,
+} = useModalSubmissionGuard('pending_due');
 const dueForm = ref({
     rowType: 'billing',
     rowId: null,
@@ -43,15 +52,20 @@ const openDueModal = (rowType, rowId) => {
     dueForm.value.patientName = row?.patient_id || 'N/A';
     dueForm.value.dueAmount = Number(row?.due_amount || 0);
     dueForm.value.amount = '';
+    prepareSubmissionToken();
     showDueModal.value = true;
 };
 
 const closeDueModal = () => {
+    if (isSubmittingDue.value) return;
     showDueModal.value = false;
     dueForm.value.amount = '';
+    resetSubmissionToken();
 };
 
 const submitDueCollect = () => {
+    if (isSubmittingDue.value) return;
+
     const amount = Number(dueForm.value.amount || 0);
     const dueAmount = Number(dueForm.value.dueAmount || 0);
 
@@ -64,13 +78,19 @@ const submitDueCollect = () => {
         ? 'backend.opd.due.collect.store'
         : 'backend.due.collect.store';
 
+    beginSubmission();
+
     router.post(route(routeName, dueForm.value.rowId), {
-        amount
+        amount,
+        submission_token: ensureSubmissionToken(),
     }, {
         preserveScroll: true,
         onSuccess: () => {
             closeDueModal();
             router.reload({ only: ['datas'] });
+        },
+        onFinish: () => {
+            endSubmission();
         }
     });
 };
@@ -190,19 +210,21 @@ const handleAction = (actionName, actionId) => {
                             min="0.01"
                             :max="dueForm.dueAmount"
                             @keydown.enter.prevent="submitDueCollect"
+                            :disabled="isSubmittingDue"
                             class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
                         >
                         <p class="mt-1 text-xs text-gray-500">Max: Tk {{ Number(dueForm.dueAmount || 0).toFixed(2) }}</p>
                     </div>
                 </div>
                 <div class="flex items-center justify-end gap-2 border-t px-5 py-3">
-                    <button type="button" class="rounded-md bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700" @click="closeDueModal">Cancel</button>
+                    <button type="button" class="rounded-md bg-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50" :disabled="isSubmittingDue" @click="closeDueModal">Cancel</button>
                     <button
                         type="button"
-                        class="rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white"
+                        class="rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        :disabled="isSubmittingDue"
                         @click="submitDueCollect"
                     >
-                        Collect Due
+                        {{ isSubmittingDue ? 'Collecting...' : 'Collect Due' }}
                     </button>
                 </div>
             </div>

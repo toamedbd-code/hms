@@ -13,12 +13,19 @@ class PatientService
 
     public function list()
     {
-        return  $this->patientModel->whereNull('deleted_at');
+        return $this->patientModel
+            ->whereNull('deleted_at')
+            ->orderByRaw('LOWER(COALESCE(name, "")) ASC')
+            ->orderBy('id', 'asc');
     }
 
     public function all()
     {
-        return  $this->patientModel->whereNull('deleted_at')->all();
+        return $this->patientModel
+            ->whereNull('deleted_at')
+            ->orderByRaw('LOWER(COALESCE(name, "")) ASC')
+            ->orderBy('id', 'asc')
+            ->get();
     }
 
     public function find($id)
@@ -83,7 +90,12 @@ class PatientService
 
     public function activeList()
     {
-        return  $this->patientModel->whereNull('deleted_at')->where('status', 'Active')->get();
+        return $this->patientModel
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->orderByRaw('LOWER(COALESCE(name, "")) ASC')
+            ->orderBy('id', 'asc')
+            ->get();
     }
 
 }

@@ -35,6 +35,14 @@ const goToRoleAdd = () => {
     router.visit(route('backend.role.create'));
 };
 
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    router.visit(route('backend.dashboard'));
+};
+
 // Helper function to check permissions
 const hasPermission = (permission) => {
     return props.permissions.includes(permission);
@@ -52,6 +60,14 @@ const hasPermission = (permission) => {
 
                 <div class="p-4 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button @click="goBack"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gray-500 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gray-600">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                            </svg>
+                            Back
+                        </button>
                         <!-- Conditionally show Staff Add button -->
                         <button 
                             v-if="hasPermission('admin-list-create')"

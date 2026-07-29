@@ -521,3 +521,14 @@ input[type="reset"]:not([class*="bg-"]) {
   color: #ffffff !important;
   border-color: var(--btn-blue-border) !important;
 }
+
+/* Ensure vue-multiselect dropdowns appear above all page content when appended to body */
+.multiselect__content-wrapper,
+.multiselect__content {
+  z-index: 99999 !important;
+}
+
+/* When multiselect appends to body it uses absolute positioning; prefer fixed for robustness */
+body > .multiselect__content-wrapper {
+  position: fixed !important;
+}

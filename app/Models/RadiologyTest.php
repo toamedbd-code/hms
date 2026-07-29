@@ -14,19 +14,13 @@ class RadiologyTest extends Model
         'radiology_id',
         'test_id',
         'report_days',
+        'room_no',
         'report_date',
         'tax_percentage',
         'amount',
         'commissionable',
         'commission_rate',
         'status'
-    ];
-
-    protected $casts = [
-        'report_date' => 'date',
-        'tax_percentage' => 'decimal:2',
-        'amount' => 'decimal:2',
-        'report_days' => 'integer'
     ];
 
     protected $casts = [

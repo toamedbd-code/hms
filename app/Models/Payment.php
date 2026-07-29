@@ -23,6 +23,7 @@ class Payment extends Model
         'provider',
         'provider_payment_id',
         'metadata',
+        'created_at',
     ];
 
     protected $casts = [

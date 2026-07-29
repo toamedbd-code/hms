@@ -12,10 +12,10 @@
     @endphp
 
     <title inertia>{{ config('app.name', 'Laravel') }}</title>
-    @if($initialFavicon)
-        <link rel="icon" href="{{ $initialFavicon }}" data-app-favicon="true" data-favicon-rel="icon">
-        <link rel="shortcut icon" href="{{ $initialFavicon }}" data-app-favicon="true" data-favicon-rel="shortcut icon">
-    @endif
+    <!-- Favicon declarations: use the static site favicon on initial render for reliable tab icons -->
+    <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}">
+    <link rel="shortcut icon" type="image/x-icon" href="{{ asset('favicon.ico') }}">
+    <link rel="apple-touch-icon" href="{{ asset('favicon.ico') }}">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -45,7 +45,7 @@
     @inertiaHead
 </head>
 
-<body class="font-sans antialiased duration-1000 overflow-hidden">
+<body class="font-sans antialiased duration-1000">
     @inertia
 </body>
 

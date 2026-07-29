@@ -48,9 +48,8 @@ function save(status = 'Draft') {
   <div class="p-6">
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-semibold">Create Journal Entry</h1>
-      <Link :href="route('backend.journal-entry.index')" class="btn-colorful text-sm">Back to list</Link>
+      <Link :href="route('backend.journal-entry.index')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">Back to list</Link>
     </div>
-
     <div class="mt-6 rounded border bg-white p-4 shadow-sm">
       <div v-if="form.errors.lines" class="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
         {{ form.errors.lines }}

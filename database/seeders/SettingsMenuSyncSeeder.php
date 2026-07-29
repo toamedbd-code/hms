@@ -94,6 +94,13 @@ class SettingsMenuSyncSeeder extends Seeder
                     'sorting' => 8,
                 ],
                 [
+                    'name' => 'Sidebar Menu Order',
+                    'icon' => 'list',
+                    'route' => 'backend.websetting.section.sidebar',
+                    'permission_name' => 'sidebar-setting',
+                    'sorting' => 12,
+                ],
+                [
                     'name' => 'bKash Settings',
                     'icon' => 'credit-card',
                     'route' => 'backend.settings.payment.bkash',

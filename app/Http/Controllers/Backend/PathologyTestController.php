@@ -54,12 +54,12 @@ class PathologyTestController extends Controller
         $this->taxCategoryService = $taxCategoryService;
 
         $this->middleware('auth:admin');
-        $this->middleware('permission:test-list');
-        $this->middleware('permission:test-list-create', ['only' => ['create', 'store']]);
-        $this->middleware('permission:test-list-create', ['only' => ['importCsv']]);
-        $this->middleware('permission:test-list-edit', ['only' => ['edit', 'update']]);
-        $this->middleware('permission:test-list-delete', ['only' => ['destroy']]);
-        $this->middleware('permission:test-list-status', ['only' => ['changeStatus']]);
+        $this->middleware('permission:itemcharge-list');
+        $this->middleware('permission:itemcharge-list-create', ['only' => ['create', 'store']]);
+        $this->middleware('permission:itemcharge-list-create', ['only' => ['importCsv']]);
+        $this->middleware('permission:itemcharge-list-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:itemcharge-list-delete', ['only' => ['destroy']]);
+        $this->middleware('permission:itemcharge-list-status', ['only' => ['changeStatus']]);
     }
 
     public function index()
@@ -421,6 +421,7 @@ class PathologyTestController extends Controller
                     'tax' => $tax,
                     'standard_charge' => $standardCharge,
                     'amount' => $amount,
+                    'referral_percentage' => $normalizeNullableNumber($rowData['referral_percentage'] ?? null),
                     'test_parameters' => $importedParameters,
                     'status' => 'Active',
                 ]);
@@ -466,11 +467,15 @@ class PathologyTestController extends Controller
                             'status' => 'Active',
                         ];
 
-                        $existingCharge = Charge::query()->whereRaw('LOWER(name) = ?', [strtolower($resolvedChargeName)])->first();
-                        if ($existingCharge) {
-                            $existingCharge->update($chargePayload);
-                        } else {
-                            Charge::create($chargePayload);
+                        // Only create or update Charge records for IPD search
+                        // when the environment flag is enabled. Default: disabled.
+                        if (env('AUTO_CREATE_IPD_CHARGE_FOR_TESTS', false)) {
+                            $existingCharge = Charge::query()->whereRaw('LOWER(name) = ?', [strtolower($resolvedChargeName)])->first();
+                            if ($existingCharge) {
+                                $existingCharge->update($chargePayload);
+                            } else {
+                                Charge::create($chargePayload);
+                            }
                         }
                     }
                 } catch (Exception $e) {
@@ -517,8 +522,9 @@ class PathologyTestController extends Controller
     {
         $query = $this->testService->list();
 
-        if (request()->filled('test_name'))
-            $query->where('test_name', 'like', '%' . request()->test_name . '%');
+        if (request()->filled('test_name')) {
+            $query->where('tests.test_name', 'like', '%' . request()->test_name . '%');
+        }
 
         $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
 
@@ -537,7 +543,7 @@ class PathologyTestController extends Controller
             $user = auth('admin')->user();
             $customData->links = [];
 
-            if ($user->can('test-list-status')) {
+            if ($user->can('itemcharge-list-status')) {
                 $customData->links[] = [
                     'linkClass' => 'semi-bold text-white statusChange ' . (($data->status == 'Active') ? "bg-gray-500" : "bg-green-500"),
                     'link' => route('backend.itemcharge.status.change', ['id' => $data->id, 'status' => $data->status == 'Active' ? 'Inactive' : 'Active']),
@@ -545,7 +551,7 @@ class PathologyTestController extends Controller
                 ];
             }
 
-            if ($user->can('test-list-edit')) {
+            if ($user->can('itemcharge-list-edit')) {
                 $customData->links[] = [
                     'linkClass' => 'bg-yellow-400 text-black semi-bold',
                     'link' => route('backend.itemcharge.edit',  $data->id),
@@ -553,7 +559,7 @@ class PathologyTestController extends Controller
                 ];
             }
 
-            if ($user->can('test-list-delete')) {
+            if ($user->can('itemcharge-list-delete')) {
                 $customData->links[] = [
                     'linkClass' => 'deleteButton bg-red-500 text-white semi-bold',
                     'link' => route('backend.itemcharge.destroy', $data->id),
@@ -628,12 +634,14 @@ class PathologyTestController extends Controller
                 'test_category_id' => $data['test_category_id'],
                 'test_sub_category_id' => $data['test_sub_category_id'] ?? null,
                 'method' => $data['method'] ?? null,
+                'room_no' => $data['room_no'] ?? null,
                 'report_days' => $data['report_days'] ?? null,
                 'charge_category_id' => $data['charge_id'] ?? $data['charge_category_id'] ?? null,
                 'charge_name' => $data['charge_name'] ?? null,
                 'tax' => $data['tax'] ?? null,
                 'standard_charge' => $data['standard_charge'] ?? null,
                 'amount' => $data['amount'] ?? null,
+                'referral_percentage' => $data['referral_percentage'] ?? null,
                 'test_parameters' => json_encode($data['parameters'] ?? []),
                 'status' => 'Active'
             ];
@@ -699,14 +707,29 @@ class PathologyTestController extends Controller
                             'tax_category_id' => $taxCategoryId,
                             'tax' => $pathologyTestData['tax'] ?? ($data['tax'] ?? null),
                             'standard_charge' => $pathologyTestData['standard_charge'] ?? ($data['standard_charge'] ?? null),
+                            // determine module(s): prefer category_type, but if name
+                            // indicates a disposable item, mark module as Disposable
+                            'module' => json_encode((function() use ($pathologyTestData, $resolvedChargeName) {
+                                $m = [];
+                                $preferred = trim((string)($pathologyTestData['category_type'] ?? ''));
+                                if ($preferred) $m[] = $preferred;
+                                // disposable heuristics
+                                if (preg_match('/\b(tube|v\.?\s*tube|syringe|needle|glove|gauze|dispos)\b/i', $resolvedChargeName)) {
+                                    array_unshift($m, 'Disposable');
+                                }
+                                if (empty($m)) $m[] = 'Service';
+                                return array_values(array_unique($m));
+                            })()),
                             'status' => 'Active',
                         ];
 
-                        $existingCharge = Charge::query()->whereRaw('LOWER(name) = ?', [strtolower($resolvedChargeName)])->first();
-                        if ($existingCharge) {
-                            $existingCharge->update($chargePayload);
-                        } else {
-                            Charge::create($chargePayload);
+                        if (env('AUTO_CREATE_IPD_CHARGE_FOR_TESTS', false)) {
+                            $existingCharge = Charge::query()->whereRaw('LOWER(name) = ?', [strtolower($resolvedChargeName)])->first();
+                            if ($existingCharge) {
+                                $existingCharge->update($chargePayload);
+                            } else {
+                                Charge::create($chargePayload);
+                            }
                         }
                     }
                 } catch (Exception $e) {
@@ -800,18 +823,21 @@ class PathologyTestController extends Controller
             $data = $request->validated();
 
             $pathologyTestData = [
+                'category_type' => $data['category_type'] ?? null,
                 'test_name' => $data['test_name'],
                 'test_short_name' => $data['test_short_name'] ?? null,
                 'test_type' => $data['test_type'] ?? null,
                 'test_category_id' => $data['test_category_id'],
                 'test_sub_category_id' => $data['test_sub_category_id'] ?? null,
                 'method' => $data['method'] ?? null,
+                'room_no' => $data['room_no'] ?? null,
                 'report_days' => $data['report_days'] ?? null,
                 'charge_category_id' => $data['charge_id'] ?? $data['charge_category_id'] ?? null,
                 'charge_name' => $data['charge_name'] ?? null,
                 'tax' => $data['tax'] ?? null,
                 'standard_charge' => $data['standard_charge'] ?? null,
                 'amount' => $data['amount'] ?? null,
+                'referral_percentage' => $data['referral_percentage'] ?? null,
                 'test_parameters' => json_encode($data['parameters'] ?? []),
             ];
 
@@ -841,6 +867,67 @@ class PathologyTestController extends Controller
                             DB::table('pathology_test_parameters')->insert($pathologyTestParameterData);
                         }
                     }
+                }
+
+                // Ensure an associated Charge exists/updated for this item as well
+                try {
+                    $resolvedChargeName = trim((string)($pathologyTestData['charge_name'] ?? $pathologyTestData['test_name']));
+                    if ($resolvedChargeName !== '') {
+                        $incomingCategoryId = $pathologyTestData['charge_category_id'] ?? ($data['charge_category_id'] ?? null);
+                        $targetChargeCategoryId = $incomingCategoryId;
+                        if (empty($targetChargeCategoryId)) {
+                            $preferredName = $pathologyTestData['category_type'] ?? ($pathologyTestData['test_category_id'] ? null : ($pathologyTestData['test_name'] ?? 'Service'));
+                            if (!$preferredName) $preferredName = 'Service';
+                            $foundCategory = ChargeCategory::query()->whereRaw('LOWER(name) = ?', [strtolower($preferredName)])->first();
+                            if ($foundCategory) {
+                                $targetChargeCategoryId = $foundCategory->id;
+                            } else {
+                                $chargeTypeId = \App\Models\ChargeType::query()->value('id') ?? 1;
+                                $newCategory = ChargeCategory::create([
+                                    'charge_type_id' => $chargeTypeId,
+                                    'name' => $preferredName,
+                                    'description' => $preferredName,
+                                    'status' => 'Active',
+                                ]);
+                                $targetChargeCategoryId = $newCategory->id;
+                            }
+                        }
+
+                        $chargeTypeId = \App\Models\ChargeType::query()->value('id') ?? 1;
+                        $unitTypeId = \App\Models\ChargeUnitType::query()->value('id') ?? 1;
+                        $taxCategoryId = \App\Models\ChargeTaxCategory::query()->value('id') ?? 1;
+
+                        $moduleArr = [];
+                        $preferred = trim((string)($pathologyTestData['category_type'] ?? ''));
+                        if ($preferred) $moduleArr[] = $preferred;
+                        if (preg_match('/\b(tube|v\.?\s*tube|syringe|needle|glove|gauze|dispos)\b/i', $resolvedChargeName)) {
+                            array_unshift($moduleArr, 'Disposable');
+                        }
+                        if (empty($moduleArr)) $moduleArr[] = 'Service';
+
+                        $chargePayload = [
+                            'name' => $resolvedChargeName,
+                            'charge_type_id' => $chargeTypeId,
+                            'charge_category_id' => $targetChargeCategoryId,
+                            'unit_type_id' => $unitTypeId,
+                            'tax_category_id' => $taxCategoryId,
+                            'tax' => $pathologyTestData['tax'] ?? ($data['tax'] ?? null),
+                            'standard_charge' => $pathologyTestData['standard_charge'] ?? ($data['standard_charge'] ?? null),
+                            'module' => json_encode(array_values(array_unique($moduleArr))),
+                            'status' => 'Active',
+                        ];
+
+                        if (env('AUTO_CREATE_IPD_CHARGE_FOR_TESTS', false)) {
+                            $existingCharge = Charge::query()->whereRaw('LOWER(name) = ?', [strtolower($resolvedChargeName)])->first();
+                            if ($existingCharge) {
+                                $existingCharge->update($chargePayload);
+                            } else {
+                                Charge::create($chargePayload);
+                            }
+                        }
+                    }
+                } catch (Exception $e) {
+                    $this->storeSystemError('Backend', 'PathologyTestController', 'update_create_charge', substr($e->getMessage(), 0, 1000));
                 }
 
                 $message = 'Item updated successfully';

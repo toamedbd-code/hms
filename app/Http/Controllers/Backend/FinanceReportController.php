@@ -71,17 +71,17 @@ class FinanceReportController extends Controller
     private function getTableHeaders($reportType)
     {
         $headers = [
-            'daily-transaction' => ['#', 'Date', 'Transactions', 'Total', 'Discount', 'Amount After Discount', 'Cash', 'Non-Cash', 'Commission', 'Paid', 'Due', 'Due Collected'],
+            'daily-transaction' => ['#', 'Date', 'Transactions', 'Total', 'Discount', 'Refund', 'Amount After Discount', 'Cash', 'Non-Cash', 'Commission', 'Paid', 'Due', 'Due Collected'],
             // Make all-transaction use the same format as daily-transaction
-            'all-transaction' => ['#', 'Date', 'Transactions', 'Total', 'Discount', 'Amount After Discount', 'Cash', 'Non-Cash', 'Commission', 'Paid', 'Due', 'Due Collected'],
-            'pharmacy-transaction' => ['#', 'Date', 'Bill No', 'Mobile', 'Doctor', 'Pay Mode', 'Total', 'Discount', 'Payable', 'Paid', 'Due', 'Due Collected', 'Status'],
-            'appointment-transaction' => ['#', 'Date', 'Reference No', 'Mobile', 'Doctor', 'Pay Mode', 'Total', 'Discount', 'Payable', 'Paid', 'Due', 'Due Collected', 'Status'],
-            'opd-transaction' => ['#', 'Date', 'Reference No', 'Mobile', 'Doctor', 'Pay Mode', 'Total', 'Discount', 'Payable', 'Paid', 'Due', 'Due Collected', 'Status'],
-            'ipd-transaction' => ['#', 'Date', 'Reference No', 'Mobile', 'Doctor', 'Pay Mode', 'Total', 'Discount', 'Payable', 'Paid', 'Due', 'Due Collected', 'Status'],
-            'income' => ['#', 'Date', 'Bills', 'Item Name', 'Total Bill', 'Discount', 'Total Income', 'Net Income', 'Due Collected'],
-            'expense' => ['#', 'Date', 'Expense Head', 'Transactions', 'Total Expense'],
-            'referral' => ['#', 'Date', 'Doctor', 'Bill No', 'Bill Amount', 'Commission'],
-            'pending-transaction' => ['#', 'Date', 'Bill No', 'Mobile', 'Doctor', 'Pay Mode', 'Total', 'Discount', 'Payable', 'Paid', 'Due', 'Due Collected', 'Status'],
+            'all-transaction' => ['#', 'Date', 'Transactions', 'Total', 'Discount', 'Refund', 'Amount After Discount', 'Cash', 'Non-Cash', 'Commission', 'Paid', 'Due', 'Due Collected'],
+            'pharmacy-transaction' => ['#', 'Date', 'Bill No', 'Mobile', 'Doctor', 'Pay Mode', 'Total', 'Discount', 'Refund', 'Payable', 'Paid', 'Due', 'Due Collected', 'Status'],
+            'appointment-transaction' => ['#', 'Date', 'Reference No', 'Mobile', 'Doctor', 'Pay Mode', 'Total', 'Discount', 'Refund', 'Payable', 'Paid', 'Due', 'Due Collected', 'Status'],
+            'opd-transaction' => ['#', 'Date', 'Reference No', 'Mobile', 'Doctor', 'Pay Mode', 'Total', 'Discount', 'Refund', 'Payable', 'Paid', 'Due', 'Due Collected', 'Status'],
+            'ipd-transaction' => ['#', 'Date', 'Reference No', 'Mobile', 'Doctor', 'Pay Mode', 'Total', 'Discount', 'Refund', 'Payable', 'Paid', 'Due', 'Due Collected', 'Status'],
+            'income' => ['#', 'Date', 'Bills', 'Item Name', 'Total Bill', 'Discount', 'Total Refund', 'Total Income', 'Net Income', 'Due Collected'],
+            'expense' => ['#', 'Date', 'Expense Head', 'Expense Name', 'Bill Number', 'Transactions', 'Total Expense', 'Refund'],
+            'referral' => ['#', 'Date', 'Doctor', 'Bill No', 'Bill Amount', 'Refund', 'Commission'],
+            'pending-transaction' => ['#', 'Date', 'Bill No', 'Mobile', 'Doctor', 'Pay Mode', 'Total', 'Discount', 'Refund', 'Payable', 'Paid', 'Due', 'Due Collected', 'Status'],
         ];
 
         return $headers[$reportType] ?? [];
@@ -96,6 +96,7 @@ class FinanceReportController extends Controller
                 ['fieldName' => 'total_transactions', 'class' => 'text-center'],
                 ['fieldName' => 'total_amount', 'class' => 'text-right'],
                 ['fieldName' => 'total_discount', 'class' => 'text-right'],
+                ['fieldName' => 'total_return_amount', 'class' => 'text-right'],
                 ['fieldName' => 'amount_after_discount', 'class' => 'text-right'],
                 ['fieldName' => 'cash_amount', 'class' => 'text-right'],
                 ['fieldName' => 'non_cash_amount', 'class' => 'text-right'],
@@ -111,6 +112,7 @@ class FinanceReportController extends Controller
                 ['fieldName' => 'total_transactions', 'class' => 'text-center'],
                 ['fieldName' => 'total_amount', 'class' => 'text-right'],
                 ['fieldName' => 'total_discount', 'class' => 'text-right'],
+                ['fieldName' => 'total_return_amount', 'class' => 'text-right'],
                 ['fieldName' => 'amount_after_discount', 'class' => 'text-right'],
                 ['fieldName' => 'cash_amount', 'class' => 'text-right'],
                 ['fieldName' => 'non_cash_amount', 'class' => 'text-right'],
@@ -128,6 +130,7 @@ class FinanceReportController extends Controller
                 ['fieldName' => 'pay_mode', 'class' => ''],
                 ['fieldName' => 'total', 'class' => 'text-right'],
                 ['fieldName' => 'discount', 'class' => 'text-right'],
+                ['fieldName' => 'total_return_amount', 'class' => 'text-right'],
                 ['fieldName' => 'payable_amount', 'class' => 'text-right'],
                 ['fieldName' => 'paid_amt', 'class' => 'text-right'],
                 ['fieldName' => 'due_amount', 'class' => 'text-right'],
@@ -143,6 +146,7 @@ class FinanceReportController extends Controller
                 ['fieldName' => 'pay_mode', 'class' => ''],
                 ['fieldName' => 'total', 'class' => 'text-right'],
                 ['fieldName' => 'discount', 'class' => 'text-right'],
+                ['fieldName' => 'total_return_amount', 'class' => 'text-right'],
                 ['fieldName' => 'payable_amount', 'class' => 'text-right'],
                 ['fieldName' => 'paid_amt', 'class' => 'text-right'],
                 ['fieldName' => 'due_amount', 'class' => 'text-right'],
@@ -158,6 +162,7 @@ class FinanceReportController extends Controller
                 ['fieldName' => 'pay_mode', 'class' => ''],
                 ['fieldName' => 'total', 'class' => 'text-right'],
                 ['fieldName' => 'discount', 'class' => 'text-right'],
+                ['fieldName' => 'total_return_amount', 'class' => 'text-right'],
                 ['fieldName' => 'payable_amount', 'class' => 'text-right'],
                 ['fieldName' => 'paid_amt', 'class' => 'text-right'],
                 ['fieldName' => 'due_amount', 'class' => 'text-right'],
@@ -173,6 +178,7 @@ class FinanceReportController extends Controller
                 ['fieldName' => 'pay_mode', 'class' => ''],
                 ['fieldName' => 'total', 'class' => 'text-right'],
                 ['fieldName' => 'discount', 'class' => 'text-right'],
+                ['fieldName' => 'total_return_amount', 'class' => 'text-right'],
                 ['fieldName' => 'payable_amount', 'class' => 'text-right'],
                 ['fieldName' => 'paid_amt', 'class' => 'text-right'],
                 ['fieldName' => 'due_amount', 'class' => 'text-right'],
@@ -186,6 +192,7 @@ class FinanceReportController extends Controller
                 ['fieldName' => 'item_names', 'class' => ''],
                 ['fieldName' => 'total_bill', 'class' => 'text-right'],
                 ['fieldName' => 'total_discount', 'class' => 'text-right'],
+                ['fieldName' => 'total_return_amount', 'class' => 'text-right'],
                 ['fieldName' => 'total_income', 'class' => 'text-right'],
                 ['fieldName' => 'net_income', 'class' => 'text-right'],
                 ['fieldName' => 'total_due_collected', 'class' => 'text-right'],
@@ -195,8 +202,11 @@ class FinanceReportController extends Controller
                 ['fieldName' => 'serial', 'class' => 'text-center'],
                 ['fieldName' => 'date', 'class' => ''],
                 ['fieldName' => 'expense_head_name', 'class' => ''],
+                ['fieldName' => 'expense_name', 'class' => ''],
+                ['fieldName' => 'bill_number', 'class' => ''],
                 ['fieldName' => 'total_transactions', 'class' => 'text-center'],
                 ['fieldName' => 'total_expense', 'class' => 'text-right'],
+                ['fieldName' => 'total_return_amount', 'class' => 'text-right'],
             ],
             'referral' => [
                 ['fieldName' => 'serial', 'class' => 'text-center'],
@@ -204,6 +214,7 @@ class FinanceReportController extends Controller
                 ['fieldName' => 'doctor_name', 'class' => ''],
                 ['fieldName' => 'bill_number', 'class' => ''],
                 ['fieldName' => 'total_bill_amount', 'class' => 'text-right'],
+                ['fieldName' => 'total_return_amount', 'class' => 'text-right'],
                 ['fieldName' => 'total_commission', 'class' => 'text-right'],
             ],
             'pending-transaction' => [
@@ -215,8 +226,7 @@ class FinanceReportController extends Controller
                 ['fieldName' => 'pay_mode', 'class' => ''],
                 ['fieldName' => 'total', 'class' => 'text-right'],
                 ['fieldName' => 'discount', 'class' => 'text-right'],
-                ['fieldName' => 'payable_amount', 'class' => 'text-right'],
-                ['fieldName' => 'paid_amt', 'class' => 'text-right'],
+            ['fieldName' => 'total_return_amount', 'class' => 'text-right'],
                 ['fieldName' => 'due_amount', 'class' => 'text-right'],
                 ['fieldName' => 'total_due_collected', 'class' => 'text-right'],
                 ['fieldName' => 'payment_status', 'class' => 'text-center'],
@@ -242,6 +252,7 @@ private function getFooterTotals($reportType, $reportData)
                 'total_transactions' => collect($reportData)->sum('total_transactions'),
                 'total_amount' => collect($reportData)->sum('total_amount_raw'),
                 'total_discount' => collect($reportData)->sum('total_discount_raw'),
+                'total_return_amount' => collect($reportData)->sum('total_return_amount_raw'),
                 'amount_after_discount' => collect($reportData)->sum('amount_after_discount_raw'),
                 'cash_amount' => collect($reportData)->sum('cash_amount_raw'),
                 'non_cash_amount' => collect($reportData)->sum('non_cash_amount_raw'),
@@ -263,6 +274,7 @@ private function getFooterTotals($reportType, $reportData)
                 'total_transactions' => collect($reportData)->sum('total_transactions'),
                 'total_amount' => collect($reportData)->sum('total_amount_raw'),
                 'total_discount' => collect($reportData)->sum('total_discount_raw'),
+                'total_return_amount' => collect($reportData)->sum('total_return_amount_raw'),
                 'amount_after_discount' => collect($reportData)->sum('amount_after_discount_raw'),
                 'cash_amount' => collect($reportData)->sum('cash_amount_raw'),
                 'non_cash_amount' => collect($reportData)->sum('non_cash_amount_raw'),
@@ -280,6 +292,7 @@ private function getFooterTotals($reportType, $reportData)
             $totals = [
                 'total' => collect($reportData)->sum('total_raw'),
                 'discount' => collect($reportData)->sum('discount_raw'),
+                'total_return_amount' => collect($reportData)->sum('total_return_amount_raw'),
                 'payable_amount' => collect($reportData)->sum('payable_amount_raw'),
                 'paid_amt' => collect($reportData)->sum('paid_amt_raw'),
                 'due_amount' => collect($reportData)->sum('due_amount_raw'),
@@ -294,6 +307,7 @@ private function getFooterTotals($reportType, $reportData)
             $totals = [
                 'total' => collect($reportData)->sum('total_raw'),
                 'discount' => collect($reportData)->sum('discount_raw'),
+                'total_return_amount' => collect($reportData)->sum('total_return_amount_raw'),
                 'payable_amount' => collect($reportData)->sum('payable_amount_raw'),
                 'paid_amt' => collect($reportData)->sum('paid_amt_raw'),
                 'due_amount' => collect($reportData)->sum('due_amount_raw'),
@@ -308,6 +322,7 @@ private function getFooterTotals($reportType, $reportData)
             $totals = [
                 'total' => collect($reportData)->sum('total_raw'),
                 'discount' => collect($reportData)->sum('discount_raw'),
+                'total_return_amount' => collect($reportData)->sum('total_return_amount_raw'),
                 'payable_amount' => collect($reportData)->sum('payable_amount_raw'),
                 'paid_amt' => collect($reportData)->sum('paid_amt_raw'),
                 'due_amount' => collect($reportData)->sum('due_amount_raw'),
@@ -322,6 +337,7 @@ private function getFooterTotals($reportType, $reportData)
             $totals = [
                 'total' => collect($reportData)->sum('total_raw'),
                 'discount' => collect($reportData)->sum('discount_raw'),
+                'total_return_amount' => collect($reportData)->sum('total_return_amount_raw'),
                 'payable_amount' => collect($reportData)->sum('payable_amount_raw'),
                 'paid_amt' => collect($reportData)->sum('paid_amt_raw'),
                 'due_amount' => collect($reportData)->sum('due_amount_raw'),
@@ -337,6 +353,7 @@ private function getFooterTotals($reportType, $reportData)
                 'total_bills' => collect($reportData)->sum('total_bills'),
                 'total_bill' => collect($reportData)->sum('total_bill_raw'),
                 'total_discount' => collect($reportData)->sum('total_discount_raw'),
+                'total_return_amount' => collect($reportData)->sum('total_return_amount_raw'),
                 'total_income' => collect($reportData)->sum('total_income_raw'),
                 'net_income' => collect($reportData)->sum('net_income_raw'),
 
@@ -352,12 +369,14 @@ private function getFooterTotals($reportType, $reportData)
             $totals = [
                 'total_transactions' => collect($reportData)->sum('total_transactions'),
                 'total_expense' => collect($reportData)->sum('total_expense_raw'),
+                'total_return_amount' => 0,
             ];
             break;
 
         case 'referral':
             $totals = [
                 'total_bill_amount' => collect($reportData)->sum('total_bill_amount_raw'),
+                'total_return_amount' => 0,
                 'total_commission' => collect($reportData)->sum('total_commission_raw'),
             ];
             break;
@@ -366,6 +385,7 @@ private function getFooterTotals($reportType, $reportData)
             $totals = [
                 'total' => collect($reportData)->sum('total_raw'),
                 'discount' => collect($reportData)->sum('discount_raw'),
+                'total_return_amount' => collect($reportData)->sum('total_return_amount_raw'),
                 'payable_amount' => collect($reportData)->sum('payable_amount_raw'),
                 'paid_amt' => collect($reportData)->sum('paid_amt_raw'),
                 'due_amount' => collect($reportData)->sum('due_amount_raw'),
@@ -471,11 +491,14 @@ private function getDailyTransactionReport($dateFrom, $dateTo)
             whereDate('collected_at', $date)
             ->sum('collected_amount');
 
+        $totalReturnAmount = $group->sum(fn($bill) => (float) ($bill->return_amt ?? 0));
+
         return [
             'date' => $date,
             'total_transactions' => $group->count(),
             'total_amount_raw' => $totalAmount,
             'total_discount_raw' => $totalDiscount,
+            'total_return_amount_raw' => $totalReturnAmount,
             'amount_after_discount_raw' => $amountAfterDiscount,
             'cash_amount_raw' => $group->sum(fn($bill) =>
                 $bill->pay_mode == 'Cash' ? $bill->payable_amount : 0),
@@ -495,6 +518,7 @@ private function getDailyTransactionReport($dateFrom, $dateTo)
         $item['date'] = Carbon::parse($item['date'])->format('d/m/Y');
         $item['total_amount'] = $this->formatCurrency($item['total_amount_raw']);
         $item['total_discount'] = $this->formatCurrency($item['total_discount_raw']);
+        $item['total_return_amount'] = $this->formatCurrency($item['total_return_amount_raw']);
         $item['amount_after_discount'] = $this->formatCurrency($item['amount_after_discount_raw']);
         $item['cash_amount'] = $this->formatCurrency($item['cash_amount_raw']);
         $item['non_cash_amount'] = $this->formatCurrency($item['non_cash_amount_raw']);
@@ -529,6 +553,8 @@ private function getDailyTransactionReport($dateFrom, $dateTo)
             ->whereBetween('collected_at', [$dateFrom, $dateTo])
             ->sum('collected_amount');
 
+        $returnAmount = (float) ($item->return_amt ?? 0);
+
         return [
             'id' => $item->id,
             'serial' => $serial++,
@@ -540,6 +566,8 @@ private function getDailyTransactionReport($dateFrom, $dateTo)
             'total_raw' => $item->total,
             'discount' => $this->formatCurrency($discount),
             'discount_raw' => $discount,
+            'total_return_amount' => $this->formatCurrency($returnAmount),
+            'total_return_amount_raw' => $returnAmount,
             'payable_amount' => $this->formatCurrency($item->payable_amount),
             'payable_amount_raw' => $item->payable_amount,
             'paid_amt' => $this->formatCurrency($item->paid_amt),
@@ -578,6 +606,10 @@ private function getIncomeReport($dateFrom, $dateTo)
                 whereDate('collected_at', $date)
                 ->sum('collected_amount');
 
+            $totalReturnAmount = $group->sum(fn($bill) => (float) ($bill->return_amt ?? 0));
+
+            $netIncomeRaw = $group->sum('paid_amt') + $dueCollected - $totalDiscount - $totalReturnAmount;
+
             return [
                 'date' => $date,
                 'total_bills' => $group->count(),
@@ -587,9 +619,10 @@ private function getIncomeReport($dateFrom, $dateTo)
                 'total_income' => $this->formatCurrency($group->sum('paid_amt')),
                 'total_discount_raw' => $totalDiscount,
                 'total_discount' => $this->formatCurrency($totalDiscount),
-                'total_income_raw' => $group->sum('paid_amt'),
-                'net_income_raw' => $group->sum('paid_amt') - $totalDiscount,
-                'net_income' => $this->formatCurrency($group->sum('paid_amt') - $totalDiscount),
+                'total_return_amount_raw' => $totalReturnAmount,
+                'total_return_amount' => $this->formatCurrency($totalReturnAmount),
+                'net_income_raw' => $netIncomeRaw,
+                'net_income' => $this->formatCurrency($netIncomeRaw),
                 'total_due_raw' => $group->sum('due_amount'),
                 'total_due' => $this->formatCurrency($group->sum('due_amount')),
                 'total_due_collected_raw' => $dueCollected,
@@ -629,6 +662,8 @@ private function getPharmacyTransactionReport($dateFrom, $dateTo)
             ->whereBetween('collected_at', [$dateFrom, $dateTo])
             ->sum('collected_amount');
 
+        $returnAmount = (float) ($item->return_amt ?? 0);
+
         return [
             'id' => $item->id,
             'serial' => $serial++,
@@ -640,6 +675,8 @@ private function getPharmacyTransactionReport($dateFrom, $dateTo)
             'total_raw' => $item->total,
             'discount' => $this->formatCurrency($discount),
             'discount_raw' => $discount,
+            'total_return_amount' => $this->formatCurrency($returnAmount),
+            'total_return_amount_raw' => $returnAmount,
             'payable_amount' => $this->formatCurrency($item->payable_amount),
             'payable_amount_raw' => $item->payable_amount,
             'paid_amt' => $this->formatCurrency($item->paid_amt),
@@ -687,6 +724,8 @@ private function getAppointmentTransactionReport($dateFrom, $dateTo)
             'total_raw' => $total,
             'discount' => $this->formatCurrency($discount),
             'discount_raw' => $discount,
+            'total_return_amount' => $this->formatCurrency(0),
+            'total_return_amount_raw' => 0,
             'payable_amount' => $this->formatCurrency($payable),
             'payable_amount_raw' => $payable,
             'paid_amt' => $this->formatCurrency($paid),
@@ -738,6 +777,8 @@ private function getOpdTransactionReport($dateFrom, $dateTo)
             'total_raw' => $total,
             'discount' => $this->formatCurrency($discount),
             'discount_raw' => $discount,
+            'total_return_amount' => $this->formatCurrency(0),
+            'total_return_amount_raw' => 0,
             'payable_amount' => $this->formatCurrency($payable),
             'payable_amount_raw' => $payable,
             'paid_amt' => $this->formatCurrency($paid),
@@ -796,6 +837,8 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
                 ->sum('collected_amount');
         }
 
+        $returnAmount = (float) ($billing?->return_amt ?? 0);
+
         return [
             'id' => $item->id,
             'serial' => $serial++,
@@ -807,6 +850,8 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
             'total_raw' => $total,
             'discount' => $this->formatCurrency($discount),
             'discount_raw' => $discount,
+            'total_return_amount' => $this->formatCurrency($returnAmount),
+            'total_return_amount_raw' => $returnAmount,
             'payable_amount' => $this->formatCurrency($payable),
             'payable_amount_raw' => $payable,
             'paid_amt' => $this->formatCurrency($paid),
@@ -840,6 +885,7 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
                 'payable_amount as payable_amount_raw',
                 'paid_amt as paid_amt_raw',
                 'due_amount as due_amount_raw',
+                'return_amt',
                 'payment_status',
                 'delivery_date',
                 'created_at'
@@ -867,23 +913,28 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
                 ->whereBetween('collected_at', [$dateFrom, $dateTo])
                 ->sum('collected_amount');
 
+            $returnAmount = (float) ($item->return_amt ?? 0);
+
             return [
                 'id' => $item->id,
                 'serial' => $serial++,
+                'bill_number' => $this->formatCurrency($item->total_raw),
+                'total' => $this->formatCurrency($item->total_raw),
+                'total_raw' => $item->total_raw,
+                'discount' => $this->formatCurrency($totalDiscount),
+                'discount_raw' => $totalDiscount,
+                'total_return_amount' => $this->formatCurrency($returnAmount),
+                'total_return_amount_raw' => $returnAmount,
+                'payable_amount' => $this->formatCurrency($item->payable_amount_raw),
+                'payable_amount_raw' => $item->payable_amount_raw,
+                'paid_amt' => $this->formatCurrency($item->paid_amt_raw),
+                'paid_amt_raw' => $item->paid_amt_raw,
+                'due_amount' => $this->formatCurrency($item->due_amount_raw),
+                'due_amount_raw' => $item->due_amount_raw,
                 'bill_number' => $item->bill_number,
                 'patient_mobile' => $item->patient_mobile,
                 'doctor_name' => $item->doctor_name ?? 'Walk-in',
                 'pay_mode' => $item->pay_mode ?? 'N/A',
-                'total' => $item->total_raw,
-                'total_raw' => $item->total_raw,
-                'discount' => $totalDiscount,
-                'discount_raw' => $totalDiscount,
-                'payable_amount' => $item->payable_amount_raw,
-                'payable_amount_raw' => $item->payable_amount_raw,
-                'paid_amt' => $item->paid_amt_raw,
-                'paid_amt_raw' => $item->paid_amt_raw,
-                'due_amount' => $item->due_amount_raw,
-                'due_amount_raw' => $item->due_amount_raw,
                 'payment_status' => $this->getStatusBadge($item->payment_status),
                 'delivery_date' => $item->delivery_date,
                 'created_at' => Carbon::parse($item->created_at)->format('d/m/Y'),
@@ -895,39 +946,38 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
 
     private function getExpenseReport($dateFrom, $dateTo)
     {
-        $data = Expense::with('expenseHead')
+        $expenses = Expense::with('expenseHead')
             ->whereBetween('date', [$dateFrom, $dateTo])
             ->where('status', 'Active')
-            ->get()
-            ->groupBy(function ($expense) {
-                return date('Y-m-d', strtotime($expense->date)) . '|' . ($expense->expenseHead->name ?? 'N/A');
-            })
-            ->map(function ($group, $key) {
-                $parts = explode('|', $key);
-                $date = $parts[0];
-                $expenseHeadName = $parts[1] ?? 'N/A';
-
-                $totalExpense = $group->sum('amount');
-
-                return (object) [
-                    'date' => Carbon::parse($date)->format('Y-m-d'),
-                    'expense_head_name' => $expenseHeadName,
-                    'total_transactions' => $group->count(),
-                    'total_expense_raw' => $totalExpense,
-                ];
-            })
-            ->sortByDesc('date')
-            ->values();
+            ->orderByDesc('date')
+            ->get();
 
         $serial = 1;
-        $data->transform(function ($item) use (&$serial) {
-            $item->serial = $serial++;
-            $item->date = Carbon::parse($item->date)->format('d/m/Y');
-            $item->total_expense = $this->formatCurrency($item->total_expense_raw);
-            return $item;
-        });
 
-        return $data->toArray();
+        $rows = $expenses->map(function ($expense) use (&$serial) {
+            $exchangeName = trim((string) ($expense->name ?? '')) ?: ($expense->expenseHead->name ?? 'N/A');
+
+            // Link to the expense printable page so copying the URL opens the report page
+            $printUrl = route('backend.expense.print', $expense->id);
+            $exchangeHtml = '<a href="' . e($printUrl) . '" target="_blank" rel="noopener">' . e($exchangeName) . '</a>';
+
+            $billNumber = trim((string) ($expense->bill_number ?? $expense->invoice_number ?? '')) ?: 'N/A';
+
+            return (object) [
+                'serial' => $serial++,
+                'date' => Carbon::parse($expense->date)->format('d/m/Y'),
+                'expense_head_name' => $expense->expenseHead->name ?? 'N/A',
+                'expense_name' => $exchangeHtml,
+                'bill_number' => $billNumber,
+                'total_transactions' => 1,
+                'total_expense_raw' => (float) $expense->amount,
+                'total_expense' => $this->formatCurrency($expense->amount),
+                'total_return_amount_raw' => 0,
+                'total_return_amount' => $this->formatCurrency(0),
+            ];
+        })->values();
+
+        return $rows->toArray();
     }
 
     private function getReferralReport($dateFrom, $dateTo)
@@ -947,6 +997,8 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
                 'bill_number' => $referral->billing->bill_number ?? 'N/A',
                 'total_bill_amount_raw' => $referral->total_bill_amount,
                 'total_bill_amount' => $this->formatCurrency($referral->total_bill_amount),
+                'total_return_amount_raw' => 0,
+                'total_return_amount' => $this->formatCurrency(0),
                 'total_commission_raw' => $referral->total_commission_amount,
                 'total_commission' => $this->formatCurrency($referral->total_commission_amount),
             ];
@@ -1000,22 +1052,79 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
             if ($settingShowHeader !== null || $settingShowFooter !== null) {
                 $showHeader = $settingShowHeader !== null ? $settingShowHeader : true;
                 $showFooter = $settingShowFooter !== null ? $settingShowFooter : true;
-                $showHeaderFooter = $showHeader && $showFooter;
             } else {
-                $showHeaderFooter = array_key_exists('show_header_footer', $reporting) ? (bool) $reporting['show_header_footer'] : true;
+                $globalShow = array_key_exists('show_header_footer', $reporting) ? (bool) $reporting['show_header_footer'] : true;
+                $showHeader = $globalShow;
+                $showFooter = $globalShow;
+            }
+
+            // Finance PDFs should always include the header title even if the global
+            // report settings disable header/footer. Keep header visible; allow a
+            // request/layout flag to explicitly suppress it if needed.
+            if (!empty($layout['suppress_header'])) {
+                $showHeader = false;
+            } elseif ($request->boolean('suppress_header')) {
+                $showHeader = false;
+            } else {
+                $showHeader = true;
             }
             $layout = data_get($reporting, 'layout', []);
-            $reportHeaderHeightPx = max(0, (int) ($layout['header_height'] ?? 115));
-            $reportFooterHeightPx = max(0, (int) ($layout['footer_height'] ?? 70));
-            $pageMarginTop = isset($layout['page_margin_top']) ? (int) $layout['page_margin_top'] : 15;
-            $pageMarginBottom = isset($layout['page_margin_bottom']) ? (int) $layout['page_margin_bottom'] : 15;
+            $reportHeaderHeightPx = max(0, (int) ($layout['header_height'] ?? 0));
+            $reportFooterHeightPx = max(0, (int) ($layout['footer_height'] ?? 0));
+
+            // Default top margin for finance reports: 48px (~0.5in)
+            $defaultPageMarginTop = 48;
+            // Force the default for finance PDFs to avoid large values coming from
+            // shared settings. Allow explicit request override via `page_margin_top`.
+            $pageMarginTop = $defaultPageMarginTop;
+            $pageMarginBottom = isset($layout['page_margin_bottom']) ? (int) $layout['page_margin_bottom'] : 10;
+
+            // Request-level override: allow passing `page_margin_top` or `force_fixed_top_margin`
+            // as request parameters when triggering PDF generation. This lets you test
+            // or temporarily override the setting without changing DB.
+            if ($request->filled('page_margin_top')) {
+                $pageMarginTop = (int) $request->get('page_margin_top');
+            }
+            if ($request->boolean('force_fixed_top_margin')) {
+                $pageMarginTop = $defaultPageMarginTop;
+            }
+
+            // Optional code-level flag: set to true in $layout to force the fixed half-inch
+            // Example: $layout['force_fixed_top_margin'] = true;
+            if (!empty($layout['force_fixed_top_margin'])) {
+                $pageMarginTop = $defaultPageMarginTop;
+            }
+
+            // Log raw px value for debugging (helps trace unexpected large margins)
+            Log::info('FinanceReportController: pageMarginTop (px)', [
+                'pageMarginTopPx' => $pageMarginTop,
+                'layout_page_margin_top' => $layout['page_margin_top'] ?? null,
+                'request_page_margin_top' => $request->get('page_margin_top', null),
+                'force_fixed_flag_layout' => !empty($layout['force_fixed_top_margin']),
+                'force_fixed_flag_request' => $request->boolean('force_fixed_top_margin'),
+            ]);
 
             $pxToMm = function ($px) {
                 return round(((float) $px) * 25.4 / 96, 2);
             };
 
-            $marginHeaderMm = $showHeaderFooter ? $pxToMm($reportHeaderHeightPx) : 0;
-            $marginFooterMm = $showHeaderFooter ? $pxToMm($reportFooterHeightPx) : 0;
+            // For finance listing PDFs we render the header inside the body HTML (not using
+            // mPDF header API). To avoid mPDF reserving additional header space which
+            // doubles the top offset, force margin_header to 0 and control placement
+            // with the body header's inline margin (below).
+            $marginHeaderMm = 0;
+            $marginFooterMm = $showFooter ? $pxToMm($reportFooterHeightPx) : 0;
+
+            // convert px to mm for mPDF margins
+            $marginTopForMpdf = $pxToMm($pageMarginTop);
+            $marginBottomForMpdf = $pxToMm($pageMarginBottom);
+
+            Log::info('FinanceReportController: PDF margins (mm)', [
+                'marginTopForMpdf' => $marginTopForMpdf,
+                'marginBottomForMpdf' => $marginBottomForMpdf,
+                'marginHeaderMm' => $marginHeaderMm,
+                'marginFooterMm' => $marginFooterMm,
+            ]);
 
             $mpdf = new Mpdf([
                 'mode' => 'utf-8',
@@ -1023,8 +1132,8 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
                 'orientation' => 'P',
                 'margin_left' => 10,
                 'margin_right' => 10,
-                'margin_top' => max(0, (int) $pageMarginTop),
-                'margin_bottom' => max(0, (int) $pageMarginBottom),
+                'margin_top' => max(0, (float) $marginTopForMpdf),
+                'margin_bottom' => max(0, (float) $marginBottomForMpdf),
                 'margin_header' => $marginHeaderMm,
                 'margin_footer' => $marginFooterMm,
                 'fontDir' => array_merge($fontDirs, [
@@ -1042,30 +1151,48 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
             ]);
 
             $mpdf->SetDisplayMode('fullpage');
-            $mpdf->setAutoTopMargin = 'stretch';
-            $mpdf->setAutoBottomMargin = 'stretch';
+            // Disable auto-stretching which may add extra top/bottom gaps.
+            $mpdf->setAutoTopMargin = false;
+            $mpdf->setAutoBottomMargin = false;
 
-            $html = $this->generatePDFHTML($reportType, $reportData, $tableHeaders, $dataFields, $footerTotals, $dateFrom, $dateTo, $showHeaderFooter);
+            // Set PDF document title (used by browser PDF viewers as tab title)
+            $reportTitle = $this->getReportTitle($reportType);
+            try {
+                $mpdf->SetTitle($reportTitle);
+            } catch (\Throwable $e) {
+                // ignore if mPDF doesn't support SetTitle in this version
+            }
+
+            $html = $this->generatePDFHTML($reportType, $reportData, $tableHeaders, $dataFields, $footerTotals, $dateFrom, $dateTo, $showHeader, $showFooter, $pageMarginTop);
 
             $mpdf->WriteHTML($html);
 
-            $fileName = "{$reportType}_report_{$dateFrom}_to_{$dateTo}.pdf";
+            // Use human-friendly report title in filename as well
+            $safeTitle = preg_replace('/[^A-Za-z0-9_-]/', '_', strtolower(str_replace(' ', '_', $reportTitle)));
+            $fileName = "{$safeTitle}_report_{$dateFrom}_to_{$dateTo}.pdf";
+            $pdfContent = $mpdf->Output('', 'S');
 
-            return $mpdf->Output($fileName, 'I');
+            return response($pdfContent, 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'inline; filename="' . $fileName . '"',
+                'Content-Length' => strlen($pdfContent),
+            ]);
         } catch (\Exception $e) {
             Log::error('PDF Generation Error: ' . $e->getMessage());
             return response()->json(['error' => 'Failed to generate PDF: ' . $e->getMessage()], 500);
         }
     }
 
-    private function generatePDFHTML($reportType, $reportData, $tableHeaders, $dataFields, $footerTotals, $dateFrom, $dateTo, $showHeaderFooter = true)
+    private function generatePDFHTML($reportType, $reportData, $tableHeaders, $dataFields, $footerTotals, $dateFrom, $dateTo, $showHeader = true, $showFooter = true, $pageMarginTop = 48)
     {
         $reportTitle = $this->getReportTitle($reportType);
         $currentDateTime = now()->format('d/m/Y H:i');
         $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
 
         $hospitalName = $websetting?->company_name ?? config('app.name', 'Hospital');
-        $hospitalAddress = $websetting?->address ?? $websetting?->report_title ?? 'N/A';
+        // Do not use report_title as a fallback for address — keep address and report title separate
+        $hospitalAddress = $websetting?->address ?? 'N/A';
+        $reportTitleSetting = $websetting?->report_title ?? null;
 
         // (No special-case for 'all-transaction' here — use the generic HTML below so
         // 'all-transaction' renders with the same table and calculations as daily-transaction.)
@@ -1075,6 +1202,8 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
     <html>
     <head>
         <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+        <title>' . htmlspecialchars($reportTitle) . '</title>
+        <meta name="title" content="' . htmlspecialchars($reportTitle) . '">
         <style>
             body { 
                 font-family: helvetica, Arial, sans-serif; 
@@ -1124,6 +1253,8 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
                 padding: 5px 4px; 
                 vertical-align: top;
             }
+            .nowrap { white-space: nowrap; }
+            .td-tight { padding-left: 6px; padding-right: 6px; }
             .text-right { text-align: right; }
             .text-center { text-align: center; }
             .text-left { text-align: left; }
@@ -1143,8 +1274,14 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
     </head>
     <body>';
 
-        if ($showHeaderFooter) {
-            $html .= '\n        <div class="header">\n            <div class="subtitle"><strong>' . htmlspecialchars($hospitalName) . '</strong></div>\n            <div class="subtitle">' . htmlspecialchars($hospitalAddress) . '</div>\n            <div class="title">' . htmlspecialchars($reportTitle) . '</div>\n            <div class="subtitle">Generated on: ' . $currentDateTime . '</div>\n            <div class="subtitle">Date Range: ' . $this->formatDateForDisplay($dateFrom) . ' to ' . $this->formatDateForDisplay($dateTo) . '</div>\n        </div>';
+            if ($showHeader) {
+            $html .= '<div class="header" style="margin-top:0; padding-top:0;">'
+                . '<div class="subtitle"><strong>' . htmlspecialchars($hospitalName) . '</strong></div>'
+                . '<div class="subtitle">' . htmlspecialchars($hospitalAddress) . '</div>'
+                . '<div class="title">' . htmlspecialchars($reportTitle) . '</div>'
+                . '<div class="subtitle">Generated on: ' . $currentDateTime . '</div>'
+                . '<div class="subtitle">Date Range: ' . $this->formatDateForDisplay($dateFrom) . ' to ' . $this->formatDateForDisplay($dateTo) . '</div>'
+                . '</div>';
         }
 
         $html .= '
@@ -1157,6 +1294,35 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
 
         $html .= '
         </div>';
+
+        // Decide whether to include the Refund column in PDF (match frontend logic)
+        $showsRefundColumn = false;
+        foreach ($reportData as $r) {
+            $rv = null;
+            if (is_object($r)) {
+                $rv = $r->total_return_amount_raw ?? $r->total_return_amount ?? null;
+            } elseif (is_array($r)) {
+                $rv = $r['total_return_amount_raw'] ?? $r['total_return_amount'] ?? null;
+            }
+            if ((float) ($rv ?? 0) > 0) {
+                $showsRefundColumn = true;
+                break;
+            }
+        }
+        if (!$showsRefundColumn && (float) ($footerTotals['total_return_amount'] ?? 0) > 0) {
+            $showsRefundColumn = true;
+        }
+
+        // If refund column is not relevant, remove it from headers/fields so table columns align
+        if (!$showsRefundColumn) {
+            $tableHeaders = array_values(array_filter($tableHeaders, function ($h) {
+                return $h !== 'Refund' && $h !== 'Total Refund';
+            }));
+
+            $dataFields = array_values(array_filter($dataFields, function ($f) {
+                return ($f['fieldName'] ?? '') !== 'total_return_amount';
+            }));
+        }
 
         $html .= '
         <table>
@@ -1196,7 +1362,13 @@ private function getIpdTransactionReport($dateFrom, $dateTo)
                     $alignment = 'text-center';
                 }
 
-                $html .= '<td class="' . $alignment . '">' . htmlspecialchars($value) . '</td>';
+                // Use nowrap + tighter padding for billing/created date to keep it on one line
+                $extraClass = '';
+                if (in_array($fieldName, ['created_at', 'billing_date', 'billing_date_display'], true)) {
+                    $extraClass = ' nowrap td-tight';
+                }
+
+                $html .= '<td class="' . $alignment . $extraClass . '">' . htmlspecialchars($value) . '</td>';
             }
 
             $html .= '</tr>';
@@ -1217,7 +1389,11 @@ switch ($reportType) {
         $html .= '
         <td class="text-center">' . ($footerTotals['total_transactions'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_amount'] ?? 0) . '</td>
-        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_discount'] ?? 0) . '</td>
+        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_discount'] ?? 0) . '</td>';
+        if ($showsRefundColumn) {
+            $html .= '<td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_return_amount'] ?? 0) . '</td>';
+        }
+        $html .= '
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['amount_after_discount'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['cash_amount'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['non_cash_amount'] ?? 0) . '</td>
@@ -1232,7 +1408,11 @@ switch ($reportType) {
         $html .= '
         <td class="text-center">' . ($footerTotals['total_transactions'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_amount'] ?? 0) . '</td>
-        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_discount'] ?? 0) . '</td>
+        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_discount'] ?? 0) . '</td>';
+        if ($showsRefundColumn) {
+            $html .= '<td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_return_amount'] ?? 0) . '</td>';
+        }
+        $html .= '
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['amount_after_discount'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['cash_amount'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['non_cash_amount'] ?? 0) . '</td>
@@ -1246,7 +1426,11 @@ switch ($reportType) {
     case 'pharmacy-transaction':
         $html .= '
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total'] ?? 0) . '</td>
-        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['discount'] ?? 0) . '</td>
+        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['discount'] ?? 0) . '</td>';
+        if ($showsRefundColumn) {
+            $html .= '<td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_return_amount'] ?? 0) . '</td>';
+        }
+        $html .= '
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['payable_amount'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['paid_amt'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['due_amount'] ?? 0) . '</td>
@@ -1260,7 +1444,11 @@ switch ($reportType) {
     case 'ipd-transaction':
         $html .= '
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total'] ?? 0) . '</td>
-        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['discount'] ?? 0) . '</td>
+        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['discount'] ?? 0) . '</td>';
+        if ($showsRefundColumn) {
+            $html .= '<td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_return_amount'] ?? 0) . '</td>';
+        }
+        $html .= '
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['payable_amount'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['paid_amt'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['due_amount'] ?? 0) . '</td>
@@ -1274,7 +1462,11 @@ switch ($reportType) {
         <td class="text-center">' . ($footerTotals['total_bills'] ?? 0) . '</td>
         <td>—</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_bill'] ?? 0) . '</td>
-        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_discount'] ?? 0) . '</td>
+        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_discount'] ?? 0) . '</td>';
+        if ($showsRefundColumn) {
+            $html .= '<td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_return_amount'] ?? 0) . '</td>';
+        }
+        $html .= '
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_income'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['net_income'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_due_collected'] ?? 0) . '</td>
@@ -1284,21 +1476,32 @@ switch ($reportType) {
     case 'expense':
         $html .= '
         <td class="text-center">' . ($footerTotals['total_transactions'] ?? 0) . '</td>
-        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_expense'] ?? 0) . '</td>
+        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_expense'] ?? 0) . '</td>';
+        if ($showsRefundColumn) {
+            $html .= '<td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_return_amount'] ?? 0) . '</td>';
+        }
+        $html .= '
         ';
         break;
 
     case 'referral':
         $html .= '
-        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_bill_amount'] ?? 0) . '</td>
-        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_commission'] ?? 0) . '</td>
+        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_bill_amount'] ?? 0) . '</td>';
+        if ($showsRefundColumn) {
+            $html .= '<td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_return_amount'] ?? 0) . '</td>';
+        }
+        $html .= '<td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_commission'] ?? 0) . '</td>
         ';
         break;
 
     case 'pending-transaction':
         $html .= '
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total'] ?? 0) . '</td>
-        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['discount'] ?? 0) . '</td>
+        <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['discount'] ?? 0) . '</td>';
+        if ($showsRefundColumn) {
+            $html .= '<td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['total_return_amount'] ?? 0) . '</td>';
+        }
+        $html .= '
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['payable_amount'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['paid_amt'] ?? 0) . '</td>
         <td class="text-right">' . $this->formatCurrencyForPDF($footerTotals['due_amount'] ?? 0) . '</td>
@@ -1371,7 +1574,7 @@ private function getFooterColumnSpan($reportType)
     // Column spans are calculated to ensure GRAND TOTAL label aligns correctly
     // with the footer total values, accounting for all table columns
 
-    $spans = [
+        $spans = [
         'daily-transaction' => 2,
         'all-transaction' => 2,
         'pharmacy-transaction' => 6,
@@ -1379,7 +1582,9 @@ private function getFooterColumnSpan($reportType)
         'opd-transaction' => 6,
         'ipd-transaction' => 6,
         'income' => 2,
-        'expense' => 3,
+            // For expense table the label should span up to Bill Number column
+            // so that Transactions and Total Expense cells align under their columns
+            'expense' => 5,
         'referral' => 4,
         'pending-transaction' => 6,
     ];

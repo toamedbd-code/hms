@@ -19,11 +19,25 @@ export default {
     },
     computed: {
         chartData() {
+            const get = (obj, key) => {
+                if (!obj) return 0;
+                if (typeof obj[key] !== 'undefined' && obj[key] !== null) return Number(obj[key] || 0);
+                const snake = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+                if (typeof obj[snake] !== 'undefined' && obj[snake] !== null) return Number(obj[snake] || 0);
+                return 0;
+            };
+
+            try {
+                // eslint-disable-next-line no-console
+                // removed console.debug to reduce console noise
+            } catch (e) {}
+
             return {
                 labels: [
                     'OPD Income',
                     'IPD Income', 
                     'Pharmacy Income',
+                    'Disposable Income',
                     'Pathology Income',
                     'Radiology Income',
                     'Pending Income',
@@ -36,6 +50,7 @@ export default {
                         '#10B981', // Green
                         '#3B82F6', // Blue
                         '#8B5CF6', // Purple
+                        '#A78BFA', // Disposable - lavender
                         '#F59E0B', // Yellow
                         '#EF4444', // Red
                         '#6B7280',  // Gray
@@ -54,14 +69,15 @@ export default {
                     ],
                     borderWidth: 1,
                     data: [
-                        this.dashboardData.opdIncome || 0,
-                        this.dashboardData.ipdIncome || 0,
-                        this.dashboardData.pharmacyIncome || 0,
-                        this.dashboardData.pathologyIncome || 0,
-                        this.dashboardData.radiologyIncome || 0,
-                        this.dashboardData.pendingIncome || 0,
-                        this.dashboardData.expenses || 0,
-                        this.dashboardData.netIncome || 0
+                        get(this.dashboardData, 'opdIncome'),
+                        get(this.dashboardData, 'ipdIncome'),
+                        get(this.dashboardData, 'pharmacyIncome'),
+                        get(this.dashboardData, 'disposableIncome'),
+                        get(this.dashboardData, 'pathologyIncome'),
+                        get(this.dashboardData, 'radiologyIncome'),
+                        get(this.dashboardData, 'pendingIncome'),
+                        get(this.dashboardData, 'expenses'),
+                        get(this.dashboardData, 'netIncome')
                     ]
                 }]
             }

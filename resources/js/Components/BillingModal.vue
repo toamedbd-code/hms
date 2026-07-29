@@ -176,6 +176,10 @@ const saveBill = () => {
                                     <option value="">Select</option>
                                     <option value="pathology">Pathology</option>
                                     <option value="radiology">Radiology</option>
+                                                <option value="ECG">ECG</option>
+                                                <option value="Ultrasound">Ultrasound</option>
+                                                <option value="ECG">ECG</option>
+                                                <option value="Ultrasound">Ultrasound</option>
                                 </select>
                             </div>
 

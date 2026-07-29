@@ -32,6 +32,7 @@ const exportCsv = () => {
       <div class="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h1>
         <div class="flex items-center gap-2">
+          <a :href="route('backend.stock.index')" class="px-3 py-2 text-sm font-semibold text-white bg-red-600 rounded hover:bg-red-700">Back</a>
           <input v-model="month" type="month" class="p-2 text-sm border rounded" @change="loadMonth" />
           <button type="button" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700" @click="exportCsv">Export CSV</button>
         </div>

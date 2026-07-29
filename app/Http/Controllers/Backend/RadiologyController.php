@@ -15,6 +15,7 @@ use App\Services\BillingService;
 use App\Services\ActivityLogService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Cache;
 use App\Services\RadiologyService;
 use App\Services\PatientService;
 use Inertia\Inertia;
@@ -103,6 +104,19 @@ class RadiologyController extends Controller
                 ];
             }
 
+            // Delete action
+            if (
+                $gate->allows('radiology-delete') ||
+                $gate->allows('radiology-list-delete') ||
+                $gate->allows('radiology-destroy')
+            ) {
+                $customData->links[] = [
+                    'linkClass' => 'bg-red-600 text-white deleteButton',
+                    'link' => route('backend.radiology.destroy', $data->id),
+                    'linkLabel' => getLinkLabel('Delete', null, null)
+                ];
+            }
+
             return $customData;
         });
 
@@ -152,7 +166,7 @@ class RadiologyController extends Controller
         // Get active radiology tests
         $radiologyTests = Test::where('category_type', 'Radiology')
             ->where('status', 'Active')
-            ->select('id', 'test_name', 'test_short_name', 'report_days', 'tax', 'standard_charge', 'amount')
+            ->select('id', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount')
             ->orderBy('test_name')
             ->get();
 
@@ -243,6 +257,16 @@ class RadiologyController extends Controller
                     ]
                 );
 
+                // If frontend provided a print_token, map it to billing id for instant preview
+                try {
+                    $printToken = request()->input('print_token');
+                    if (!empty($printToken)) {
+                        Cache::put('print_token_' . $printToken, $billing->id, now()->addMinutes(10));
+                    }
+                } catch (\Throwable $e) {
+                    // ignore cache errors
+                }
+
                 DB::commit();
 
                 return redirect()
@@ -277,7 +301,7 @@ class RadiologyController extends Controller
 
         $radiologyTests = Test::where('category_type', 'Radiology')
             ->where('status', 'Active')
-            ->select('id', 'test_name', 'test_short_name', 'report_days', 'tax', 'standard_charge', 'amount')
+            ->select('id', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount')
             ->orderBy('test_name')
             ->get();
 
@@ -368,6 +392,16 @@ class RadiologyController extends Controller
 
             // Update billing record
             $this->updateBillingRecord($radiology, $data);
+
+            // Map print_token -> billing id if frontend provided it
+            try {
+                $printToken = request()->input('print_token');
+                if (!empty($printToken)) {
+                    Cache::put('print_token_' . $printToken, Billing::where('bill_number', $radiology->bill_no)->first()?->id, now()->addMinutes(10));
+                }
+            } catch (\Throwable $e) {
+                // ignore
+            }
 
             $message = 'Radiology updated successfully';
             $this->storeAdminWorkLog($radiology->id, 'radiologies', $message);
@@ -637,6 +671,7 @@ class RadiologyController extends Controller
                     'billing_id' => $billing->id,
                     'item_id' => $test['testId'],
                     'item_name' => $testInfo->test_name,
+                    'room_no' => $test['room_no'] ?? $test['roomNo'] ?? null,
                     'category' => 'Radiology',
                     'unit_price' => floatval($test['amount']),
                     'quantity' => 1,

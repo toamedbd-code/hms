@@ -5,6 +5,7 @@ namespace App\Exceptions;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Session\TokenMismatchException;
+use Inertia\Inertia;
 use Spatie\Permission\Exceptions\UnauthorizedException as SpatieUnauthorizedException;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Throwable;
@@ -57,6 +58,10 @@ class Handler extends ExceptionHandler
     {
         if ($request->expectsJson() || $request->ajax()) {
             if ($exception instanceof AuthenticationException) {
+                if ($request->header('X-Inertia')) {
+                    return Inertia::location(route('backend.auth.login'));
+                }
+
                 return response()->json([
                     'message' => 'Session expired or unauthorized. Please login again.',
                 ], 401);

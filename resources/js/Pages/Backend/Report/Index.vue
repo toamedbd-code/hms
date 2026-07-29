@@ -170,10 +170,10 @@ const downloadPdf = async () => {
     let filterData = { ...filters.value };
 
     if (selectionMode.value === 'single') {
-        filterData.dateFrom = '';
-        filterData.dateTo = '';
+        delete filterData.dateFrom;
+        delete filterData.dateTo;
     } else {
-        filterData.singleDate = '';
+        delete filterData.singleDate;
     }
 
     try {
@@ -184,12 +184,8 @@ const downloadPdf = async () => {
             }
         });
 
-        let url = `${route('backend.report.generate-pdf')}?${params.toString()}`;
-        if (params.toString().length > 0) {
-            url += '&inline=1';
-        } else {
-            url += 'inline=1';
-        }
+        params.append('inline', '1');
+        const url = `${route('backend.report.generate-pdf')}?${params.toString()}`;
 
         try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
 
@@ -246,6 +242,14 @@ const resetFilters = () => {
     }, {
         preserveState: true
     });
+};
+
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    router.visit(route('backend.dashboard'));
 };
 
 const monthNames = ["January", "February", "March", "April", "May", "June",
@@ -446,11 +450,21 @@ onUnmounted(() => {
 
 <template>
     <BackendLayout>
-        <div class="report-generator">
+        <div class="report-generator fixed-report-top">
             <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <div class="mb-6">
-                    <h2 class="text-2xl font-bold text-gray-800 mb-2">Report Generator</h2>
-                    <p class="text-gray-600">Generate reports by selecting date range and module</p>
+                <div class="mb-6 flex items-start justify-between gap-4">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-2">Report Generator</h2>
+                        <p class="text-gray-600">Generate reports by selecting date range and module</p>
+                    </div>
+                    <button @click="goBack"
+                        class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-gray-500 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gray-600">
+                        <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                        Back
+                    </button>
                 </div>
 
                 <div class="bg-gray-50 rounded-lg p-4 mb-6">
@@ -862,6 +876,12 @@ onUnmounted(() => {
         </div>
     </BackendLayout>
 </template>
+
+<style scoped>
+.fixed-report-top {
+    --report-page-top-margin: 48px;
+}
+</style>
 
 <style scoped>
 .report-generator {

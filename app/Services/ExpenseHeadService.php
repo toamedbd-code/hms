@@ -15,12 +15,19 @@ class ExpenseHeadService
 
     public function list()
     {
-        return  $this->expenseheadModel->whereNull('deleted_at');
+        return $this->expenseheadModel
+            ->whereNull('deleted_at')
+            ->orderByRaw('LOWER(name) ASC')
+            ->orderBy('id', 'asc');
     }
 
     public function all()
     {
-        return  $this->expenseheadModel->whereNull('deleted_at')->all();
+        return $this->expenseheadModel
+            ->whereNull('deleted_at')
+            ->orderByRaw('LOWER(name) ASC')
+            ->orderBy('id', 'asc')
+            ->get();
     }
 
     public function find($id)
@@ -78,6 +85,11 @@ class ExpenseHeadService
 
     public function activeList()
     {
-        return  $this->expenseheadModel->whereNull('deleted_at')->where('status', 'Active')->get();
+        return $this->expenseheadModel
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->orderByRaw('LOWER(name) ASC')
+            ->orderBy('id', 'asc')
+            ->get();
     }
 }

@@ -109,7 +109,10 @@ const handleLinkClick = (linkInfo, event) => {
 const visitLink = (link, target) => {
     if (!link) return;
     if (target === '_blank') {
-        window.open(link, '_blank');
+        const popup = window.open(link, '_blank', 'noopener,noreferrer');
+        if (popup) {
+            try { popup.opener = null; } catch (e) {}
+        }
         return;
     }
     router.visit(link);
@@ -135,7 +138,7 @@ const visitLink = (link, target) => {
 <!-- DATA FIELDS -->
 <template v-for="dateField in $page.props.dataFields">
 <td class="px-4 py-2 border border-gray-200" :class="dateField.class">
-<p v-html="data[dateField.fieldName] ?? ''"></p>
+<p v-html="data[dateField.fieldName] ?? ''" class="whitespace-nowrap"></p>
 </td>
 </template>
 

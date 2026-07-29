@@ -12,13 +12,13 @@
         @page {
             size: A4 portrait;
             /* Reserve space for fixed header/footer */
-            margin: 32mm 10mm 18mm 10mm; /* top right bottom left */
+            margin: 28mm 10mm 12mm 10mm; /* top right bottom left */
         }
 
         body {
             font-family: DejaVu Sans, Arial, Helvetica, sans-serif;
-            font-size: 9.5pt;
-            line-height: 1.15;
+            font-size: 9.25pt;
+            line-height: 1.12;
             color: #111;
             margin: 0;
             padding: 0;
@@ -37,10 +37,10 @@
 
         .footer {
             position: fixed;
-            bottom: -14mm;
+            bottom: -12mm;
             left: 0;
             right: 0;
-            height: 14mm;
+            height: 12mm;
         }
 
         /* Typography */
@@ -83,6 +83,50 @@
         /* Plain tables (no borders) for header/footer blocks */
         .plain, .plain td, .plain th { border: none !important; }
         .plain td, .plain th { padding: 0.5mm 0.8mm; }
+
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            border: none !important;
+        }
+        .info-table td,
+        .info-table th,
+        .info-table tr {
+            border: none !important;
+        }
+        .info-table td {
+            padding: 0.6mm 0.8mm;
+            vertical-align: top;
+        }
+        .info-table .label {
+            width: 16%;
+            font-weight: 700;
+            color: #333;
+            white-space: nowrap;
+        }
+        .info-table .colon {
+            width: 3%;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .info-table .value {
+            width: 31%;
+        }
+
+        .info-box {
+            border: 0.3mm solid #333;
+            padding: 1.5mm;
+            margin-bottom: 1mm;
+            background: #fff;
+        }
+        .info-box .section-title {
+            font-size: 10pt;
+            font-weight: 700;
+            margin-bottom: 1mm;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
 
         /* Wrapping */
         .wrap {

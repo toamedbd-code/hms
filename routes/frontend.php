@@ -22,6 +22,7 @@ Route::get('/', [HomeController::class, 'index'])->name('home');
 
 // Serve storage files from storage/app/public when public/storage symlink is missing
 Route::get('/storage/{path}', [AssetController::class, 'storage'])->where('path', '.*');
+Route::get('/webSetting/{path}', [AssetController::class, 'storage'])->where('path', '.*');
 
 // Debug: list featured doctors with resolved image URLs and existence checks
 Route::get('/debug/featured-doctors', [DebugController::class, 'featuredDoctors'])->name('debug.featured.doctors');

@@ -26,25 +26,42 @@ export default {
 
   computed: {
     chartData() {
+      const val = v => Number(v || 0);
+      const get = (obj, key) => {
+        if (!obj) return 0;
+        // direct
+        if (typeof obj[key] !== 'undefined' && obj[key] !== null) return Number(obj[key] || 0);
+        // try snake_case fallback (disposable_income)
+        const snake = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+        if (typeof obj[snake] !== 'undefined' && obj[snake] !== null) return Number(obj[snake] || 0);
+        return 0;
+      };
+      // debug value
+      try {
+        // eslint-disable-next-line no-console
+        // removed console.debug to avoid noisy logs
+      } catch (e) {}
       return {
-        labels: ["OPD", "IPD", "Pharmacy", "Pathology", "Radiology", "Pending", "Expense", "Final Income"],
+        labels: ["OPD", "IPD", "Pharmacy", "Disposable", "Pathology", "Radiology", "Pending", "Expense", "Final Income"],
         datasets: [
           {
             data: [
-              this.dashboardData.opdIncome || 0,
-              this.dashboardData.ipdIncome || 0,
-              this.dashboardData.pharmacyIncome || 0,
-              this.dashboardData.pathologyIncome || 0,
-              this.dashboardData.radiologyIncome || 0,
-              this.dashboardData.pendingIncome || 0,
-              this.dashboardData.expenses || 0,
-              this.dashboardData.netIncome || 0
+              val(this.dashboardData.opdIncome),
+              val(this.dashboardData.ipdIncome),
+              val(this.dashboardData.pharmacyIncome),
+              get(this.dashboardData, 'disposableIncome'),
+              val(this.dashboardData.pathologyIncome),
+              val(this.dashboardData.radiologyIncome),
+              val(this.dashboardData.pendingIncome),
+              val(this.dashboardData.expenses),
+              val(this.dashboardData.netIncome)
             ],
 
             backgroundColor: [
               "#4F46E5",
               "#10B981",
               "#3B82F6",
+              "#A78BFA", // Disposable - lavender
               "#F59E0B",
               "#EF4444",
               "#6B7280",

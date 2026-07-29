@@ -3,6 +3,7 @@ import { computed, ref, nextTick } from 'vue';
 import { router } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import Pagination from '@/Components/Pagination.vue';
+import { useModalSubmissionGuard } from '@/Composables/useModalSubmissionGuard';
 
 const props = defineProps({
   datas: Object,
@@ -21,6 +22,14 @@ const search = ref(props.filters?.search ?? '');
 const status = ref(props.filters?.status ?? '');
 
 const getItems = (billing) => billing.bill_items ?? billing.billItems ?? [];
+
+const getRelevantItems = (billing) => {
+  const items = getItems(billing);
+  return items.filter((it) => {
+    // treat missing requires_sample as true for backward compatibility
+    return typeof it.requires_sample === 'undefined' ? true : Boolean(it.requires_sample);
+  });
+};
 
 const hasDue = (billing) => Number(billing?.due_amount ?? 0) > 0;
 
@@ -90,13 +99,13 @@ const getReportedBy = (billing) => {
 
 const canSend = (billing) => {
   if (hasDue(billing)) return false;
-  const items = getItems(billing);
+  const items = getRelevantItems(billing);
   return items.some((it) => it.reported_at && !it.sent_at);
 };
 
 const canDeliver = (billing) => {
   if (hasDue(billing)) return false;
-  const items = getItems(billing);
+  const items = getRelevantItems(billing);
   return items.some((it) => it.reported_at && !it.delivered_at);
 };
 
@@ -110,8 +119,8 @@ const getDeliveredBy = (billing) => {
 };
 
 const getReportStatus = (billing) => {
-  const items = getItems(billing);
-  if (!items.length) return { label: 'N/A', classes: 'text-gray-600 bg-gray-50 border-gray-200' };
+  const items = getRelevantItems(billing);
+  if (!items.length) return { label: 'Complete', classes: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
 
   const anyCollected = items.some((it) => it.sample_collected_at);
   const allReported = items.every((it) => it.reported_at);
@@ -121,7 +130,11 @@ const getReportStatus = (billing) => {
   return { label: 'Complete', classes: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
 };
 
-const isReportComplete = (billing) => getItems(billing).every((it) => it.reported_at);
+const isReportComplete = (billing) => {
+  const items = getRelevantItems(billing);
+  if (!items.length) return true;
+  return items.every((it) => it.reported_at);
+};
 
 const handleSearch = () => {
   router.get(
@@ -166,6 +179,9 @@ const getReportedItems = (billing) => getItems(billing).filter((it) => it.report
 
 const getItemStatus = (it) => {
   if (!it) return { label: 'N/A', classes: 'text-gray-600 bg-gray-50 border-gray-200' };
+  if (typeof it.requires_sample !== 'undefined' && !Boolean(it.requires_sample)) {
+    return { label: 'Complete', classes: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
+  }
   if (!it.sample_collected_at) return { label: 'Pending', classes: 'text-amber-700 bg-amber-50 border-amber-200' };
   if (!it.reported_at) return { label: 'Processing', classes: 'text-blue-700 bg-blue-50 border-blue-200' };
   return { label: 'Complete', classes: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
@@ -324,6 +340,14 @@ const dueBilling = ref(null);
 const payInput = ref(null);
 const requireFullPayment = ref(true);
 const partialCollected = ref(false);
+const {
+  isSubmitting: isSubmittingDue,
+  prepareSubmissionToken,
+  ensureSubmissionToken,
+  beginSubmission,
+  endSubmission,
+  resetSubmissionToken,
+} = useModalSubmissionGuard('report_due');
 const isReady = computed(() => {
   if (!dueBilling.value) return false;
   if (!requireFullPayment.value) return true;
@@ -334,6 +358,7 @@ const openDueModal = (billing) => {
   dueBilling.value = billing;
   dueAmount.value = Number(billing?.due_amount ?? 0);
   partialCollected.value = false;
+  prepareSubmissionToken();
   showDueModal.value = true;
 };
 
@@ -349,6 +374,7 @@ const fillFullDue = async () => {
 };
 
 const submitDueCollect = () => {
+  if (isSubmittingDue.value) return;
   if (!dueBilling.value?.id) return;
 
   // items user wanted to print after collecting due (set when Print was clicked)
@@ -356,9 +382,13 @@ const submitDueCollect = () => {
   // open placeholder windows now (user gesture) — we'll close them if we don't proceed
   const wins = itemsToPrint.map(() => openNoopener());
 
+  beginSubmission();
   router.post(
     route('backend.due.collect.store', dueBilling.value.id),
-    { amount: dueAmount.value },
+    {
+      amount: dueAmount.value,
+      submission_token: ensureSubmissionToken(),
+    },
     {
       preserveScroll: true,
       onSuccess: () => {
@@ -387,6 +417,7 @@ const submitDueCollect = () => {
           }
 
           partialCollected.value = true;
+          endSubmission();
           // keep modal open so user can collect remaining amount
           return;
         }
@@ -415,6 +446,7 @@ const submitDueCollect = () => {
 
               processingDeliver.value = { ...processingDeliver.value, [dueBilling.value.id]: false };
               showDueModal.value = false;
+              resetSubmissionToken();
               pendingPrintItems.value = [];
               partialCollected.value = false;
               handleSearch();
@@ -431,6 +463,7 @@ const submitDueCollect = () => {
               }
               processingDeliver.value = { ...processingDeliver.value, [dueBilling.value.id]: false };
               showDueModal.value = false;
+              resetSubmissionToken();
               pendingPrintItems.value = [];
               partialCollected.value = false;
               handleSearch();
@@ -461,6 +494,9 @@ const submitDueCollect = () => {
       },
       onError: () => {
         // leave modal open so user can retry
+      },
+      onFinish: () => {
+        endSubmission();
       },
     }
   );
@@ -564,7 +600,7 @@ const goBack = () => {
           </button>
           <button
             type="button"
-            class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50"
+            class="px-4 py-2 text-sm font-medium text-white bg-red-600 border-0 rounded hover:bg-red-700"
             @click="goBack"
           >
             Back
@@ -690,7 +726,7 @@ const goBack = () => {
       </div>
 
       <div v-if="showDueModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div class="w-full max-w-md p-4 bg-white rounded shadow-lg" @click.self="showDueModal = false">
+        <div class="w-full max-w-md p-4 bg-white rounded shadow-lg" @click.self="!isSubmittingDue && (showDueModal = false)">
           <h3 class="mb-3 text-lg font-semibold">Collect Due</h3>
 
           <table class="w-full mb-3 text-sm table-auto">
@@ -721,8 +757,9 @@ const goBack = () => {
               :max="Number(dueBilling?.due_amount ?? 0)"
               step="0.01"
               ref="payInput"
-              @keyup.enter="submitDueCollect"
-              class="w-full px-3 py-2 border rounded"
+              :disabled="isSubmittingDue"
+              @keydown.enter.prevent="submitDueCollect"
+              class="w-full px-3 py-2 border rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
             />
             <p class="text-xs text-gray-500 mt-1">Max: Tk {{ Number(dueBilling?.due_amount ?? 0).toFixed(2) }}</p>
             <label class="inline-flex items-center mt-2 text-sm">
@@ -739,14 +776,14 @@ const goBack = () => {
           </div>
 
           <div class="flex items-center justify-end gap-2">
-            <button type="button" class="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded" @click="showDueModal = false">Cancel</button>
+            <button type="button" class="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded disabled:opacity-60 disabled:cursor-not-allowed" :disabled="isSubmittingDue" @click="showDueModal = false">Cancel</button>
             <button
               type="button"
               class="px-4 py-2 text-sm text-white bg-green-600 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-              :disabled="!dueAmount || dueAmount <= 0 || dueAmount > Number(dueBilling?.due_amount ?? 0)"
+              :disabled="isSubmittingDue || !dueAmount || dueAmount <= 0 || dueAmount > Number(dueBilling?.due_amount ?? 0)"
               @click="submitDueCollect"
             >
-              Collect
+              {{ isSubmittingDue ? 'Collecting...' : 'Collect' }}
             </button>
           </div>
         </div>

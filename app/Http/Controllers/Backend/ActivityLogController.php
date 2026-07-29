@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
 use App\Services\ActivityLogService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -104,6 +105,41 @@ class ActivityLogController extends Controller
             'pageTitle' => 'Activity Log Detail',
             'activityLog' => $activityLog->load('admin')
         ]);
+    }
+
+    public function alerts(Request $request)
+    {
+        $adminUser = $request->user('admin') ?? auth()->guard('admin')->user();
+        if (!$adminUser) {
+            return response()->json(['message' => 'Session expired or unauthorized. Please login again.'], 401);
+        }
+
+        $today = Carbon::today()->toDateString();
+
+        $activityData = [
+            'today_count' => ActivityLog::query()
+                ->whereDate('created_at', $today)
+                ->count(),
+            'recent' => ActivityLog::query()
+                ->orderByDesc('created_at')
+                ->limit(8)
+                ->get(['id', 'user_name', 'module', 'action', 'description', 'status', 'created_at'])
+                ->map(function ($log) {
+                    return [
+                        'id' => $log->id,
+                        'user_name' => $log->user_name,
+                        'module' => $log->module,
+                        'action' => $log->action,
+                        'description' => $log->description,
+                        'status' => $log->status,
+                        'created_at' => optional($log->created_at)->format('d-m-Y h:i A'),
+                    ];
+                })
+                ->values()
+                ->toArray(),
+        ];
+
+        return response()->json($activityData);
     }
 
     /**

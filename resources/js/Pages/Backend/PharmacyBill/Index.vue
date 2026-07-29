@@ -4,6 +4,7 @@ import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { router, usePage } from '@inertiajs/vue3';
+import { useModalSubmissionGuard } from '@/Composables/useModalSubmissionGuard';
 
 let props = defineProps({
     filters: Object,
@@ -45,7 +46,14 @@ const exportBills = (format) => {
 
 const page = usePage();
 const showDueModal = ref(false);
-const isSubmittingDue = ref(false);
+const {
+    isSubmitting: isSubmittingDue,
+    prepareSubmissionToken,
+    ensureSubmissionToken,
+    beginSubmission,
+    endSubmission,
+    resetSubmissionToken,
+} = useModalSubmissionGuard('pharmacy_due');
 const dueForm = ref({
     rowId: null,
     billNo: 'N/A',
@@ -69,6 +77,7 @@ const openDueModal = (rowId) => {
     dueForm.value.patientName = row?.patient_name || 'N/A';
     dueForm.value.dueAmount = parseMoney(row?.due_amount);
     dueForm.value.amount = '';
+    prepareSubmissionToken();
     showDueModal.value = true;
 };
 
@@ -76,6 +85,7 @@ const closeDueModal = (force = false) => {
     if (isSubmittingDue.value && !force) return;
     showDueModal.value = false;
     dueForm.value.amount = '';
+    resetSubmissionToken();
 };
 
 const submitDueCollect = () => {
@@ -91,10 +101,11 @@ const submitDueCollect = () => {
         return;
     }
 
-    isSubmittingDue.value = true;
+    beginSubmission();
 
     router.post(route('backend.due.collect.store', dueForm.value.rowId), {
         amount,
+        submission_token: ensureSubmissionToken(),
         return_to: window.location.href
     }, {
         preserveScroll: true,
@@ -103,7 +114,7 @@ const submitDueCollect = () => {
             router.reload({ only: ['datas'] });
         },
         onFinish: () => {
-            isSubmittingDue.value = false;
+            endSubmission();
         }
     });
 };

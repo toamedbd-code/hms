@@ -18,6 +18,8 @@ class WebSetting extends Model
         'attendance_device_options' => 'array',
         'website_enabled' => 'boolean',
         'patient_panel' => 'boolean',
+        'vat_enabled' => 'boolean',
+        'vat_percent' => 'float',
         'sms_enabled' => 'boolean',
         'sms_is_unicode' => 'boolean',
         'opd_invoice_header_footer' => 'boolean',

@@ -506,138 +506,46 @@
             background: transparent;
         }
 
-        @media print {
-            @page {
-                size: A4;
-                margin: 0;
-            }
+        @media print { 
+            @page { size: A4; margin: 0mm; }
 
-            .toolbar {
-                display: none;
-            }
+            /* Hide toolbar on print */
+            .toolbar { display: none; }
 
-            body {
-                margin: 0;
-                font-size: 12px;
-                line-height: 1.35;
-                color: #1f2937;
-                background: #ffffff;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-            }
+            /* Reserve header/footer space via body padding using CSS variables set on the body element */
+            body { padding-top: var(--report-header-height); padding-bottom: var(--report-footer-height); }
 
-            .sheet {
-                border: 0;
-                padding: calc(var(--report-header-height, 115px) + 12px) 12.7mm calc(var(--report-footer-height, 70px) + 12px) 12.7mm; /* reserve space for fixed header/footer */
-                min-height: calc(297mm - var(--report-header-height, 115px) - var(--report-footer-height, 70px));
-                box-sizing: border-box;
-            }
+            /* Layout: reduce left/right printable margins to 0.5in and align content */
+            .sheet { padding: calc(var(--report-header-height) + 12px) 0.5in calc(var(--report-footer-height) + 12px) 0.5in; }
 
-            .id-barcode-table {
-                width: 100%;
-                table-layout: fixed;
-                border-collapse: collapse;
-            }
+            /* ID/barcode row: remove extra inline paddings and center items vertically */
+            .id-barcode-row > div { padding: 0; vertical-align: middle; display: inline-block; }
 
-            .id-barcode-table td {
-                padding: 0 4mm;
-                vertical-align: middle;
-            }
+            /* Ensure barcode images are visible and scale within the side gutters */
+            .id-barcode-row img, .id-barcode-table img { max-height: 64px !important; max-width: 100% !important; height: auto !important; display: block !important; margin: 0 auto !important; }
 
-            .id-barcode-row div {
-                padding: 0 4mm;
-                vertical-align: middle;
-            }
-
-            .id-barcode-table img,
-            .id-barcode-row img {
-                max-height: 64px;
-                max-width: 100%;
-                height: auto;
-                display: block;
-            }
-
-            .prescription-title {
-                font-size: 24px;
-                color: #000;
-                font-weight: 700;
-                margin: 0;
-            }
-
-            .patient-table td,
-            .footer-content,
-            .followup-col,
-            .signature-col {
-                font-size: 11px;
-            }
-
-            .rx-item,
-            .section,
-            .split-layout,
-            .split-layout tr,
-            .split-layout td,
-            .footer-row,
-            .text-box,
-            .patient-table,
-            .patient-table tr,
-            .patient-table td {
-                page-break-inside: avoid;
-                break-inside: avoid;
-            }
-
-            .qr-bottom,
-            .qr-box {
-                page-break-inside: avoid;
-                break-inside: avoid;
-            }
-
-            /* Fixed header at top of page in print */
-            .header-image.fixed-header,
-            .header-placeholder.fixed-header {
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                width: 100%;
-                z-index: 50;
-                height: var(--report-header-height, 115px);
-            }
-
-            .header-image { height: var(--report-header-height, 115px); object-fit: cover; }
-
-            /* Fixed footer at bottom of page in print */
-            .footer-section { position: fixed; bottom: 0; left: 0; right: 0; width: 100%; height: var(--report-footer-height, 70px); z-index: 10; }
-
-            .footer-section .footer-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
-
-            .footer-section .footer-content {
-                position: absolute;
-                inset: 0;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 14px;
-                text-align: center;
-                padding: 6px 12px;
-                width: 100%;
-                z-index: 9999 !important; /* force content above footer image */
-                background: transparent;
-            }
-
-            .content-section { padding-bottom: calc(var(--report-footer-height, 70px) + 40px); }
-
-            /* Ensure page-sized layout for A4 */
-            html, body { height: 297mm; }
-
-            /* hide placeholders in print */
-            .header-placeholder.fixed-header,
-            .footer-placeholder { display: none; }
-
+            /* Fix header to top like IPD invoice */
             .header-image,
-            .footer-image {
-                object-fit: contain;
-                display: block;
-            }
+            .header-placeholder,
+            .print-shared-header { position: fixed; top: 0; left: 0; right: 0; width: 100%; z-index: 50; }
+
+            /* Fix footer to bottom like IPD invoice */
+            .footer-image,
+            .footer-placeholder,
+            .footer-wrapper,
+            .footer { position: fixed; bottom: 0; left: 0; right: 0; width: 100%; max-height: calc(var(--report-footer-height) + 10px); object-fit: contain; z-index: 10; display: block; }
+
+            /* Keep footer content above the footer image */
+            .footer-content { position: relative; left: 0; right: 0; width: 100%; text-align: center; z-index: 60; padding-top: 0; background: transparent; }
+
+            /* Hide fallback placeholders (we use fixed header/footer) */
+            .header-placeholder, .footer-placeholder { display: none; }
+
+            /* Ensure content reserves space for footer so nothing overlaps */
+            .content-section { padding-bottom: calc(var(--report-footer-height) * 2); }
+
+            /* Keep header/footer images visible and contained */
+            .header-img, .footer-img, .header-image, .footer-image { object-fit: contain; display: block; }
         }
     </style>
 </head>
@@ -668,9 +576,18 @@
 <body style="--report-header-height: {{ $reportHeaderHeight }}px; --report-footer-height: {{ $reportFooterHeight }}px;">
     @if (empty($forPdf) || !$forPdf)
         <div class="toolbar">
+            <button type="button" class="btn-print" onclick="history.back()">Back</button>
             <button type="button" class="btn-print" onclick="window.print()">Print Prescription</button>
         </div>
     @endif
+
+    @if (empty($forPdf) || !$forPdf)
+        <button id="presc-back-btn-opd" onclick="history.back()" style="position:fixed;top:8px;left:8px;z-index:99999;padding:6px 10px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer">Back</button>
+    @endif
+
+    <style>
+        @media print { #presc-back-btn-opd { display: none !important; } }
+    </style>
 
     <div class="sheet">
         <div class="content-section">
@@ -730,14 +647,8 @@
                 <tr>
                     <td class="label">Date</td>
                     <td>{{ $prescriptionDate ?? 'N/A' }}</td>
-                    <td class="label">RX ID</td>
-                    <td>{{ $prescriptionCode ?? 'N/A' }}</td>
-                </tr>
-                <tr>
                     <td class="label">NIBP</td>
                     <td>{{ $opdpatient?->nibp ?? 'N/A' }}</td>
-                        <td class="label">Final Income</td>
-                    <td><b>Tk {{ number_format(525, 2) }}</b></td>
                 </tr>
             </table>
         </div>

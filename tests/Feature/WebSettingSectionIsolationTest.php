@@ -91,6 +91,31 @@ class WebSettingSectionIsolationTest extends TestCase
         $this->assertSame('Updated CMS CTA', $fresh->website_cta_text);
     }
 
+    public function test_form_prefers_latest_active_web_setting_for_vat_values()
+    {
+        WebSetting::create($this->dbPayload($this->basePayload([
+            'company_name' => 'Older Hospital',
+            'vat_enabled' => false,
+            'vat_percent' => 0.0,
+            'status' => 'Inactive',
+        ])));
+
+        WebSetting::create($this->dbPayload($this->basePayload([
+            'company_name' => 'Latest Hospital',
+            'vat_enabled' => true,
+            'vat_percent' => 5.5,
+            'status' => 'Active',
+        ])));
+
+        $service = app(\App\Services\WebSettingService::class);
+        $settings = $service->first();
+
+        $this->assertNotNull($settings);
+        $this->assertSame('Latest Hospital', $settings->company_name);
+        $this->assertTrue($settings->vat_enabled);
+        $this->assertSame(5.5, (float) $settings->vat_percent);
+    }
+
     private function basePayload(array $overrides = []): array
     {
         $payload = [

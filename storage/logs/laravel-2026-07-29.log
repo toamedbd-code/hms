@@ -1,0 +1,198 @@
+[2026-07-29 12:27:28] local.ERROR: Route [auth.login2] not defined. (View: C:\laragon\www\hms\resources\views\payment\bkash\simulate-public.blade.php) {"exception":"[object] (Illuminate\\View\\ViewException(code: 0): Route [auth.login2] not defined. (View: C:\\laragon\\www\\hms\\resources\\views\\payment\\bkash\\simulate-public.blade.php) at C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/UrlGenerator.php:534)
+[stacktrace]
+#0 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/View/Engines/PhpEngine.php(59): Illuminate/View/Engines/CompilerEngine->handleViewException(Object(Symfony/Component/Routing/Exception/RouteNotFoundException), 0)
+#1 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/View/Engines/CompilerEngine.php(76): Illuminate/View/Engines/PhpEngine->evaluatePath('C://laragon//www//...', Array)
+#2 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/View/View.php(208): Illuminate/View/Engines/CompilerEngine->get('C://laragon//www//...', Array)
+#3 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/View/View.php(191): Illuminate/View/View->getContents()
+#4 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/View/View.php(160): Illuminate/View/View->renderContents()
+#5 C:/laragon/www/hms/scripts/save_simulate_pages.php(16): Illuminate/View/View->render()
+#6 {main}
+
+[previous exception] [object] (Symfony\\Component\\Routing\\Exception\\RouteNotFoundException(code: 0): Route [auth.login2] not defined. at C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/UrlGenerator.php:534)
+[stacktrace]
+#0 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/helpers.php(870): Illuminate/Routing/UrlGenerator->route('auth.login2', Array, true)
+#1 C:/laragon/www/hms/storage/framework/views/0e435a2ae527d002a2c94a63df9f23db.php(156): route('auth.login2')
+#2 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Filesystem/Filesystem.php(123): require('C://laragon//www//...')
+#3 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Filesystem/Filesystem.php(124): Illuminate/Filesystem/Filesystem::Illuminate/Filesystem/{closure}()
+#4 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/View/Engines/PhpEngine.php(57): Illuminate/Filesystem/Filesystem->getRequire('C://laragon//www//...', Array)
+#5 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/View/Engines/CompilerEngine.php(76): Illuminate/View/Engines/PhpEngine->evaluatePath('C://laragon//www//...', Array)
+#6 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/View/View.php(208): Illuminate/View/Engines/CompilerEngine->get('C://laragon//www//...', Array)
+#7 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/View/View.php(191): Illuminate/View/View->getContents()
+#8 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/View/View.php(160): Illuminate/View/View->renderContents()
+#9 C:/laragon/www/hms/scripts/save_simulate_pages.php(16): Illuminate/View/View->render()
+#10 {main}
+"} 
+[2026-07-29 12:56:44] production.INFO: AppServiceProvider: ensured APP_KEY is set at runtime  
+[2026-07-29 20:31:55] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:31:55] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:31:55","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:32:00] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:32:00] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:32:00","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:32:30] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:32:30] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:32:30","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:32:46] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:32:46] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:32:46","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:33:26] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:33:26] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:33:26","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:33:26] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:33:26] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:33:26","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:33:27] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:33:27] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:33:27","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:33:30] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:33:30] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:33:30","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:38:02] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:38:02] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:38:04] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:38:04] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:38:18] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:38:18] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:38:20] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:38:20] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:41:52] production.INFO: AppServiceProvider: ensured APP_KEY is set at runtime  
+[2026-07-29 20:41:52] production.INFO: AppServiceProvider: enforced DB config at runtime {"db_host":"127.0.0.1","db_database":"hms_local","db_username":"root"} 
+[2026-07-29 20:41:54] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:41:54] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:41:55] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:41:55] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:42:50] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:42:50] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:45:51] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:45:51] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:46:48] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:46:48] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:46:50] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:46:50] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:50:01] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:50:01] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:50:03] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:50:03] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:51:19] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:51:19] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:51:26] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:51:26] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:51:36] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:51:36] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:51:56] local.INFO: FinanceReportController: pageMarginTop (px) {"pageMarginTopPx":48,"layout_page_margin_top":85,"request_page_margin_top":null,"force_fixed_flag_layout":false,"force_fixed_flag_request":false} 
+[2026-07-29 20:51:56] local.INFO: FinanceReportController: PDF margins (mm) {"marginTopForMpdf":12.7,"marginBottomForMpdf":0.0,"marginHeaderMm":0,"marginFooterMm":0} 
+[2026-07-29 20:54:27] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:54:27] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:54:27","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:54:45] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:54:45] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:54:45","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:59:45] local.INFO: IpdDischargeBillingService::collectBillItemLines - fallback added {"ipd_id":2,"from":"2026-07-07","to":"2026-07-30"} 
+[2026-07-29 20:59:45] local.INFO: IpdDischargeBillingService::collectBillItemLines - counts {"ipd_id":2,"admission_at":"2026-07-08 16:12:00","discharge_at":"2026-07-29 20:59:45","reference":null,"counts":{"bed charge":1}} 
+[2026-07-29 20:59:59] production.INFO: AppServiceProvider: ensured APP_KEY is set at runtime  
+[2026-07-29 20:59:59] production.INFO: AppServiceProvider: enforced DB config at runtime {"db_host":"127.0.0.1","db_database":"hms_local","db_username":"root"} 
+[2026-07-29 21:02:20] local.ERROR: Unable to prepare route [__placeholder/backendreportingultrasound] for serialization. Another route has already been assigned name [backend.__placeholder.reporting.ultrasound]. {"exception":"[object] (LogicException(code: 0): Unable to prepare route [__placeholder/backendreportingultrasound] for serialization. Another route has already been assigned name [backend.__placeholder.reporting.ultrasound]. at C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php:257)
+[stacktrace]
+#0 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(221): Illuminate/Routing/AbstractRouteCollection->addToSymfonyRoutesCollection(Object(Symfony/Component/Routing/RouteCollection), Object(Illuminate/Routing/Route))
+#1 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/RouteCollection.php(268): Illuminate/Routing/AbstractRouteCollection->toSymfonyRouteCollection()
+#2 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(200): Illuminate/Routing/RouteCollection->toSymfonyRouteCollection()
+#3 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(171): Illuminate/Routing/AbstractRouteCollection->dumper()
+#4 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/RouteCacheCommand.php(108): Illuminate/Routing/AbstractRouteCollection->compile()
+#5 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/RouteCacheCommand.php(67): Illuminate/Foundation/Console/RouteCacheCommand->buildRouteCacheFile(Object(Illuminate/Routing/RouteCollection))
+#6 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate/Foundation/Console/RouteCacheCommand->handle()
+#7 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate/Container/BoundMethod::Illuminate/Container/{closure}()
+#8 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate/Container/Util::unwrapIfClosure(Object(Closure))
+#9 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate/Container/BoundMethod::callBoundMethod(Object(Illuminate/Foundation/Application), Array, Object(Closure))
+#10 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate/Container/BoundMethod::call(Object(Illuminate/Foundation/Application), Array, Array, NULL)
+#11 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate/Container/Container->call(Array)
+#12 C:/laragon/www/hms/vendor/symfony/console/Command/Command.php(341): Illuminate/Console/Command->execute(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#13 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony/Component/Console/Command/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#14 C:/laragon/www/hms/vendor/symfony/console/Application.php(1117): Illuminate/Console/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#15 C:/laragon/www/hms/vendor/symfony/console/Application.php(356): Symfony/Component/Console/Application->doRunCommand(Object(Illuminate/Foundation/Console/RouteCacheCommand), Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#16 C:/laragon/www/hms/vendor/symfony/console/Application.php(195): Symfony/Component/Console/Application->doRun(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#17 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony/Component/Console/Application->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#18 C:/laragon/www/hms/artisan(35): Illuminate/Foundation/Console/Kernel->handle(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#19 {main}
+"} 
+[2026-07-29 21:02:28] local.ERROR: Unable to prepare route [__placeholder/backendreportingultrasound] for serialization. Another route has already been assigned name [backend.__placeholder.reporting.ultrasound]. {"exception":"[object] (LogicException(code: 0): Unable to prepare route [__placeholder/backendreportingultrasound] for serialization. Another route has already been assigned name [backend.__placeholder.reporting.ultrasound]. at C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php:257)
+[stacktrace]
+#0 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(221): Illuminate/Routing/AbstractRouteCollection->addToSymfonyRoutesCollection(Object(Symfony/Component/Routing/RouteCollection), Object(Illuminate/Routing/Route))
+#1 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/RouteCollection.php(268): Illuminate/Routing/AbstractRouteCollection->toSymfonyRouteCollection()
+#2 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(200): Illuminate/Routing/RouteCollection->toSymfonyRouteCollection()
+#3 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(171): Illuminate/Routing/AbstractRouteCollection->dumper()
+#4 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/RouteCacheCommand.php(108): Illuminate/Routing/AbstractRouteCollection->compile()
+#5 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/RouteCacheCommand.php(67): Illuminate/Foundation/Console/RouteCacheCommand->buildRouteCacheFile(Object(Illuminate/Routing/RouteCollection))
+#6 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate/Foundation/Console/RouteCacheCommand->handle()
+#7 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate/Container/BoundMethod::Illuminate/Container/{closure}()
+#8 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate/Container/Util::unwrapIfClosure(Object(Closure))
+#9 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate/Container/BoundMethod::callBoundMethod(Object(Illuminate/Foundation/Application), Array, Object(Closure))
+#10 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate/Container/BoundMethod::call(Object(Illuminate/Foundation/Application), Array, Array, NULL)
+#11 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate/Container/Container->call(Array)
+#12 C:/laragon/www/hms/vendor/symfony/console/Command/Command.php(341): Illuminate/Console/Command->execute(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#13 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony/Component/Console/Command/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#14 C:/laragon/www/hms/vendor/symfony/console/Application.php(1117): Illuminate/Console/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#15 C:/laragon/www/hms/vendor/symfony/console/Application.php(356): Symfony/Component/Console/Application->doRunCommand(Object(Illuminate/Foundation/Console/RouteCacheCommand), Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#16 C:/laragon/www/hms/vendor/symfony/console/Application.php(195): Symfony/Component/Console/Application->doRun(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#17 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony/Component/Console/Application->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#18 C:/laragon/www/hms/artisan(35): Illuminate/Foundation/Console/Kernel->handle(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#19 {main}
+"} 
+[2026-07-29 21:03:34] local.ERROR: Unable to prepare route [__placeholder/backendreportingultrasound] for serialization. Another route has already been assigned name [backend.__placeholder.reporting.ultrasound]. {"exception":"[object] (LogicException(code: 0): Unable to prepare route [__placeholder/backendreportingultrasound] for serialization. Another route has already been assigned name [backend.__placeholder.reporting.ultrasound]. at C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php:257)
+[stacktrace]
+#0 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(221): Illuminate/Routing/AbstractRouteCollection->addToSymfonyRoutesCollection(Object(Symfony/Component/Routing/RouteCollection), Object(Illuminate/Routing/Route))
+#1 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/RouteCollection.php(268): Illuminate/Routing/AbstractRouteCollection->toSymfonyRouteCollection()
+#2 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(200): Illuminate/Routing/RouteCollection->toSymfonyRouteCollection()
+#3 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(171): Illuminate/Routing/AbstractRouteCollection->dumper()
+#4 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/RouteCacheCommand.php(108): Illuminate/Routing/AbstractRouteCollection->compile()
+#5 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/RouteCacheCommand.php(67): Illuminate/Foundation/Console/RouteCacheCommand->buildRouteCacheFile(Object(Illuminate/Routing/RouteCollection))
+#6 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate/Foundation/Console/RouteCacheCommand->handle()
+#7 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate/Container/BoundMethod::Illuminate/Container/{closure}()
+#8 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate/Container/Util::unwrapIfClosure(Object(Closure))
+#9 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate/Container/BoundMethod::callBoundMethod(Object(Illuminate/Foundation/Application), Array, Object(Closure))
+#10 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate/Container/BoundMethod::call(Object(Illuminate/Foundation/Application), Array, Array, NULL)
+#11 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate/Container/Container->call(Array)
+#12 C:/laragon/www/hms/vendor/symfony/console/Command/Command.php(341): Illuminate/Console/Command->execute(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#13 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony/Component/Console/Command/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#14 C:/laragon/www/hms/vendor/symfony/console/Application.php(1117): Illuminate/Console/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#15 C:/laragon/www/hms/vendor/symfony/console/Application.php(356): Symfony/Component/Console/Application->doRunCommand(Object(Illuminate/Foundation/Console/RouteCacheCommand), Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#16 C:/laragon/www/hms/vendor/symfony/console/Application.php(195): Symfony/Component/Console/Application->doRun(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#17 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony/Component/Console/Application->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#18 C:/laragon/www/hms/artisan(35): Illuminate/Foundation/Console/Kernel->handle(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#19 {main}
+"} 
+[2026-07-29 21:05:17] local.ERROR: Unable to prepare route [__placeholder/backendreportingultrasound] for serialization. Another route has already been assigned name [backend.__placeholder.reporting.ultrasound]. {"exception":"[object] (LogicException(code: 0): Unable to prepare route [__placeholder/backendreportingultrasound] for serialization. Another route has already been assigned name [backend.__placeholder.reporting.ultrasound]. at C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php:257)
+[stacktrace]
+#0 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(221): Illuminate/Routing/AbstractRouteCollection->addToSymfonyRoutesCollection(Object(Symfony/Component/Routing/RouteCollection), Object(Illuminate/Routing/Route))
+#1 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/RouteCollection.php(268): Illuminate/Routing/AbstractRouteCollection->toSymfonyRouteCollection()
+#2 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(200): Illuminate/Routing/RouteCollection->toSymfonyRouteCollection()
+#3 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(171): Illuminate/Routing/AbstractRouteCollection->dumper()
+#4 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/RouteCacheCommand.php(108): Illuminate/Routing/AbstractRouteCollection->compile()
+#5 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/RouteCacheCommand.php(67): Illuminate/Foundation/Console/RouteCacheCommand->buildRouteCacheFile(Object(Illuminate/Routing/RouteCollection))
+#6 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate/Foundation/Console/RouteCacheCommand->handle()
+#7 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate/Container/BoundMethod::Illuminate/Container/{closure}()
+#8 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate/Container/Util::unwrapIfClosure(Object(Closure))
+#9 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate/Container/BoundMethod::callBoundMethod(Object(Illuminate/Foundation/Application), Array, Object(Closure))
+#10 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate/Container/BoundMethod::call(Object(Illuminate/Foundation/Application), Array, Array, NULL)
+#11 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate/Container/Container->call(Array)
+#12 C:/laragon/www/hms/vendor/symfony/console/Command/Command.php(341): Illuminate/Console/Command->execute(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#13 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony/Component/Console/Command/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#14 C:/laragon/www/hms/vendor/symfony/console/Application.php(1117): Illuminate/Console/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#15 C:/laragon/www/hms/vendor/symfony/console/Application.php(356): Symfony/Component/Console/Application->doRunCommand(Object(Illuminate/Foundation/Console/RouteCacheCommand), Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#16 C:/laragon/www/hms/vendor/symfony/console/Application.php(195): Symfony/Component/Console/Application->doRun(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#17 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony/Component/Console/Application->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#18 C:/laragon/www/hms/artisan(35): Illuminate/Foundation/Console/Kernel->handle(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#19 {main}
+"} 
+[2026-07-29 21:05:46] local.ERROR: Unable to prepare route [__placeholder/backendreportingultrasound] for serialization. Another route has already been assigned name [backend.__placeholder.reporting.ultrasound]. {"exception":"[object] (LogicException(code: 0): Unable to prepare route [__placeholder/backendreportingultrasound] for serialization. Another route has already been assigned name [backend.__placeholder.reporting.ultrasound]. at C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php:257)
+[stacktrace]
+#0 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(221): Illuminate/Routing/AbstractRouteCollection->addToSymfonyRoutesCollection(Object(Symfony/Component/Routing/RouteCollection), Object(Illuminate/Routing/Route))
+#1 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/RouteCollection.php(268): Illuminate/Routing/AbstractRouteCollection->toSymfonyRouteCollection()
+#2 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(200): Illuminate/Routing/RouteCollection->toSymfonyRouteCollection()
+#3 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Routing/AbstractRouteCollection.php(171): Illuminate/Routing/AbstractRouteCollection->dumper()
+#4 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/RouteCacheCommand.php(108): Illuminate/Routing/AbstractRouteCollection->compile()
+#5 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/RouteCacheCommand.php(67): Illuminate/Foundation/Console/RouteCacheCommand->buildRouteCacheFile(Object(Illuminate/Routing/RouteCollection))
+#6 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(36): Illuminate/Foundation/Console/RouteCacheCommand->handle()
+#7 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/Util.php(43): Illuminate/Container/BoundMethod::Illuminate/Container/{closure}()
+#8 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(96): Illuminate/Container/Util::unwrapIfClosure(Object(Closure))
+#9 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/BoundMethod.php(35): Illuminate/Container/BoundMethod::callBoundMethod(Object(Illuminate/Foundation/Application), Array, Object(Closure))
+#10 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Container/Container.php(799): Illuminate/Container/BoundMethod::call(Object(Illuminate/Foundation/Application), Array, Array, NULL)
+#11 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(211): Illuminate/Container/Container->call(Array)
+#12 C:/laragon/www/hms/vendor/symfony/console/Command/Command.php(341): Illuminate/Console/Command->execute(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#13 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony/Component/Console/Command/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#14 C:/laragon/www/hms/vendor/symfony/console/Application.php(1117): Illuminate/Console/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#15 C:/laragon/www/hms/vendor/symfony/console/Application.php(356): Symfony/Component/Console/Application->doRunCommand(Object(Illuminate/Foundation/Console/RouteCacheCommand), Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#16 C:/laragon/www/hms/vendor/symfony/console/Application.php(195): Symfony/Component/Console/Application->doRun(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#17 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony/Component/Console/Application->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#18 C:/laragon/www/hms/artisan(35): Illuminate/Foundation/Console/Kernel->handle(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#19 {main}
+"} 

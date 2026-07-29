@@ -8,18 +8,101 @@ import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 
-const props = defineProps(['websetting', 'id', 'activeSection', 'activeModule', 'singleSectionMode', 'availableTemplates', 'bookingDoctors']);
+const props = defineProps(['websetting', 'id', 'activeSection', 'activeModule', 'singleSectionMode', 'availableTemplates', 'bookingDoctors', 'sidebarMenus']);
 const bookingDoctors = props.bookingDoctors ?? [];
 const bookingPanelOpen = ref(false);
 const page = usePage();
+const vatStorageKey = 'backend.websetting.lastVatSettings';
+const currentWebSetting = computed(() => {
+    const propsValue = page?.props ?? {};
+    const pageSetting = propsValue.websetting ?? propsValue.webSetting ?? null;
+
+    if (pageSetting && typeof pageSetting === 'object') {
+        return pageSetting;
+    }
+
+    if (props.websetting && typeof props.websetting === 'object') {
+        return props.websetting;
+    }
+
+    return {};
+});
+const getWebSettingValue = (key, fallback = '') => {
+    const source = currentWebSetting.value && typeof currentWebSetting.value === 'object'
+        ? currentWebSetting.value
+        : null;
+
+    const sourceValue = source?.[key];
+
+    if (sourceValue === null || sourceValue === undefined || sourceValue === '') {
+        const propValue = props.websetting && typeof props.websetting === 'object'
+            ? props.websetting[key]
+            : undefined;
+
+        return propValue ?? fallback;
+    }
+
+    return sourceValue ?? fallback;
+};
+const sidebarMenus = ref(props.sidebarMenus ?? []);
+const searchQuery = ref('');
 const settingsSections = [
     { key: 'general', label: 'General Setting', hint: 'Hospital profile, logo, language, currency' },
     { key: 'cms', label: 'CMS Setting', hint: 'Website hero, about, doctors and CTA content' },
     { key: 'prefix', label: 'Prefix Setting', hint: 'All document and bill numbering prefixes' },
     { key: 'sms', label: 'SMS Setting', hint: 'Gateway credentials and Bulk SMS access' },
+    { key: 'sidebar', label: 'Sidebar Menu Order', hint: 'Reorder top-level sidebar items by moving them up or down' },
     { key: 'module', label: 'Module Setting', hint: 'Attendance, pathology, payroll, reporting integrations', hidden: true },
     { key: 'other', label: 'Other Setting', hint: 'Theme, panel visibility and extra options' },
 ];
+const filteredSidebarMenus = computed(() => {
+    const query = String(searchQuery.value || '').trim().toLowerCase();
+    if (query === '') {
+        return sidebarMenus.value;
+    }
+    return sidebarMenus.value.filter((menu) => String(menu.name || '').toLowerCase().includes(query));
+});
+
+const manualSidebarPositions = reactive({});
+const refreshSidebarPositions = () => {
+    sidebarMenus.value.forEach((menu, index) => {
+        manualSidebarPositions[menu.id] = String(index + 1);
+    });
+};
+
+const getSidebarMenuPosition = (menuId) => {
+    const index = sidebarMenus.value.findIndex((item) => Number(item.id) === Number(menuId));
+    return index >= 0 ? index + 1 : 0;
+};
+
+const setSidebarMenuPosition = (menuId, newPosition) => {
+    const position = Number(newPosition);
+    if (!Number.isFinite(position) || position < 1) {
+        manualSidebarPositions[menuId] = String(getSidebarMenuPosition(menuId) || 1);
+        return;
+    }
+
+    const currentIndex = sidebarMenus.value.findIndex((item) => Number(item.id) === Number(menuId));
+    if (currentIndex === -1) {
+        return;
+    }
+
+    const targetIndex = Math.min(Math.max(position - 1, 0), sidebarMenus.value.length - 1);
+    if (targetIndex === currentIndex) {
+        manualSidebarPositions[menuId] = String(currentIndex + 1);
+        return;
+    }
+
+    const items = [...sidebarMenus.value];
+    const [moved] = items.splice(currentIndex, 1);
+    items.splice(targetIndex, 0, moved);
+    sidebarMenus.value = items;
+    refreshSidebarPositions();
+};
+
+const updateManualSidebarPosition = (menuId, event) => {
+    manualSidebarPositions[menuId] = event.target.value;
+};
 
 const settingsSectionStorageKey = 'backend.websetting.activeSection';
 const authPermissions = computed(() => {
@@ -33,6 +116,7 @@ const visibleSettingsSections = computed(() => {
     const canManageAllWebSettings = hasPermission('websetting-add');
     const canManageGeneralSettings = canManageAllWebSettings || hasPermission('general-setting-add');
     const canManageCmsSettings = canManageAllWebSettings || hasPermission('cms-setting');
+    const canManageSidebarSettings = canManageAllWebSettings || canManageGeneralSettings || canManageCmsSettings || hasPermission('sidebar-setting');
 
     return settingsSections.filter((section) => {
         if (section.hidden) {
@@ -45,6 +129,10 @@ const visibleSettingsSections = computed(() => {
 
         if (section.key === 'cms') {
             return canManageCmsSettings;
+        }
+
+        if (section.key === 'sidebar') {
+            return canManageSidebarSettings;
         }
 
         return canManageAllWebSettings;
@@ -94,6 +182,30 @@ const activeSettingsSection = ref(getInitialSettingsSection());
 const showSectionToast = ref(false);
 const sectionToastMessage = ref('');
 let sectionToastTimer = null;
+
+const moveSidebarItem = (index, direction) => {
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= sidebarMenus.value.length) {
+        return;
+    }
+    const items = [...sidebarMenus.value];
+    const temp = items[newIndex];
+    items[newIndex] = items[index];
+    items[index] = temp;
+    sidebarMenus.value = items;
+};
+
+const moveSidebarMenuUp = (index) => moveSidebarItem(index, 'up');
+const moveSidebarMenuDown = (index) => moveSidebarItem(index, 'down');
+
+const goBack = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+
+    router.visit(route('backend.dashboard'));
+};
 
 const setActiveSettingsSection = (section) => {
     if (isSingleSectionMode.value) {
@@ -500,8 +612,78 @@ const parseTestimonialsRows = (rawJson) => {
     }
 };
 
+const getStoredVatValues = () => {
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+        return null;
+    }
+
+    try {
+        const raw = window.localStorage.getItem(vatStorageKey);
+        if (!raw) {
+            return null;
+        }
+
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') {
+            return null;
+        }
+
+        return parsed;
+    } catch (_) {
+        return null;
+    }
+};
+
+const persistVatValuesToStorage = () => {
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+        return;
+    }
+
+    try {
+        const normalizedVatPercent = (form.vat_percent === null || form.vat_percent === undefined || form.vat_percent === '')
+            ? 0.0
+            : form.vat_percent;
+
+        window.localStorage.setItem(vatStorageKey, JSON.stringify({
+            vat_enabled: Boolean(form.vat_enabled ?? false),
+            vat_percent: normalizedVatPercent,
+        }));
+    } catch (_) {
+        // ignore storage failures
+    }
+};
+
+const syncVatFieldsFromSettings = (source = null) => {
+    const settings = source && typeof source === 'object' ? source : currentWebSetting.value ?? props.websetting ?? null;
+    const fallbackSettings = getStoredVatValues();
+
+    const resolvedSettings = {
+        ...(fallbackSettings && typeof fallbackSettings === 'object' ? fallbackSettings : {}),
+        ...(settings && typeof settings === 'object' ? settings : {}),
+    };
+
+    if (!resolvedSettings || typeof resolvedSettings !== 'object') {
+        return;
+    }
+
+    try {
+        if (Object.prototype.hasOwnProperty.call(resolvedSettings, 'vat_enabled')) {
+            form.vat_enabled = Boolean(resolvedSettings.vat_enabled);
+        }
+
+        if (Object.prototype.hasOwnProperty.call(resolvedSettings, 'vat_percent') && resolvedSettings.vat_percent !== null && resolvedSettings.vat_percent !== '') {
+            const parsedVatPercent = Number(resolvedSettings.vat_percent);
+            if (Number.isFinite(parsedVatPercent)) {
+                form.vat_percent = parsedVatPercent;
+            }
+        }
+    } catch (e) {
+        // ignore field sync failures
+    }
+};
+
 const form = useForm({
-    company_name: props.websetting?.company_name ?? 'ToaMed',
+    company_name: currentWebSetting.value?.company_name ?? props.websetting?.company_name ?? 'ToaMed',
     company_short_name: props.websetting?.company_short_name ?? 'TM',
     hospital_code: props.websetting?.hospital_code ?? '',
     address: props.websetting?.address ?? props.websetting?.report_title ?? 'Mirpur, Dhaka.',
@@ -517,6 +699,8 @@ const form = useForm({
     time_zone: props.websetting?.time_zone ?? '(GMT+06:00) Asia, Dhaka',
     currency: props.websetting?.currency ?? 'BDT',
     currency_symbol: props.websetting?.currency_symbol ?? 'Tk.',
+    vat_enabled: Boolean(currentWebSetting.value?.vat_enabled ?? props.websetting?.vat_enabled ?? false),
+    vat_percent: currentWebSetting.value?.vat_percent ?? props.websetting?.vat_percent ?? 0.00,
     credit_limit: props.websetting?.credit_limit ?? 10000,
     max_billing_discount_percent: props.websetting?.max_billing_discount_percent ?? 100,
     low_stock_threshold: props.websetting?.low_stock_threshold ?? 10,
@@ -574,6 +758,7 @@ const form = useForm({
     website_testimonials_en_json: props.websetting?.website_testimonials_en_json ?? '',
     website_testimonials_bn_json: props.websetting?.website_testimonials_bn_json ?? '',
     attendance_device_enabled: Boolean(props.websetting?.attendance_device_enabled ?? true),
+    sidebar_menu_order: props.sidebarMenus ? props.sidebarMenus.map((menu) => menu.id) : [],
     attendance_device_type: props.websetting?.attendance_device_type ?? 'both',
     attendance_device_identifier: props.websetting?.attendance_device_identifier ?? '',
     attendance_device_ip: props.websetting?.attendance_device_ip ?? '',
@@ -591,11 +776,16 @@ const form = useForm({
         return (props.availableTemplates && props.availableTemplates.length) ? props.availableTemplates[0] : 'default';
     })(),
 
-    logoPreview: props.websetting?.logo ?? '',
-    iconPreview: props.websetting?.icon ?? '',
-    mobileAppLogoPreview: props.websetting?.mobile_app_logo ?? '',
+    logoPreview: props.websetting?.logo ?? currentWebSetting.value?.logo ?? '',
+    iconPreview: props.websetting?.icon ?? currentWebSetting.value?.icon ?? '',
+    mobileAppLogoPreview: getWebSettingValue('mobile_app_logo', ''),
     _method: 'post',
 });
+
+watch(sidebarMenus, (newList) => {
+    form.sidebar_menu_order = newList.map((menu) => menu.id);
+    refreshSidebarPositions();
+}, { deep: true, immediate: true });
 
 const featuredDoctorsRows = ref(parseFeaturedDoctorsRows(form.website_featured_doctors_json));
 const serviceRows = ref(parseSimpleListRows(form.website_services_json));
@@ -891,6 +1081,19 @@ watch(deviceOptions, (newOptions) => {
     form.attendance_device_options = JSON.stringify(newOptions);
 }, { deep: true });
 
+watch(() => currentWebSetting.value, (settings) => {
+    syncVatFieldsFromSettings(settings);
+}, { immediate: true, deep: true });
+
+watch(() => props.websetting, (settings) => {
+    syncVatFieldsFromSettings(settings);
+}, { immediate: true, deep: true });
+
+onMounted(() => {
+    syncVatFieldsFromSettings();
+    persistVatValuesToStorage();
+});
+
 const setFilePreview = (file, previewKey, fileKey) => {
     if (!file) return;
 
@@ -920,9 +1123,23 @@ const submit = () => {
         activeSection: activeSettingsSection.value,
         report_title: data.address,
         attendance_device_options: JSON.stringify(deviceOptions.value),
+        sidebar_menu_order: sidebarMenus.value.map((menu) => menu.id),
     })).post(route('backend.websetting.store'), {
+        preserveState: true,
+        preserveScroll: true,
+        replace: true,
         onSuccess: (response) => {
             displayResponse(response);
+
+            try {
+                const latestWebSetting = response?.props?.websetting ?? page.props?.websetting ?? props.websetting ?? null;
+                if (latestWebSetting && typeof latestWebSetting === 'object') {
+                    syncVatFieldsFromSettings(latestWebSetting);
+                }
+                persistVatValuesToStorage();
+            } catch (e) {
+                // ignore field sync failures
+            }
 
             // Emit client-side branding update immediately so layout components
             // (Sidebar, Navbar) reflect the new company name without waiting
@@ -956,10 +1173,6 @@ const submit = () => {
             } catch (e) {
                 // ignore emit failures
             }
-
-            // Force a full Inertia reload so shared props (webSetting/websetting)
-            // propagate to layout components like the Sidebar immediately.
-            router.reload();
         },
         onError: (errorObject) => {
             displayWarning(errorObject);
@@ -1041,8 +1254,17 @@ onBeforeUnmount(() => {
 <template>
     <BackendLayout>
         <div class="w-full transition duration-1000 ease-in-out transform bg-white rounded-md">
-            <div v-if="$page.props.pageTitle" class="flex items-center justify-between w-full text-gray-700 bg-gray-100 rounded-md">
-                <h1 class="p-4 text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
+            <div class="flex items-center justify-between w-full text-gray-700 bg-gray-100 rounded-md">
+                <h1 class="p-4 text-xl font-bold dark:text-white">{{ $page.props.pageTitle || 'Settings' }}</h1>
+                <div class="p-4">
+                    <button
+                        type="button"
+                        @click="goBack"
+                        class="px-3 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                    >
+                        Back
+                    </button>
+                </div>
             </div>
 
             <div class="p-4">
@@ -1090,7 +1312,6 @@ onBeforeUnmount(() => {
                         </div>
 
                 <div v-show="activeSettingsSection === 'general'" class="border rounded-md p-4">
-                    <h2 class="text-lg font-semibold mb-4">General Setting</h2>
                     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
                         <div>
                             <InputLabel for="company_name" value="Hospital Name *" />
@@ -1162,7 +1383,7 @@ onBeforeUnmount(() => {
                     <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div>
                             <InputLabel for="logo" value="Hospital Logo *" />
-                            <img v-if="form.logoPreview" :src="form.logoPreview" alt="Hospital Logo" class="mb-2 h-20 object-contain" />
+                            <img v-if="form.logoPreview || getWebSettingValue('logo', '')" :src="form.logoPreview || getWebSettingValue('logo', '')" alt="Hospital Logo" class="mb-2 h-20 object-contain" />
                             <input id="logo" type="file" accept="image/*" @change="handleLogoChange"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300" />
                             <InputError class="mt-2" :message="form.errors.logo" />
@@ -1170,7 +1391,7 @@ onBeforeUnmount(() => {
 
                         <div>
                             <InputLabel for="icon" value="Hospital Small Logo *" />
-                            <img v-if="form.iconPreview" :src="form.iconPreview" alt="Hospital Small Logo" class="mb-2 h-20 object-contain" />
+                            <img v-if="form.iconPreview || getWebSettingValue('icon', '')" :src="form.iconPreview || getWebSettingValue('icon', '')" alt="Hospital Small Logo" class="mb-2 h-20 object-contain" />
                             <input id="icon" type="file" accept="image/*,.ico" @change="handleIconChange"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300" />
                             <InputError class="mt-2" :message="form.errors.icon" />
@@ -1178,7 +1399,7 @@ onBeforeUnmount(() => {
 
                         <div>
                             <InputLabel for="mobile_app_logo" value="Mobile App Logo" />
-                            <img v-if="form.mobileAppLogoPreview" :src="form.mobileAppLogoPreview" alt="Mobile App Logo" class="mb-2 h-20 object-contain" />
+                            <img v-if="form.mobileAppLogoPreview || getWebSettingValue('mobile_app_logo', '')" :src="form.mobileAppLogoPreview || getWebSettingValue('mobile_app_logo', '')" alt="Mobile App Logo" class="mb-2 h-20 object-contain" />
                             <input id="mobile_app_logo" type="file" accept="image/*" @change="handleMobileLogoChange"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300" />
                             <InputError class="mt-2" :message="form.errors.mobile_app_logo" />
@@ -1247,6 +1468,22 @@ onBeforeUnmount(() => {
                             <InputError class="mt-2" :message="form.errors.currency_symbol" />
                         </div>
 
+                        <div class="md:col-span-2">
+                            <InputLabel for="vat_enabled" value="Enable VAT" />
+                            <div class="flex items-center space-x-3">
+                                <label class="flex items-center space-x-2">
+                                    <input id="vat_enabled" type="checkbox" v-model="form.vat_enabled" class="h-4 w-4" />
+                                    <span class="text-sm">Enable VAT for billing</span>
+                                </label>
+                                <div class="flex items-center">
+                                    <input id="vat_percent" v-model.number="form.vat_percent" type="number" min="0" max="100" step="0.01"
+                                        class="block w-28 p-2 text-sm rounded-md border-slate-300" />
+                                    <span class="ml-2">%</span>
+                                </div>
+                            </div>
+                            <InputError class="mt-2" :message="form.errors.vat_percent" />
+                        </div>
+
                         <div>
                             <InputLabel for="credit_limit" value="Credit Limit *" />
                             <input id="credit_limit" v-model="form.credit_limit" type="number" min="0" step="0.01"
@@ -1296,6 +1533,14 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
+                <div v-show="activeSettingsSection === 'general'" class="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <div class="flex justify-end">
+                        <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md bg-green-600 px-6 py-3 text-base font-bold text-white shadow-sm transition hover:bg-green-700">
+                            Save General Setting
+                        </button>
+                    </div>
+                </div>
+
                 <div v-show="activeSettingsSection === 'cms'" class="border rounded-md p-4">
                     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
                         <div>
@@ -1304,7 +1549,6 @@ onBeforeUnmount(() => {
                         </div>
                         <div class="flex items-center gap-2">
                             <a href="/" target="_blank" class="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Open Website</a>
-                            <button type="button" @click="submit" class="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100">Save CMS Now</button>
                         </div>
                     </div>
 
@@ -1650,8 +1894,78 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
+                <div v-show="activeSettingsSection === 'sidebar'" class="border rounded-md p-4">
+                    <div class="grid gap-4 sm:grid-cols-[auto_1fr] items-center mb-4">
+                        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                            <div class="font-semibold text-slate-800">Manual position</div>
+                            <div class="mt-2 text-xs text-slate-500">
+                                Type a new position and press Enter or leave the field to update order.
+                            </div>
+                        </div>
+                        <div>
+                            <label for="sidebar-menu-search" class="block text-sm font-medium text-slate-700">Search sidebar menu</label>
+                            <input
+                                id="sidebar-menu-search"
+                                v-model="searchQuery"
+                                type="text"
+                                placeholder="Search menu name..."
+                                class="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-sky-500 focus:outline-none"
+                            />
+                        </div>
+                    </div>
+                    <div class="space-y-3">
+                        <template v-if="filteredSidebarMenus.length">
+                            <div v-for="(menu, index) in filteredSidebarMenus" :key="menu.id" class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:flex-row md:items-center md:justify-between">
+                                <div>
+                                    <p class="text-sm font-semibold text-slate-900">{{ menu.name }}</p>
+                                    <p class="text-xs text-slate-500">Position {{ getSidebarMenuPosition(menu.id) }}</p>
+                                </div>
+                                <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                    <div class="flex items-center gap-2">
+                                        <button type="button" @click="moveSidebarMenuUp(getSidebarMenuPosition(menu.id) - 1)"
+                                            class="rounded border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                                            :disabled="getSidebarMenuPosition(menu.id) === 1">
+                                            Up
+                                        </button>
+                                        <button type="button" @click="moveSidebarMenuDown(getSidebarMenuPosition(menu.id) - 1)"
+                                            class="rounded border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                                            :disabled="getSidebarMenuPosition(menu.id) === sidebarMenus.length">
+                                            Down
+                                        </button>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <label class="text-xs text-slate-600">Set position</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            :max="sidebarMenus.length"
+                                            v-model="manualSidebarPositions[menu.id]"
+                                            placeholder="Pos"
+                                            @blur="() => setSidebarMenuPosition(menu.id, manualSidebarPositions[menu.id])"
+                                            @keyup.enter.prevent="() => setSidebarMenuPosition(menu.id, manualSidebarPositions[menu.id])"
+                                            class="w-20 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800 focus:border-sky-500 focus:outline-none"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                        <div v-else class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                            কোনো সক্রিয় টপ-লেভেল সাইডবার মেনু আইটেম পাওয়া যায়নি।
+                        </div>
+                    </div>
+
+                    <template v-for="menu in sidebarMenus" :key="`sidebar-order-${menu.id}`">
+                        <input type="hidden" name="sidebar_menu_order[]" :value="menu.id" />
+                    </template>
+
+                    <div class="flex justify-end mt-6">
+                        <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md bg-green-600 px-6 py-3 text-base font-bold text-white shadow-sm transition hover:bg-green-700">
+                            Save Sidebar Setting
+                        </button>
+                    </div>
+                </div>
+
                 <div v-show="activeSettingsSection === 'prefix'" class="border rounded-md p-4">
-                    <h2 class="text-lg font-semibold mb-4">Prefix Setting</h2>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
                         <div>
                             <InputLabel for="ipd_no_prefix" value="IPD No" />
@@ -1772,10 +2086,18 @@ onBeforeUnmount(() => {
                             <InputError class="mt-2" :message="form.errors.death_record_reference_no_prefix" />
                         </div>
                     </div>
+
+                    <div class="flex justify-end mt-6">
+                        <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md bg-green-600 px-6 py-3 text-base font-bold text-white shadow-sm transition hover:bg-green-700">
+                            Save Prefix Setting
+                        </button>
+                    </div>
                 </div>
 
                 <div v-show="activeSettingsSection === 'other'" class="border rounded-md p-4">
-                    <h2 class="text-lg font-semibold mb-4">Other Setting</h2>
+                    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+                        <h2 class="text-lg font-semibold">Other Setting</h2>
+                    </div>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
                         <div>
                             <InputLabel for="doctor_restriction_mode" value="Doctor Restriction Mode" />
@@ -1849,11 +2171,15 @@ onBeforeUnmount(() => {
                             </div>
                         </div>
                     </div>
+
+                    <div class="flex justify-end mt-6">
+                        <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md bg-green-600 px-6 py-3 text-base font-bold text-white shadow-sm transition hover:bg-green-700">
+                            Save Other Setting
+                        </button>
+                    </div>
                 </div>
 
                 <div v-show="activeSettingsSection === 'sms'" class="border rounded-md p-4">
-                    <h2 class="text-lg font-semibold mb-4">SMS Setting</h2>
-
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                         <div>
                             <InputLabel for="sms_enabled" value="Enable SMS Gateway" />
@@ -1914,10 +2240,17 @@ onBeforeUnmount(() => {
                             Bulk SMS management is in the <a href="/backend/bulk-sms" class="text-sky-600 underline">Bulk SMS</a> page.
                         </div>
                     </div>
+
+                    <div class="flex justify-end mt-6">
+                        <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md bg-green-600 px-6 py-3 text-base font-bold text-white shadow-sm transition hover:bg-green-700">
+                            Save SMS Setting
+                        </button>
+                    </div>
                 </div>
 
                 <div v-show="activeSettingsSection === 'module' || lockedModuleSection" class="border rounded-md p-4">
-                    <div v-if="!isModuleSectionLocked" class="mb-4 grid grid-cols-1 gap-2 md:grid-cols-3">
+                    <div class="mb-4 flex flex-wrap items-start gap-3">
+                        <div v-if="!isModuleSectionLocked" class="grid grid-cols-1 gap-2 md:grid-cols-3">
                         <button
                             type="button"
                             class="w-full px-3 py-2 text-left text-xs font-semibold rounded border flex items-center justify-between"
@@ -1954,17 +2287,10 @@ onBeforeUnmount(() => {
                             <span>Reporting Module</span>
                             <span>{{ moduleSections.reporting ? '▲' : '▼' }}</span>
                         </button>
+                        </div>
                     </div>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-                        <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-cyan-200 bg-cyan-50">
-                            <h3 class="text-sm font-semibold text-cyan-800 mb-1">Attendance Module Settings</h3>
-                            <p class="text-xs text-cyan-700">Device, sync, webhook এবং integration module settings এখানে।</p>
-                        </div>
 
-                        <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-emerald-200 bg-emerald-50">
-                            <h3 class="text-sm font-semibold text-emerald-800 mb-1">Pathology Machine Integration</h3>
-                            <p class="text-xs text-emerald-700">Hematology Analyzer + Ultrasound integration এর communication settings এখানে কনফিগার করুন।</p>
-                        </div>
 
                         <div v-show="moduleSections.pathology">
                             <InputLabel for="pathology_enabled" value="Pathology Integration" />
@@ -1996,7 +2322,6 @@ onBeforeUnmount(() => {
                             <InputLabel for="pathology_webhook_endpoint_url" value="Webhook Endpoint URL" />
                             <input id="pathology_webhook_endpoint_url" v-model="deviceOptions.pathology.webhook_endpoint_url" type="text"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300" />
-                            <p class="mt-1 text-xs text-emerald-700">Machine-side push URL হিসেবে এই endpoint ব্যবহার করুন।</p>
                         </div>
 
                         <div v-show="moduleSections.pathology">
@@ -2550,17 +2875,27 @@ onBeforeUnmount(() => {
                             <InputLabel for="attendance_device_options" value="Options (JSON Preview)" />
                             <textarea id="attendance_device_options" v-model="form.attendance_device_options" rows="3" readonly
                                 class="block w-full p-2 text-sm rounded-md border-slate-300 bg-slate-50"></textarea>
-                            <p class="mt-1 text-xs text-slate-500">এই JSON অটো-জেনারেটেড, ডিভাইস সেটিংস সেভ করলে এটিই সংরক্ষিত হবে।</p>
+                        </div>
+
+                        <!-- Save buttons for each module -->
+                        <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 flex justify-start pt-4 border-t border-slate-200">
+                            <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md px-6 py-3 text-base font-bold text-white bg-green-600 hover:bg-green-700 transition-colors">Save Machine Integration Setting</button>
+                        </div>
+
+                        <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3 flex justify-start pt-4 border-t border-slate-200">
+                            <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md px-6 py-3 text-base font-bold text-white bg-green-600 hover:bg-green-700 transition-colors">Save Attendance Module Setting</button>
+                        </div>
+
+                        <div v-show="moduleSections.payroll" class="md:col-span-2 lg:col-span-3 flex justify-start pt-4 border-t border-slate-200">
+                            <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md px-6 py-3 text-base font-bold text-white bg-green-600 hover:bg-green-700 transition-colors">Save Payroll Module Setting</button>
+                        </div>
+
+                        <div v-show="moduleSections.reporting" class="md:col-span-2 lg:col-span-3 flex justify-start pt-4 border-t border-slate-200">
+                            <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md px-6 py-3 text-base font-bold text-white bg-green-600 hover:bg-green-700 transition-colors">Save Report Settings</button>
                         </div>
                     </div>
                 </div>
 
-                <div class="flex items-center justify-end mt-6">
-                    <PrimaryButton type="button" class="ms-4" :class="{ 'opacity-25': form.processing }"
-                        :disabled="form.processing" @click.prevent="submit()">
-                        {{ props.id ? 'Update General Setting' : 'Save General Setting' }}
-                    </PrimaryButton>
-                </div>
                     </div>
                 </div>
 

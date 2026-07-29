@@ -10,6 +10,7 @@ import { displayResponse, displayWarning } from '@/responseMessage.js';
 import { showToastIfNoFlash } from '@/responseMessage.js';
 import PatientModal from '@/Components/PatientModal.vue';
 import SymptomTypeModal from '@/Components/SymptomTypeModal.vue';
+import DoctorModal from '@/Components/DoctorModal.vue';
 import Multiselect from 'vue-multiselect';
 import 'vue-multiselect/dist/vue-multiselect.css';
 import eventBus from '@/eventBus.js';
@@ -32,7 +33,7 @@ const getCurrentDateTimeForInput = () => {
     return `${getPart('year')}-${getPart('month')}-${getPart('day')}T${getPart('hour')}:${getPart('minute')}`;
 };
 
-const props = defineProps(['ipdpatient', 'id', 'patients', 'doctors', 'bedGroups', 'beds', 'symptomTypes']);
+const props = defineProps(['ipdpatient', 'id', 'patients', 'doctors', 'bedGroups', 'beds', 'symptomTypes', 'designations', 'departments', 'specialists', 'pathologyAndRadiologyTests', 'medicineInventories', 'hospitalCharges']);
 
 const form = useForm({
     patient_id: props.ipdpatient?.patient_id ?? '',
@@ -63,6 +64,65 @@ const form = useForm({
     _method: props.ipdpatient?.id ? 'put' : 'post',
 });
 
+const normalizeDoctorId = (value) => {
+    if (value && typeof value === 'object') {
+        return value.id ?? null;
+    }
+
+    return value ?? null;
+};
+
+const findDoctorById = (list, id) => {
+    if (!id) return null;
+    return list.find((item) => Number(item.id) === Number(id)) ?? null;
+};
+
+const isDoctorModalOpen = ref(false);
+const doctorsList = ref([...(props.doctors || [])]);
+
+watch(() => props.doctors, (newDoctors) => {
+    doctorsList.value = [...(newDoctors || [])];
+}, { immediate: true });
+
+const openDoctorModal = () => {
+    isDoctorModalOpen.value = true;
+};
+
+const closeDoctorModal = () => {
+    isDoctorModalOpen.value = false;
+};
+
+const handleDoctorCreated = (newDoctor) => {
+    closeDoctorModal();
+
+    if (!newDoctor) return;
+
+    const doctorId = normalizeDoctorId(newDoctor);
+    const existingDoctor = findDoctorById(doctorsList.value, doctorId);
+
+    if (!existingDoctor) {
+        doctorsList.value = [...doctorsList.value, newDoctor];
+    }
+
+    const selectedDoctor = findDoctorById(doctorsList.value, doctorId);
+    if (selectedDoctor) {
+        form.consultant_doctor_id = selectedDoctor.id;
+    }
+
+    router.reload({
+        only: ['doctors'],
+        preserveState: true,
+        preserveScroll: true,
+        onSuccess: (page) => {
+            doctorsList.value = [...(page.props.doctors || [])];
+            const refreshedDoctor = findDoctorById(doctorsList.value, doctorId);
+            if (refreshedDoctor) {
+                form.consultant_doctor_id = refreshedDoctor.id;
+            }
+        }
+    });
+};
+
 const addHospitalChargeItem = () => {
     form.hospital_charge_items.push({ item_name: '', unit_price: '', quantity: 1 });
 };
@@ -88,117 +148,244 @@ const hospitalChargeGrandTotal = computed(() => {
 
 const formatTk = (amount) => `Tk ${Number(amount || 0).toFixed(2)}`;
 
+const autoGrowTextarea = (event) => {
+    const textarea = event.target;
+    textarea.style.height = 'auto';
+    textarea.style.height = (textarea.scrollHeight) + 'px';
+};
+
 const applyGrandTotalToAdvance = () => {
     form.advance_amount = Number(hospitalChargeGrandTotal.value.toFixed(2));
 };
 
+// Normalize for matching: remove non-alphanumeric, collapse spaces, lowercase
+const normalizeForMatch = (v) => {
+    if (v == null) return '';
+    return String(v)
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+};
+
+// Smart sorting helper copied from BillingPage to keep identical search behavior
+const smartSortSearchResults = (items, queryString, getDisplayText = (item) => item.name || '') => {
+    if (!queryString || !queryString.trim()) return items;
+
+    const normalizedQuery = normalizeForMatch(queryString);
+    const firstChar = normalizedQuery.charAt(0);
+
+    return items.sort((a, b) => {
+        const displayA = getDisplayText(a) || '';
+        const displayB = getDisplayText(b) || '';
+
+        const getMatchScore = (itemDisplay) => {
+            const normalized = normalizeForMatch(itemDisplay);
+            const words = normalized.split(/\s+/).filter(Boolean);
+            const firstWord = words[0] || '';
+
+            if (firstWord.startsWith(normalizedQuery)) return 120;
+            if (normalized.startsWith(normalizedQuery)) return 110;
+            if (firstChar && firstWord.startsWith(firstChar)) return 100;
+            if (firstChar && normalized.startsWith(firstChar)) return 90;
+            if (words.some(word => word.startsWith(normalizedQuery))) return 80;
+            if (normalized.includes(normalizedQuery)) return 70;
+            return 50;
+        };
+
+        const scoreA = getMatchScore(displayA);
+        const scoreB = getMatchScore(displayB);
+
+        return scoreB - scoreA;
+    });
+};
+
+// Build combined items list for searching
+const allAvailableHospitalItems = computed(() => {
+    const items = [];
+
+    // Add tests
+    if (Array.isArray(props.pathologyAndRadiologyTests)) {
+        console.log('✓ Tests available:', props.pathologyAndRadiologyTests.length);
+        props.pathologyAndRadiologyTests.forEach((test) => {
+            items.push({
+                id: test.id,
+                name: test.test_name || '',
+                category: test.category_type || '',
+                unitPrice: test.amount ?? 0,
+                type: 'test',
+                alt: [test.test_name, test.test_short_name ?? '', test.charge_name ?? ''].filter(Boolean).join(' | '),
+            });
+        });
+    } else {
+        console.warn('✗ Tests not available or not an array');
+    }
+
+    // Add medicines
+    if (Array.isArray(props.medicineInventories)) {
+        console.log('✓ Medicines available:', props.medicineInventories.length);
+        props.medicineInventories.forEach((medicine) => {
+            items.push({
+                id: medicine.id,
+                name: medicine.medicine_name || '',
+                category: 'Medicine',
+                unitPrice: medicine.medicine_unit_selling_price ?? 0,
+                type: 'medicine',
+                alt: [medicine.medicine_name, medicine.medicine_code ?? ''].filter(Boolean).join(' | '),
+            });
+        });
+    } else {
+        console.warn('✗ Medicines not available or not an array');
+    }
+
+    // Add hospital charges
+    if (Array.isArray(props.hospitalCharges)) {
+        console.log('✓ Charges available:', props.hospitalCharges.length);
+        props.hospitalCharges.forEach((charge) => {
+            items.push({
+                id: charge.id,
+                name: charge.name || '',
+                category: charge.module || '',
+                unitPrice: charge.amount ?? 0,
+                type: 'charge',
+                alt: [charge.name, charge.short_name ?? ''].filter(Boolean).join(' | '),
+            });
+        });
+    } else {
+        console.warn('✗ Charges not available or not an array');
+    }
+
+    console.log('📋 Total items for search:', items.length);
+    return items;
+});
+
+// Filter items based on search query
+// Use BillingPage's smart sorter and limit results for best UX
+const getFilteredHospitalItems = (searchQuery) => {
+    const rawQuery = String(searchQuery || '').trim();
+    if (!rawQuery) return [];
+
+    const tokens = rawQuery.split(/\s+/).filter(Boolean);
+    const normalizedTokens = tokens.map(t => normalizeForMatch(t)).filter(Boolean);
+
+    const filtered = allAvailableHospitalItems.value.filter((item) => {
+        try {
+            const hay = normalizeForMatch(((item.name || '') + ' ' + (item.alt || '')));
+            if (!normalizedTokens.length) return false;
+            return normalizedTokens.every((tok) => hay.includes(tok));
+        } catch (e) {
+            return false;
+        }
+    });
+
+    const sorted = smartSortSearchResults(filtered, rawQuery, (i) => i.name || '');
+    return sorted.slice(0, 50);
+};
+
+
 const hospitalItemSearchResults = ref([]);
-const hospitalItemSearchLoading = ref(false);
-const showHospitalItemSearch = ref(false);
-const hospitalItemSelectedIndex = ref(-1);
-const activeHospitalItemRow = ref(-1);
-let hospitalItemSearchTimer = null;
+const hospitalItemOptions = ref([]);
 
-const searchHospitalItems = async (q, rowIndex) => {
-    if (!q || String(q).trim().length < 2) {
-        hospitalItemSearchResults.value = [];
-        hospitalItemSelectedIndex.value = -1;
-        showHospitalItemSearch.value = false;
+onMounted(() => {
+    // Initialize with all items when component mounts, so they're always available
+    console.log('📍 Component mounted, initializing search options...');
+    hospitalItemOptions.value = allAvailableHospitalItems.value;
+    console.log('✓ Initialized with', hospitalItemOptions.value.length, 'items');
+});
+const activeHospitalItemRowForSearch = ref(null);
+
+const onHospitalItemSearch = (searchQuery) => {
+    const q = typeof searchQuery === 'string' ? searchQuery : (searchQuery?.query || '');
+    
+    // When empty, restore full option list so dropdown can show suggestions on focus
+    if (!q || String(q).trim().length < 1) {
+        hospitalItemOptions.value = allAvailableHospitalItems.value;
         return;
     }
 
-    hospitalItemSearchLoading.value = true;
-    activeHospitalItemRow.value = rowIndex;
-    try {
-        const res = await window.axios.get(route('backend.itemcharge.search'), { params: { q } });
-        hospitalItemSearchResults.value = res?.data?.results || [];
-        hospitalItemSelectedIndex.value = hospitalItemSearchResults.value.length > 0 ? 0 : -1;
-        showHospitalItemSearch.value = hospitalItemSearchResults.value.length > 0;
-    } catch (error) {
-        hospitalItemSearchResults.value = [];
-        hospitalItemSelectedIndex.value = -1;
-        showHospitalItemSearch.value = false;
-    } finally {
-        hospitalItemSearchLoading.value = false;
+    hospitalItemOptions.value = getFilteredHospitalItems(q);
+};
+
+// Positioning helpers: place appended multiselect dropdown exactly under the input
+const _positioningHandles = new Map();
+
+const positionDropdownForRow = (rowIndex) => {
+    nextTick(() => {
+        try {
+            const input = document.querySelector(`[data-hospital-item-multiselect="${rowIndex}"] .multiselect__input`);
+            if (!input) return;
+
+            const wrappers = Array.from(document.querySelectorAll('.multiselect__content-wrapper'));
+            if (!wrappers.length) return;
+
+            const wrapper = wrappers[wrappers.length - 1];
+
+            const rect = input.getBoundingClientRect();
+            wrapper.style.position = 'fixed';
+            wrapper.style.left = `${rect.left}px`;
+            wrapper.style.top = `${rect.bottom + 4}px`;
+            wrapper.style.minWidth = `${rect.width}px`;
+            wrapper.style.zIndex = '99999';
+        } catch (e) {
+            // ignore
+        }
+    });
+};
+
+const onHospitalMultiselectOpen = (rowIndex) => {
+    // Ensure options populated so suggestions show immediately on open
+    hospitalItemOptions.value = allAvailableHospitalItems.value;
+    activeHospitalItemRowForSearch.value = rowIndex;
+
+    // initial position
+    positionDropdownForRow(rowIndex);
+
+    const handle = () => positionDropdownForRow(rowIndex);
+    window.addEventListener('scroll', handle, { passive: true });
+    window.addEventListener('resize', handle);
+    _positioningHandles.set(rowIndex, handle);
+};
+
+const onHospitalMultiselectClose = (rowIndex) => {
+    const handle = _positioningHandles.get(rowIndex);
+    if (handle) {
+        window.removeEventListener('scroll', handle);
+        window.removeEventListener('resize', handle);
+        _positioningHandles.delete(rowIndex);
     }
-};
-
-const onHospitalItemInput = (rowIndex, event) => {
-    const q = event?.target?.value ?? '';
-    activeHospitalItemRow.value = rowIndex;
-
-    if (hospitalItemSearchTimer) clearTimeout(hospitalItemSearchTimer);
-
-    if (!q || String(q).trim().length < 2) {
-        hospitalItemSearchResults.value = [];
-        hospitalItemSelectedIndex.value = -1;
-        showHospitalItemSearch.value = false;
-        return;
-    }
-
-    hospitalItemSearchTimer = setTimeout(() => searchHospitalItems(q, rowIndex), 250);
-};
-
-const hospitalItemSelectNext = () => {
-    if (!Array.isArray(hospitalItemSearchResults.value) || hospitalItemSearchResults.value.length === 0) return;
-    const len = hospitalItemSearchResults.value.length;
-    let idx = Number(hospitalItemSelectedIndex.value);
-    if (!Number.isFinite(idx) || idx < 0) idx = -1;
-    hospitalItemSelectedIndex.value = (idx + 1) % len;
-};
-
-const hospitalItemSelectPrev = () => {
-    if (!Array.isArray(hospitalItemSearchResults.value) || hospitalItemSearchResults.value.length === 0) return;
-    const len = hospitalItemSearchResults.value.length;
-    let idx = Number(hospitalItemSelectedIndex.value);
-    if (!Number.isFinite(idx)) idx = 0;
-    hospitalItemSelectedIndex.value = (idx - 1 + len) % len;
 };
 
 const selectHospitalItemForRow = (item, rowIndex) => {
     if (!item || rowIndex < 0 || !form.hospital_charge_items[rowIndex]) return;
 
-    form.hospital_charge_items[rowIndex].item_name = item.test_name ?? item.charge_name ?? item.name ?? '';
-    form.hospital_charge_items[rowIndex].unit_price = Number(item.amount ?? item.standard_charge ?? 0);
+    form.hospital_charge_items[rowIndex].item_name = item.name || item.test_name || item.charge_name || '';
+    form.hospital_charge_items[rowIndex].unit_price = Number(item.unitPrice ?? item.amount ?? item.standard_charge ?? 0);
     if (!Number(form.hospital_charge_items[rowIndex].quantity || 0)) {
         form.hospital_charge_items[rowIndex].quantity = 1;
     }
-
-    hospitalItemSearchResults.value = [];
-    hospitalItemSelectedIndex.value = -1;
-    showHospitalItemSearch.value = false;
 };
 
-const onHospitalItemEnter = (rowIndex, event) => {
-    if (event && typeof event.preventDefault === 'function') {
-        event.preventDefault();
-    }
-
-    if (
-        showHospitalItemSearch.value
-        && activeHospitalItemRow.value === rowIndex
-        && Array.isArray(hospitalItemSearchResults.value)
-        && hospitalItemSearchResults.value.length > 0
-    ) {
-        let idx = Number(hospitalItemSelectedIndex.value);
-        if (!Number.isFinite(idx) || idx < 0 || idx >= hospitalItemSearchResults.value.length) idx = 0;
-        const item = hospitalItemSearchResults.value[idx];
-        if (item) {
-            selectHospitalItemForRow(item, rowIndex);
+const onHospitalItemSelected = (item, rowIndex) => {
+    if (!item) return;
+    selectHospitalItemForRow(item, rowIndex);
+    
+    // Move to next row on selection
+    nextTick(() => {
+        if (rowIndex < form.hospital_charge_items.length - 1) {
+            const nextRowInput = document.querySelector(`[data-hospital-item-multiselect="${rowIndex + 1}"] .multiselect__input`);
+            if (nextRowInput) {
+                nextRowInput.focus();
+            }
+        } else {
+            addHospitalChargeItem();
+            nextTick(() => {
+                const newRowInput = document.querySelector(`[data-hospital-item-multiselect="${rowIndex + 1}"] .multiselect__input`);
+                if (newRowInput) {
+                    newRowInput.focus();
+                }
+            });
         }
-        return;
-    }
-
-    const row = form.hospital_charge_items[rowIndex];
-    if (row && String(row.item_name || '').trim() !== '' && rowIndex === form.hospital_charge_items.length - 1) {
-        addHospitalChargeItem();
-    }
-};
-
-const hideHospitalItemSearch = () => {
-    setTimeout(() => {
-        showHospitalItemSearch.value = false;
-    }, 150);
+    });
 };
 
 const allBeds = computed(() => props.beds ?? []);
@@ -241,8 +428,9 @@ const loadBedAvailability = async () => {
 };
 
 
-const submit = () => {
+const submit = (options = {}) => {
     const routeName = props.id ? route('backend.ipdpatient.update', props.id) : route('backend.ipdpatient.store');
+    const autoPrint = Boolean(options?.autoPrint ?? true);
     form.transform(data => ({
         ...data,
         hospital_charge_items: (data.hospital_charge_items || [])
@@ -268,9 +456,18 @@ const submit = () => {
             const billId = response?.props?.flash?.billId;
 
             if (billId) {
-                // Open IPD invoice PDF in a new tab when server provides billId
-                const url = route('backend.download.ipd.invoice', { id: billId });
-                try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
+                const url = route('backend.print.ipd.invoice', {
+                    id: billId,
+                    ...(autoPrint ? { auto_print: 1 } : {}),
+                });
+                try {
+                    const popup = window.open(url, '_blank', 'noopener,noreferrer');
+                    if (!popup) {
+                        window.location.href = url;
+                    }
+                } catch (e) {
+                    window.location.href = url;
+                }
             }
 
             // Show toast only when server did not set a flash (to avoid duplicates
@@ -284,10 +481,7 @@ const submit = () => {
 };
 
 const saveAndPrint = () => {
-    submit();
-    setTimeout(() => {
-        window.print();
-    }, 1000);
+    submit({ autoPrint: true });
 };
 
 const isPatientModalOpen = ref(false);
@@ -489,6 +683,14 @@ const goToIpdList = () => {
     router.visit(route('backend.ipdpatient.index'));
 };
 
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    router.visit(route('backend.ipdpatient.index'));
+};
+
 const handlePatientSelect = (selectedPatient) => {
     form.patient_id = selectedPatient ? selectedPatient.id : '';
 };
@@ -505,6 +707,9 @@ const handleDoctorSelect = (selectedDoctor) => {
         @patientCreated="handlePatientCreated" />
     <SymptomTypeModal :isOpen="showSymptomTypeModal" @close="closeSymptomTypeModal"
         @symptomTypeCreated="handleSymptomTypeCreated" />
+    <DoctorModal :isOpen="isDoctorModalOpen" :designations="props.designations || []"
+        :departments="props.departments || []" :specialists="props.specialists || []"
+        @close="closeDoctorModal" @doctorCreated="handleDoctorCreated" />
 
     <BackendLayout>
         <div class="w-full transition duration-1000 ease-in-out transform bg-white rounded-md">
@@ -536,6 +741,14 @@ const handleDoctorSelect = (selectedDoctor) => {
 
                     <div class="p-2 py-2 flex items-center space-x-2">
                         <div class="flex items-center space-x-3">
+                            <button @click="goBack"
+                                class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gray-500 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gray-600 ml-2">
+                                <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                    stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                                </svg>
+                                Back
+                            </button>
                             <button @click="goToIpdList"
                                 class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-400 to-blue-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-blue-500 hover:to-blue-700 ml-2">
                                 <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -594,8 +807,9 @@ const handleDoctorSelect = (selectedDoctor) => {
                         <!-- Symptoms Description -->
                         <div>
                             <InputLabel for="symptom_description" value="Symptoms Description" />
-                            <textarea id="symptom_description" v-model="form.symptom_description" rows="2"
-                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            <textarea id="symptom_description" v-model="form.symptom_description" rows="1"
+                                @input="autoGrowTextarea"
+                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600 resize-none overflow-hidden"
                                 placeholder="Describe symptoms in detail"></textarea>
                             <InputError class="mt-1" :message="form.errors.symptom_description" />
                         </div>
@@ -603,10 +817,52 @@ const handleDoctorSelect = (selectedDoctor) => {
                         <!-- Note -->
                         <div>
                             <InputLabel for="note" value="Note" />
-                            <textarea id="note" v-model="form.note" rows="2"
-                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            <textarea id="note" v-model="form.note" rows="1"
+                                @input="autoGrowTextarea"
+                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600 resize-none overflow-hidden"
                                 placeholder="Additional notes"></textarea>
                             <InputError class="mt-1" :message="form.errors.note" />
+                        </div>
+
+                        <!-- Consultant Doctor -->
+                        <div>
+                            <InputLabel for="consultant_doctor_id" value="Consultant Doctor" class="required" />
+                            <div class="flex items-center space-x-2">
+                                <Multiselect :modelValue="doctorsList.find((doctor) => Number(doctor.id) === Number(form.consultant_doctor_id))"
+                                    @update:modelValue="handleDoctorSelect" :options="doctorsList" :track-by="'id'"
+                                    :label="'name'" placeholder="Search and select a doctor"
+                                    class="w-full text-sm rounded-md border border-slate-300 doctor-multiselect" />
+                                <button type="button" @click="openDoctorModal"
+                                    class="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                                    title="Add Doctor">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                        stroke-width="2">
+                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                            d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            <InputError class="mt-1" :message="form.errors.consultant_doctor_id" />
+                        </div>
+
+                        <!-- Reference Doctor -->
+                        <div>
+                            <InputLabel for="reference" value="Reference Doctor" />
+                            <input id="reference" v-model="form.reference" type="text"
+                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                placeholder="Reference doctor name" />
+                            <InputError class="mt-1" :message="form.errors.reference" />
+                        </div>
+
+                        <!-- Live Consultation -->
+                        <div>
+                            <InputLabel for="live_consultation" value="Live Consultation" />
+                            <select id="live_consultation" v-model="form.live_consultation"
+                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                <option value="no">No</option>
+                                <option value="yes">Yes</option>
+                            </select>
+                            <InputError class="mt-1" :message="form.errors.live_consultation" />
                         </div>
                     </div>
 
@@ -667,7 +923,6 @@ const handleDoctorSelect = (selectedDoctor) => {
                             </div>
                         </div>
 
-                        <!-- Reference & Consultant Doctor -->
                         <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                             <div>
                                 <InputLabel for="credit_limit" value="Credit Limit" />
@@ -676,42 +931,9 @@ const handleDoctorSelect = (selectedDoctor) => {
                                     placeholder="Credit Limit" />
                                 <InputError class="mt-1" :message="form.errors.credit_limit" />
                             </div>
-                            <div>
-                                <InputLabel for="advance_amount" value="Advance Amount (Tk)" />
-                                <div class="mb-1 flex items-center justify-between">
-                                    <span class="text-xs text-slate-500">Suggested: {{ formatTk(hospitalChargeGrandTotal) }}</span>
-                                    <button
-                                        type="button"
-                                        class="text-xs font-semibold text-emerald-700 hover:text-emerald-800"
-                                        @click="applyGrandTotalToAdvance"
-                                    >
-                                        Use Grand Total
-                                    </button>
-                                </div>
-                                <input id="advance_amount" v-model="form.advance_amount" type="number" step="0.01"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300" placeholder="0.00" />
-                                <InputError class="mt-1" :message="form.errors.advance_amount" />
-                            </div>
-                            <div>
-                                <InputLabel for="reference" value="Reference" />
-                                <input id="reference" v-model="form.reference" type="text"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
-                                    placeholder="Reference" />
-                                <InputError class="mt-1" :message="form.errors.reference" />
-                            </div>
-
                         </div>
 
                         <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-                            <div>
-                                <InputLabel for="consultant_doctor_id" value="Consultant Doctor" class="required" />
-                                <Multiselect :modelValue="props.doctors.find(d => d.id === form.consultant_doctor_id)"
-                                    @update:modelValue="handleDoctorSelect" :options="doctors" :track-by="'id'"
-                                    :label="'name'" placeholder="Search and select a doctor"
-                                    class="w-full text-sm rounded-md border border-slate-300" />
-                                <InputError class="mt-1" :message="form.errors.consultant_doctor_id" />
-                            </div>
-
                             <div>
                                 <InputLabel for="bed_group_id" value="Bed Group" class="required" />
                                 <select id="bed_group_id" v-model="form.bed_group_id"
@@ -723,10 +945,7 @@ const handleDoctorSelect = (selectedDoctor) => {
                                 </select>
                                 <InputError class="mt-1" :message="form.errors.bed_group_id" />
                             </div>
-                        </div>
 
-                        <!-- Live Consultation & Paid Amount -->
-                        <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                             <div>
                                 <InputLabel for="bed_id" value="Bed Number" class="required" />
                                 <select id="bed_id" v-model="form.bed_id"
@@ -740,15 +959,14 @@ const handleDoctorSelect = (selectedDoctor) => {
                                 </select>
                                 <InputError class="mt-1" :message="form.errors.bed_id" />
                             </div>
-                            <div>
-                                <InputLabel for="live_consultation" value="Live Consultation" />
-                                <select id="live_consultation" v-model="form.live_consultation"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
-                                    <option value="no">No</option>
-                                    <option value="yes">Yes</option>
-                                </select>
-                                <InputError class="mt-1" :message="form.errors.live_consultation" />
-                            </div>
+                        </div>
+
+                        <!-- Advance Amount -->
+                        <div>
+                            <InputLabel for="advance_amount" value="Advance Amount (Tk)" />
+                            <input id="advance_amount" v-model="form.advance_amount" type="number" step="0.01"
+                                class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" placeholder="0.00" />
+                            <InputError class="mt-1" :message="form.errors.advance_amount" />
                         </div>
                     </div>
                 </div>
@@ -779,40 +997,39 @@ const handleDoctorSelect = (selectedDoctor) => {
                             </thead>
                             <tbody>
                                 <tr v-for="(item, index) in form.hospital_charge_items" :key="index" class="border-t border-slate-200">
-                                    <td class="px-3 py-2 relative">
-                                        <input
-                                            v-model="item.item_name"
-                                            type="text"
-                                            class="block w-full p-1.5 text-sm rounded-md border-slate-300"
-                                            placeholder="Item name"
-                                            @input="onHospitalItemInput(index, $event)"
-                                            @focus="onHospitalItemInput(index, { target: { value: item.item_name } })"
-                                            @blur="hideHospitalItemSearch"
-                                            @keydown.down.prevent="hospitalItemSelectNext"
-                                            @keydown.up.prevent="hospitalItemSelectPrev"
-                                            @keydown.enter.prevent="onHospitalItemEnter(index, $event)"
-                                        />
-
-                                        <div
-                                            v-if="showHospitalItemSearch && activeHospitalItemRow === index"
-                                            class="absolute left-3 right-3 z-50 mt-1 max-h-56 overflow-auto rounded-md border border-slate-200 bg-white shadow"
+                                    <td class="px-3 py-2 relative" :data-hospital-item-multiselect="index">
+                                        <Multiselect
+                                            id="hospital-multiselect-" :class="`hospital-item-multiselect hospital-item-multiselect-${index} item-name-multiselect w-full text-sm rounded-md border border-slate-300`"
+                                            :modelValue="hospitalItemOptions.find(opt => opt.name === item.item_name) || null"
+                                            @update:modelValue="(val) => { if (val) { item.item_name = val.name; item.unit_price = val.unitPrice; } else { item.item_name = ''; } }"
+                                            @search-input="onHospitalItemSearch"
+                                            @search-change="onHospitalItemSearch"
+                                            :options="hospitalItemOptions"
+                                            :track-by="'id'"
+                                            :label="'name'"
+                                            
+                                            @open="() => onHospitalMultiselectOpen(index)"
+                                            @close="() => onHospitalMultiselectClose(index)"
+                                            :searchable="true"
+                                            :close-on-select="true"
+                                            :clear-on-select="false"
+                                            :allow-empty="true"
+                                            :preserve-search="true"
+                                            :max-height="300"
+                                            :show-labels="false"
+                                            placeholder="Search and select item"
+                                            @select="(item) => { onHospitalItemSelected(item, index); }"
                                         >
-                                            <div v-if="hospitalItemSearchLoading" class="p-2 text-xs text-slate-500">Searching...</div>
-                                            <div v-else>
-                                                <div
-                                                    v-for="(result, rIndex) in hospitalItemSearchResults"
-                                                    :key="result.id ?? `${result.name}-${rIndex}`"
-                                                    class="cursor-pointer p-2 text-xs"
-                                                    :class="rIndex === hospitalItemSelectedIndex ? 'bg-slate-100 font-semibold' : 'hover:bg-slate-100'"
-                                                    @mousedown.prevent="selectHospitalItemForRow(result, index)"
-                                                    @mouseover="hospitalItemSelectedIndex = rIndex"
-                                                >
-                                                    <div class="text-slate-800">{{ result.test_name ?? result.charge_name ?? result.name }}</div>
-                                                    <div class="text-slate-500">Tk {{ Number(result.amount ?? result.standard_charge ?? 0).toFixed(2) }}</div>
+                                            <template #option="{ option }">
+                                                <div class="text-xs">
+                                                    <div class="font-medium">{{ option.name }}</div>
+                                                    <div class="text-slate-600">Tk {{ Number(option.unitPrice ?? 0).toFixed(2) }}</div>
                                                 </div>
-                                                <div v-if="hospitalItemSearchResults.length === 0" class="p-2 text-xs text-slate-500">No matches</div>
-                                            </div>
-                                        </div>
+                                            </template>
+                                            <template #singleLabel="{ option }">
+                                                {{ typeof option === 'object' ? (option.name) : option }}
+                                            </template>
+                                        </Multiselect>
                                     </td>
                                     <td class="px-3 py-2">
                                         <input
@@ -877,5 +1094,26 @@ const handleDoctorSelect = (selectedDoctor) => {
 .required::after {
     content: " *";
     color: #e53e3e;
+}
+
+:deep(.doctor-multiselect .multiselect__content-wrapper) {
+    max-height: 280px !important;
+}
+
+:deep(.doctor-multiselect .multiselect__content) {
+    max-height: 260px !important;
+}
+
+:deep(.item-name-multiselect .multiselect__content-wrapper) {
+    max-height: 160px !important;
+}
+
+:deep(.item-name-multiselect .multiselect__content) {
+    max-height: 140px !important;
+}
+
+:deep(.item-name-multiselect .multiselect__option) {
+    padding: 6px 12px !important;
+    font-size: 0.875rem !important;
 }
 </style>

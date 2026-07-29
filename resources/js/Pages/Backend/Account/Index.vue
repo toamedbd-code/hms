@@ -528,8 +528,13 @@ function exportHistoryServerCsv() {
 <template>
   <BackendLayout>
     <div class="w-full p-4 bg-white rounded-md dark:bg-slate-900">
-      <h1 class="text-xl font-bold">{{ $page.props.pageTitle }}</h1>
-      <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">Chart of Accounts — add, view and manage accounts.</p>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 class="text-xl font-bold">{{ $page.props.pageTitle }}</h1>
+          <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">Chart of Accounts — add, view and manage accounts.</p>
+        </div>
+        <Link :href="route('backend.dashboard')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">Back</Link>
+      </div>
       <div class="mt-3 flex flex-wrap gap-2">
         <Link :href="route('backend.accounts.balances')" class="px-3 py-2 text-sm rounded border border-slate-300 dark:border-slate-600">Balances</Link>
         <Link :href="route('backend.ledger.index')" class="px-3 py-2 text-sm rounded border border-slate-300 dark:border-slate-600">Ledger</Link>

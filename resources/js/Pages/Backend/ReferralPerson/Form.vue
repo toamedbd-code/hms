@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
@@ -23,9 +23,12 @@ const form = useForm({
     pharmacy_commission: props.referralperson?.pharmacy_commission ?? '',
     pathology_commission: props.referralperson?.pathology_commission ?? '',
     radiology_commission: props.referralperson?.radiology_commission ?? '',
+    ecg_commission: props.referralperson?.ecg_commission ?? '',
+    ultrasound_commission: props.referralperson?.ultrasound_commission ?? '',
     blood_bank_commission: props.referralperson?.blood_bank_commission ?? '',
     ambulance_commission: props.referralperson?.ambulance_commission ?? '',
     apply_to_all: props.referralperson?.apply_to_all ?? false,
+    use_item_referral: props.referralperson?.use_item_referral ?? false,
 
     _method: props.referralperson?.id ? 'put' : 'post',
 });
@@ -55,6 +58,8 @@ const applyStandardCommissionToAll = () => {
         form.pharmacy_commission = form.standard_commission;
         form.pathology_commission = form.standard_commission;
         form.radiology_commission = form.standard_commission;
+        form.ecg_commission = form.standard_commission;
+        form.ultrasound_commission = form.standard_commission;
         form.blood_bank_commission = form.standard_commission;
         form.ambulance_commission = form.standard_commission;
     }
@@ -63,6 +68,26 @@ const applyStandardCommissionToAll = () => {
 const goToRefferalList = () => {
     router.get(route('backend.referralperson.index'));
 };
+
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    router.visit(route('backend.referralperson.index'));
+};
+
+const categories = props.categories ?? [];
+
+const groupedCategories = computed(() => {
+    const map = {};
+    (categories || []).forEach(c => {
+        const g = c.group ?? '';
+        if (!map[g]) map[g] = [];
+        map[g].push(c);
+    });
+    return map;
+});
 
 </script>
 
@@ -78,6 +103,14 @@ const goToRefferalList = () => {
 
                 <div class="p-2 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button @click="goBack"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-red-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-red-700 ml-2">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                            </svg>
+                            Back
+                        </button>
 
                         <button @click="goToRefferalList"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-400 to-blue-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-blue-500 hover:to-blue-700 ml-2">
@@ -130,8 +163,14 @@ const goToRefferalList = () => {
                             <InputLabel for="category_id" value="Category" class="text-xs" />
                             <select id="category_id" class="form-input text-xs h-9" v-model="form.category_id">
                                 <option value="">Select Category</option>
-                                <option v-for="data in categories" :key="data.id" :value="data.id">{{ data.name }}
-                                </option>
+                                <template v-for="(groupItems, group) in groupedCategories" :key="group">
+                                    <optgroup v-if="group" :label="group">
+                                        <option v-for="item in groupItems" :key="item.id" :value="item.id">{{ item.name }}</option>
+                                    </optgroup>
+                                    <template v-else>
+                                        <option v-for="item in groupItems" :key="item.id" :value="item.id">{{ item.name }}</option>
+                                    </template>
+                                </template>
                             </select>
                             <InputError class="mt-1 text-xs" :message="form.errors.category_id" />
                         </div>
@@ -192,6 +231,28 @@ const goToRefferalList = () => {
                             <input id="radiology_commission" class="form-input text-xs p-1 h-8"
                                 v-model="form.radiology_commission" type="number" step="0.01" min="0" />
                             <InputError class="mt-1 text-xs" :message="form.errors.radiology_commission" />
+                        </div>
+
+                        <div class="mt-2">
+                            <label class="inline-flex items-center">
+                                <input type="checkbox" class="form-checkbox h-3 w-3" v-model="form.use_item_referral" />
+                                <span class="ml-2 text-xs">Use Item Referral Percentage (prefer item-level percentage)</span>
+                            </label>
+                            <InputError class="mt-1 text-xs" :message="form.errors.use_item_referral" />
+                        </div>
+
+                        <div>
+                            <InputLabel for="ecg_commission" value="ECG (%)" class="text-xs" />
+                            <input id="ecg_commission" class="form-input text-xs p-1 h-8"
+                                v-model="form.ecg_commission" type="number" step="0.01" min="0" />
+                            <InputError class="mt-1 text-xs" :message="form.errors.ecg_commission" />
+                        </div>
+
+                        <div>
+                            <InputLabel for="ultrasound_commission" value="Ultrasound (%)" class="text-xs" />
+                            <input id="ultrasound_commission" class="form-input text-xs p-1 h-8"
+                                v-model="form.ultrasound_commission" type="number" step="0.01" min="0" />
+                            <InputError class="mt-1 text-xs" :message="form.errors.ultrasound_commission" />
                         </div>
 
                         <div>

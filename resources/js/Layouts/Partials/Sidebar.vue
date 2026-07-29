@@ -11,6 +11,17 @@ const brandingOverride = ref(null);
 let brandingHandler = null;
 let remoteUpdateHandler = null;
 let remoteForceHandler = null;
+
+const restoreSidebarCollapsedState = () => {
+  try {
+    const saved = window.localStorage.getItem('backend.sidebar.collapsed');
+    if (saved !== null) {
+      sideBar.value = saved === 'true';
+    }
+  } catch (e) {
+    // ignore local storage failures
+  }
+};
 // Accept both Inertia shared prop `webSetting` and page-specific `websetting`
 // (the WebSetting form returns `websetting` on partial reloads).
 // Prefer any client-side branding override so runtime updates persist
@@ -135,24 +146,37 @@ const handleResize = () => {
 };
 
 onMounted(() => {
+  restoreSidebarCollapsedState();
   window.addEventListener("resize", handleResize);
   // If server didn't provide sideMenus, try to fetch via API (fallback)
   try {
     const serverMenus = page.props.auth?.sideMenus ?? [];
     if (!Array.isArray(serverMenus) || serverMenus.length === 0) {
       let apiUrl = null;
+      const routeNames = [
+        'api.side-menus',
+        'backend.api.side-menus',
+        'backend.backend.api.side-menus',
+      ];
+
       try {
         if (typeof route === 'function') {
-          try { apiUrl = route('backend.api.side-menus'); } catch (e) { /* ignore */ }
-          if (!apiUrl) {
-            try { apiUrl = route('backend.backend.api.side-menus'); } catch (e) { /* ignore */ }
+          for (const routeName of routeNames) {
+            try {
+              apiUrl = route(routeName);
+              if (apiUrl) break;
+            } catch (e) {
+              // ignore missing route names
+            }
           }
         }
       } catch (err) {
         // ignore
       }
 
-      if (!apiUrl) apiUrl = '/admin/side-menus';
+      if (!apiUrl) {
+        apiUrl = '/admin/side-menus';
+      }
 
       // Prefer axios when available, otherwise use fetch fallback
       if (typeof window !== 'undefined' && window.axios && typeof window.axios.get === 'function') {
@@ -745,9 +769,9 @@ const webSettingModuleSubmenus = [
     requiredPermission: 'payroll-management',
   },
   {
-    name: 'Reporting Module Setting',
+    name: 'Report Settings',
     icon: 'bar-chart-2',
-    route: 'backend.websetting.module.reporting',
+    route: 'backend.report-setting.edit',
     requiredPermission: 'report-settings',
   },
 ];
@@ -1059,11 +1083,14 @@ watch(currentRouteName, async (newRoute) => {
 
 const filteredMenus = computed(() => {
   const base = (sourceMenus.value ?? []).map(menu => {
+    if (!menu || typeof menu !== 'object') return null;
     if (isBlockedMenuName(menu?.name)) {
       return null;
     }
 
     const filteredChildren = (menu.childrens ?? []).filter(child => {
+        if (!child || typeof child !== 'object') return false;
+
         if (isBlockedMenuName(child?.name)) {
           return false;
         }
@@ -1072,8 +1099,17 @@ const filteredMenus = computed(() => {
           return false;
         }
 
-        // Respect explicit permission on the menu item when present
-        if ((child.permission_name || child.permission) && !hasPermission(child.permission_name || child.permission)) {
+        // Respect explicit permission on the menu item when present.
+        // If the child defines its own permission, require that permission.
+        // Only allow an implicit parent-permission fallback when the child
+        // has no dedicated permission defined.
+        const childPermission = child.permission_name || child.permission;
+        const parentPermission = menu.permission_name || menu.permission;
+        if (childPermission) {
+          if (!hasPermission(childPermission)) {
+            return false;
+          }
+        } else if (parentPermission && !hasPermission(parentPermission)) {
           return false;
         }
 
@@ -1152,6 +1188,29 @@ const filteredMenus = computed(() => {
   // NOTE: Do not synthesize top-level menus on the client. The server's
   // `sideMenus` should fully determine what appears in the sidebar so that
   // role/permission changes are accurately represented after a save.
+  // However, if filtering leaves the sidebar empty due to stale permissions,
+  // fall back to the raw source menus so the navigation never disappears.
+  try {
+    if (!Array.isArray(base) || base.length === 0) {
+      const fallbackBase = (sourceMenus.value ?? []).map((menu) => {
+        if (!menu || typeof menu !== 'object') return null;
+        if (isBlockedMenuName(menu?.name)) return null;
+
+        const fallbackChildren = Array.isArray(menu?.childrens)
+          ? menu.childrens.filter((child) => !isBlockedMenuName(child?.name))
+          : [];
+
+        return {
+          ...menu,
+          childrens: fallbackChildren,
+        };
+      }).filter(Boolean);
+
+      return fallbackBase;
+    }
+  } catch (e) {
+    // ignore
+  }
 
   // Deduplicate top-level menus that are also listed as children
   try {
@@ -1180,6 +1239,24 @@ const filteredMenus = computed(() => {
       });
     } catch (e) {
       // ignore sort failure
+    }
+
+    if (deduped.length === 0) {
+      const fallbackBase = (sourceMenus.value ?? []).map((menu) => {
+        if (!menu || typeof menu !== 'object') return null;
+        if (isBlockedMenuName(menu?.name)) return null;
+
+        const fallbackChildren = Array.isArray(menu?.childrens)
+          ? menu.childrens.filter((child) => !isBlockedMenuName(child?.name))
+          : [];
+
+        return {
+          ...menu,
+          childrens: fallbackChildren,
+        };
+      }).filter(Boolean);
+
+      return fallbackBase;
     }
 
     return deduped;
@@ -1315,8 +1392,30 @@ const insertionIndex = computed(() => {
 
 // Keep server/menu sorting stable so sidebar items do not jump position
 // while navigating related pages inside the same module.
+// Ensure we always return at least a minimal navigation so the sidebar
+// never disappears in the UI even when filtering/permissions leave
+// the computed list empty (defensive UX fallback).
 const orderedMenus = computed(() => {
-  return Array.isArray(filteredMenus.value) ? filteredMenus.value : [];
+  try {
+    if (Array.isArray(filteredMenus.value) && filteredMenus.value.length > 0) {
+      return filteredMenus.value;
+    }
+
+    // Fallback: include a safe Dashboard entry when nothing else is available.
+    const dashboardCandidate = { id: 'fallback-dashboard', name: 'Dashboard', icon: 'home', route: 'backend.dashboard', childrens: [] };
+    // Only include the dashboard route if it actually exists in Ziggy
+    try {
+      if (routeExists('backend.dashboard')) {
+        return [dashboardCandidate];
+      }
+    } catch (e) {
+      // ignore and return empty
+    }
+
+    return [];
+  } catch (e) {
+    return Array.isArray(filteredMenus.value) ? filteredMenus.value : [];
+  }
 });
 
 const getRouteGroupKey = (routeName) => {
@@ -1391,17 +1490,17 @@ const getActiveRoute = (mainMenu) => {
 };
 
 const sidebarClasses = computed(() => {
-  const baseClasses = "bg-white text-gray-700 md:block relative border-r border-gray-200 shadow-sm";
+  const baseClasses = "bg-white text-gray-700 relative border-r border-gray-200 shadow-sm transition-all duration-200 flex-shrink-0";
   if (sideBar.value) {
-    return `hidden w-[70px] ${baseClasses}`;
-  } else {
-    return `block w-[240px] ${baseClasses}`;
+    return `block w-[70px] min-w-[70px] ${baseClasses}`;
   }
+
+  return `block w-[240px] min-w-[240px] ${baseClasses}`;
 });
 </script>
 
 <template>
-  <div :class="sidebarClasses">
+  <div class="app-sidebar" :class="sidebarClasses">
     <!-- Header -->
     <div class="w-full flex items-center h-[50px] border-b border-gray-200 bg-gray-100 px-4">
       <Link :href="route('backend.dashboard')"
@@ -1416,6 +1515,11 @@ const sidebarClasses = computed(() => {
       <ul class="w-full px-3 py-4 space-y-1">
         <!-- quickLinks will be inserted inline within the menu list (see insertionIndex) -->
 
+        <template v-if="orderedMenus.length === 0">
+          <li class="px-4 py-3 text-sm text-gray-500 border border-dashed border-gray-200 rounded-md bg-gray-50">
+            Sidebar menu unavailable — refresh page or check permissions.
+          </li>
+        </template>
         <template v-for="(mainMenu, Index) in orderedMenus" :key="childUniqueKey(mainMenu)">
           <!-- Menu with Submenu -->
           <li v-if="menuHasChildren(mainMenu)" :class="{ 'flex justify-center': sideBar }" class="relative" @click="onMenuTriggerClick($event, childUniqueKey(mainMenu), getActiveRoute(mainMenu) || (getRenderedChildren(mainMenu)[0] && getRenderedChildren(mainMenu)[0].route))">
@@ -1569,6 +1673,8 @@ const sidebarClasses = computed(() => {
             </li>
           </template>
         </template>
+
+        <!-- Static 'Main Category' helper removed per request -->
 
       </ul>
     </div>

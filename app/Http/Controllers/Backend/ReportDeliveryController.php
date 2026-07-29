@@ -13,7 +13,9 @@ class ReportDeliveryController extends Controller
     public function __construct()
     {
         $this->middleware('auth:admin');
-        $this->middleware('permission:report-delivery');
+        // Allow users with general report-delivery permission OR department-specific
+        // reporting permissions (pathology, ultrasound, xray) to access delivery actions.
+        $this->middleware('permission:report-delivery|pathology-reporting|ultrasound-reporting|xray-reporting');
     }
 
     /**
@@ -26,7 +28,7 @@ class ReportDeliveryController extends Controller
             return back()->with('error', 'Cannot send reports for IPD invoices.');
         }
 
-        $allowedCategories = ['Pathology', 'Radiology'];
+        $allowedCategories = ['Pathology', 'Radiology', 'Ultrasound', 'X-ray', 'ECG'];
 
         if ((float) ($billing->due_amount ?? 0) > 0) {
             return back()->with('error', 'Cannot send report while due amount exists.');
@@ -105,23 +107,31 @@ class ReportDeliveryController extends Controller
                         });
                 });
             })
-            ->when($status !== '', function ($query) use ($status) {
+            ->when($status !== '', function ($query) use ($status, $allowedCategories) {
                 if ($status === 'pending') {
-                    // No sample collected for any item
-                    $query->whereDoesntHave('billItems', function ($q) {
-                        $q->whereNotNull('sample_collected_at');
+                    // No sample collected for any relevant (non-disposable) item
+                    $query->whereDoesntHave('billItems', function ($q) use ($allowedCategories) {
+                        $q->whereIn('category', $allowedCategories)
+                            ->where('requires_sample', true)
+                            ->whereNotNull('sample_collected_at');
                     });
                 } elseif ($status === 'processing') {
-                    // Has at least one collected and at least one not yet reported
-                    $query->whereHas('billItems', function ($q) {
-                        $q->whereNotNull('sample_collected_at');
-                    })->whereHas('billItems', function ($q) {
-                        $q->whereNull('reported_at');
+                    // Has at least one collected and at least one not yet reported among relevant items
+                    $query->whereHas('billItems', function ($q) use ($allowedCategories) {
+                        $q->whereIn('category', $allowedCategories)
+                            ->where('requires_sample', true)
+                            ->whereNotNull('sample_collected_at');
+                    })->whereHas('billItems', function ($q) use ($allowedCategories) {
+                        $q->whereIn('category', $allowedCategories)
+                            ->where('requires_sample', true)
+                            ->whereNull('reported_at');
                     });
                 } elseif ($status === 'complete') {
-                    // All relevant items reported
-                    $query->whereDoesntHave('billItems', function ($q) {
-                        $q->whereNull('reported_at');
+                    // All relevant (non-disposable) items reported
+                    $query->whereDoesntHave('billItems', function ($q) use ($allowedCategories) {
+                        $q->whereIn('category', $allowedCategories)
+                            ->where('requires_sample', true)
+                            ->whereNull('reported_at');
                     });
                 }
             })

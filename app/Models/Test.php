@@ -22,11 +22,13 @@ class Test extends Model
         'pathology_sub_category',
         'method',
         'report_days',
+        'room_no',
         'charge_category_id',
         'charge_name',
         'tax',
         'standard_charge',
         'amount',
+        'referral_percentage',
         'test_parameters',
         'commissionable',
         'commission_rate',
@@ -36,6 +38,7 @@ class Test extends Model
     protected $casts = [
         'commissionable' => 'boolean',
         'commission_rate' => 'decimal:2',
+        'referral_percentage' => 'decimal:2',
     ];
 
     // Relationships

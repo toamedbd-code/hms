@@ -211,16 +211,16 @@
         color: #475569;
         padding-left: 16px;
     }
-    /* Force footer image to span full width and not be constrained by template-specific rules */
+    /* Footer image: keep natural aspect ratio and avoid side-cropping */
     .footer-wrapper .footer-image-area img.footer-image,
     .footer-image {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
         display: block !important;
-        object-fit: cover !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        max-width: 100% !important;
+        width: auto !important;
+        height: 100% !important;
+        object-fit: contain !important;
         object-position: center bottom !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
@@ -269,14 +269,16 @@
 
         .footer-wrapper .footer-image-area img.footer-image,
         .footer-image {
+            /* Center the footer image horizontally and preserve aspect ratio to avoid horizontal cropping */
             position: absolute !important;
-            left: 0 !important;
-            right: 0 !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
             bottom: 0 !important;
             display: block !important;
-            width: 100% !important;
+            width: auto !important;
+            max-width: 100% !important;
             height: 100% !important;
-            object-fit: cover !important;
+            object-fit: contain !important;
             object-position: center bottom !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
@@ -313,19 +315,20 @@
            and render as a single-line row with left/right alignment. */
         .footer-content-area.above {
             top: auto !important;
-            /* move content above the footer image so it is never covered */
-            bottom: calc(var(--report-footer-height) - 10mm) !important;
+            /* move content above the footer image so it is never covered; shift down by 5mm toward the image */
+            bottom: calc(var(--report-footer-height) - 5mm) !important;
             justify-content: space-between !important;
-            padding: 4px 6mm !important;
+            padding: 4px 10mm 4px 6mm !important; /* extra right padding to keep timestamp inside page */
         }
 
         .footer-content-area.above .footer-content-row {
             flex-direction: row !important;
-            gap: 4px !important;
+            gap: 6px !important;
             align-items: center !important;
             justify-content: space-between !important;
             width: 100%;
             white-space: nowrap !important;
+            padding-right: 4mm !important; /* extra inner space to avoid clipping */
         }
 
         /* Constrain main and timestamp widths so timestamp stays inside page on one line */
@@ -334,21 +337,23 @@
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
-            flex: 1 1 auto;
-            /* Narrower reserved space for timestamp so more room for main content */
-            max-width: calc(100% - 80px) !important;
+            flex: 1 1 auto !important;
+            max-width: calc(100% - 130px) !important;
             text-align: left !important;
             font-size: 12px !important;
+            padding-right: 4mm !important;
         }
 
         .footer-content-area.above .footer-printed-at {
             display: inline-block !important;
             white-space: nowrap !important;
-            margin-left: 4px !important;
-            /* Slightly narrower timestamp box */
-            flex: 0 0 70px !important;
+            margin-left: 8px !important;
+            flex: 0 0 100px !important;
             text-align: right !important;
             font-size: 12px !important;
+            padding-right: 2mm !important;
+            /* Shift timestamp right by 10mm (was -40mm, now -30mm) so it moves toward the right */
+            transform: translateX(-30mm) !important;
         }
 
         /* Reserve space at page bottom so content doesn't overlap/clip the footer */

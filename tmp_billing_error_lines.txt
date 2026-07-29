@@ -1,0 +1,194 @@
+
+storage\logs\laravel-2026-07-12.log:13:[2026-07-12 00:20:44] local.DEBUG: 
+billing.store.received {"billing_date":"2026-07-12","billing_time":"00:20:43"} 
+storage\logs\laravel-2026-07-12.log:14:[2026-07-12 00:20:44] local.DEBUG: 
+billing.store.items {"items":[{"id":175,"name":"CBC","category":"Pathology","un
+it_price":550,"quantity":1,"total_amount":550,"discount":0,"rugound":0,"net_amo
+unt":550,"room_no":null},{"id":12,"name":"RBS","category":"Pathology","unit_pri
+ce":200,"quantity":1,"total_amount":200,"discount":0,"rugound":0,"net_amount":2
+00,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:15:[2026-07-12 00:20:44] local.DEBUG: 
+billing.store.items.normalized {"items":[{"id":175,"name":"CBC","category":"Pat
+hology","unit_price":550,"quantity":1,"total_amount":550,"discount":0,"rugound"
+:0,"net_amount":550,"room_no":null},{"id":12,"name":"RBS","category":"Pathology
+","unit_price":200,"quantity":1,"total_amount":200,"discount":0,"rugound":0,"ne
+t_amount":200,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:16:[2026-07-12 00:20:44] local.DEBUG: 
+billing.store.item.snapshot {"item_id":175,"item_name":"CBC","category":"Pathol
+ogy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:17:[2026-07-12 00:20:44] local.DEBUG: 
+billing.store.item.snapshot {"item_id":12,"item_name":"RBS","category":"Patholo
+gy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:86:[2026-07-12 10:07:55] local.DEBUG: 
+billing.store.received {"billing_date":"2026-07-12","billing_time":"10:07:53"} 
+storage\logs\laravel-2026-07-12.log:87:[2026-07-12 10:07:55] local.DEBUG: 
+billing.store.items {"items":[{"id":175,"name":"CBC","category":"Pathology","un
+it_price":550,"quantity":1,"total_amount":550,"discount":0,"rugound":0,"net_amo
+unt":550,"room_no":null},{"id":12,"name":"RBS","category":"Pathology","unit_pri
+ce":200,"quantity":1,"total_amount":200,"discount":0,"rugound":0,"net_amount":2
+00,"room_no":null},{"id":15,"name":"S.Creatinine","category":"Pathology","unit_
+price":500,"quantity":1,"total_amount":500,"discount":0,"rugound":0,"net_amount
+":500,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:88:[2026-07-12 10:07:55] local.DEBUG: 
+billing.store.items.normalized {"items":[{"id":175,"name":"CBC","category":"Pat
+hology","unit_price":550,"quantity":1,"total_amount":550,"discount":0,"rugound"
+:0,"net_amount":550,"room_no":null},{"id":12,"name":"RBS","category":"Pathology
+","unit_price":200,"quantity":1,"total_amount":200,"discount":0,"rugound":0,"ne
+t_amount":200,"room_no":null},{"id":15,"name":"S.Creatinine","category":"Pathol
+ogy","unit_price":500,"quantity":1,"total_amount":500,"discount":0,"rugound":0,
+"net_amount":500,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:89:[2026-07-12 10:07:55] local.DEBUG: 
+billing.store.item.snapshot {"item_id":175,"item_name":"CBC","category":"Pathol
+ogy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:90:[2026-07-12 10:07:55] local.DEBUG: 
+billing.store.item.snapshot {"item_id":12,"item_name":"RBS","category":"Patholo
+gy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:91:[2026-07-12 10:07:55] local.DEBUG: 
+billing.store.item.snapshot {"item_id":15,"item_name":"S.Creatinine","category"
+:"Pathology","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:135:[2026-07-12 14:09:44] local.DEBUG: 
+billing.store.received {"billing_date":"2026-07-12","billing_time":"14:09:41"} 
+storage\logs\laravel-2026-07-12.log:136:[2026-07-12 14:09:44] local.DEBUG: 
+billing.store.items {"items":[{"id":175,"name":"CBC","category":"Pathology","un
+it_price":550,"quantity":1,"total_amount":550,"discount":0,"rugound":0,"net_amo
+unt":550,"room_no":null},{"id":12,"name":"RBS","category":"Pathology","unit_pri
+ce":200,"quantity":1,"total_amount":200,"discount":0,"rugound":0,"net_amount":2
+00,"room_no":null},{"id":67,"name":"CRP","category":"Pathology","unit_price":60
+0,"quantity":1,"total_amount":600,"discount":0,"rugound":0,"net_amount":600,"ro
+om_no":null}]} 
+storage\logs\laravel-2026-07-12.log:137:[2026-07-12 14:09:44] local.DEBUG: 
+billing.store.items.normalized {"items":[{"id":175,"name":"CBC","category":"Pat
+hology","unit_price":550,"quantity":1,"total_amount":550,"discount":0,"rugound"
+:0,"net_amount":550,"room_no":null},{"id":12,"name":"RBS","category":"Pathology
+","unit_price":200,"quantity":1,"total_amount":200,"discount":0,"rugound":0,"ne
+t_amount":200,"room_no":null},{"id":67,"name":"CRP","category":"Pathology","uni
+t_price":600,"quantity":1,"total_amount":600,"discount":0,"rugound":0,"net_amou
+nt":600,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:138:[2026-07-12 14:09:44] local.DEBUG: 
+billing.store.item.snapshot {"item_id":175,"item_name":"CBC","category":"Pathol
+ogy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:139:[2026-07-12 14:09:44] local.DEBUG: 
+billing.store.item.snapshot {"item_id":12,"item_name":"RBS","category":"Patholo
+gy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:140:[2026-07-12 14:09:44] local.DEBUG: 
+billing.store.item.snapshot {"item_id":67,"item_name":"CRP","category":"Patholo
+gy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:141:[2026-07-12 14:17:17] local.ERROR: 
+App\Http\Controllers\Backend\InvoiceController::__construct(): Argument #2 
+($medicineInventoryService) must be of type 
+App\Services\MedicineInventoryService, null given, called in 
+C:\laragon\www\hms\scripts\debug_billing_874.php on line 22 
+{"exception":"[object] (TypeError(code: 0): 
+App\\Http\\Controllers\\Backend\\InvoiceController::__construct(): Argument #2 
+($medicineInventoryService) must be of type 
+App\\Services\\MedicineInventoryService, null given, called in 
+C:\\laragon\\www\\hms\\scripts\\debug_billing_874.php on line 22 at 
+C:/laragon/www/hms/app/Http/Controllers/Backend/InvoiceController.php:49)
+storage\logs\laravel-2026-07-12.log:146:[2026-07-12 14:17:47] local.ERROR: 
+Method App\Http\Controllers\Backend\InvoiceController::calculateFilteredTotals 
+does not exist. {"exception":"[object] (BadMethodCallException(code: 0): 
+Method 
+App\\Http\\Controllers\\Backend\\InvoiceController::calculateFilteredTotals 
+does not exist. at C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/R
+outing/Controller.php:68)
+storage\logs\laravel-2026-07-12.log:151:[2026-07-12 14:24:42] local.DEBUG: 
+billing.store.received {"billing_date":"2026-07-12","billing_time":"14:24:39"} 
+storage\logs\laravel-2026-07-12.log:152:[2026-07-12 14:24:42] local.DEBUG: 
+billing.store.items {"items":[{"id":175,"name":"CBC","category":"Pathology","un
+it_price":577.5,"quantity":1,"total_amount":577.5,"discount":0,"rugound":0,"net
+_amount":577.5,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:153:[2026-07-12 14:24:42] local.DEBUG: 
+billing.store.items.normalized {"items":[{"id":175,"name":"CBC","category":"Pat
+hology","unit_price":577.5,"quantity":1,"total_amount":577.5,"discount":0,"rugo
+und":0,"net_amount":577.5,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:154:[2026-07-12 14:24:42] local.DEBUG: 
+billing.store.item.snapshot {"item_id":175,"item_name":"CBC","category":"Pathol
+ogy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:168:[2026-07-12 17:03:14] local.ERROR: The 
+"--compact" option does not exist. {"exception":"[object] 
+(Symfony\\Component\\Console\\Exception\\RuntimeException(code: 0): The 
+\"--compact\" option does not exist. at 
+C:/laragon/www/hms/vendor/symfony/console/Input/ArgvInput.php:226)
+storage\logs\laravel-2026-07-12.log:200:[2026-07-12 18:03:21] local.DEBUG: 
+billing.store.received {"billing_date":"2026-07-12","billing_time":"18:03:19"} 
+storage\logs\laravel-2026-07-12.log:201:[2026-07-12 18:03:21] local.DEBUG: 
+billing.store.items {"items":[{"id":213,"name":"Normal Delivery (Normal Bed 
+Without Medicine)","category":"IPD","unit_price":7000,"quantity":1,"total_amoun
+t":7000,"discount":0,"rugound":0,"net_amount":7000,"room_no":null},{"id":175,"n
+ame":"CBC","category":"Pathology","unit_price":577.5,"quantity":1,"total_amount
+":577.5,"discount":0,"rugound":0,"net_amount":577.5,"room_no":null},{"id":12,"n
+ame":"RBS","category":"Pathology","unit_price":200,"quantity":1,"total_amount":
+200,"discount":0,"rugound":0,"net_amount":200,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:202:[2026-07-12 18:03:21] local.DEBUG: 
+billing.store.items.normalized {"items":[{"id":213,"name":"Normal Delivery 
+(Normal Bed Without Medicine)","category":"IPD","unit_price":7000,"quantity":1,
+"total_amount":7000,"discount":0,"rugound":0,"net_amount":7000,"room_no":null},
+{"id":175,"name":"CBC","category":"Pathology","unit_price":577.5,"quantity":1,"
+total_amount":577.5,"discount":0,"rugound":0,"net_amount":577.5,"room_no":null}
+,{"id":12,"name":"RBS","category":"Pathology","unit_price":200,"quantity":1,"to
+tal_amount":200,"discount":0,"rugound":0,"net_amount":200,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:203:[2026-07-12 18:03:21] local.DEBUG: 
+billing.store.item.snapshot {"item_id":175,"item_name":"CBC","category":"Pathol
+ogy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:204:[2026-07-12 18:03:21] local.DEBUG: 
+billing.store.item.snapshot {"item_id":12,"item_name":"RBS","category":"Patholo
+gy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:211:[2026-07-12 18:13:32] local.DEBUG: 
+billing.store.received {"billing_date":"2026-07-12","billing_time":"18:13:31"} 
+storage\logs\laravel-2026-07-12.log:212:[2026-07-12 18:13:32] local.DEBUG: 
+billing.store.items {"items":[{"id":12,"name":"RBS","category":"Pathology","uni
+t_price":200,"quantity":1,"total_amount":200,"discount":0,"rugound":0,"net_amou
+nt":200,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:213:[2026-07-12 18:13:32] local.DEBUG: 
+billing.store.items.normalized {"items":[{"id":12,"name":"RBS","category":"Path
+ology","unit_price":200,"quantity":1,"total_amount":200,"discount":0,"rugound":
+0,"net_amount":200,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:214:[2026-07-12 18:13:32] local.DEBUG: 
+billing.store.item.snapshot {"item_id":12,"item_name":"RBS","category":"Patholo
+gy","commissionable":null,"commission_rate_snapshot":null} 
+storage\logs\laravel-2026-07-12.log:223:[2026-07-12 18:30:21] local.DEBUG: 
+billing.store.received {"billing_date":"2026-07-12","billing_time":"18:30:19"} 
+storage\logs\laravel-2026-07-12.log:224:[2026-07-12 18:30:21] local.DEBUG: 
+billing.store.items {"items":[{"id":201,"name":"Breast Lump (Cabin Without Medi
+cine)","category":"IPD","unit_price":15500,"quantity":1,"total_amount":15500,"d
+iscount":0,"rugound":0,"net_amount":15500,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:225:[2026-07-12 18:30:21] local.DEBUG: 
+billing.store.items.normalized {"items":[{"id":201,"name":"Breast Lump (Cabin 
+Without Medicine)","category":"IPD","unit_price":15500,"quantity":1,"total_amou
+nt":15500,"discount":0,"rugound":0,"net_amount":15500,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:226:[2026-07-12 18:30:35] local.DEBUG: 
+billing.store.received {"billing_date":"2026-07-12","billing_time":"18:30:34"} 
+storage\logs\laravel-2026-07-12.log:227:[2026-07-12 18:30:35] local.DEBUG: 
+billing.store.items {"items":[{"id":201,"name":"Breast Lump (Cabin Without Medi
+cine)","category":"IPD","unit_price":15500,"quantity":1,"total_amount":15500,"d
+iscount":0,"rugound":0,"net_amount":15500,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:228:[2026-07-12 18:30:35] local.DEBUG: 
+billing.store.items.normalized {"items":[{"id":201,"name":"Breast Lump (Cabin 
+Without Medicine)","category":"IPD","unit_price":15500,"quantity":1,"total_amou
+nt":15500,"discount":0,"rugound":0,"net_amount":15500,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:229:[2026-07-12 18:38:55] local.DEBUG: 
+billing.store.received {"billing_date":"2026-07-12","billing_time":"18:38:53"} 
+storage\logs\laravel-2026-07-12.log:230:[2026-07-12 18:38:55] local.DEBUG: 
+billing.store.items {"items":[{"id":216,"name":"CBC & Platelet count","category
+":"Pathology","unit_price":400,"quantity":1,"total_amount":400,"discount":0,"ru
+gound":0,"net_amount":400,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:231:[2026-07-12 18:38:55] local.DEBUG: 
+billing.store.items.normalized {"items":[{"id":216,"name":"CBC & Platelet count
+","category":"Pathology","unit_price":400,"quantity":1,"total_amount":400,"disc
+ount":0,"rugound":0,"net_amount":400,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:232:[2026-07-12 18:44:53] local.DEBUG: 
+billing.store.received {"billing_date":"2026-07-12","billing_time":"18:44:51"} 
+storage\logs\laravel-2026-07-12.log:233:[2026-07-12 18:44:53] local.DEBUG: 
+billing.store.items {"items":[{"id":89,"name":"Reducing Substance (RS)","catego
+ry":"Pathology","unit_price":600,"quantity":1,"total_amount":600,"discount":0,"
+rugound":0,"net_amount":600,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:234:[2026-07-12 18:44:53] local.DEBUG: 
+billing.store.items.normalized {"items":[{"id":89,"name":"Reducing Substance (R
+S)","category":"Pathology","unit_price":600,"quantity":1,"total_amount":600,"di
+scount":0,"rugound":0,"net_amount":600,"room_no":null}]} 
+storage\logs\laravel-2026-07-12.log:235:[2026-07-12 18:44:53] local.DEBUG: 
+billing.store.item.snapshot {"item_id":89,"item_name":"Reducing Substance (RS)"
+,"category":"Pathology","commissionable":null,"commission_rate_snapshot":null} 
+
+
+

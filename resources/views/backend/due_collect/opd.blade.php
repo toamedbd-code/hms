@@ -39,6 +39,8 @@
                 <form method="POST" action="{{ route('backend.opd.due.collect.store', $opdPatient->id) }}">
                     @csrf
 
+                    <input type="hidden" name="submission_token" value="{{ $submissionToken ?? '' }}">
+
                     <div class="mb-3">
                         <label class="form-label fw-bold">Pay Amount</label>
                         <input

@@ -15,6 +15,7 @@ class SingleDeveloperSeeder extends Seeder
         // Seed menus and related menu-sync seeders so PermissionSeeder can build full permission set
         $this->call([
             MenuSeeder::class,
+            UpdateItemChargeMenuSeeder::class,
             SettingsMenuSyncSeeder::class,
             QuickAccessMenuPermissionSyncSeeder::class,
             StoreManagementMenuSeeder::class,
@@ -33,6 +34,7 @@ class SingleDeveloperSeeder extends Seeder
             DutyRosterPermissionSeeder::class,
             SalarySheetPermissionSeeder::class,
             SidebarPermissionStabilitySeeder::class,
+            SidebarMenuOrderPermissionSeeder::class,
         ]);
 
         // Ensure permission cache is cleared

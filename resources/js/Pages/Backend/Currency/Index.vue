@@ -1,6 +1,6 @@
 <script setup>
 import BackendLayout from '@/Layouts/BackendLayout.vue';
-import { router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 const props = defineProps(['datas']);
 
 const deleteCurrency = (id) => {
@@ -14,7 +14,10 @@ const deleteCurrency = (id) => {
     <div class="p-4 bg-white rounded shadow">
       <div class="flex items-center justify-between">
         <h1 class="text-xl font-bold">Currencies</h1>
-        <a :href="route('backend.currency.create')" class="btn-colorful">Create</a>
+        <div class="flex items-center gap-2">
+          <Link :href="route('backend.dashboard')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">Back</Link>
+          <a :href="route('backend.currency.create')" class="btn-colorful">Create</a>
+        </div>
       </div>
 
       <table class="w-full mt-4 table-auto">

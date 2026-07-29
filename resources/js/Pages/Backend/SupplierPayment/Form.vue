@@ -73,7 +73,7 @@ const submit = () => {
         <h1 class="text-xl font-semibold text-gray-800">
           {{ isEdit ? 'Edit Supplier Payment' : 'Add Supplier Payment' }}
         </h1>
-        <Link :href="route('backend.supplierpayment.index')" class="px-3 py-2 text-sm text-white bg-gray-600 rounded hover:bg-gray-700">
+        <Link :href="route('backend.supplierpayment.index')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">
           Back
         </Link>
       </div>

@@ -17,6 +17,9 @@ return new class extends Migration
             if (!Schema::hasColumn('billings', 'invoice_amount')) {
                 $table->decimal('invoice_amount', 10, 2)->default(0)->after('paid_amt');
             }
+            if (!Schema::hasColumn('billings', 'return_amt')) {
+                $table->decimal('return_amt', 10, 2)->default(0)->after('receiving_amt');
+            }
         });
     }
 
@@ -30,6 +33,9 @@ return new class extends Migration
         Schema::table('billings', function (Blueprint $table) {
             if (Schema::hasColumn('billings', 'invoice_amount')) {
                 $table->dropColumn('invoice_amount');
+            }
+            if (Schema::hasColumn('billings', 'return_amt')) {
+                $table->dropColumn('return_amt');
             }
         });
     }

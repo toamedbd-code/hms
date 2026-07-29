@@ -1,6 +1,6 @@
 <script setup>
 import BackendLayout from '@/Layouts/BackendLayout.vue';
-import { router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 const props = defineProps(['datas','currencies']);
 const csrfToken = (typeof document !== 'undefined') ? (document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '') : '';
 
@@ -13,7 +13,10 @@ const deleteExchangeRate = (id) => {
 <template>
   <BackendLayout>
     <div class="p-4 bg-white rounded shadow">
-      <h1 class="text-xl font-bold">Exchange Rates</h1>
+      <div class="flex items-center justify-between">
+        <h1 class="text-xl font-bold">Exchange Rates</h1>
+        <Link :href="route('backend.currency.index')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">Back</Link>
+      </div>
       <form method="post" :action="route('backend.exchange-rate.store')" class="mt-4">
         <input type="hidden" name="_token" :value="csrfToken" />
         <div class="grid grid-cols-3 gap-2">

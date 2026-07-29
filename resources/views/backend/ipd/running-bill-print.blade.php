@@ -16,16 +16,19 @@
 
         body {
             font-family: Arial, sans-serif;
-            font-size: 13px;
+            font-size: 12px;
             margin: 0;
-            padding: 16px;
+            padding: 10px;
             color: #111827;
+            -webkit-font-smoothing: antialiased;
         }
 
         .page {
-            max-width: 900px;
+            width: 210mm;
+            max-width: 210mm;
             margin: 0 auto;
-            padding-bottom: 90px;
+            padding: 8mm 10mm 18mm 10mm;
+            box-shadow: none;
         }
 
         .header-image,
@@ -128,6 +131,8 @@
             width: 100%;
             border-collapse: collapse;
             margin-top: 6px;
+            table-layout: fixed;
+            word-wrap: break-word;
         }
 
         th,
@@ -136,6 +141,7 @@
             padding: 6px 8px;
             text-align: left;
             vertical-align: top;
+            font-size: 11px;
         }
 
         th {
@@ -145,6 +151,14 @@
         .text-right {
             text-align: right;
         }
+
+        /* keep rows together when printing */
+        tr, td, th {
+            page-break-inside: avoid;
+        }
+
+        thead { display: table-header-group; }
+        tfoot { display: table-footer-group; }
 
         .actions {
             margin-top: 10px;
@@ -169,13 +183,11 @@
         }
 
         @media print {
-            .actions {
-                display: none;
-            }
-
-            body {
-                padding: 0;
-            }
+            .actions { display: none; }
+            body { padding: 0; }
+            /* tighter spacing for print */
+            th, td { padding: 4px 6px; }
+            .title { font-size: 16px; }
         }
     </style>
 </head>
@@ -184,18 +196,31 @@
     <div class="page">
         @includeIf('prints.partials._header')
 
-        <div class="header">
-            <div>
-                <div class="title">IPD Running Bill</div>
-                <div class="muted">Print: {{ $printed_at ?? '' }}</div>
-            </div>
-            <div class="muted">
-                IPD ID: {{ $ipdpatient?->id ?? 'N/A' }}
-                @if (!empty($barcodeImage))
-                    <div class="barcode"><img src="{{ $barcodeImage }}" alt="Barcode"></div>
-                @endif
-            </div>
-        </div>
+        @php
+            $ipd_serial = prefixed_serial('ipd_no_prefix', 'IPDN', $ipdpatient->id, 4) ?? ($ipdpatient?->id ?? 'N/A');
+        @endphp
+        <table style="width:100%; border-collapse: collapse; margin-bottom:8px;">
+            <tr style="border:0;">
+                <td style="border:0; width:30%; vertical-align: middle;">
+                    @if(function_exists('DNS1D'))
+                        {!! DNS1D::getBarcodeHTML($ipd_serial, 'C128', 1, 30) !!}
+                    @elseif(!empty($barcodeImage))
+                        <img src="{{ $barcodeImage }}" alt="Barcode" style="height:32px;">
+                    @endif
+                </td>
+                <td style="border:0; text-align:center; vertical-align: middle;">
+                    <div class="title">IPD Running Bill</div>
+                    <div class="muted">Print: {{ $printed_at ?? '' }}</div>
+                </td>
+                <td style="border:0; width:30%; text-align:right; vertical-align: middle;">
+                    @if(function_exists('DNS1D'))
+                        {!! DNS1D::getBarcodeHTML($ipd_serial, 'C128', 1, 30) !!}
+                    @elseif(!empty($barcodeImage))
+                        <img src="{{ $barcodeImage }}" alt="Barcode" style="height:32px;">
+                    @endif
+                </td>
+            </tr>
+        </table>
 
         @php
             $patientName = $ipdpatient?->patient?->name ?? 'N/A';
@@ -361,9 +386,7 @@
 
 <script>
     window.addEventListener('load', function () {
-        setTimeout(function () {
-            window.print();
-        }, 180);
+        setTimeout(function () { window.print(); }, 220);
     });
 </script>
 

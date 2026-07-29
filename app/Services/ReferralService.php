@@ -22,8 +22,12 @@ class ReferralService
 
     public function list()
     {
-        return $this->referralModel->whereNull('deleted_at')
-            ->with(['payee:id,name,phone', 'billing:id,bill_number,invoice_number,patient_mobile']);
+        return $this->referralModel->whereNull('referrals.deleted_at')
+            ->with(['payee:id,name,phone', 'billing:id,bill_number,invoice_number,patient_mobile'])
+            ->join('referralpeople', 'referrals.payee_id', '=', 'referralpeople.id')
+            ->select('referrals.*')
+            ->orderByRaw('LOWER(referralpeople.name) ASC')
+            ->orderBy('referrals.id', 'asc');
     }
 
     public function all()

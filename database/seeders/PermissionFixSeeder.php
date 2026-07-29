@@ -26,6 +26,10 @@ class PermissionFixSeeder extends Seeder
 
         $parentPermission = Permission::findOrCreate('pharmacy-management', 'admin');
         $hrHubParent = Permission::findOrCreate('hr-hub-management', 'admin');
+        $dashboardParent = Permission::findOrCreate('dashboard', 'admin');
+        $dashboardDisposableIncome = Permission::findOrCreate('dashboard-card-disposable-income', 'admin');
+        $dashboardDisposableIncome->parent_id = $dashboardParent->id;
+        $dashboardDisposableIncome->save();
 
         $permissionNames = [
             'pharmacy-bill-list',
@@ -48,6 +52,8 @@ class PermissionFixSeeder extends Seeder
             'dutyroaster-list',
             'salary-sheet',
             'salary-sheet-pay',
+            'dashboard-card-disposable-income',
+            'dashboard-card-referral-commission',
         ];
 
         $opdParent = Permission::where('name', 'opd-patient-list')->first();

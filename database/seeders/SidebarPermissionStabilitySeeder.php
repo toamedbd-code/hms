@@ -44,9 +44,10 @@ class SidebarPermissionStabilitySeeder extends Seeder
             'backend.websetting.section.prefix' => ['prefix-setting', 3],
             'backend.websetting.section.sms' => ['sms-setting', 4],
             'backend.websetting.section.other' => ['other-setting', 5],
-            'backend.settings.payment.bkash' => ['b-kash-settings', 6],
-            'backend.activity-logs.index' => ['activity-logs', 7],
-            'backend.activity-logs.print' => ['activity-logs-print', 8],
+            'backend.websetting.section.sidebar' => ['sidebar-setting', 6],
+            'backend.settings.payment.bkash' => ['b-kash-settings', 7],
+            'backend.activity-logs.index' => ['activity-logs', 8],
+            'backend.activity-logs.print' => ['activity-logs-print', 9],
         ];
 
         foreach ($settingsRoutePermissionMap as $route => [$permissionName, $sorting]) {
@@ -60,6 +61,13 @@ class SidebarPermissionStabilitySeeder extends Seeder
         }
 
         $this->ensurePermission('billing', null, 2);
+        $this->ensurePermission('cash-counter', 'billing', 8);
+        Menu::query()
+            ->where('route', 'backend.cash-counter.index')
+            ->where('status', 'Active')
+            ->whereNull('deleted_at')
+            ->update(['permission_name' => 'cash-counter', 'parent_id' => null, 'name' => 'Cash Counter', 'icon' => 'credit-card']);
+
         $billingMenu = Menu::query()
             ->whereNull('parent_id')
             ->where(function ($query) {
@@ -88,6 +96,12 @@ class SidebarPermissionStabilitySeeder extends Seeder
             $billingMenu->sorting = 1;
         }
         $billingMenu->save();
+
+        Menu::query()
+            ->where('route', 'backend.cash-counter.index')
+            ->where('status', 'Active')
+            ->whereNull('deleted_at')
+            ->update(['parent_id' => null]);
 
         $this->ensurePermission('vendor-payment-list', 'account-management', 2);
         Menu::query()
@@ -369,6 +383,12 @@ class SidebarPermissionStabilitySeeder extends Seeder
             ['activity-log-view', 'activity-logs-print'],
             ['supplier-payment-list', 'vendor-payment-list'],
             ['report-management', 'report-summary'],
+            ['billing', 'cash-counter'],
+            ['test-list', 'itemcharge-list'],
+            ['test-list-create', 'itemcharge-list-create'],
+            ['test-list-edit', 'itemcharge-list-edit'],
+            ['test-list-delete', 'itemcharge-list-delete'],
+            ['test-list-status', 'itemcharge-list-status'],
         ];
 
         foreach ($mappings as [$fromPermission, $toPermission]) {

@@ -28,7 +28,7 @@ class ChargeSystemSeeder extends Seeder
         DB::table('chargetypes')->insert([
             ['name' => 'Consultation', 'modules' => json_encode(['Appointment', 'OPD']), 'status' => 'Active', 'created_at' => now(), 'updated_at' => now()],
             ['name' => 'Procedure', 'modules' => json_encode(['IPD', 'OPD']), 'status' => 'Active', 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'Diagnostic', 'modules' => json_encode(['Pathology', 'Radiology']), 'status' => 'Active', 'created_at' => now(), 'updated_at' => now()],
+            ['name' => 'Diagnostic', 'modules' => json_encode(['Pathology', 'Radiology', 'ECG', 'Ultrasound']), 'status' => 'Active', 'created_at' => now(), 'updated_at' => now()],
             ['name' => 'Emergency', 'modules' => json_encode(['Ambulance', 'IPD']), 'status' => 'Active', 'created_at' => now(), 'updated_at' => now()],
             ['name' => 'Support', 'modules' => json_encode(['Blood Bank', 'Ambulance']), 'status' => 'Active', 'created_at' => now(), 'updated_at' => now()],
         ]);
@@ -144,6 +144,32 @@ class ChargeSystemSeeder extends Seeder
                 'tax' => 0.00,
                 'standard_charge' => 1500.00,
                 'description' => 'One unit of whole blood',
+                'status' => 'Active',
+                'created_at' => now(),
+                'updated_at' => now()
+            ],
+            [
+                'name' => 'ECG',
+                'charge_type_id' => $chargeTypes[2],
+                'charge_category_id' => $chargeCategories[2],
+                'unit_type_id' => $unitTypes[0],
+                'tax_category_id' => $taxCategories[0],
+                'tax' => 0.00,
+                'standard_charge' => 400.00,
+                'description' => 'Electrocardiogram (ECG) test',
+                'status' => 'Active',
+                'created_at' => now(),
+                'updated_at' => now()
+            ],
+            [
+                'name' => 'Ultrasound (USG)',
+                'charge_type_id' => $chargeTypes[2],
+                'charge_category_id' => $chargeCategories[2],
+                'unit_type_id' => $unitTypes[0],
+                'tax_category_id' => $taxCategories[0],
+                'tax' => 0.00,
+                'standard_charge' => 1200.00,
+                'description' => 'Ultrasound / USG diagnostic service',
                 'status' => 'Active',
                 'created_at' => now(),
                 'updated_at' => now()

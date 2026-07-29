@@ -31,6 +31,15 @@ class ChargeImportController extends Controller
 
     public function processImport(Request $request)
     {
+        $hospitalChargesEnv = env('HOSPITAL_CHARGES_ENABLED', null);
+        $hospitalChargesEnabled = true;
+        if ($hospitalChargesEnv !== null && $hospitalChargesEnv !== '') {
+            $hospitalChargesEnabled = filter_var($hospitalChargesEnv, FILTER_VALIDATE_BOOLEAN);
+        }
+
+        if (!$hospitalChargesEnabled) {
+            return back()->withErrors(['csv_file' => 'Hospital charges feature is disabled. Import not allowed.']);
+        }
         $request->validate([
             'csv_file' => 'required|file|mimes:csv,txt'
         ]);

@@ -1,0 +1,40 @@
+{
+    "timestamp": "2026-07-28T19:27:51+06:00",
+    "endpoint": "https:\/\/tokenized.sandbox.bka.sh\/v2\/tokenized\/checkout\/token",
+    "request": {
+        "method": "POST",
+        "path": "\/v2\/tokenized\/checkout\/token",
+        "query": "",
+        "headers": {
+            "Content-Type": "application\/json",
+            "Accept": "application\/json",
+            "Date": "Tue, 28 Jul 2026 13:27:51 GMT",
+            "x-amz-date": "20260728T132751Z",
+            "x-amz-content-sha256": "13c9b6c8b8548e4d57d37f364e73afae615a80812e4c9b92c0b11cce5f1ec5e9",
+            "x-sandbox-date": "20260728T132751Z",
+            "Authorization": "AWS4-HMAC-SHA256 Credential=0vWQuCRGiUX7EPVjQDr0EUAYtc\/20260728\/sandbox\/execute-api\/aws4_request, SignedHeaders=accept;content-type;date;host;x-amz-content-sha256;x-amz-date;x-sandbox-date, Signature=5c348a5acfa69be23fc75135aae9ece4410d46130c006e2e267a60c36cb2b8cf"
+        },
+        "payload": {
+            "app_key": "0vWQuCRGiUX7EPVjQDr0EUAYtc",
+            "app_secret": "jcUNPBgbcqEDedNKdvE4G1cAK7D3hCjmJccNPZZBq96QIxxwAMEx",
+            "username": "01770618567",
+            "password": "D7DaC<*E*eG"
+        },
+        "payload_json": "{\"app_key\":\"0vWQuCRGiUX7EPVjQDr0EUAYtc\",\"app_secret\":\"jcUNPBgbcqEDedNKdvE4G1cAK7D3hCjmJccNPZZBq96QIxxwAMEx\",\"username\":\"01770618567\",\"password\":\"D7DaC<*E*eG\"}"
+    },
+    "canonical": {
+        "canonical_request": "POST\n\/v2\/tokenized\/checkout\/token\n\naccept:application\/json\ncontent-type:application\/json\ndate:Tue, 28 Jul 2026 13:27:51 GMT\nhost:tokenized.sandbox.bka.sh\nx-amz-content-sha256:13c9b6c8b8548e4d57d37f364e73afae615a80812e4c9b92c0b11cce5f1ec5e9\nx-amz-date:20260728T132751Z\nx-sandbox-date:20260728T132751Z\n\naccept;content-type;date;host;x-amz-content-sha256;x-amz-date;x-sandbox-date\n13c9b6c8b8548e4d57d37f364e73afae615a80812e4c9b92c0b11cce5f1ec5e9",
+        "string_to_sign": "AWS4-HMAC-SHA256\n20260728T132751Z\n20260728\/sandbox\/execute-api\/aws4_request\n2324f45f8a0afad48c653fde0d9e06134a3bebd8c2232be10013420c760ee89c",
+        "credential_scope": "20260728\/sandbox\/execute-api\/aws4_request"
+    },
+    "computed": {
+        "signature": "5c348a5acfa69be23fc75135aae9ece4410d46130c006e2e267a60c36cb2b8cf",
+        "authorization_header": "AWS4-HMAC-SHA256 Credential=0vWQuCRGiUX7EPVjQDr0EUAYtc\/20260728\/sandbox\/execute-api\/aws4_request, SignedHeaders=accept;content-type;date;host;x-amz-content-sha256;x-amz-date;x-sandbox-date, Signature=5c348a5acfa69be23fc75135aae9ece4410d46130c006e2e267a60c36cb2b8cf"
+    },
+    "secrets_masked": {
+        "app_key": "0vW********************Ytc",
+        "app_secret": "jcU**********************************************MEx",
+        "username": "017*****567",
+        "password": "D7D******eG"
+    }
+}

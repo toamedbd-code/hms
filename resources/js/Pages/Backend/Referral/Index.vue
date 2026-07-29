@@ -1,23 +1,24 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { router, usePage } from '@inertiajs/vue3';
 import { route }  from 'ziggy-js';
+import { successMessage } from '@/responseMessage.js';
 
 let props = defineProps({
     filters: Object,
 });
 
 const filters = ref({
-
+    payee_name: props.filters?.payee_name ?? '',
+    bill_number: props.filters?.bill_number ?? '',
     numOfData: props.filters?.numOfData ?? 10,
 });
 
 const isProcessing = ref(false);
-const toastMessage = ref('');
-let toastTimer = null;
+const modalError = ref('');
 const page = usePage();
 let lastActionToken = '';
 let lastActionAt = 0;
@@ -58,15 +59,6 @@ onMounted(() => {
 onUnmounted(() => {
 });
 
-const showToast = (message) => {
-    toastMessage.value = message;
-    if (toastTimer) {
-        clearTimeout(toastTimer);
-    }
-    toastTimer = setTimeout(() => {
-        toastMessage.value = '';
-    }, 3000);
-};
 
 const applyFilter = () => {
     const url = resolveRoute('backend.referral.index');
@@ -78,6 +70,14 @@ const goToRefferalAdd = () => {
     if (!url) return;
     router.get(url)
 }
+
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    router.visit(route('backend.dashboard'));
+};
 
 const handleAction = (actionName, actionId) => {
     lastActionToken = `${actionName}|${actionId}`;
@@ -124,7 +124,7 @@ const handleAction = (actionName, actionId) => {
             onSuccess: () => {
                 localStorage.setItem('dashboard:refresh', String(Date.now()));
                 window.dispatchEvent(new Event('dashboard:refresh'));
-                showToast(page.props?.flash?.successMessage || 'Commission payment updated.');
+                successMessage(page.props?.flash?.successMessage || 'Commission payment updated for payee.');
                 router.reload({ only: ['datas'] });
             },
             onError: (errors) => {
@@ -152,6 +152,7 @@ const openPartialModal = (payeeId, pendingAmount) => {
     const rows = page.props?.datas?.data || [];
     const row = rows.find((item) => String(item.payee_id) === String(payeeId));
 
+    modalError.value = '';
     partialForm.value.payeeId = payeeId;
     partialForm.value.payeeName = row?.payee_name || 'N/A';
     partialForm.value.payeePhone = row?.payee_phone || 'N/A';
@@ -166,37 +167,52 @@ const openPartialModal = (payeeId, pendingAmount) => {
 const closePartialModal = () => {
     showPartialModal.value = false;
     partialForm.value.amount = '';
+    modalError.value = '';
 };
 
 const submitPartialPayment = () => {
+    if (isProcessing.value) return;
+
     const pendingAmount = Number(partialForm.value.pendingAmount || 0);
     const amount = Number(partialForm.value.amount || 0);
+    modalError.value = '';
 
-    if (!Number.isFinite(amount) || amount <= 0 || amount > pendingAmount) {
-        alert('Invalid amount.');
+    if (!Number.isFinite(amount) || amount <= 0) {
+        modalError.value = 'Please enter a valid amount.';
+        return;
+    }
+
+    if (amount > pendingAmount) {
+        modalError.value = 'Amount cannot exceed the pending balance.';
         return;
     }
 
     const postUrl = resolveRoute('backend.referral.commission.payment.payee', { payeeId: partialForm.value.payeeId });
-    if (!postUrl) return;
+    if (!postUrl) {
+        modalError.value = 'Payment route is unavailable.';
+        return;
+    }
 
     router.post(postUrl, {
         payment_type: 'partial',
         amount
     }, {
         preserveScroll: true,
+        preserveState: true,
         onStart: () => {
             isProcessing.value = true;
         },
         onSuccess: () => {
             localStorage.setItem('dashboard:refresh', String(Date.now()));
             window.dispatchEvent(new Event('dashboard:refresh'));
-            showToast(page.props?.flash?.successMessage || 'Commission payment updated.');
+            successMessage(page.props?.flash?.successMessage || 'Commission payment updated for payee.');
             closePartialModal();
             router.reload({ only: ['datas'] });
         },
         onError: (errors) => {
             console.error('Commission payment POST failed', errors);
+            const firstError = errors?.amount?.[0] || errors?.payment_type?.[0] || 'Unable to process the payment.';
+            modalError.value = firstError;
         },
         onFinish: () => {
             isProcessing.value = false;
@@ -211,21 +227,9 @@ const submitPartialPayment = () => {
 
         <div class="w-full p-2 duration-1000 ease-in-out bg-white rounded-md dark:bg-slate-900">
 
-            <div v-if="$page.props.flash?.successMessage"
-                class="mb-3 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-                {{ $page.props.flash.successMessage }}
-            </div>
-            <div v-if="$page.props.flash?.errorMessage"
-                class="mb-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {{ $page.props.flash.errorMessage }}
-            </div>
             <div v-if="isProcessing"
                 class="mb-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
                 Processing commission payment...
-            </div>
-            <div v-if="toastMessage"
-                class="fixed right-6 top-20 z-50 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 shadow">
-                {{ toastMessage }}
             </div>
 
             <div
@@ -236,6 +240,15 @@ const submitPartialPayment = () => {
 
                 <div class="p-4 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button @click="goBack"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-red-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-red-700">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                            </svg>
+                            Back
+                        </button>
+
                         <button @click="goToRefferalAdd"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out"
                             style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
@@ -258,7 +271,7 @@ const submitPartialPayment = () => {
 
                     <div class="flex space-x-2">
                         <div class="w-full">
-                            <input id="name" v-model="filters.name"
+                            <input id="payee_name" v-model="filters.payee_name"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 type="text" placeholder="Name" @input="applyFilter" />
                         </div>
@@ -298,11 +311,11 @@ const submitPartialPayment = () => {
             <Pagination />
         </div>
 
-        <div v-if="showPartialModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div class="w-full max-w-md rounded-lg bg-white shadow-xl">
-                <div class="flex items-center justify-between border-b px-5 py-3">
-                    <h3 class="text-base font-semibold text-gray-800">Partial Commission Payment</h3>
-                    <button type="button" class="text-gray-500 hover:text-gray-700" @click="closePartialModal">✕</button>
+        <div v-if="showPartialModal" class="fixed inset-0 z-[9999] flex items-center justify-center overflow-y-auto bg-slate-900/12 p-4">
+            <div class="w-full max-w-md rounded-3xl bg-white shadow-2xl ring-1 ring-slate-200/80 overflow-hidden border border-slate-200">
+                <div class="flex items-center justify-between border-b px-5 py-3 bg-slate-50">
+                    <h3 class="text-base font-semibold text-slate-900">Partial Commission Payment</h3>
+                    <button type="button" class="text-slate-500 hover:text-slate-700" @click="closePartialModal">✕</button>
                 </div>
                 <div class="px-5 py-4">
                     <table class="w-full text-sm text-gray-700">
@@ -337,8 +350,10 @@ const submitPartialPayment = () => {
                             min="0.01"
                             :max="partialForm.pendingAmount"
                             class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                            @keyup.enter.prevent="submitPartialPayment"
                         >
                         <p class="mt-1 text-xs text-gray-500">Max: ৳{{ Number(partialForm.pendingAmount || 0).toFixed(2) }}</p>
+                        <p v-if="modalError" class="mt-1 text-xs font-medium text-red-600">{{ modalError }}</p>
                     </div>
                 </div>
                 <div class="flex items-center justify-end gap-2 border-t px-5 py-3">
@@ -347,9 +362,9 @@ const submitPartialPayment = () => {
                         type="button"
                         class="rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
                         :disabled="isProcessing"
-                        @click="submitPartialPayment"
+                        @click.prevent="submitPartialPayment"
                     >
-                        Collect Due
+                        Pay Commission
                     </button>
                 </div>
             </div>

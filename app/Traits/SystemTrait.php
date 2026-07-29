@@ -5,6 +5,7 @@ namespace App\Traits;
 use Illuminate\Support\Str;
 use App\Models\SystemErrorLog;
 use App\Models\SystemLog;
+use App\Services\ActivityLogService;
 use Illuminate\Support\Facades\Storage;
 
 trait SystemTrait
@@ -49,16 +50,57 @@ trait SystemTrait
 
     public function storeAdminWorkLog($dataId, $referenceTable, $note)
     {
+        $admin = auth('admin')->user();
 
         $data = [
             'data_id' => $dataId,
-            'admin_id' => auth('admin')->user()->id,
+            'admin_id' => $admin?->id,
             'reference_table' => $referenceTable,
             'note' => $note,
             'created_at' => currentTimeStamp(),
         ];
 
         SystemLog::create($data);
+
+        if ($admin) {
+            $module = Str::title(str_replace(['_', '-'], ' ', $referenceTable));
+            $action = $this->resolveActivityActionFromNote($note);
+
+            ActivityLogService::log(
+                $module,
+                $action,
+                $note,
+                [
+                    'reference_table' => $referenceTable,
+                    'data_id' => $dataId,
+                ],
+                'success',
+                $admin->id
+            );
+        }
+    }
+
+    private function resolveActivityActionFromNote(string $note): string
+    {
+        $normalized = strtolower($note);
+
+        if (str_contains($normalized, 'created') || str_contains($normalized, 'create')) {
+            return 'CREATE';
+        }
+
+        if (str_contains($normalized, 'deleted') || str_contains($normalized, 'delete')) {
+            return 'DELETE';
+        }
+
+        if (str_contains($normalized, 'updated') || str_contains($normalized, 'update') || str_contains($normalized, 'edited') || str_contains($normalized, 'edit')) {
+            return 'UPDATE';
+        }
+
+        if (str_contains($normalized, 'status')) {
+            return 'UPDATE';
+        }
+
+        return 'UPDATE';
     }
 
 
@@ -169,42 +211,31 @@ trait SystemTrait
     public function storeDescription($dataId,$referenceTable,$description)
     {
         $index = 0;
-
         $breakPoint = 0;
-
         $segment = '';
+        $flag = true;
 
         while ($index < strlen($description)) {
-
             $segment = $segment . $description[$index];
-
             $index++;
-
             $breakPoint++;
 
             if ($breakPoint == (strlen($description) - 1)) {
-
                 $flag = $this->storeDescriptionSegment($dataId, $referenceTable, $segment);
-
-                if (!$flag)
+                if (!$flag) {
                     break;
-
+                }
                 $breakPoint = 0;
-
                 $segment = "";
-
                 break;
             }
 
             if ($breakPoint == 10000) {
-
                 $flag = $this->storeDescriptionSegment($dataId, $referenceTable, $segment);
-
-                if (!$flag)
+                if (!$flag) {
                     break;
-
+                }
                 $breakPoint = 0;
-
                 $segment = "";
             }
         }

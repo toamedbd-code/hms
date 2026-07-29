@@ -18,6 +18,15 @@ const applyFilter = () => {
     router.get(route('backend.billingdoctor.index'), filters.value, { preserveState: true });
 };
 
+const goBack = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+
+    router.visit(route('backend.dashboard'));
+};
+
 </script>
 
 <template>
@@ -30,7 +39,14 @@ const applyFilter = () => {
                 <div>
                     <h1 class="p-4 text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
                 </div>
-                <div class="p-4">
+                <div class="p-4 flex items-center gap-2">
+                    <button
+                        type="button"
+                        @click="goBack"
+                        class="px-3 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors duration-200"
+                    >
+                        Back
+                    </button>
                     <a :href="route('backend.billingdoctor.create')"
                         class="px-4 py-2 text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors duration-200">
                         Create / Add Doctor

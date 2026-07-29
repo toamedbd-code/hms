@@ -9,11 +9,14 @@ use Illuminate\Support\Facades\Schema;
 use App\Models\DueCollection;
 use App\Models\Expense;
 use App\Models\ProductReturn;
+use App\Models\Referral;
 use App\Models\OpdPatient;
 use App\Models\IpdPatient;
 use App\Models\PharmacyBill;
 use Carbon\Carbon;
 use App\Services\ReportAccountingService;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class DashboardService
 {
@@ -367,7 +370,8 @@ class DashboardService
     // ✔ OPD Income (Today paid) - Actual paid amount
     public function countOpdIncome(array $dateRange)
     {
-        return OpdPatient::where('status', 'Active')
+        // Primary source: OPD appointments (OpdPatient paid_amount)
+        $opdPaid = OpdPatient::where('status', 'Active')
             ->whereNull('deleted_at')
             ->where('payment_status', '!=', 'Pending')
             ->whereBetween('appointment_date', [
@@ -375,116 +379,233 @@ class DashboardService
                 $dateRange[1]->toDateString(),
             ])
             ->sum('paid_amount');
+
+        // Additional source: Bill items categorized as 'OPD' or 'Appointment'
+        $billItemQuery = BillItem::whereRaw('LOWER(category) IN (?,?)', ['opd', 'appointment'])
+            ->where('status', 'Active')
+            ->whereHas('billing', function ($q) use ($dateRange) {
+                $q->whereBetween('created_at', [$dateRange[0], $dateRange[1]])
+                    ->where('status', 'Active')
+                    ->where('payment_status', '!=', 'Pending');
+            });
+
+        if ($billItemQuery->exists()) {
+            $items = $billItemQuery->get();
+            $totalsByBilling = $items->groupBy('billing_id')->map(function ($items) {
+                return (float) $items->sum('total_amount');
+            });
+
+            $billingIds = $totalsByBilling->keys()->toArray();
+            $billings = Billing::whereIn('id', $billingIds)->get(['id', 'total', 'discount', 'discount_type', 'extra_flat_discount']);
+
+            $net = 0.0;
+            foreach ($billings as $billing) {
+                $amt = (float) ($totalsByBilling[$billing->id] ?? 0);
+                if ($amt <= 0) continue;
+
+                $billingDiscount = 0;
+                if ((float) $billing->discount > 0) {
+                    if (($billing->discount_type ?? '') === 'percentage') {
+                        $billingDiscount = ((float) $billing->total * (float) $billing->discount) / 100;
+                    } else {
+                        $billingDiscount = (float) $billing->discount;
+                    }
+                }
+                $billingDiscount += max(0, (float) ($billing->extra_flat_discount ?? 0));
+
+                $allocated = 0;
+                if ((float) $billing->total > 0) {
+                    $allocated = ($billingDiscount * $amt) / (float) $billing->total;
+                }
+
+                $net += max(0, $amt - $allocated);
+            }
+
+            $opdPaid += round($net, 2);
+        }
+
+        return (float) $opdPaid;
+    }
+
+    // ✔ Disposable Income - Net Income After Discount (from Billing items categorized as Disposable)
+    public function countDisposableIncome(array $dbRange, array $dateRange)
+    {
+        $billItems = BillItem::whereRaw('LOWER(category) = ?', ['disposable'])
+            ->where('status', 'Active')
+            ->whereHas('billing', function ($q) use ($dbRange) {
+                $q->whereBetween('created_at', $dbRange)
+                    ->where('status', 'Active')
+                    ->where('payment_status', '!=', 'Pending');
+            })->get();
+
+        if ($billItems->isEmpty()) {
+            return 0;
+        }
+
+        $totalsByBilling = $billItems->groupBy('billing_id')->map(function ($items) {
+            return (float) $items->sum('total_amount');
+        });
+
+        $billingIds = $totalsByBilling->keys()->toArray();
+        $billings = Billing::whereIn('id', $billingIds)
+            ->get(['id', 'total', 'discount', 'discount_type', 'extra_flat_discount']);
+
+        $netDisposable = 0.0;
+        foreach ($billings as $billing) {
+            $disTotal = (float) ($totalsByBilling[$billing->id] ?? 0);
+            if ($disTotal <= 0) continue;
+
+            $billingDiscount = 0;
+            if ((float) $billing->discount > 0) {
+                if (($billing->discount_type ?? '') === 'percentage') {
+                    $billingDiscount = ((float) $billing->total * (float) $billing->discount) / 100;
+                } else {
+                    $billingDiscount = (float) $billing->discount;
+                }
+            }
+            $billingDiscount += max(0, (float) ($billing->extra_flat_discount ?? 0));
+
+            $allocatedDiscount = 0;
+            if ((float) $billing->total > 0) {
+                $allocatedDiscount = ($billingDiscount * $disTotal) / (float) $billing->total;
+            }
+
+            $netDisposable += max(0, $disTotal - $allocatedDiscount);
+        }
+
+        return round($netDisposable, 2);
     }
 
     // ✔ IPD Income (from IPD billing) - Collected amount
     public function countIpdIncome(array $dbRange)
     {
-        return (float) IpdPatient::query()
-            ->join('billings', 'ipdpatients.billing_id', '=', 'billings.id')
-            ->whereIn('ipdpatients.status', ['Active', 'Inactive'])
-            ->whereBetween('billings.created_at', $dbRange)
-            ->where('billings.status', 'Active')
-            ->where('billings.payment_status', '!=', 'Pending')
-            ->sum('billings.paid_amt');
+        // Collect billing IDs linked to IPD patients within the requested DB range.
+        $billingIdsFromIpd = IpdPatient::query()
+            ->whereIn('status', ['Active', 'Inactive'])
+            ->whereNotNull('billing_id')
+            ->whereHas('billing', function ($q) use ($dbRange) {
+                $q->whereBetween('created_at', $dbRange)
+                    ->where('status', 'Active');
+            })->pluck('billing_id')->unique()->values()->toArray();
+
+        // Also include billing IDs which contain bill_items categorized as 'IPD'
+        $itemBillingIds = BillItem::query()
+            ->whereRaw('LOWER(category) = ?', ['ipd'])
+            ->where('status', 'Active')
+            ->whereHas('billing', function ($q) use ($dbRange) {
+                $q->whereBetween('created_at', $dbRange)
+                    ->where('status', 'Active');
+            })->pluck('billing_id')->unique()->values()->toArray();
+
+        // Merge both sources of billing ids (from ipd_patient links and from IPD bill items)
+        $billingIds = array_values(array_unique(array_merge($billingIdsFromIpd, $itemBillingIds)));
+
+        // Sum payments that are either explicitly linked to an IPD patient OR
+        // are linked to a billing that belongs to an IPD discharge billing.
+        $paymentQuery = \App\Models\Payment::query()
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->whereBetween('created_at', $dbRange)
+            ->where(function ($q) use ($billingIds) {
+                $q->whereNotNull('ipd_patient_id');
+                if (!empty($billingIds)) {
+                    $q->orWhereIn('billing_id', $billingIds);
+                }
+            });
+
+        $paymentsSum = (float) $paymentQuery->sum('amount');
+
+        // Removed verbose debug logging to reduce log volume
+
+        if ($paymentsSum > 0) {
+            return $paymentsSum;
+        }
+
+        // Final fallback: sum paid_amt on billings linked to ipdpatients (legacy)
+        if (empty($billingIds)) {
+            return 0.0;
+        }
+
+        $billingPaidSum = (float) \App\Models\Billing::whereIn('id', $billingIds)
+            ->where('status', 'Active')
+            ->where('payment_status', '!=', 'Pending')
+            ->sum('paid_amt');
+
+        // Removed fallback logging to keep logs concise
+
+        return $billingPaidSum;
     }
 
-    // ✔ Pending Income (all outstanding dues)
-    // Source of truth is current due fields on each module row.
-    // Billing due_amount is already adjusted during due-collection, so avoid
-    // subtracting DueCollection again or adding pharmacy pending again.
+    // ✔ Pending Income (outstanding dues for the current dashboard filter range)
+    // Billing due amounts use created_at, OPD balances use appointment_date or created_at.
     public function countPendingIncome(array $dbRange = null, array $dateRange = null)
     {
-        $totalDue = 0;
-
-        // Billing dues (optionally limited to the provided DB range)
-        $billingQuery = Billing::where('status', 'Active')
+        $billingQuery = Billing::query()
+            ->where('status', 'Active')
+            ->whereNull('deleted_at')
             ->where('due_amount', '>', 0);
 
-        if (is_array($dbRange) && count($dbRange) === 2) {
+        if (!empty($dbRange)) {
             $billingQuery->whereBetween('created_at', $dbRange);
         }
 
-        $billings = $billingQuery->get(['due_amount']);
-        if ($billings->isNotEmpty()) {
-            $billingTotalDue = $billings->sum(function ($b) {
-                return max(0, (float) ($b->due_amount ?? 0));
-            });
+        $billingDue = (float) $billingQuery->sum('due_amount');
 
-            $totalDue += max(0, $billingTotalDue);
-        }
-
-        // OPD patient balances (optionally limited to the provided date range)
-        $opdQuery = OpdPatient::where('status', 'Active')
+        $opdQuery = OpdPatient::query()
+            ->where('status', 'Active')
             ->whereNull('deleted_at')
             ->where('balance_amount', '>', 0);
 
-        if (is_array($dateRange) && count($dateRange) === 2) {
-            $opdQuery->whereBetween('appointment_date', [
-                $dateRange[0]->toDateString(),
-                $dateRange[1]->toDateString(),
-            ]);
+        if (!empty($dateRange)) {
+            $opdQuery->where(function ($query) use ($dateRange) {
+                $query->whereBetween('appointment_date', [
+                    $dateRange[0]->toDateString(),
+                    $dateRange[1]->toDateString(),
+                ])
+                ->orWhereBetween('created_at', [
+                    $dateRange[0]->toDateTimeString(),
+                    $dateRange[1]->toDateTimeString(),
+                ]);
+            });
         }
 
-        $opdPatients = $opdQuery->get(['balance_amount']);
-        foreach ($opdPatients as $opdPatient) {
-            $totalDue += max(0, (float) $opdPatient->balance_amount);
-        }
+        $opdDue = (float) $opdQuery->sum('balance_amount');
 
-        return $totalDue;
+        return max(0, $billingDue + $opdDue);
     }
 
     // ✔ Total Income (module incomes + pending dues)
     public function countTotalIncome(array $dbRange, array $dateRange)
     {
-        $pharmacyIncome = (float) $this->countPharmacyIncome($dbRange, $dateRange);
-        $pathologyIncome = (float) $this->countPathologyIncome($dbRange, $dateRange);
-        $radiologyIncome = (float) $this->countRadiologyIncome($dbRange, $dateRange);
-        $bloodBankIncome = (float) $this->countBloodBankIncome($dbRange, $dateRange);
-        $opdIncome = (float) $this->countOpdIncome($dateRange);
-        $ipdIncome = (float) $this->countIpdIncome($dbRange);
-        $pendingIncome = (float) $this->countPendingIncome($dbRange, $dateRange);
+        $dateConditions = [
+            'single_date_range' => $dbRange,
+        ];
 
-        return $pharmacyIncome
-            + $pathologyIncome
-            + $radiologyIncome
-            + $bloodBankIncome
-            + $opdIncome
-            + $ipdIncome
-            + $pendingIncome;
+        return $this->accountingService->getIncomeReportNetIncome($dateConditions);
     }
 
     // ✔ Total Discount (Today)
     public function countTotalDiscount(array $dbRange)
     {
-        $billings = Billing::where('status', 'Active')
-            ->where('payment_status', '!=', 'Pending')
-            ->whereBetween('created_at', $dbRange)
-            ->get();
+        $dateConditions = [
+            'single_date_range' => $dbRange,
+        ];
 
-        $totalDiscount = 0;
-        foreach ($billings as $billing) {
-            $discount = ($billing->discount_type == 'percentage'
-                ? ($billing->total * $billing->discount) / 100
-                : $billing->discount) + $billing->extra_flat_discount;
-            $totalDiscount += $discount;
-        }
+        $billRows = $this->accountingService->getBillRowsByDate($dateConditions);
+        $billTotals = $this->accountingService->calculateBillTotals($billRows);
 
-        return $totalDiscount;
+        return (float) (($billTotals['discount_amount'] ?? 0) + ($billTotals['extra_discount'] ?? 0));
     }
 
     // ✔ Expense (Daily)
     public function countExpense(array $dateRange)
     {
-        return Expense::where('status', 'Active')
-            ->whereBetween('date', [
-                $dateRange[0]->toDateString(),
-                $dateRange[1]->toDateString(),
-            ])
-            ->sum('amount');
+        return $this->accountingService->getExpenseTotal([
+            'single_date_range' => $dateRange,
+        ]);
     }
 
-    // ✔ Net Income (Daily) = (Today Paid Billing + Due Collection) - Expense
+    // ✔ Net Income (Daily) = (Today Paid Billing + Due Collection) - Expense - Refund
     public function countNetIncome(array $dbRange, array $dateRange)
     {
         $dateConditions = [
@@ -493,51 +614,70 @@ class DashboardService
 
         $billRows = $this->accountingService->getBillRowsByDate($dateConditions);
         $incomeTotals = $this->accountingService->calculateFinalIncomeTotals($billRows, $dateConditions);
+        $dueCollectionTotal = $this->accountingService->getDueCollectionTotal($dateConditions);
 
-        $finalIncomeFromBills = (float) ($incomeTotals['final_income'] ?? 0);
-        $dueCollectionFromBills = (float) ($incomeTotals['total_due_collected'] ?? 0);
+        $totalPaidAmount = (float) ($incomeTotals['total_paid'] ?? 0);
+        $totalExpense = (float) ($incomeTotals['total_expense'] ?? 0);
+        $totalRefundAmount = (float) ($incomeTotals['total_return_amount'] ?? 0);
 
-        $dueCollectionRows = DueCollection::query()
-            ->whereBetween('collected_at', $dbRange)
-            ->get(['billing_id', 'collected_amount', 'payment_method', 'note']);
+        return $totalPaidAmount + $dueCollectionTotal - $totalExpense - $totalRefundAmount;
+    }
 
-        $opdIdsFromDueRows = $dueCollectionRows
-            ->filter(function ($row) {
-                return strtolower((string)($row->payment_method ?? '')) === 'opd' && empty($row->billing_id);
-            })
-            ->map(function ($row) {
-                $matches = [];
-                preg_match('/opd_patient_id:\s*(\d+)/i', (string)($row->note ?? ''), $matches);
-                return isset($matches[1]) ? (int)$matches[1] : null;
-            })
-            ->filter()
-            ->unique()
-            ->values();
+    // ✔ Total Refunds (Daily) = Sum of processed refunds from refund transactions
+    public function countRefunds(array $dbRange, array $dateRange)
+    {
+        $dateConditions = [
+            'single_date_range' => $dbRange,
+        ];
 
-        $activeOpdIdMap = OpdPatient::query()
-            ->whereIn('id', $opdIdsFromDueRows)
-            ->whereNull('deleted_at')
-            ->pluck('id')
-            ->flip();
+        return $this->accountingService->getRefundTotal($dateConditions);
+    }
 
-        $dueCollection = (float) $dueCollectionRows->sum(function ($row) use ($activeOpdIdMap) {
-            $paymentMethod = strtolower((string)($row->payment_method ?? ''));
+    // Referral Commission (dashboard card): pending commission amount
+    // Sum of (total_commission_amount - paid_amount) for active referrals.
+    public function countReferralCommissionPending(array $dbRange = null): float
+    {
+        $query = Referral::query()
+            ->where('status', 'Active')
+            ->whereNull('deleted_at');
 
-            if ($paymentMethod === 'opd' && empty($row->billing_id)) {
-                $matches = [];
-                preg_match('/opd_patient_id:\s*(\d+)/i', (string)($row->note ?? ''), $matches);
-                $opdPatientId = isset($matches[1]) ? (int)$matches[1] : null;
+        if (!empty($dbRange)) {
+            $query->whereBetween('created_at', $dbRange);
+        }
 
-                if ($opdPatientId && !$activeOpdIdMap->has($opdPatientId)) {
-                    return 0;
-                }
-            }
+        $rows = $query->get(['total_commission_amount', 'paid_amount']);
 
-            return (float)($row->collected_amount ?? 0);
+        $pending = $rows->sum(function ($row) {
+            $total = (float) ($row->total_commission_amount ?? 0);
+            $paid = (float) ($row->paid_amount ?? 0);
+            return max(0, $total - $paid);
         });
 
-        $missingDueCollection = max(0, $dueCollection - $dueCollectionFromBills);
+        return (float) round($pending, 2);
+    }
 
-        return $finalIncomeFromBills + $missingDueCollection;
+    // Distinct referral payee IDs that still have pending commission.
+    public function countReferralCommissionPendingPayees(array $dbRange = null): int
+    {
+        $query = Referral::query()
+            ->where('status', 'Active')
+            ->whereNull('deleted_at');
+
+        if (!empty($dbRange)) {
+            $query->whereBetween('created_at', $dbRange);
+        }
+
+        $rows = $query->get(['payee_id', 'total_commission_amount', 'paid_amount']);
+
+        return (int) $rows
+            ->filter(function ($row) {
+                $total = (float) ($row->total_commission_amount ?? 0);
+                $paid = (float) ($row->paid_amount ?? 0);
+                return max(0, $total - $paid) > 0;
+            })
+            ->pluck('payee_id')
+            ->filter()
+            ->unique()
+            ->count();
     }
 }

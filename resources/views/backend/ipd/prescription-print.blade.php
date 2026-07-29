@@ -17,6 +17,8 @@
         @page { size: A4; margin: 0; }
 
         body {
+            --report-header-height: 1.5in; /* make header 1.5 inches high */
+            --report-footer-height: 1.2in; /* footer area height */
             margin: 0;
             font-family: 'NotoSansBengali', "DejaVu Sans", "Noto Sans Bengali", "Hind Siliguri", "SolaimanLipi", "Segoe UI", Arial, sans-serif;
             font-size: 12px;
@@ -87,12 +89,21 @@
 
         .header-img.fixed,
         .header-placeholder.fixed {
-            position: static;
-            left: auto;
-            right: auto;
-            top: auto;
+            position: fixed;
+            top: -2in;
+            left: 0;
+            right: 0;
             width: 100%;
-            margin-top: 4px;
+            z-index: 50;
+            height: calc(var(--report-header-height, 115px) + 2in);
+            margin-top: 0;
+            overflow: hidden;
+        }
+
+        .header-img {
+            height: calc(var(--report-header-height, 115px) + 2in);
+            object-fit: cover;
+            object-position: top center;
         }
 
         .header-placeholder { width: 100%; height: var(--report-header-height, 115px); display: block; }
@@ -159,12 +170,16 @@
         }
 
         .section-title {
+            overflow: visible;
             font-weight: 700;
             color: #1e3a8a;
             margin: 0 0 4px;
         }
 
         ul,
+            position: absolute;
+            left: 0;
+            bottom: 0;
         ol {
             margin: 0;
             padding-left: 18px;
@@ -174,6 +189,8 @@
             margin-bottom: 6px;
         }
 
+            position: relative;
+            z-index: 20; /* show above footer image */
         .footer-row {
             display: flex;
             justify-content: space-between;
@@ -314,76 +331,45 @@
         }
 
         @media print {
-            @page {
-                size: A4;
-                margin: 0;
-            }
+            @page { size: A4; margin: 0mm; }
 
-            .toolbar {
-                display: none;
-            }
+            /* Hide toolbar on print */
+            .toolbar { display: none; }
 
-            .sheet {
-                padding: calc(var(--report-header-height, 115px) + 12px) 12.7mm calc(var(--report-footer-height, 70px) + 12px) 12.7mm; /* reserve space for fixed header/footer */
-            }
+            /* Reserve header/footer space via body padding using CSS variables set on the body element */
+            body { padding-top: var(--report-header-height); padding-bottom: var(--report-footer-height); }
 
-            .id-row > div {
-                padding: 0 4mm;
-                vertical-align: middle;
-            }
+            /* Layout: reduce left/right printable margins to 0.5in and align content */
+            .sheet { padding: calc(var(--report-header-height) + 12px) 0.5in calc(var(--report-footer-height) + 12px) 0.5in; }
 
-            .id-row img {
-                max-height: 64px;
-                max-width: 100%;
-                height: auto;
-                display: block;
-            }
+            /* ID/barcode row: remove extra inline paddings and center items vertically */
+            .id-row > div { padding: 0; vertical-align: middle; display: inline-block; }
 
-            .prescription-title {
-                margin: 0;
-                font-size: 24px;
-                color: #000;
-                font-weight: 800;
-            }
+            /* Ensure barcode images are visible and scale within the side gutters */
+            .id-row img, .barcode img { max-height: 64px !important; max-width: 100% !important; height: auto !important; display: block !important; margin: 0 auto !important; }
 
-            /* Fixed header at top */
-            .header-img.fixed,
-            .header-placeholder.fixed {
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                width: 100%;
-                z-index: 50;
-                height: var(--report-header-height, 115px);
-            }
+            /* Fix header to top like IPD invoice */
+            .header-image,
+            .header-placeholder,
+            .print-shared-header { position: fixed; top: 0; left: 0; right: 0; width: 100%; z-index: 50; }
 
-            .header-img { height: var(--report-header-height, 115px); object-fit: cover; }
+            /* Fix footer to bottom like IPD invoice */
+            .footer-image,
+            .footer-placeholder,
+            .footer-wrapper,
+            .footer { position: fixed; bottom: 0; left: 0; right: 0; width: 100%; max-height: calc(var(--report-footer-height) + 10px); object-fit: contain; z-index: 10; display: block; }
 
-            /* Fixed footer at bottom */
-            .footer-section { position: fixed; bottom: 0; left: 0; right: 0; width: 100%; z-index: 10; }
+            /* Keep footer content above the footer image */
+            .footer-content { position: relative; left: 0; right: 0; width: 100%; text-align: center; z-index: 60; padding-top: 0; background: transparent; }
 
-            .footer-img { max-height: var(--report-footer-height, 70px); object-fit: contain; z-index: 10; }
+            /* Hide fallback placeholders (we use fixed header/footer) */
+            .header-placeholder, .footer-placeholder { display: none; }
 
-            .footer-content {
-                text-align: center;
-                width: 100%;
-                font-size: 14px;
-                padding: 0 12px;
-                margin: 0;
-                background: transparent;
-            }
+            /* Ensure content reserves space for footer so nothing overlaps */
+            .content-section { padding-bottom: calc(var(--report-footer-height) * 2); }
 
-            .content-section { padding-bottom: calc(var(--report-footer-height, 70px) * 2); }
-
-            .header-placeholder.fixed,
-            .footer-placeholder { display: none; }
-
-            .header-img,
-            .footer-img {
-                object-fit: contain;
-                display: block;
-            }
+            /* Keep header/footer images visible and contained */
+            .header-img, .footer-img { object-fit: contain; display: block; }
         }
     </style>
 </head>
@@ -407,13 +393,26 @@
         $reportHeaderHeight = 0;
         $reportFooterHeight = 0;
     }
+
+    // Prescription print: align header/footer sizes with IPD invoice defaults to avoid page overflow
+    if ($showHeaderFooter) {
+        // IPD defaults: header ~115px, footer ~70px
+        $reportHeaderHeight = 115;
+        $reportFooterHeight = 70;
+    }
 @endphp
 
 <body style="--report-header-height: {{ $reportHeaderHeight }}px; --report-footer-height: {{ $reportFooterHeight }}px;">
     @if (empty($forPdf) || !$forPdf)
         <div class="toolbar">
+            <button type="button" class="btn" onclick="history.back()">Back</button>
             <button type="button" class="btn" onclick="window.print()">Print Prescription</button>
         </div>
+    @endif
+
+    @if (empty($forPdf) || !$forPdf)
+        <button id="presc-back-btn-ipd" onclick="history.back()" style="position:fixed;top:8px;left:8px;z-index:99999;padding:6px 10px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer">Back</button>
+        <style>@media print { #presc-back-btn-ipd { display: none !important; } }</style>
     @endif
 
     <div class="sheet">

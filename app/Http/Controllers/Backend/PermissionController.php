@@ -7,6 +7,7 @@ use Inertia\Inertia;
 use App\Http\Requests\PermissionRequest;
 use App\Services\PermissionService;
 use App\Traits\SystemTrait;
+use App\Support\DefaultDeveloperManager;
 use Illuminate\Support\Facades\DB;
 use Exception;
 
@@ -20,6 +21,15 @@ class PermissionController extends Controller
     public function __construct(PermissionService $permissionService)
     {
         $this->permissionService = $permissionService;
+
+        $this->middleware(function ($request, $next) {
+            $actor = auth()->guard('admin')->user();
+            if (!DefaultDeveloperManager::isDeveloper($actor)) {
+                abort(403, 'Developer access only.');
+            }
+
+            return $next($request);
+        });
     }
 
     public function index()

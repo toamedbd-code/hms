@@ -10,6 +10,7 @@ use App\Services\PermissionService;
 use App\Services\RoleService;
 use App\Services\AdminService;
 use App\Traits\SystemTrait;
+use App\Support\DefaultDeveloperManager;
 use Spatie\Permission\Models\Permission as SpatiePermission;
 use Spatie\Permission\PermissionRegistrar;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +31,14 @@ class RoleController extends Controller
         $this->AdminService = $AdminService;
 
         $this->middleware('auth:admin');
+        $this->middleware(function ($request, $next) {
+            $actor = auth()->guard('admin')->user();
+            if (!DefaultDeveloperManager::isDeveloper($actor)) {
+                abort(403, 'Developer access only.');
+            }
+
+            return $next($request);
+        });
         $this->middleware('permission:role-list');
         $this->middleware('permission:role-list-create', ['only' => ['create', 'store']]);
         $this->middleware('permission:role-list-edit', ['only' => ['edit', 'update']]);

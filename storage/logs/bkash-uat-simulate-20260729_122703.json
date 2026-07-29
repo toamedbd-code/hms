@@ -1,0 +1,32 @@
+{
+    "created": [
+        {
+            "invoice": 912,
+            "provider_payment_id": null,
+            "amount": "100.00",
+            "created_at": "2026-07-29 12:27:03"
+        },
+        {
+            "invoice": 913,
+            "provider_payment_id": null,
+            "amount": "100.00",
+            "created_at": "2026-07-29 12:27:03"
+        }
+    ],
+    "actions": [
+        {
+            "invoice": 912,
+            "action": "approved",
+            "provider_payment_id": "SIM-912",
+            "status": "success",
+            "timestamp": "2026-07-29 12:27:03"
+        },
+        {
+            "invoice": 913,
+            "action": "marked_failed",
+            "provider_payment_id": null,
+            "status": "failed",
+            "timestamp": "2026-07-29 12:27:03"
+        }
+    ]
+}

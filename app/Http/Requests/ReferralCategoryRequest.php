@@ -12,12 +12,16 @@ class ReferralCategoryRequest extends FormRequest
             case 'POST':
                 return [
                     'name' => 'required|string|max:255',
+                    'ecg_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
+                    'ultrasound_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
                 ];
                 break;
 
             case 'PUT':
                 return [
                     'name' => 'required|string|max:255',
+                    'ecg_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
+                    'ultrasound_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
                 ];
                 break;
             case 'PATCH':

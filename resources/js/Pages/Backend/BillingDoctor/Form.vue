@@ -34,6 +34,15 @@
         });
     };
 
+    const goBack = () => {
+        if (typeof window !== 'undefined' && window.history.length > 1) {
+            window.history.back();
+            return;
+        }
+
+        router.visit(route('backend.billingdoctor.index'));
+    };
+
     </script>
 
     <template>
@@ -50,8 +59,8 @@
                         <a :href="route('backend.billingdoctor.index')"
                             class="px-3 py-1 text-sm font-medium text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors">BillingDoctor List</a>
 
-                        <button type="button" @click="router.back()"
-                            class="px-3 py-1 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors">Back</button>
+                        <button type="button" @click="goBack()"
+                            class="px-3 py-1 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors">Back</button>
                     </div>
                 </div>
 
@@ -71,7 +80,7 @@
                     <div class="flex items-center justify-end mt-4">
                         <PrimaryButton type="submit" class="ms-4" :class="{ 'opacity-25': form.processing }"
                             :disabled="form.processing">
-                            {{ ((props.id ?? false) ? 'Update' : 'Create') }}
+                            Save
                         </PrimaryButton>
                     </div>
                 </form>

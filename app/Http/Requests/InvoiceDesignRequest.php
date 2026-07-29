@@ -14,6 +14,7 @@ class InvoiceDesignRequest extends FormRequest
             'module' => 'required|in:opd,ipd,pathology,radiology,pharmacy,appointment,billing,prescription',
             'header_height' => 'nullable|integer|min:0|max:1000',
             'footer_height' => 'nullable|integer|min:0|max:1000',
+            'footer_font_size' => 'nullable|integer|min:6|max:72',
         ];
 
         // Common file rules

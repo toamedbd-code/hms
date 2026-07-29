@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, nextTick } from "vue";
 import BackendLayout from "@/Layouts/BackendLayout.vue";
 import { Link, router, useForm } from "@inertiajs/vue3";
+import { useModalSubmissionGuard } from '@/Composables/useModalSubmissionGuard';
 import Multiselect from 'vue-multiselect';
 import HospitalChargeModal from '@/Components/HospitalChargeModal.vue';
 import Modal from '@/Components/Modal.vue';
@@ -118,6 +119,35 @@ const refreshRunningBill = () => {
   router.reload({ preserveScroll: true });
 };
 
+const openPrintRoute = (url) => {
+  if (!url) return;
+  try {
+    const popup = window.open(url, '_blank', 'noopener,noreferrer');
+    if (popup) {
+      popup.focus?.();
+    }
+  } catch (error) {
+    window.location.href = url;
+  }
+};
+
+onMounted(() => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('open_certificate') === '1') {
+    const certificateRoute = params.get('certificate_route');
+    const targetRoute = certificateRoute ? decodeURIComponent(certificateRoute) : route('backend.ipdpatient.discharge-certificate.print', props.ipdpatient?.id);
+
+    if (targetRoute) {
+      window.open(targetRoute, '_blank', 'noopener,noreferrer');
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('open_certificate');
+    url.searchParams.delete('certificate_route');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }
+});
+
 const goToCreateItem = () => {
   // Open embedded create form modal for quick item creation
   showItemModal.value = true;
@@ -181,6 +211,93 @@ const discountForm = useForm({
   extra_flat_discount: '',
 });
 
+const {
+  isSubmitting: isSubmittingDueCollect,
+  prepareSubmissionToken: prepareDueSubmissionToken,
+  ensureSubmissionToken: ensureDueSubmissionToken,
+  beginSubmission: beginDueSubmission,
+  endSubmission: endDueSubmission,
+  resetSubmissionToken: resetDueSubmissionToken,
+} = useModalSubmissionGuard('ipd_due');
+
+const showCollectDueModal = ref(false);
+const collectDueForm = ref({
+  amount: '',
+  payment_method: 'Cash',
+  notes: '',
+  mode: 'due',
+  title: 'Collect Due',
+  max_amount: 0,
+});
+
+const currentRunningBill = computed(() => localRunningBill.value ?? runningBill.value ?? {});
+const currentDueAmount = computed(() => Number(currentRunningBill.value.due ?? 0));
+const currentTotalAmount = computed(() => Number(currentRunningBill.value.total ?? 0));
+
+const openCollectDueModal = (mode = 'due') => {
+  const due = currentDueAmount.value;
+  const title = mode === 'full' ? 'Collect Full Bill' : 'Collect Due';
+  const maxAmount = due;
+
+  collectDueForm.value.mode = mode;
+  collectDueForm.value.title = title;
+  collectDueForm.value.max_amount = maxAmount;
+  collectDueForm.value.amount = maxAmount > 0 ? maxAmount.toFixed(2) : '';
+  collectDueForm.value.payment_method = 'Cash';
+  collectDueForm.value.notes = '';
+  prepareDueSubmissionToken();
+  showCollectDueModal.value = true;
+};
+
+const closeCollectDueModal = (force = false) => {
+  if (isSubmittingDueCollect.value && !force) return;
+  showCollectDueModal.value = false;
+  collectDueForm.value.amount = '';
+  collectDueForm.value.notes = '';
+  collectDueForm.value.mode = 'due';
+  collectDueForm.value.title = 'Collect Due';
+  collectDueForm.value.max_amount = 0;
+  resetDueSubmissionToken();
+};
+
+const submitCollectDue = async () => {
+  if (!props.ipdpatient?.id) return;
+  if (isSubmittingDueCollect.value) return;
+
+  const amount = Number(collectDueForm.value.amount || 0);
+  const due = Number(collectDueForm.value.max_amount || 0);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    if (typeof window?.toast === 'function') window.toast('Please enter a valid amount.', { type: 'error' });
+    return;
+  }
+
+  if (amount > due) {
+    if (typeof window?.toast === 'function') window.toast('Collected amount cannot exceed due amount.', { type: 'error' });
+    return;
+  }
+
+  beginDueSubmission();
+
+  try {
+    const res = await window.axios.post(route('backend.ipdpatient.payments.store', props.ipdpatient.id), {
+      amount,
+      payment_method: collectDueForm.payment_method || 'Cash',
+      notes: collectDueForm.notes || `Collected via ${collectDueForm.title}`,
+    });
+
+    const msg = res?.data?.message || 'Payment recorded';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'success' });
+    closeCollectDueModal(true);
+    try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'payments', 'overviewTotals'], preserveState: true }); } catch (e) {}
+  } catch (err) {
+    const msg = err?.response?.data?.message || 'Failed to collect due amount.';
+    if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
+  } finally {
+    endDueSubmission();
+  }
+};
+
 const collectAmount = async (amount, label = 'Payment') => {
   if (!props.ipdpatient?.id) return;
   amount = Number(amount) || 0;
@@ -204,13 +321,11 @@ const collectAmount = async (amount, label = 'Payment') => {
 };
 
 const collectDue = () => {
-  const amount = Number(localRunningBill?.value?.due ?? runningBill.due ?? 0);
-  collectAmount(amount, 'Due');
+  openCollectDueModal('due');
 };
 
 const collectFullBill = () => {
-  const amount = Number(localRunningBill?.value?.total ?? runningBill.total ?? 0);
-  collectAmount(amount, 'Full Bill');
+  openCollectDueModal('full');
 };
 
 const applyDiscount = async () => {
@@ -1412,7 +1527,9 @@ onBeforeUnmount(() => {
     <div class="w-full p-2 bg-white rounded-md dark:bg-slate-900">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div>
-          <div class="text-xl font-bold text-gray-800 dark:text-gray-100">IPD Admission Patient</div>
+          <div class="text-xl font-bold text-gray-800 dark:text-gray-100">
+            {{ props.ipdpatient?.status === 'Inactive' ? 'IPD Discharged Patient' : 'IPD Admission Patient' }}
+          </div>
           <div class="mt-1 text-xs text-gray-600 dark:text-gray-300">
             <span class="font-semibold">{{ patientName }}</span>
             <span v-if="props.ipdpatient?.id"> (IPD: {{ props.ipdpatient.id }})</span>
@@ -1450,7 +1567,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="flex items-center gap-2">
-            <a v-if="props.ipdpatient?.id" :href="route('backend.download.ipd.invoice', { id: props.ipdpatient.id })"
+            <a v-if="props.ipdpatient?.id" :href="route('backend.print.ipd.invoice', { id: props.ipdpatient.id, auto_print: 1 })"
               target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-rose-600 text-white rounded">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
@@ -1461,7 +1578,8 @@ onBeforeUnmount(() => {
             </a>
 
             <a v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id"
-              :href="route('backend.download.ipd.final-bill', { id: props.ipdpatient.id })" target="_blank" rel="noopener"
+              href="#"
+              @click.prevent="openPrintRoute(route('backend.print.ipd.final-bill', { id: props.ipdpatient.id, auto_print: 1, fast_open: 1 }))"
               class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-fuchsia-700 text-white rounded">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
@@ -1495,12 +1613,13 @@ onBeforeUnmount(() => {
               </button>
 
               <div v-if="showPrintMenu" class="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded shadow-lg z-50">
-                <a v-if="props.ipdpatient?.id" :href="route('backend.print.ipd.invoice', { id: props.ipdpatient.id })"
+                <a v-if="props.ipdpatient?.id" :href="route('backend.print.ipd.invoice', { id: props.ipdpatient.id, auto_print: 1 })"
                   target="_blank" rel="noopener" class="block px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">
                   Print Invoice
                 </a>
                 <a v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id"
-                  :href="route('backend.print.ipd.final-bill', { id: props.ipdpatient.id })" target="_blank" rel="noopener"
+                  href="#"
+                  @click.prevent="openPrintRoute(route('backend.print.ipd.final-bill', { id: props.ipdpatient.id, auto_print: 1, fast_open: 1 }))"
                   class="block px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">
                   Print Final Bill
                 </a>
@@ -1705,6 +1824,14 @@ onBeforeUnmount(() => {
             <div class="p-2 border rounded">
               <div class="font-semibold">Due</div>
               <div class="text-sm">Tk {{ Number((localRunningBill?.value?.due ?? runningBill.due ?? runningBill.value?.due ?? 0)).toFixed(2) }}</div>
+            </div>
+            <div class="p-2 border rounded">
+              <div class="font-semibold">Discount</div>
+              <div class="text-sm">Tk {{ Number(overviewTotals.discount ?? 0).toFixed(2) }}</div>
+            </div>
+            <div class="p-2 border rounded">
+              <div class="font-semibold">Return</div>
+              <div class="text-sm">Tk {{ Number(overviewTotals.return_amount ?? (localRunningBill?.value?.change ?? runningBill.change ?? runningBill.value?.change ?? 0)).toFixed(2) }}</div>
             </div>
             <div class="p-2 border rounded">
               <div class="font-semibold">Change</div>
@@ -2034,6 +2161,33 @@ onBeforeUnmount(() => {
             <button type="button" @click="applyDiscount" :disabled="discountForm.processing" class="px-3 py-2 text-xs bg-yellow-500 text-black rounded">Apply Discount</button>
           </div>
         </div>
+
+        <Modal :show="showCollectDueModal" @close="closeCollectDueModal" maxWidth="md">
+            <div v-if="showCollectDueModal" class="p-4">
+            <div class="text-lg font-semibold mb-4">{{ collectDueForm.title }}</div>
+            <div class="space-y-3">
+              <div class="text-sm text-gray-600">Outstanding Due: <strong>{{ formatMoney(currentDueAmount.value) }}</strong></div>
+              <div class="text-sm text-gray-600">Total Bill: <strong>{{ formatMoney(currentTotalAmount.value) }}</strong></div>
+              <div>
+                <label class="block text-xs font-semibold mb-1">Amount</label>
+                <input v-model="collectDueForm.amount" type="number" step="0.01" min="0" class="w-full p-2 text-sm border rounded" />
+                <div class="text-xs text-gray-500">Maximum {{ formatMoney(collectDueForm.max_amount) }}</div>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold mb-1">Payment Method</label>
+                <input v-model="collectDueForm.payment_method" type="text" class="w-full p-2 text-sm border rounded" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold mb-1">Notes</label>
+                <textarea v-model="collectDueForm.notes" rows="3" class="w-full p-2 text-sm border rounded"></textarea>
+              </div>
+              <div class="flex justify-end gap-2 pt-2">
+                <button type="button" @click="closeCollectDueModal" class="px-3 py-2 text-xs bg-gray-200 text-gray-700 rounded">Cancel</button>
+                <button type="button" @click="submitCollectDue" :disabled="isSubmittingDueCollect.value" class="px-3 py-2 text-xs bg-emerald-600 text-white rounded">Submit</button>
+              </div>
+            </div>
+          </div>
+        </Modal>
 
         <form @submit.prevent="submitPayment" class="grid grid-cols-1 md:grid-cols-6 gap-2 items-end mb-3">
           <input v-model="paymentForm.amount" type="number" step="0.01" class="p-2 text-xs border rounded" placeholder="Amount" />

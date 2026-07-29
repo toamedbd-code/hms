@@ -23,15 +23,10 @@ class ReportSettingController extends Controller
             $settings = WebSetting::query()->orderByDesc('id')->first();
         }
 
-        if (!$settings) {
-            return redirect()->route('backend.websetting.create')
-                ->with('warning', 'Please configure Websetting first.');
-        }
-
-        $settingsData = $settings->toArray();
-        $settingsData['technologist_signature_preview_url'] = $this->toSignaturePreviewUrl($settings->technologist_signature);
-        $settingsData['sample_collected_by_signature_preview_url'] = $this->toSignaturePreviewUrl($settings->sample_collected_by_signature);
-        $settingsData['pathologist_signature_preview_url'] = $this->toSignaturePreviewUrl($settings->pathologist_signature);
+        $settingsData = $settings ? $settings->toArray() : [];
+        $settingsData['technologist_signature_preview_url'] = $this->toSignaturePreviewUrl($settings?->technologist_signature);
+        $settingsData['sample_collected_by_signature_preview_url'] = $this->toSignaturePreviewUrl($settings?->sample_collected_by_signature);
+        $settingsData['pathologist_signature_preview_url'] = $this->toSignaturePreviewUrl($settings?->pathologist_signature);
 
         return Inertia::render('Backend/ReportSetting/Form', [
             'pageTitle' => 'Report Settings',
@@ -46,9 +41,9 @@ class ReportSettingController extends Controller
             $settings = WebSetting::query()->orderByDesc('id')->first();
         }
 
-        if (!$settings) {
-            return redirect()->route('backend.websetting.create')
-                ->with('warning', 'Please configure Websetting first.');
+        if (! $settings) {
+            $settings = new WebSetting();
+            $settings->status = 'Active';
         }
 
         $data = $request->validated();
@@ -162,7 +157,12 @@ class ReportSettingController extends Controller
             }
         }
 
-        $settings->update($data);
+        if ($settings->exists) {
+            $settings->update($data);
+        } else {
+            $settings->fill($data);
+            $settings->save();
+        }
 
         if (function_exists('get_cached_web_setting')) {
             get_cached_web_setting(true);

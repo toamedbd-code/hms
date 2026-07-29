@@ -379,22 +379,37 @@
                     <td>Net Amount</td>
                     <td class="amount-col">Tk {{ number_format($amount, 2) }}</td>
                 </tr>
+                @php
+                    $taxAmountOPD = round((float) ($tax_amount ?? 0), 2);
+                    $discountAmountOPD = round((float) ($discount_amount ?? 0), 2);
+                @endphp
+                @if ($taxAmountOPD != 0)
                 <tr>
                     <td>Tax({{ number_format($tax_percent, 2) }}%)</td>
                     <td class="amount-col">Tk {{ number_format($tax_amount, 2) }}</td>
                 </tr>
+                @endif
+                @if ($discountAmountOPD != 0)
                 <tr>
                     <td>Discount({{ number_format($discount, 2) }}%)</td>
                     <td class="amount-col">Tk {{ number_format($discount_amount, 2) }}</td>
                 </tr>
+                @endif
                 <tr class="total-row">
                     <td>Total</td>
                     <td class="amount-col">Tk {{ number_format($total_amount, 2) }}</td>
                 </tr>
+                @php
+                    $invoiceTimePaidOPD = round((float) ($invoice_time_paid_amount ?? $paid_amount ?? 0), 2);
+                    $totalPaidOPD = round((float) ($paid_amount ?? 0), 2);
+                    $balanceAmountOPD = round((float) ($balance_amount ?? 0), 2);
+                @endphp
+                @if ($invoiceTimePaidOPD != 0)
                 <tr>
                     <td>Paid (Invoice Time)</td>
                     <td class="amount-col">Tk {{ number_format($invoice_time_paid_amount ?? $paid_amount, 2) }}</td>
                 </tr>
+                @endif
                 @foreach(($opd_due_collections ?? []) as $dueCollection)
                 <tr>
                     <td class="due-collect-label">
@@ -403,14 +418,18 @@
                     <td class="amount-col">Tk {{ number_format((float) $dueCollection->collected_amount, 2) }}</td>
                 </tr>
                 @endforeach
+                @if ($totalPaidOPD != 0)
                 <tr>
                     <td><strong>Total Paid Amount</strong></td>
                     <td class="amount-col"><strong>Tk {{ number_format($paid_amount, 2) }}</strong></td>
                 </tr>
+                @endif
+                @if ($balanceAmountOPD != 0)
                 <tr class="balance-row">
                     <td>Due Amount</td>
                     <td class="amount-col">Tk {{ number_format($balance_amount, 2) }}</td>
                 </tr>
+                @endif
             </table>
         </div>
 

@@ -1,6 +1,6 @@
 <script setup>
 import BackendLayout from '@/Layouts/BackendLayout.vue';
-import { useForm } from '@inertiajs/vue3';
+import { Link, useForm } from '@inertiajs/vue3';
 const props = defineProps(['currency','id']);
 
 const form = useForm({ code: props.currency?.code ?? '', name: props.currency?.name ?? '', symbol: props.currency?.symbol ?? '', is_base: props.currency?.is_base ?? false, _method: props.id ? 'put' : 'post' });
@@ -14,7 +14,10 @@ const submit = () => {
 <template>
   <BackendLayout>
     <div class="p-4 bg-white rounded shadow">
-      <h1 class="text-lg font-bold">{{ props.id ? 'Edit' : 'Create' }} Currency</h1>
+      <div class="flex items-center justify-between">
+        <h1 class="text-lg font-bold">{{ props.id ? 'Edit' : 'Create' }} Currency</h1>
+        <Link :href="route('backend.currency.index')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">Back</Link>
+      </div>
       <form @submit.prevent="submit" class="mt-4">
         <div>
           <label>Code</label>

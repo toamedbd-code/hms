@@ -10,7 +10,7 @@ import Breadcrumb from '@/Layouts/Partials/Breadcrumb.vue';
 <template>
     <div>
 
-        <Head :title="$page.props.pageTitle" />
+        <Head :title="$page.props.pageTitle || $page.props.webSetting?.company_short_name || $page.props.webSetting?.company_name || 'HMS'" />
 
 
         <div class="w-full app-shell-surface dark:bg-slate-950">

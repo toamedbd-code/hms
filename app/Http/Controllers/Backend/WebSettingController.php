@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\WebSettingRequest;
+use App\Models\Menu;
 use App\Models\WebSetting;
 use Illuminate\Support\Facades\DB;
 use App\Services\WebSettingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
@@ -29,7 +31,7 @@ class WebSettingController extends Controller
         $this->websettingService = $websettingService;
 
         $this->middleware('auth:admin')->except(['favicon']);
-        $this->middleware('permission:websetting-add|cms-setting|general-setting-add', ['only' => ['create', 'section', 'module', 'store']]);
+        $this->middleware('permission:websetting-add|cms-setting|general-setting-add|sidebar-setting', ['only' => ['create', 'section', 'module', 'store']]);
     }
 
     /**
@@ -65,6 +67,36 @@ class WebSettingController extends Controller
         return true;
     }
 
+    private function deleteStoredWebSettingFile(?string $existingValue): void
+    {
+        if (!is_string($existingValue) || trim($existingValue) === '') {
+            return;
+        }
+
+        $normalized = trim($existingValue);
+
+        if (Str::startsWith($normalized, ['http://', 'https://'])) {
+            $path = parse_url($normalized, PHP_URL_PATH);
+            if (is_string($path) && $path !== '') {
+                $normalized = $path;
+            }
+        }
+
+        if (strpos($normalized, 'storage/') !== false) {
+            $normalized = preg_replace('#^.*storage/#', '', $normalized);
+        }
+
+        $normalized = trim($normalized, '/');
+
+        if ($normalized === '') {
+            return;
+        }
+
+        if (Storage::disk('public')->exists($normalized)) {
+            Storage::disk('public')->delete($normalized);
+        }
+    }
+
     public function create(Request $request)
     {
         $requestedSection = trim((string) $request->query('section', ''));
@@ -90,7 +122,7 @@ class WebSettingController extends Controller
     {
         $websetting = $this->websettingService->first() ?? null;
 
-        $availableSections = ['general', 'cms', 'sms', 'prefix', 'module', 'other'];
+        $availableSections = ['general', 'cms', 'sms', 'prefix', 'module', 'other', 'sidebar'];
         $normalizedSection = strtolower(trim((string) $requestedSection));
         $activeSection = in_array($normalizedSection, $availableSections, true)
             ? $normalizedSection
@@ -106,10 +138,22 @@ class WebSettingController extends Controller
             'general' => 'General Setting',
             'cms' => 'CMS Setting',
             'sms' => 'SMS Setting',
-            'module' => '',
+            'module' => 'Module Setting',
             'prefix' => 'Prefix Setting',
             'other' => 'Other Setting',
+            'sidebar' => 'Sidebar Menu Order',
         ];
+
+        $pageTitle = $pageTitleMap[$activeSection] ?? 'General Setting';
+        if ($activeSection === 'module') {
+            $pageTitle = match ($activeModule) {
+                'attendance' => 'Attendance Module Setting',
+                'pathology' => 'Machine Integration Setting',
+                'payroll' => 'Payroll Module Setting',
+                'reporting' => 'Report Settings',
+                default => 'Module Setting',
+            };
+        }
 
         // discover file-based frontend templates under resources/views/frontend/templates
         $templates = [];
@@ -124,8 +168,21 @@ class WebSettingController extends Controller
         }
 
         return Inertia::render('Backend/WebSetting/Form', [
-            'websetting' => fn() => $websetting,
-            'pageTitle' => fn() => $pageTitleMap[$activeSection] ?? 'General Setting',
+            'websetting' => fn() => $websetting ? $this->decorateVatFallback($websetting) : $websetting,
+            'sidebarMenus' => fn() => Menu::whereNull('parent_id')
+                ->whereNull('deleted_at')
+                ->where('status', 'Active')
+                ->orderBy('sorting', 'ASC')
+                ->orderBy('id', 'ASC')
+                ->get(['id', 'name', 'sorting'])
+                ->map(function ($menu) {
+                    return [
+                        'id' => $menu->id,
+                        'name' => $menu->name,
+                        'sorting' => $menu->sorting,
+                    ];
+                })->values(),
+            'pageTitle' => fn() => $pageTitle,
             'activeSection' => fn() => $activeSection,
             'activeModule' => fn() => $activeModule,
             'singleSectionMode' => fn() => $singleSectionMode,
@@ -147,17 +204,67 @@ class WebSettingController extends Controller
         ]);
     }
 
+    /**
+     * If VAT columns are missing in DB, read fallback values from attendance_device_options
+     * and attach them as properties so frontend form can display them.
+     */
+    private function decorateVatFallback($websetting)
+    {
+        try {
+            $hasVatCols = Schema::hasColumn('web_settings', 'vat_enabled') && Schema::hasColumn('web_settings', 'vat_percent');
+            if ($hasVatCols) {
+                return $websetting;
+            }
+
+            $opts = $websetting->attendance_device_options ?? [];
+            if (is_string($opts)) {
+                $decoded = json_decode($opts, true);
+                $opts = json_last_error() === JSON_ERROR_NONE && is_array($decoded) ? $decoded : [];
+            }
+
+            $websetting->vat_enabled = $opts['vat_enabled'] ?? ($websetting->vat_enabled ?? false);
+            $websetting->vat_percent = isset($opts['vat_percent']) ? (float) $opts['vat_percent'] : ($websetting->vat_percent ?? 0.0);
+        } catch (\Throwable $_) {
+            // ignore and return original
+        }
+
+        return $websetting;
+    }
+
     public function store(WebSettingRequest $request)
     {
 
         DB::beginTransaction();
         try {
             $data = $request->validated();
+            $settings = $this->websettingService->first();
+
+            // Persist VAT values directly in DB when the columns exist, otherwise store them
+            // in attendance_device_options as a fallback so the values survive page reloads.
+            $vatEnabledProvided = $request->has('vat_enabled');
+            $vatPercentProvided = $request->has('vat_percent');
+            if ((!Schema::hasColumn('web_settings', 'vat_enabled') || !Schema::hasColumn('web_settings', 'vat_percent')) && ($vatEnabledProvided || $vatPercentProvided)) {
+                $existingOptions = $settings?->attendance_device_options ?? [];
+                if (is_string($existingOptions)) {
+                    $decoded = json_decode($existingOptions, true);
+                    $existingOptions = json_last_error() === JSON_ERROR_NONE && is_array($decoded) ? $decoded : [];
+                }
+                $existingOptions = is_array($existingOptions) ? $existingOptions : [];
+                if ($vatEnabledProvided) {
+                    $existingOptions['vat_enabled'] = filter_var($request->input('vat_enabled'), FILTER_VALIDATE_BOOLEAN);
+                }
+                if ($vatPercentProvided) {
+                    $existingOptions['vat_percent'] = (float) $request->input('vat_percent');
+                }
+                $data['attendance_device_options'] = json_encode($existingOptions, JSON_UNESCAPED_UNICODE);
+                // ensure vat keys won't be used further down as DB columns
+                unset($data['vat_enabled'], $data['vat_percent']);
+            }
             $section = strtolower(trim((string) ($request->input('activeSection') ?? $request->input('section') ?? 'general')));
 
             // Section-wise field whitelist to prevent cross-section overwrite.
             $generalFields = [
-                'company_name','company_short_name','hospital_code','address','phone','email','logo','icon','language','date_format','time_zone','currency','currency_symbol','credit_limit','max_billing_discount_percent','low_stock_threshold','time_format','mobile_app_api_url','mobile_app_primary_color_code','mobile_app_secondary_color_code','mobile_app_logo','login_banner','login_title','login_subtitle','report_title',
+                'company_name','company_short_name','hospital_code','address','phone','email','logo','icon','language','date_format','time_zone','currency','currency_symbol','vat_enabled','vat_percent','credit_limit','max_billing_discount_percent','low_stock_threshold','time_format','mobile_app_api_url','mobile_app_primary_color_code','mobile_app_secondary_color_code','mobile_app_logo','login_banner','login_title','login_subtitle','report_title',
             ];
             $cmsFields = [
                 'website_hero_title','website_hero_subtitle','website_about_text','website_emergency_phone','website_enabled','website_cta_text','website_featured_doctors_json','website_featured_doctor_images','website_services_json','website_facilities_json','website_testimonials_en_json','website_testimonials_bn_json','website_template',
@@ -182,18 +289,23 @@ class WebSettingController extends Controller
                 'sms' => $smsFields,
                 'module' => $moduleFields,
                 'other' => $otherFields,
+                'sidebar' => ['sidebar_menu_order'],
             ];
 
             if (!array_key_exists($section, $sectionFieldMap)) {
                 $section = 'general';
             }
 
+            $sidebarOrder = $request->input('sidebar_menu_order', []);
             $data = array_intersect_key($data, array_flip($sectionFieldMap[$section]));
+
+            if ($section === 'sidebar') {
+                unset($data['sidebar_menu_order']);
+            }
 
             // নিচের কোড অপরিবর্তিত থাকবে (ফাইল আপলোড, doctor image, template ইত্যাদি)
             // If a website_template was provided, persist it inside attendance_device_options
             // to avoid requiring a DB migration for a dedicated column.
-            $settings = $this->websettingService->first();
             if (isset($data['website_template'])) {
                 $normalizedTemplate = trim((string) $data['website_template']);
                 $normalizedTemplate = preg_replace('/\.blade(\.php)?$/i', '', $normalizedTemplate);
@@ -244,36 +356,27 @@ class WebSettingController extends Controller
             unset($data['website_featured_doctor_images']);
 
             if ($request->hasFile('logo')) {
-                $data['logo'] = $this->imageUpload($request->file('logo'), 'webSetting');
-                
                 if ($settings && $settings->logo) {
-                    $oldLogoPath = strstr($settings->logo, 'storage/');
-                    if ($oldLogoPath && file_exists($oldLogoPath)) {
-                        unlink($oldLogoPath);
-                    }
+                    $this->deleteStoredWebSettingFile($settings->logo);
                 }
+
+                $data['logo'] = $this->imageUpload($request->file('logo'), 'webSetting');
             }
 
             if ($request->hasFile('icon')) {
-                $data['icon'] = $this->imageUpload($request->file('icon'), 'webSetting');
-                
                 if ($settings && $settings->icon) {
-                    $oldIconPath = strstr($settings->icon, 'storage/');
-                    if ($oldIconPath && file_exists($oldIconPath)) {
-                        unlink($oldIconPath);
-                    }
+                    $this->deleteStoredWebSettingFile($settings->icon);
                 }
+
+                $data['icon'] = $this->imageUpload($request->file('icon'), 'webSetting');
             }
 
             if ($request->hasFile('mobile_app_logo')) {
-                $data['mobile_app_logo'] = $this->imageUpload($request->file('mobile_app_logo'), 'webSetting');
-
                 if ($settings && $settings->mobile_app_logo) {
-                    $oldMobileLogoPath = strstr($settings->mobile_app_logo, 'storage/');
-                    if ($oldMobileLogoPath && file_exists($oldMobileLogoPath)) {
-                        unlink($oldMobileLogoPath);
-                    }
+                    $this->deleteStoredWebSettingFile($settings->mobile_app_logo);
                 }
+
+                $data['mobile_app_logo'] = $this->imageUpload($request->file('mobile_app_logo'), 'webSetting');
             }
 
             // Keep legacy consumers working that still read report_title as hospital address.
@@ -300,11 +403,27 @@ class WebSettingController extends Controller
                 unset($data['login_banner'], $data['login_title'], $data['login_subtitle']);
                 $updatedSettings = $this->websettingService->update($data, $dataInfo->id);
                 $this->syncHistoricalPrefixValues($oldSettingsSnapshot, $updatedSettings);
-                $message = 'General settings updated successfully';
+                $message = ($section === 'sidebar') ? 'Sidebar menu order updated successfully' : 'General settings updated successfully';
             } else {
                 unset($data['login_banner'], $data['login_title'], $data['login_subtitle']);
-                WebSetting::create($data);
-                $message = 'General settings created successfully';
+                if (!empty($data)) {
+                    WebSetting::create($data);
+                    $message = 'General settings created successfully';
+                } else {
+                    $message = 'Sidebar menu order updated successfully';
+                }
+            }
+
+            if ($section === 'sidebar' && is_array($sidebarOrder)) {
+                foreach ($sidebarOrder as $index => $menuId) {
+                    $menuId = (int) $menuId;
+                    if ($menuId <= 0) {
+                        continue;
+                    }
+                    Menu::whereNull('parent_id')
+                        ->where('id', $menuId)
+                        ->update(['sorting' => $index + 1]);
+                }
             }
 
             // Sync featured doctors (CMS) to Admins so they are available in appointment lists
@@ -481,7 +600,6 @@ class WebSettingController extends Controller
         }
     }
 
-    
     public function getSettings()
     {
         try {
@@ -507,9 +625,8 @@ class WebSettingController extends Controller
     {
         $setting = get_cached_web_setting();
 
-        $rawLogo = trim((string) ($setting?->getRawOriginal('logo') ?? ''));
         $rawIcon = trim((string) ($setting?->getRawOriginal('icon') ?? ''));
-        $candidate = $rawLogo !== '' ? $rawLogo : $rawIcon;
+        $candidate = $rawIcon;
 
         $headers = [
             'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
@@ -522,12 +639,19 @@ class WebSettingController extends Controller
                 return redirect()->away($candidate);
             }
 
-            $candidate = ltrim($candidate, '/');
+            $candidate = trim(str_replace('\\', '/', $candidate), '/');
+            $candidate = preg_replace('#^(?:public/storage/|storage/app/public/|storage/)#', '', $candidate);
+
             $storagePath = storage_path('app/public/' . $candidate);
             $publicPath = public_path($candidate);
+            $publicStoragePath = public_path('storage/' . $candidate);
 
             if (is_file($storagePath)) {
                 return response()->file($storagePath, $headers);
+            }
+
+            if (is_file($publicStoragePath)) {
+                return response()->file($publicStoragePath, $headers);
             }
 
             if (is_file($publicPath)) {

@@ -254,12 +254,7 @@ function publicStorageUrl($value)
     }
 
     $normalized = ltrim($value, '/');
-
-    if (str_starts_with($normalized, 'public/storage/')) {
-        $normalized = substr($normalized, strlen('public/storage/'));
-    } elseif (str_starts_with($normalized, 'storage/')) {
-        $normalized = substr($normalized, strlen('storage/'));
-    }
+    $normalized = preg_replace('#^(?:storage/app/public/|public/storage/|storage/)#', '', $normalized);
 
     if ($normalized === '') {
         return null;
@@ -275,6 +270,16 @@ function publicStorageUrl($value)
         return route('backend.public.storage.file', ['path' => $normalized]);
     }
 
+    $publicStorageFile = public_path('storage/' . $normalized);
+    if (is_file($publicStorageFile)) {
+        return asset('storage/' . $normalized);
+    }
+
+    $publicFile = public_path($normalized);
+    if (is_file($publicFile)) {
+        return asset($normalized);
+    }
+
     return asset($normalized);
 }
 
@@ -284,34 +289,63 @@ function getSideMenus($user)
         return [];
     }
 
-    // reload user roles/permissions to reflect recent changes
     try {
         $user = $user->fresh(['roles.permissions', 'permissions']);
     } catch (\Throwable $e) {
         // ignore and continue with provided user
     }
 
+    $isDeveloperUser = false;
+    try {
+        $isDeveloperUser = method_exists($user, 'hasRole') && $user->hasRole('developer');
+    } catch (\Throwable $e) {
+        $isDeveloperUser = false;
+    }
+
+    $isDeveloperOnlyMenu = function ($menuOrChild) use ($isDeveloperUser) {
+        if ($isDeveloperUser) {
+            return false;
+        }
+
+        $name = strtolower(trim((string) (($menuOrChild['name'] ?? $menuOrChild->name ?? ''))));
+        $permissionName = strtolower(trim((string) (($menuOrChild['permission_name'] ?? $menuOrChild->permission_name ?? ''))));
+        $route = strtolower(trim((string) (($menuOrChild['route'] ?? $menuOrChild->route ?? ''))));
+
+        $developerOnlyNames = ['role management', 'role list', 'permission manage', 'permission list', 'developer'];
+        $developerOnlyPermissions = ['role-management', 'role-list', 'permission-management', 'permission-list', 'permission-add', 'permission-edit', 'permission-delete'];
+        $developerOnlyRoutes = ['backend.role.index', 'backend.role.create', 'backend.role.edit', 'backend.role.destroy', 'backend.permission.index', 'backend.permission.create', 'backend.permission.edit', 'backend.permission.destroy'];
+
+        if (in_array($name, $developerOnlyNames, true)) {
+            return true;
+        }
+
+        if (in_array($permissionName, $developerOnlyPermissions, true)) {
+            return true;
+        }
+
+        if (in_array($route, $developerOnlyRoutes, true)) {
+            return true;
+        }
+
+        return false;
+    };
+
     $grantedPermissions = collect();
     try {
-        // Normalize permission names to lowercase trimmed strings so
-        // server-side matching is robust against case/whitespace differences.
         $grantedPermissions = $user->getAllPermissions()
             ->pluck('name')
             ->filter()
-            ->map(function ($n) {
-                return strtolower(trim((string) $n));
-            })->unique()->values();
+            ->map(function ($name) {
+                return strtolower(trim((string) $name));
+            })
+            ->unique()
+            ->values();
     } catch (\Throwable $e) {
         $grantedPermissions = collect();
     }
 
     $hasMenuPermission = function ($permissionName) use ($grantedPermissions) {
         $permissionName = trim((string) $permissionName);
-
-        // Treat empty permission as not granted — visibility should be
-        // determined by whether permitted children exist. This prevents
-        // menus with no explicit permission from appearing for users who
-        // don't actually hold any relevant permissions.
         if ($permissionName === '') {
             return false;
         }
@@ -319,419 +353,112 @@ function getSideMenus($user)
         return $grantedPermissions->contains(strtolower($permissionName));
     };
 
-    $menus = Menu::with(['childrens' => function ($q) {
-            $q->whereNull('deleted_at')
-                ->where('status', 'Active')
-                ->orderBy('sorting', 'ASC')
-                ->orderBy('id', 'ASC');
-        }])
+    $menus = Menu::with(['childrens' => function ($query) {
+        $query->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->orderBy('sorting', 'ASC')
+            ->orderBy('id', 'ASC');
+    }])
         ->whereNull('parent_id')
         ->whereNull('deleted_at')
         ->where('status', 'Active')
-        // order by sorting then id to ensure deterministic parent ordering
-        // (id keeps original insertion order so Dashboard remains first)
         ->orderBy('sorting', 'ASC')
         ->orderBy('id', 'ASC')
         ->get();
-    // Per-user strict filtering control. When an admin's email appears in
-    // the `SIDEBAR_STRICT_EMAILS` env list, we disable any "show-everything"
-    // fallbacks so that the returned menus strictly reflect assigned
-    // permissions/modules for that user.
-    $strictEmailsEnv = env('SIDEBAR_STRICT_EMAILS', '');
-    $strictEmails = array_filter(array_map('trim', explode(',', (string) $strictEmailsEnv)));
-    $userEmailLower = null;
-    try {
-        $userEmailLower = strtolower(trim((string) ($user->email ?? '')));
-    } catch (\Throwable $e) {
-        $userEmailLower = null;
-    }
-    $strictFiltering = $userEmailLower && in_array($userEmailLower, array_map('strtolower', $strictEmails), true);
-    // Config-driven override: optionally force full unfiltered menus for
-    // debugging or for specific users. Controlled via config/sidebar.php
-    // or environment variables (FORCE_FULL_SIDEBAR, FORCE_FULL_SIDEBAR_EMAILS, etc.).
-    try {
-        $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
-        $forceForAll = config('sidebar.force_for_all', env('FORCE_FULL_SIDEBAR_FORCE_ALL', false));
-        $allowDevs = config('sidebar.allow_developers', env('FORCE_FULL_SIDEBAR_ALLOW_DEVS', true));
-        $emailsEnv = env('FORCE_FULL_SIDEBAR_EMAILS', '');
-        $emails = array_filter(array_map('trim', explode(',', (string) $emailsEnv)));
 
-        if ($forceFull && !$strictFiltering) {
-            $shouldReturn = false;
-
-            if ($forceForAll) {
-                $shouldReturn = true;
-            } else {
-                $userEmail = null;
-                try {
-                    $userEmail = strtolower(trim((string) ($user->email ?? '')));
-                } catch (\Throwable $e) {
-                    $userEmail = null;
-                }
-
-                if ($userEmail && in_array($userEmail, array_map('strtolower', $emails), true)) {
-                    $shouldReturn = true;
-                }
-
-                if (!$shouldReturn && $allowDevs && !$strictFiltering) {
-                    try {
-                        if (method_exists($user, 'hasRole') && $user->hasRole('developer')) {
-                            $shouldReturn = true;
-                        }
-                    } catch (\Throwable $e) {
-                        // ignore
-                    }
-                }
-            }
-
-            if ($shouldReturn) {
-                return $menus->map(function ($m) {
-                    return is_array($m) ? $m : $m->toArray();
-                })->values();
-            }
-        }
-    } catch (\Throwable $e) {
-        // ignore override failures
+    if ($menus->isEmpty()) {
+        return [];
     }
 
-        // Developer full-menu bypass: developer should always see sidebar entries.
-        try {
-            if (!$strictFiltering && method_exists($user, 'hasRole') && $user->hasRole('developer')) {
-                    // Allow developers to see all menus only when the override is active.
-                    $blockedSubstrings = [];
+    $normalizedMenus = $menus->map(function ($menu) {
+        $menuArray = is_array($menu) ? $menu : $menu->toArray();
+        $menuArray['childrens'] = collect($menuArray['childrens'] ?? [])
+            ->values()
+            ->all();
 
-                    $devMenus = $menus->map(function ($menu) use ($blockedSubstrings) {
-                        $arr = is_array($menu) ? $menu : $menu->toArray();
-
-                        if (isset($arr['childrens']) && is_array($arr['childrens'])) {
-                            usort($arr['childrens'], function ($a, $b) {
-                                $sa = isset($a['sorting']) ? (int) $a['sorting'] : 0;
-                                $sb = isset($b['sorting']) ? (int) $b['sorting'] : 0;
-                                if ($sa !== $sb) return $sa - $sb;
-                                $ida = isset($a['id']) ? (int) $a['id'] : 0;
-                                $idb = isset($b['id']) ? (int) $b['id'] : 0;
-                                return $ida - $idb;
-                            });
-
-                            // Filter out invoice-design children by name or route substring
-                            $arr['childrens'] = array_values(array_filter($arr['childrens'], function ($child) use ($blockedSubstrings) {
-                                $cname = strtolower(trim((string) ($child['name'] ?? '')));
-                                $croute = strtolower(trim((string) ($child['route'] ?? '')));
-                                foreach ($blockedSubstrings as $s) {
-                                    if ($s !== '' && (strpos($cname, $s) !== false || strpos($croute, $s) !== false)) {
-                                        return false;
-                                    }
-                                }
-                                return true;
-                            }));
-                        }
-
-                        return $arr;
-                    })->sortBy(function ($m) {
-                        $sorting = (int) ($m['sorting'] ?? 0);
-                        $id = (int) ($m['id'] ?? 0);
-                        return sprintf('%05d-%010d', $sorting, $id);
-                    })->values();
-
-                    // Also drop any top-level menus that reference invoice-design
-                    $devMenus = $devMenus->reject(function ($m) use ($blockedSubstrings) {
-                        $name = is_array($m) ? strtolower(trim((string) ($m['name'] ?? ''))) : strtolower(trim((string) ($m->name ?? '')));
-                        $route = is_array($m) ? strtolower(trim((string) ($m['route'] ?? ''))) : strtolower(trim((string) ($m->route ?? '')));
-                        foreach ($blockedSubstrings as $s) {
-                            if ($s !== '' && (strpos($name, $s) !== false || strpos($route, $s) !== false)) return true;
-                        }
-                        return false;
-                    })->values();
-
-                    return $devMenus;
-                }
-        } catch (\Throwable $e) {
-            // ignore and fall back to normal permission/module filtering below
-        }
-
-    $normalizeRoute = function ($route) {
-        $route = trim((string) $route);
-
-        $aliases = [
-            'backend.pharmacy.supplier.payment' => 'backend.supplierpayment.index',
-            'admin.attendance.devices' => 'backend.attendance.devices',
-        ];
-
-        return $aliases[$route] ?? $route;
-    };
-
-    $result = $menus->filter(function ($menu) use ($normalizeRoute, $hasMenuPermission) {
-        $menuHasPermission = $hasMenuPermission($menu->permission_name ?? null);
-        $menuPermissionName = trim((string) ($menu->permission_name ?? ''));
-        $hasExplicitMenuPermission = $menuPermissionName !== '';
-
-        $menu->childrens = $menu->childrens->filter(function ($child) use ($hasMenuPermission) {
-            return $hasMenuPermission($child->permission_name ?? null);
-        })->reject(function ($child) {
-            $name = strtolower(trim((string) ($child->name ?? '')));
-
-            // Hard-remove requested menu labels regardless of language variations/casing.
-            $blockedNames = [
-                'পার্সেস প্রোডাক্ট',
-                'পারছেস প্রোডাক্ট',
-                'পারচেস প্রোডাক্ট',
-                'প্রোডাক্ট ডেলিভারি',
-                'product delivery',
-                'product add',
-            ];
-
-            return in_array($name, $blockedNames, true);
-        })->unique(function ($child) use ($normalizeRoute) {
-            $name = strtolower(trim((string) ($child->name ?? '')));
-            $route = $normalizeRoute($child->route ?? '');
-
-            // Keep only one Supplier Payment entry even if route aliases differ.
-            if (str_contains($name, 'supplier payment')) {
-                return 'name:supplier-payment';
-            }
-
-            return $route !== '' ? ('route:' . $route) : ('name:' . $name);
-        })->sortBy(function ($child) {
-            $sorting = 0;
-            $id = 0;
-            if (is_array($child)) {
-                $sorting = (int) ($child['sorting'] ?? 0);
-                $id = (int) ($child['id'] ?? 0);
-            } else {
-                $sorting = (int) ($child->sorting ?? 0);
-                $id = (int) ($child->id ?? 0);
-            }
-
-            return sprintf('%05d-%010d', $sorting, $id);
-        })->values();
-
-        $menuName = strtolower(trim((string) ($menu->name ?? '')));
-        $isPurchaseMenu = str_contains($menuName, 'purchase') || str_contains($menuName, 'পার্সেস') || str_contains($menuName, 'পারচেস');
-
-        if ($isPurchaseMenu) {
-            $hasAddMedicine = $menu->childrens->contains(function ($child) {
-                return strtolower(trim((string) ($child->name ?? ''))) === 'add medicine product';
-            });
-
-            $hasAddPurchase = $menu->childrens->contains(function ($child) {
-                return strtolower(trim((string) ($child->name ?? ''))) === 'add purchase product';
-            });
-
-            $menu->childrens = $menu->childrens->reject(function ($child) use ($hasAddMedicine, $hasAddPurchase) {
-                $name = strtolower(trim((string) ($child->name ?? '')));
-
-                if ($hasAddMedicine && $name === 'edit medicine product') {
-                    return true;
-                }
-
-                if ($hasAddPurchase && $name === 'edit purchase product') {
-                    return true;
-                }
-
-                return false;
-            })->values();
-        }
-
-        // hide parent menu if it has no permitted children and no route
-        $hasChildren = (is_array($menu->childrens) ? count($menu->childrens) : $menu->childrens->count()) > 0;
-        $route = trim((string) ($menu->route ?? ''));
-
-        // Parent route should not be clickable when its own permission is unselected.
-        if ($route !== '' && !$menuHasPermission) {
-            if (is_array($menu)) {
-                $menu['route'] = null;
-                $route = '';
-            } else {
-                $menu->route = null;
-                $route = '';
-            }
-        }
-
-        // Treat explicit parent permission as authoritative: if a menu has its
-        // own permission slug and the user does not have it, hide the parent
-        // menu even when some child permissions are present.
-        if ($hasExplicitMenuPermission && !$menuHasPermission) {
-            return false;
-        }
-
-        // If there are no permitted children and no route, hide the parent only
-        // when the current user also doesn't have the parent's permission.
-        if (!$hasChildren && $route === '' && !$menuHasPermission) {
-            return false;
-        }
-
-        return $menu;
-    })->unique(function ($menu) {
-        $route = trim((string) ($menu->route ?? ''));
-        return $route !== '' ? ('route:' . $route) : ('name:' . trim((string) ($menu->name ?? '')));
+        return $menuArray;
     })->values();
 
-    // NOTE: removed special-case injection for "Account Management" so that
-    // it follows the same permission-based visibility rules as other menus.
+    $hasAnyPermission = $grantedPermissions->isNotEmpty();
 
-    // Developer full-menu bypass: only apply when the sidebar debug override
-    // is explicitly enabled (config/sidebar.force_full_menus +
-    // config/sidebar.allow_developers). By default developers should see
-    // only the menus granted via permissions so role-created developer
-    // accounts behave like any other role.
-    try {
-        $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
-        $allowDevs = config('sidebar.allow_developers', env('FORCE_FULL_SIDEBAR_ALLOW_DEVS', false));
+    $result = $normalizedMenus->map(function ($menu) use ($hasMenuPermission, $hasAnyPermission, $isDeveloperOnlyMenu) {
+        $menuArray = is_array($menu) ? $menu : (array) $menu;
 
-        if (!$strictFiltering && $forceFull && $allowDevs && method_exists($user, 'hasRole') && $user->hasRole('developer')) {
-            return $result->values();
-        }
-    } catch (\Throwable $e) {
-        // ignore failures; fall back to module filtering below
-    }
-
-    // Filter menus by assigned modules (if menus have module_slug set).
-    // If module master data is not seeded yet, skip module filtering and
-    // rely on permission filtering so sidebar does not become empty.
-    try {
-        try {
-            $userModuleSlugs = $user->modules()->pluck('slug')->map(function ($s) {
-                return trim(strtolower((string) $s));
-            })->filter()->values();
-        } catch (\Throwable $e) {
-            $userModuleSlugs = collect();
+        if ($isDeveloperOnlyMenu($menuArray)) {
+            return null;
         }
 
-        $applyModuleFilter = true;
-        try {
-            $hasDefinedModules = \App\Models\Module::query()->exists();
-            $isDeveloper = method_exists($user, 'hasRole') && $user->hasRole('developer');
+        $children = collect($menuArray['childrens'] ?? []);
+        $menuPermissionName = trim((string) ($menuArray['permission_name'] ?? $menuArray['permission'] ?? ''));
+        $hasParentPermission = $menuPermissionName !== '' && $hasAnyPermission && $hasMenuPermission($menuPermissionName);
 
-            if (! $hasDefinedModules || ($isDeveloper && $userModuleSlugs->isEmpty())) {
-                $applyModuleFilter = false;
+        $filteredChildren = $children->filter(function ($child) use ($hasMenuPermission, $hasAnyPermission, $hasParentPermission, $isDeveloperOnlyMenu) {
+            if ($isDeveloperOnlyMenu($child)) {
+                return false;
             }
-        } catch (\Throwable $e) {
-            // keep default behavior
-        }
 
-        if ($applyModuleFilter) {
-            $result = $result->filter(function ($menu) use ($userModuleSlugs) {
-                $menuModule = '';
-                if (is_array($menu)) {
-                    $menuModule = trim(strtolower((string) ($menu['module_slug'] ?? '')));
-                } else {
-                    $menuModule = trim(strtolower((string) ($menu->module_slug ?? '')));
-                }
+            $permissionName = trim((string) ($child['permission_name'] ?? $child['permission'] ?? ''));
+            if ($permissionName !== '' && $hasAnyPermission && !$hasMenuPermission($permissionName)) {
+                return false;
+            }
+            if ($permissionName === '' && $hasAnyPermission && !$hasParentPermission) {
+                return false;
+            }
 
-                // keep menus without a module assignment
-                if ($menuModule === '') {
+            $route = trim((string) ($child['route'] ?? ''));
+            if ($route === '') {
+                return false;
+            }
+
+            $routeCandidates = [$route];
+            if (!str_starts_with($route, 'backend.')) {
+                $routeCandidates[] = 'backend.' . $route;
+            }
+            if (str_starts_with($route, 'backend.')) {
+                $routeCandidates[] = str_replace('backend.', 'backend.backend.', $route);
+            }
+
+            foreach ($routeCandidates as $candidate) {
+                if (\Illuminate\Support\Facades\Route::has($candidate)) {
                     return true;
                 }
+            }
 
-                return $userModuleSlugs->contains($menuModule);
-            })->values();
+            return false;
+        })->values()->all();
+
+        // If user lacks the parent-level permission, only hide the parent
+        // when there are no accessible children. Allow parent to remain
+        // visible when at least one child is accessible to the user.
+        if ($menuPermissionName !== '' && $hasAnyPermission && !$hasMenuPermission($menuPermissionName) && empty($filteredChildren)) {
+            return null;
         }
-    } catch (\Throwable $e) {
-        // ignore filtering errors and return as-is
+
+        $route = trim((string) ($menuArray['route'] ?? ''));
+        if ($route === '' && empty($filteredChildren)) {
+            return null;
+        }
+
+        $menuArray['childrens'] = $filteredChildren;
+        return $menuArray;
+    })->filter()->values();
+
+    if ($result->isNotEmpty()) {
+        return $result;
     }
 
-        // Block specific menu entries by substring to remove them from sidebar.
-        // Add any menu name/route fragments here to hide them application-wide.
-        try {
-        $blockedSubstrings = [
-            'invoicedesign', // route slug used by InvoiceDesign resource
-            'invoice design',
-            'invoice-design',
-        ];
+    return $normalizedMenus->filter(function ($menu) use ($isDeveloperOnlyMenu) {
+        if ($isDeveloperOnlyMenu($menu)) {
+            return false;
+        }
 
-        // strip any children matching blocked substrings for arrays and objects
-        $result = $result->map(function ($menu) use ($blockedSubstrings, $normalizeRoute) {
-            if (is_array($menu)) {
-                $children = $menu['childrens'] ?? [];
-                $menu['childrens'] = array_values(array_filter($children, function ($child) use ($blockedSubstrings) {
-                    $cn = strtolower(trim((string) ($child['name'] ?? '')));
-                    $cr = strtolower(trim((string) ($child['route'] ?? '')));
-                    foreach ($blockedSubstrings as $s) {
-                        if ($s !== '' && (strpos($cn, $s) !== false || strpos($cr, $s) !== false)) {
-                            return false;
-                        }
-                    }
-                    return true;
-                }));
-
-                return $menu;
-            } else {
-                try {
-                    $menu->childrens = $menu->childrens->filter(function ($child) use ($blockedSubstrings) {
-                        $cn = strtolower(trim((string) ($child->name ?? '')));
-                        $cr = strtolower(trim((string) ($child->route ?? '')));
-                        foreach ($blockedSubstrings as $s) {
-                            if ($s !== '' && (strpos($cn, $s) !== false || strpos($cr, $s) !== false)) {
-                                return false;
-                            }
-                        }
-                        return true;
-                    })->values();
-                } catch (\Throwable $e) {
-                    // ignore
-                }
-
-                return $menu;
-            }
-        })->filter(function ($menu) use ($blockedSubstrings, $normalizeRoute) {
-            $name = is_array($menu) ? strtolower(trim((string) ($menu['name'] ?? ''))) : strtolower(trim((string) ($menu->name ?? '')));
-            $route = is_array($menu) ? strtolower(trim((string) ($menu['route'] ?? ''))) : strtolower(trim((string) ($menu->route ?? '')));
-
-            foreach ($blockedSubstrings as $s) {
-                if ($s !== '' && (strpos($name, $s) !== false || strpos($route, $s) !== false)) return false;
-            }
-
+        $route = trim((string) ($menu['route'] ?? ''));
+        if ($route !== '' && \Illuminate\Support\Facades\Route::has($route)) {
             return true;
-        })->values();
-    } catch (\Throwable $e) {
-        // ignore safety filter failures
-    }
-
-    // Ensure consistent ordering across users by sorting final menus by
-    // the `sorting` field (works for both model instances and arrays).
-    try {
-        $result = $result->sortBy(function ($m) {
-            $sorting = 0;
-            $id = 0;
-            if (is_array($m)) {
-                $sorting = (int) ($m['sorting'] ?? 0);
-                $id = (int) ($m['id'] ?? 0);
-            } else {
-                $sorting = (int) ($m->sorting ?? 0);
-                $id = (int) ($m->id ?? 0);
-            }
-
-            // Composite key ensures stable ordering when `sorting` values tie.
-            return sprintf('%05d-%010d', $sorting, $id);
-        })->values();
-    } catch (\Throwable $e) {
-        // ignore sort failures and return as-is
-    }
-
-    // Final safety fallback: if no menus remained after filtering but the
-    // current user is an admin, only return the full menus when an explicit
-    // debug override is enabled (`force_full_menus`). This prevents admins
-    // from implicitly seeing all menus when their role/permissions are
-    // intended to limit visibility.
-    try {
-        if (!$strictFiltering && method_exists($result, 'isEmpty') && $result->isEmpty()) {
-            try {
-                $forceFull = config('sidebar.force_full_menus', env('FORCE_FULL_SIDEBAR', false));
-                // Only apply the fallback when the override is explicitly enabled.
-                if ($forceFull && method_exists($user, 'hasRole') && ($user->hasRole('Admin') || $user->hasRole('admin'))) {
-                    return $menus->map(function ($m) {
-                        return is_array($m) ? $m : $m->toArray();
-                    })->values();
-                }
-            } catch (\Throwable $e) {
-                // ignore
-            }
         }
-    } catch (\Throwable $e) {
-        // ignore
-    }
 
-    return $result->values();
+        return trim((string) ($menu['name'] ?? '')) !== '';
+    })->values();
 }
 
 function web_setting_prefix(string $field, string $default = ''): string

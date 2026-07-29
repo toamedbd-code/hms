@@ -144,7 +144,7 @@ class LoginController extends Controller
         }
     }
 
-    function logout()
+    public function logout(\Illuminate\Http\Request $request)
     {
         $currentUser = auth('admin')->user();
         $loginStartedAt = session('admin_login_started_at');
@@ -154,10 +154,11 @@ class LoginController extends Controller
         }
 
         auth('admin')->logout();
-        session()->forget('admin_login_started_at');
+        $request->session()->forget('admin_login_started_at');
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+        $request->session()->flash('message', 'Successfully Logged Out.');
 
-        session()->flush('message', "Successfully Logged Out.");
-
-        return redirect()->route('backend.auth.login');
+        return redirect()->route('backend.auth.login2');
     }
 }

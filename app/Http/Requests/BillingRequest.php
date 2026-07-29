@@ -40,13 +40,15 @@ class BillingRequest extends FormRequest
             'items' => 'required|array|min:1',
             'items.*.id' => 'required|integer',
             'items.*.name' => 'required|string|max:255',
-            'items.*.category' => 'required|in:Pathology,Radiology,Medicine,OPD,IPD,Appointment',
+            // Include ECG, Ultrasound and Ultrasonogram as valid categories (treated as radiology)
+            'items.*.category' => 'required|in:Pathology,Radiology,ECG,Ultrasound,Ultrasonogram,Medicine,OPD,IPD,Appointment,Disposable,Service',
             'items.*.unit_price' => 'required|numeric|min:0',
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.total_amount' => 'required|numeric|min:0',
             'items.*.discount' => 'nullable|numeric|min:0',
             'items.*.rugound' => 'nullable|numeric',
             'items.*.net_amount' => 'required|numeric|min:0',
+            'items.*.room_no' => 'nullable|string|max:50',
 
             'total' => 'required|numeric|min:0',
             'discount' => 'nullable|numeric|min:0',
@@ -60,12 +62,25 @@ class BillingRequest extends FormRequest
             'extra_flat_discount' => 'nullable|numeric|min:0',
 
             'delivery_date' => 'nullable',
+            'delivery_time' => 'nullable|string|max:10',
+            // Allow frontend to provide backdated billing datetime
+            'billing_date' => 'nullable|date_format:Y-m-d',
+            'billing_time' => 'nullable|date_format:H:i:s',
             'remarks' => 'nullable|string|max:1000',
 
             'commission_total' => 'nullable|numeric|min:0',
             'physyst_amt' => 'nullable|numeric|min:0',
             'commission_slider' => 'nullable|numeric|min:0|max:100',
             'referrer_id' => 'nullable|integer',
+            'doctor_id' => 'nullable|integer',
+            'doctor_type' => 'nullable|string|max:50',
+            'admin_id' => 'nullable|integer',
+            'created_by' => 'nullable|integer',
+            'updated_by' => 'nullable|integer',
+            
+            // Optional fields for API flow
+            'print_token' => 'nullable|string|max:255',
+            'backend_invoice' => 'nullable|boolean',
         ];
 
         $rules['is_new_patient'] = 'sometimes|boolean';
@@ -125,7 +140,7 @@ class BillingRequest extends FormRequest
             'items.*.id.integer' => 'Item ID must be a valid number.',
             'items.*.name.required' => 'Item name is required for each item.',
             'items.*.category.required' => 'Item category is required.',
-            'items.*.category.in' => 'Item category must be Pathology, Radiology, Medicine, OPD, IPD, or Appointment.',
+            'items.*.category.in' => 'Item category must be one of Pathology, Radiology, ECG, Ultrasound, Medicine, OPD, IPD, Appointment, Ultrasonogram, Disposable, or Service. ',
             'items.*.unit_price.required' => 'Unit price is required for each item.',
             'items.*.unit_price.numeric' => 'Unit price must be a valid number.',
             'items.*.unit_price.min' => 'Unit price cannot be negative.',
@@ -208,19 +223,6 @@ class BillingRequest extends FormRequest
 
             if (!$isNewPatient && $patientId && !is_numeric($patientId)) {
                 $validator->errors()->add('patient_id', 'Valid patient ID is required when selecting existing patient.');
-            }
-
-            $payableAmount = max(0, (float) $this->input('payable_amount', 0));
-            $paidAmount = max(0, (float) $this->input('paid_amt', 0));
-            $receivingAmount = max(0, (float) $this->input('receiving_amt', 0));
-            $returnAmount = max(0, (float) $this->input('return_amt', 0));
-
-            $effectivePaid = min($payableAmount, $paidAmount);
-            $grossReceived = max($receivingAmount, $effectivePaid);
-            $maxAllowedReturn = max(0, $grossReceived - $effectivePaid);
-
-            if ($returnAmount > $maxAllowedReturn + 0.01) {
-                $validator->errors()->add('return_amt', 'Return amount cannot exceed the overpayment amount.');
             }
 
             $total = (float) $this->input('total', 0);

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
@@ -9,6 +9,26 @@ import AlertMessage from '@/Components/AlertMessage.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 
 const props = defineProps(['expense', 'expenseHeads', 'id']);
+const expenseHeadSearch = ref('');
+const showExpenseHeadSuggestions = ref(false);
+const highlightedExpenseHeadIndex = ref(0);
+
+const sortedExpenseHeads = computed(() => {
+    return [...(props.expenseHeads || [])].sort((a, b) => {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return nameA.localeCompare(nameB, 'en', { numeric: true });
+    });
+});
+
+const filteredExpenseHeads = computed(() => {
+    const query = expenseHeadSearch.value.trim().toLowerCase();
+    if (!query) {
+        return sortedExpenseHeads.value;
+    }
+
+    return sortedExpenseHeads.value.filter((head) => head.name?.toLowerCase().includes(query));
+});
 
 const form = useForm({
     expense_header_id: props.expense?.expense_header_id ?? '',
@@ -39,6 +59,76 @@ const removeDocument = () => {
     form.documentPreview = null;
     // Reset file input
     document.getElementById('document').value = '';
+};
+
+const syncExpenseHeadSearch = () => {
+    const selectedHead = (props.expenseHeads || []).find((head) => String(head.id) === String(form.expense_header_id));
+    expenseHeadSearch.value = selectedHead?.name || '';
+};
+
+const selectExpenseHead = (head) => {
+    if (!head) return;
+
+    form.expense_header_id = head.id;
+    expenseHeadSearch.value = head.name;
+    highlightedExpenseHeadIndex.value = 0;
+    showExpenseHeadSuggestions.value = false;
+};
+
+const handleExpenseHeadInput = (event) => {
+    const value = event.target.value;
+    expenseHeadSearch.value = value;
+    showExpenseHeadSuggestions.value = true;
+
+    const matchedHead = sortedExpenseHeads.value.find((head) => head.name?.toLowerCase() === value.trim().toLowerCase());
+    if (matchedHead) {
+        form.expense_header_id = matchedHead.id;
+        highlightedExpenseHeadIndex.value = filteredExpenseHeads.value.findIndex((head) => head.id === matchedHead.id);
+    } else {
+        form.expense_header_id = '';
+        highlightedExpenseHeadIndex.value = 0;
+    }
+};
+
+const handleExpenseHeadKeydown = (event) => {
+    if (event.key === 'Escape') {
+        showExpenseHeadSuggestions.value = false;
+        return;
+    }
+
+    if (!showExpenseHeadSuggestions.value || !filteredExpenseHeads.value.length) {
+        if (event.key === 'Enter' && expenseHeadSearch.value.trim()) {
+            const matchedHead = sortedExpenseHeads.value.find((head) => head.name?.toLowerCase() === expenseHeadSearch.value.trim().toLowerCase());
+            if (matchedHead) {
+                selectExpenseHead(matchedHead);
+            }
+        }
+        return;
+    }
+
+    if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        highlightedExpenseHeadIndex.value = Math.min(highlightedExpenseHeadIndex.value + 1, filteredExpenseHeads.value.length - 1);
+    } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        highlightedExpenseHeadIndex.value = Math.max(highlightedExpenseHeadIndex.value - 1, 0);
+    } else if (event.key === 'Enter') {
+        event.preventDefault();
+        const selectedHead = filteredExpenseHeads.value[highlightedExpenseHeadIndex.value];
+        if (selectedHead) {
+            selectExpenseHead(selectedHead);
+        }
+    }
+};
+
+const focusExpenseHeadInput = () => {
+    showExpenseHeadSuggestions.value = true;
+};
+
+const hideExpenseHeadSuggestions = () => {
+    setTimeout(() => {
+        showExpenseHeadSuggestions.value = false;
+    }, 120);
 };
 
 const submit = () => {
@@ -78,15 +168,29 @@ const formatAmount = (event) => {
     form.amount = value;
 };
 
+watch(() => form.expense_header_id, () => {
+    syncExpenseHeadSearch();
+}, { immediate: true });
+
 onMounted(() => {
     // Set today's date as default if creating new expense
     if (!props.expense?.id) {
         form.date = new Date().toISOString().split('T')[0];
     }
+
+    syncExpenseHeadSearch();
 });
 
 const goToExpenseList = () => {
     router.visit(route('backend.expense.index'));
+};
+
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+    } else {
+        router.visit(route('backend.dashboard'));
+    }
 };
 
 </script>
@@ -104,6 +208,16 @@ const goToExpenseList = () => {
 
                 <div class="p-2 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button @click="goBack"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-red-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-red-700 ml-2">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M10.5 19.5 3 12m7.5-7.5L3 12m7.5 0H21"></path>
+                            </svg>
+                            Back
+                        </button>
+
                         <button @click="goToExpenseList"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-400 to-blue-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-blue-500 hover:to-blue-700 ml-2">
                             <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -123,15 +237,30 @@ const goToExpenseList = () => {
                 <!-- First Row: Expense Head, Name, Invoice Number, Date -->
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4 mb-4">
                     <!-- Expense Head -->
-                    <div class="col-span-1">
+                    <div class="col-span-1 relative">
                         <InputLabel for="expense_header_id" value="Expense Head *" />
-                        <select id="expense_header_id" v-model="form.expense_header_id"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
-                            <option value="">Select Expense Head</option>
-                            <option v-for="head in expenseHeads" :key="head.id" :value="head.id">
+                        <input id="expense_header_id" v-model="expenseHeadSearch" type="text"
+                            placeholder="Type to search expense head"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            @input="handleExpenseHeadInput"
+                            @focus="focusExpenseHeadInput"
+                            @keydown="handleExpenseHeadKeydown"
+                            @blur="hideExpenseHeadSuggestions" />
+
+                        <ul v-if="showExpenseHeadSuggestions && filteredExpenseHeads.length"
+                            class="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg dark:border-slate-600 dark:bg-slate-800">
+                            <li v-for="(head, index) in filteredExpenseHeads" :key="head.id"
+                                @mousedown.prevent="selectExpenseHead(head)"
+                                :class="[
+                                    'cursor-pointer px-3 py-2 text-sm',
+                                    highlightedExpenseHeadIndex === index
+                                        ? 'bg-indigo-100 text-indigo-700 dark:bg-slate-700 dark:text-indigo-200'
+                                        : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700'
+                                ]">
                                 {{ head.name }}
-                            </option>
-                        </select>
+                            </li>
+                        </ul>
+
                         <InputError class="mt-2" :message="form.errors.expense_header_id" />
                     </div>
 

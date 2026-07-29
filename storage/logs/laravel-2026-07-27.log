@@ -1,0 +1,6 @@
+[2026-07-27 16:49:45] production.INFO: AppServiceProvider: ensured APP_KEY is set at runtime  
+[2026-07-27 16:49:45] production.INFO: AppServiceProvider: enforced DB config at runtime {"db_host":"127.0.0.1","db_database":"hms_local","db_username":"root"} 
+[2026-07-27 16:49:47] production.INFO: AppServiceProvider: ensured APP_KEY is set at runtime  
+[2026-07-27 16:49:47] production.INFO: AppServiceProvider: enforced DB config at runtime {"db_host":"127.0.0.1","db_database":"hms_local","db_username":"root"} 
+[2026-07-27 19:09:19] production.INFO: AppServiceProvider: ensured APP_KEY is set at runtime  
+[2026-07-27 19:09:19] production.INFO: AppServiceProvider: enforced DB config at runtime {"db_host":"127.0.0.1","db_database":"hms_local","db_username":"root"} 

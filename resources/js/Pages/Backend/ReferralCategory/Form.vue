@@ -12,6 +12,8 @@ const props = defineProps(['referralcategory', 'id']);
 
 const form = useForm({
     name: props.referralcategory?.name ?? '',
+    ecg_commission: props.referralcategory?.ecg_commission ?? '',
+    ultrasound_commission: props.referralcategory?.ultrasound_commission ?? '',
 
     _method: props.referralcategory?.id ? 'put' : 'post',
 });
@@ -40,6 +42,14 @@ const goToRefferalList = () => {
     router.get(route('backend.referralcategory.index'));
 };
 
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    router.visit(route('backend.referralcategory.index'));
+};
+
 </script>
 
 <template>
@@ -54,6 +64,14 @@ const goToRefferalList = () => {
 
                 <div class="p-2 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button @click="goBack"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-red-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-red-700 ml-2">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                            </svg>
+                            Back
+                        </button>
 
                         <button @click="goToRefferalList"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-400 to-blue-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-blue-500 hover:to-blue-700 ml-2">
@@ -73,12 +91,28 @@ const goToRefferalList = () => {
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-4">
 
                     <div class="col-span-1 md:col-span-1">
-                        <InputLabel for="name" value="Name" />
-                        <input id="name"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
-                            v-model="form.name" type="text" placeholder="Name" />
-                        <InputError class="mt-2" :message="form.errors.name" />
-                    </div>
+                            <InputLabel for="name" value="Name" />
+                            <input id="name"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                v-model="form.name" type="text" placeholder="Name" />
+                            <InputError class="mt-2" :message="form.errors.name" />
+                        </div>
+
+                        <div class="col-span-1 md:col-span-1">
+                            <InputLabel for="ecg_commission" value="ECG (%)" />
+                            <input id="ecg_commission"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                v-model="form.ecg_commission" type="number" step="0.01" min="0" placeholder="ECG Commission" />
+                            <InputError class="mt-2" :message="form.errors.ecg_commission" />
+                        </div>
+
+                        <div class="col-span-1 md:col-span-1">
+                            <InputLabel for="ultrasound_commission" value="Ultrasound (%)" />
+                            <input id="ultrasound_commission"
+                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                v-model="form.ultrasound_commission" type="number" step="0.01" min="0" placeholder="Ultrasound Commission" />
+                            <InputError class="mt-2" :message="form.errors.ultrasound_commission" />
+                        </div>
 
                 </div>
                 <div class="flex items-center justify-end mt-4">

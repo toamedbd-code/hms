@@ -74,6 +74,12 @@ class IpdPatientAddHospitalChargesTest extends TestCase
             'status' => 'Active',
         ]);
 
+        // Ensure hospital charges are enabled for this test scenario
+        config(['app.hospital_charges_enabled' => true]);
+        putenv('HOSPITAL_CHARGES_ENABLED=true');
+        $_ENV['HOSPITAL_CHARGES_ENABLED'] = 'true';
+        $_SERVER['HOSPITAL_CHARGES_ENABLED'] = 'true';
+
         // Call endpoint
         $response = $this->postJson(route('backend.ipdpatient.charges.hospital.store', $ipd->id), [
             'hospital_charge_ids' => [$charge->id],

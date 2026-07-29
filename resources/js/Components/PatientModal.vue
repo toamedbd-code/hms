@@ -233,20 +233,20 @@ const handleAgeInput = (currentInput, nextInput) => {
                                     <div>
                                         <InputLabel value="Age" />
                                         <div class="flex space-x-1">
-                                            <input ref="ageYearsInput" v-model="ageYears"
+                                            <input id="age_years" name="age_years" ref="ageYearsInput" v-model="ageYears"
                                                 @input="handleAgeInput(ageYearsInput, ageMonthsInput)" type="number"
                                                 min="0" max="120" class="w-16 form-input" placeholder="Y"
-                                                @focus="$event.target.select()" />
+                                                aria-label="Age (years)" @focus="$event.target.select()" />
                                             <span class="self-center text-gray-500">y</span>
-                                            <input ref="ageMonthsInput" v-model="ageMonths"
+                                            <input id="age_months" name="age_months" ref="ageMonthsInput" v-model="ageMonths"
                                                 @input="handleAgeInput(ageMonthsInput, ageDaysInput)" type="number"
                                                 min="0" max="11" class="w-16 form-input" placeholder="M"
-                                                @focus="$event.target.select()" />
+                                                aria-label="Age (months)" @focus="$event.target.select()" />
                                             <span class="self-center text-gray-500">m</span>
-                                            <input ref="ageDaysInput" v-model="ageDays"
+                                            <input id="age_days" name="age_days" ref="ageDaysInput" v-model="ageDays"
                                                 @input="handleAgeInput(ageDaysInput, null)" type="number" min="0"
                                                 max="30" class="w-16 form-input" placeholder="D"
-                                                @focus="$event.target.select()" />
+                                                aria-label="Age (days)" @focus="$event.target.select()" />
                                             <span class="self-center text-gray-500">d</span>
                                         </div>
                                     </div>

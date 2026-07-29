@@ -15,6 +15,13 @@ class PublicStorageController extends Controller
         }
 
         if (!Storage::disk('public')->exists($normalized)) {
+            $fallback = 'webSetting/' . $normalized;
+            if (Storage::disk('public')->exists($fallback)) {
+                $normalized = $fallback;
+            }
+        }
+
+        if (!Storage::disk('public')->exists($normalized)) {
             abort(404);
         }
 

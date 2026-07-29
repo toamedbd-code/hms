@@ -115,6 +115,14 @@ const printRoster = () => {
   const url = `/backend/staffattendance/duty-roster/print?${params.toString()}`;
   try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
 };
+
+const goBack = () => {
+  if (window.history.length > 1) {
+    window.history.back();
+  } else {
+    router.visit(route('backend.staffattendance.report'));
+  }
+};
 </script>
 
 <template>
@@ -123,9 +131,11 @@ const printRoster = () => {
       <div class="flex items-center justify-between p-4 bg-gray-100 rounded">
         <div>
           <h1 class="text-xl font-bold">{{ pageTitle }}</h1>
-          <p class="text-sm text-gray-600">ডিউটি রোস্টার পরিচালনা করুন</p>
         </div>
         <div class="flex items-center gap-2">
+          <button @click="goBack" class="px-3 py-2 text-sm font-semibold text-white bg-red-600 rounded hover:bg-red-700">
+            Back
+          </button>
           <input type="month" v-model="selectedMonth" @change="applyFilter" class="p-2 border rounded" />
           <input v-model="searchTerm" type="text" placeholder="Search name or employee id" class="p-2 border rounded" />
           <input v-model="dateFromFilter" type="date" class="p-2 border rounded" />

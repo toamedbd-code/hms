@@ -34,9 +34,12 @@ class DatabaseSeeder extends Seeder
         // Full seed (legacy)
         $this->call([
             MenuSeeder::class,
+            UpdateItemChargeMenuSeeder::class,
             SettingsMenuSyncSeeder::class,
             QuickAccessMenuPermissionSyncSeeder::class,
             StoreManagementMenuSeeder::class,
+            SalarySheetMenuSeeder::class,
+            MenuDeduplicateSeeder::class,
             RoleSeeder::class,
             PermissionSeeder::class,
             PermissionFixSeeder::class,
@@ -62,11 +65,11 @@ class DatabaseSeeder extends Seeder
             MedicineSeeder::class,
             WebSettingSeeder::class,
             AttendanceSeeder::class,
-            SalarySheetMenuSeeder::class,
             ChartOfAccountsSeeder::class,
             CurrencySeeder::class,
             EnsureDefaultDeveloperSeeder::class,
             SidebarPermissionStabilitySeeder::class,
+            SidebarMenuOrderPermissionSeeder::class,
 
         ]);
     }

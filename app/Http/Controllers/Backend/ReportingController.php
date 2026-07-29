@@ -38,18 +38,22 @@ class ReportingController extends Controller
     public function __construct()
     {
         $this->middleware('auth:admin');
-        $this->middleware('permission:reporting');
+        // Allow users with general reporting permission OR specific radiology reporting permissions
+        // Allow users with general reporting permission OR specific department reporting permissions
+        $this->middleware('permission:reporting|pathology-reporting|ultrasound-reporting|xray-reporting');
     }
 
-    public function index(Request $request)
+    /**
+     * Pathology-specific reporting list (only Pathology items).
+     */
+    public function pathologyIndex(Request $request)
     {
-        $allowedCategories = $this->resolveDepartmentCategories();
+        $allowedCategories = ['Pathology'];
         $billNumber = trim((string) $request->input('bill_number', ''));
         $includeReported = $request->boolean('include_reported');
 
         $datas = Billing::query()
             ->where('status', 'Active')
-            // Exclude IPD-generated billings (case_number starting with 'IPD-')
             ->where(function ($q) {
                 $q->whereNull('case_number')
                     ->orWhere('case_number', 'not like', 'IPD-%');
@@ -82,6 +86,234 @@ class ReportingController extends Controller
             ->withQueryString();
 
         return Inertia::render('Backend/Reporting/Index', [
+            'pageTitle' => 'Pathology Reporting',
+            'department' => 'pathology',
+            'datas' => $datas,
+            'filters' => [
+                'bill_number' => $billNumber,
+                'include_reported' => $includeReported,
+            ],
+        ]);
+    }
+
+    /**
+     * Ultrasound-specific reporting list (only items categorized as ultrasound/ultrasonogram).
+     */
+    public function ultrasoundIndex(Request $request)
+    {
+        // Ultrasound items are sometimes stored under `Radiology` category with names like "USG...".
+        $allowedCategories = ['Ultrasound', 'Ultrasonogram', 'Ultrasonography', 'Radiology'];
+        $billNumber = trim((string) $request->input('bill_number', ''));
+        $includeReported = $request->boolean('include_reported');
+
+        $datas = Billing::query()
+            ->where('status', 'Active')
+            ->where(function ($q) {
+                $q->whereNull('case_number')
+                    ->orWhere('case_number', 'not like', 'IPD-%');
+            })
+            ->when($billNumber !== '', function ($query) use ($billNumber) {
+                $query->where('bill_number', 'like', '%' . $billNumber . '%');
+            })
+            ->whereHas('billItems', function ($query) use ($includeReported, $allowedCategories) {
+                $query->whereIn('category', $allowedCategories)
+                    ->whereNotNull('sample_collected_at')
+                    ->where(function ($q2) {
+                        $q2->where('item_name', 'like', '%usg%')
+                            ->orWhere('item_name', 'like', '%ultrasound%')
+                            ->orWhere('item_name', 'like', '%ultrasonogram%')
+                            ->orWhere('item_name', 'like', '%ultrasonography%');
+                    });
+
+                if (!$includeReported) {
+                    $query->whereNull('reported_at');
+                }
+            })
+            ->with([
+                'patient',
+                'billItems' => function ($query) use ($includeReported, $allowedCategories) {
+                    $query->whereIn('category', $allowedCategories)
+                        ->whereNotNull('sample_collected_at')
+                        ->where(function ($q2) {
+                            $q2->where('item_name', 'like', '%usg%')
+                                ->orWhere('item_name', 'like', '%ultrasound%')
+                                ->orWhere('item_name', 'like', '%ultrasonogram%')
+                                ->orWhere('item_name', 'like', '%ultrasonography%');
+                        })
+                        ->with('collectedBy');
+
+                    if (!$includeReported) {
+                        $query->whereNull('reported_at');
+                    }
+                },
+            ])
+            ->orderByDesc('id')
+            ->paginate($request->input('numOfData', 10))
+            ->withQueryString();
+
+        return Inertia::render('Backend/Reporting/Index', [
+            'pageTitle' => 'Ultrasound Reporting',
+            'department' => 'ultrasound',
+            'datas' => $datas,
+            'filters' => [
+                'bill_number' => $billNumber,
+                'include_reported' => $includeReported,
+            ],
+        ]);
+    }
+
+    /**
+     * X-ray specific reporting list (Radiology items filtered by name containing xray/radiograph).
+     */
+    public function xrayIndex(Request $request)
+    {
+        $allowedCategories = ['Radiology'];
+        $billNumber = trim((string) $request->input('bill_number', ''));
+        $includeReported = $request->boolean('include_reported');
+
+        $datas = Billing::query()
+            ->where('status', 'Active')
+            ->where(function ($q) {
+                $q->whereNull('case_number')
+                    ->orWhere('case_number', 'not like', 'IPD-%');
+            })
+            ->when($billNumber !== '', function ($query) use ($billNumber) {
+                $query->where('bill_number', 'like', '%' . $billNumber . '%');
+            })
+            ->whereHas('billItems', function ($query) use ($includeReported, $allowedCategories) {
+                $query->whereIn('category', $allowedCategories)
+                    ->whereNotNull('sample_collected_at')
+                    ->where(function ($q2) {
+                        $q2->where('item_name', 'like', '%xray%')
+                            ->orWhere('item_name', 'like', '%x-ray%')
+                            ->orWhere('item_name', 'like', '%radiograph%')
+                            ->orWhere('item_name', 'like', '%x ray%');
+                    });
+
+                if (!$includeReported) {
+                    $query->whereNull('reported_at');
+                }
+            })
+            ->with([
+                'patient',
+                'billItems' => function ($query) use ($includeReported, $allowedCategories) {
+                    $query->whereIn('category', $allowedCategories)
+                        ->whereNotNull('sample_collected_at')
+                        ->where(function ($q2) {
+                            $q2->where('item_name', 'like', '%xray%')
+                                ->orWhere('item_name', 'like', '%x-ray%')
+                                ->orWhere('item_name', 'like', '%radiograph%')
+                                ->orWhere('item_name', 'like', '%x ray%');
+                        })
+                        ->with('collectedBy');
+
+                    if (!$includeReported) {
+                        $query->whereNull('reported_at');
+                    }
+                },
+            ])
+            ->orderByDesc('id')
+            ->paginate($request->input('numOfData', 10))
+            ->withQueryString();
+
+        return Inertia::render('Backend/Reporting/Index', [
+            'pageTitle' => 'X-ray Reporting',
+            'department' => 'xray',
+            'datas' => $datas,
+            'filters' => [
+                'bill_number' => $billNumber,
+                'include_reported' => $includeReported,
+            ],
+        ]);
+    }
+
+    public function index(Request $request)
+    {
+        $requestedDept = trim((string) $request->input('department', ''));
+        $billNumber = trim((string) $request->input('bill_number', ''));
+        $includeReported = $request->boolean('include_reported');
+
+        $query = Billing::query()
+            ->where('status', 'Active')
+            // Exclude IPD-generated billings (case_number starting with 'IPD-')
+            ->where(function ($q) {
+                $q->whereNull('case_number')
+                    ->orWhere('case_number', 'not like', 'IPD-%');
+            })
+            ->when($billNumber !== '', function ($q) use ($billNumber) {
+                $q->where('bill_number', 'like', '%' . $billNumber . '%');
+            });
+
+        // Apply department-specific filters when requested (e.g., ultrasound)
+        if ($requestedDept === 'ultrasound') {
+            $allowedCategories = ['Ultrasound', 'Ultrasonogram', 'Ultrasonography', 'Radiology'];
+
+            $query->whereHas('billItems', function ($q) use ($includeReported, $allowedCategories) {
+                $q->whereIn('category', $allowedCategories)
+                    ->whereNotNull('sample_collected_at')
+                    ->where(function ($q2) {
+                        $q2->where('item_name', 'like', '%usg%')
+                            ->orWhere('item_name', 'like', '%ultrasound%')
+                            ->orWhere('item_name', 'like', '%ultrasonogram%')
+                            ->orWhere('item_name', 'like', '%ultrasonography%');
+                    });
+
+                if (!$includeReported) {
+                    $q->whereNull('reported_at');
+                }
+            });
+
+            $datas = $query->with([
+                'patient',
+                'billItems' => function ($q) use ($includeReported, $allowedCategories) {
+                    $q->whereIn('category', $allowedCategories)
+                        ->whereNotNull('sample_collected_at')
+                        ->where(function ($q2) {
+                            $q2->where('item_name', 'like', '%usg%')
+                                ->orWhere('item_name', 'like', '%ultrasound%')
+                                ->orWhere('item_name', 'like', '%ultrasonogram%')
+                                ->orWhere('item_name', 'like', '%ultrasonography%');
+                        })
+                        ->with('collectedBy');
+
+                    if (!$includeReported) {
+                        $q->whereNull('reported_at');
+                    }
+                },
+            ])->orderByDesc('id')
+              ->paginate($request->input('numOfData', 10))
+              ->withQueryString();
+
+        } else {
+            // Default behavior: determine allowed categories from user scope
+            $allowedCategories = $this->resolveDepartmentCategories();
+
+            $datas = $query->whereHas('billItems', function ($q) use ($includeReported, $allowedCategories) {
+                $q->whereIn('category', $allowedCategories)
+                    ->whereNotNull('sample_collected_at');
+
+                if (!$includeReported) {
+                    $q->whereNull('reported_at');
+                }
+            })
+            ->with([
+                'patient',
+                'billItems' => function ($q) use ($includeReported, $allowedCategories) {
+                    $q->whereIn('category', $allowedCategories)
+                        ->whereNotNull('sample_collected_at')
+                        ->with('collectedBy');
+
+                    if (!$includeReported) {
+                        $q->whereNull('reported_at');
+                    }
+                },
+            ])
+            ->orderByDesc('id')
+            ->paginate($request->input('numOfData', 10))
+            ->withQueryString();
+        }
+
+        return Inertia::render('Backend/Reporting/Index', [
             'pageTitle' => 'Reporting',
             'datas' => $datas,
             'filters' => [
@@ -93,11 +325,27 @@ class ReportingController extends Controller
 
     public function search(Request $request)
     {
-        $allowedCategories = $this->resolveDepartmentCategories();
+        $requestedDept = trim((string) $request->input('department', ''));
         $billNumber = trim((string) $request->input('bill_number', ''));
+        $includeReported = $request->boolean('include_reported');
 
         if ($billNumber === '') {
             return back()->with('warning', 'Please enter a bill number.');
+        }
+
+        // Determine allowed categories and optional name filters based on requested department
+        if ($requestedDept === 'ultrasound') {
+            $allowedCategories = ['Ultrasound', 'Ultrasonogram', 'Ultrasonography', 'Radiology'];
+            $nameKeywords = ['usg', 'ultrasound', 'ultrasonogram', 'ultrasonography'];
+        } elseif ($requestedDept === 'xray') {
+            $allowedCategories = ['Radiology'];
+            $nameKeywords = ['xray', 'x-ray', 'x ray', 'radiograph', 'radiography'];
+        } elseif ($requestedDept === 'pathology') {
+            $allowedCategories = ['Pathology'];
+            $nameKeywords = [];
+        } else {
+            $allowedCategories = $this->resolveDepartmentCategories();
+            $nameKeywords = [];
         }
 
         $query = Billing::query()
@@ -107,23 +355,87 @@ class ReportingController extends Controller
                 $q->whereNull('case_number')
                     ->orWhere('case_number', 'not like', 'IPD-%');
             })
-            ->whereHas('billItems', function ($query) use ($allowedCategories) {
-                $query->whereIn('category', $allowedCategories)
-                    ->whereNotNull('sample_collected_at')
-                    ->whereNull('reported_at');
+            ->whereHas('billItems', function ($q) use ($allowedCategories, $nameKeywords, $includeReported) {
+                $q->whereIn('category', $allowedCategories)
+                    ->whereNotNull('sample_collected_at');
+
+                if (!empty($nameKeywords)) {
+                    $q->where(function ($q2) use ($nameKeywords) {
+                        foreach ($nameKeywords as $kw) {
+                            $q2->orWhere('item_name', 'like', '%' . $kw . '%');
+                        }
+                    });
+                }
+
+                if (!$includeReported) {
+                    $q->whereNull('reported_at');
+                }
             });
 
-        $billing = (clone $query)->where('bill_number', $billNumber)->first();
+        // Fetch billing and eagerly load only the filtered billItems so department detection is accurate
+        $billing = (clone $query)
+            ->with(['billItems' => function ($q) use ($allowedCategories, $nameKeywords, $includeReported) {
+                $q->whereIn('category', $allowedCategories)
+                    ->whereNotNull('sample_collected_at');
+
+                if (!empty($nameKeywords)) {
+                    $q->where(function ($q2) use ($nameKeywords) {
+                        foreach ($nameKeywords as $kw) {
+                            $q2->orWhere('item_name', 'like', '%' . $kw . '%');
+                        }
+                    });
+                }
+
+                if (!$includeReported) {
+                    $q->whereNull('reported_at');
+                }
+            }])
+            ->where('bill_number', $billNumber)
+            ->first();
 
         if (!$billing) {
-            $billing = (clone $query)->where('bill_number', 'like', '%' . $billNumber . '%')->first();
+            $billing = (clone $query)
+                ->with(['billItems' => function ($q) use ($allowedCategories, $nameKeywords, $includeReported) {
+                    $q->whereIn('category', $allowedCategories)
+                        ->whereNotNull('sample_collected_at');
+
+                    if (!empty($nameKeywords)) {
+                        $q->where(function ($q2) use ($nameKeywords) {
+                            foreach ($nameKeywords as $kw) {
+                                $q2->orWhere('item_name', 'like', '%' . $kw . '%');
+                            }
+                        });
+                    }
+
+                    if (!$includeReported) {
+                        $q->whereNull('reported_at');
+                    }
+                }])
+                ->where('bill_number', 'like', '%' . $billNumber . '%')
+                ->first();
         }
 
         if (!$billing) {
             return back()->with('warning', 'No pending report found for this bill number.');
         }
 
-        return redirect()->route('backend.reporting.edit', $billing->id);
+        // Determine department based on the filtered billing items (fallback if not provided)
+        $department = $requestedDept ?: null;
+        if (!$department) {
+            $names = $billing->billItems->pluck('item_name')->map(fn($s) => strtolower((string) $s))->all();
+            $cats = $billing->billItems->pluck('category')->map(fn($s) => strtolower((string) $s))->all();
+
+            $nameText = implode(' ', $names) . ' ' . implode(' ', $cats);
+            if (str_contains($nameText, 'ultrasound') || str_contains($nameText, 'ultrason') || str_contains($nameText, 'usg')) {
+                $department = 'ultrasound';
+            } elseif (str_contains($nameText, 'xray') || str_contains($nameText, 'x-ray') || str_contains($nameText, 'radiograph')) {
+                $department = 'xray';
+            } elseif (in_array('pathology', $cats, true)) {
+                $department = 'pathology';
+            }
+        }
+
+        return redirect()->route('backend.reporting.edit', ['billing' => $billing->id, 'department' => $department]);
     }
 
     public function edit(Billing $billing)
@@ -134,22 +446,81 @@ class ReportingController extends Controller
                 ->with('warning', 'Reporting is not available for IPD invoices.');
         }
 
-        $allowedCategories = $this->resolveDepartmentCategories();
+        // Allow overriding the department via query param (pathology|ultrasound|xray)
+        $requestedDept = trim((string) request('department', ''));
         $includeReported = request()->boolean('include_reported');
 
-        $billing->load([
-            'patient',
-            'billItems' => function ($query) use ($includeReported, $allowedCategories) {
-                $query->whereIn('category', $allowedCategories)
-                    ->whereNotNull('sample_collected_at');
+        // If department not explicitly provided, try to auto-detect it from the billing's items
+        if ($requestedDept === '') {
+            try {
+                $names = \App\Models\BillItem::query()
+                    ->where('billing_id', $billing->id)
+                    ->pluck('item_name')
+                    ->map(fn($s) => strtolower((string) $s))->all();
 
-                if (!$includeReported) {
-                    $query->whereNull('reported_at');
+                $cats = \App\Models\BillItem::query()
+                    ->where('billing_id', $billing->id)
+                    ->pluck('category')
+                    ->map(fn($s) => strtolower((string) $s))->all();
+
+                $nameText = implode(' ', $names) . ' ' . implode(' ', $cats);
+                if (str_contains($nameText, 'ultrasound') || str_contains($nameText, 'ultrason') || str_contains($nameText, 'usg')) {
+                    $requestedDept = 'ultrasound';
+                } elseif (str_contains($nameText, 'xray') || str_contains($nameText, 'x-ray') || str_contains($nameText, 'radiograph')) {
+                    $requestedDept = 'xray';
+                } elseif (in_array('pathology', $cats, true)) {
+                    $requestedDept = 'pathology';
                 }
-            },
-        ]);
+            } catch (\Throwable $_) {
+                // ignore detection failures and fall back to explicit categories
+            }
+        }
 
-        $pathologyItemIds = $billing->billItems
+        if ($requestedDept === 'ultrasound') {
+            // Ultrasound tests may be stored under Radiology category with USG names.
+            $allowedCategories = ['Ultrasound', 'Ultrasonogram', 'Ultrasonography', 'Radiology'];
+        } elseif ($requestedDept === 'xray') {
+            $allowedCategories = ['Radiology'];
+        } elseif ($requestedDept === 'pathology') {
+            $allowedCategories = ['Pathology'];
+        } else {
+            $allowedCategories = $this->resolveDepartmentCategories();
+        }
+
+        // Eager-load patient and fetch bill items explicitly so department filtering is enforced reliably
+        $billing->load('patient');
+
+            $rawItemsQuery = \App\Models\BillItem::query()
+                ->where('billing_id', $billing->id)
+                ->whereNotNull('sample_collected_at');
+
+            if (!$includeReported) {
+                $rawItemsQuery->whereNull('reported_at');
+            }
+
+            // apply category filter
+            $rawItemsQuery->whereIn('category', $allowedCategories);
+
+            // apply department-specific name filters for radiology-derived departments
+            if ($requestedDept === 'ultrasound') {
+                $rawItemsQuery->where(function ($q2) {
+                    $q2->where('item_name', 'like', '%usg%')
+                        ->orWhere('item_name', 'like', '%ultrasound%')
+                        ->orWhere('item_name', 'like', '%ultrasonogram%')
+                        ->orWhere('item_name', 'like', '%ultrasonography%');
+                });
+            } elseif ($requestedDept === 'xray') {
+                $rawItemsQuery->where(function ($q2) {
+                    $q2->where('item_name', 'like', '%xray%')
+                        ->orWhere('item_name', 'like', '%x-ray%')
+                        ->orWhere('item_name', 'like', '%radiograph%')
+                        ->orWhere('item_name', 'like', '%x ray%');
+                });
+            }
+
+        $rawItems = $rawItemsQuery->with('collectedBy')->get();
+
+        $pathologyItemIds = $rawItems
             ->where('category', 'Pathology')
             ->pluck('item_id')
             ->filter()
@@ -158,7 +529,7 @@ class ReportingController extends Controller
 
         $normalRangeMap = $this->buildNormalRangeMap($pathologyItemIds->all());
 
-        $items = $billing->billItems->map(function ($item) use ($normalRangeMap) {
+        $items = $rawItems->map(function ($item) use ($normalRangeMap) {
             $item->report_file_url = $item->report_file
                 ? route('backend.reporting.item.file', $item->id)
                 : null;
@@ -172,9 +543,22 @@ class ReportingController extends Controller
                 $defaultRange = $this->suggestNormalRangeByTestName($item);
             }
 
-            // Attach parameter definitions for pathology tests so frontend can render per-parameter inputs.
-            if ($item->category === 'Pathology' && !empty($item->item_id)) {
-                $params = PathologyTestParameter::query()
+            // Attach parameter definitions only for Urine R/E / M/E pathology tests.
+            if ($item->category === 'Pathology') {
+                $iname = trim(strtolower((string) ($item->item_name ?? '')));
+                $test = null;
+                $tname = '';
+                if (!empty($item->item_id)) {
+                    $test = Test::find($item->item_id);
+                    $tname = trim(strtolower($test?->test_name ?? $test?->test_short_name ?? ''));
+                }
+
+                $isUrineName = (str_contains($iname, 'urine') || preg_match('/\br\/?e\b/i', $iname) || preg_match('/\bm\/?e\b/i', $iname));
+                $isUrineTest = ($tname !== '' && (str_contains($tname, 'urine') || preg_match('/\br\/?e\b/i', $tname) || preg_match('/\bm\/?e\b/i', $tname)));
+
+                if ($isUrineName || $isUrineTest) {
+                    $params = PathologyTestParameter::query()
+                        ->where('pathology_test_id', $item->item_id)
                     ->where('pathology_test_id', $item->item_id)
                     ->with(['pathologyUnit:id,name', 'testParameter:id,name'])
                     ->orderBy('id')
@@ -189,22 +573,174 @@ class ReportingController extends Controller
                         ];
                     })->values();
 
-                $item->parameters = $params->toArray();
+                // If no explicit pathology_test_parameters exist, try Test->test_parameters (legacy JSON)
+                if ($params->isEmpty()) {
+                    try {
+                        $test = Test::find($item->item_id);
+                        if ($test && !empty($test->test_parameters)) {
+                            $ids = json_decode($test->test_parameters, true);
+                            if (is_array($ids) && count($ids) > 0) {
+                                $alt = \App\Models\PathologyParameter::query()
+                                    ->whereIn('id', $ids)
+                                    ->with('pathologyUnit')
+                                    ->get()
+                                    ->map(function ($p) {
+                                        return [
+                                            'id' => $p->id,
+                                            'name' => trim((string) ($p->name ?? '')),
+                                            'reference_from' => trim((string) ($p->referance_from ?? $p->reference_from ?? '')),
+                                            'reference_to' => trim((string) ($p->referance_to ?? $p->reference_to ?? '')),
+                                            'unit' => trim((string) ($p->pathologyUnit->name ?? '')),
+                                        ];
+                                    })->values();
 
-                // load any previously saved parameter results for this bill item
-                $existing = BillItemParameterResult::query()
-                    ->where('bill_item_id', $item->id)
-                    ->whereIn('pathology_test_parameter_id', $params->pluck('id')->all())
-                    ->pluck('value', 'pathology_test_parameter_id')
-                    ->toArray();
+                                if ($alt->isNotEmpty()) {
+                                    $params = $alt;
+                                }
+                            }
+                        }
+                    } catch (\Throwable $_) {
+                        // ignore fallback failures
+                    }
+                }
 
-                $item->saved_parameter_values = $existing;
+                // If still empty, synthesize a common Urine R/E parameter set for urine-related tests
+                if ($params->isEmpty()) {
+                    try {
+                        $test = Test::find($item->item_id);
+                        $tname = trim(strtolower($test?->test_name ?? $test?->test_short_name ?? ''));
+
+                        $iname = trim(strtolower((string) ($item->item_name ?? '')));
+                        $isUrineName = (str_contains($iname, 'urine') || str_contains($iname, 'r/e') || str_contains($iname, 'm/e') || str_contains($iname, 'r e'));
+
+                        if (($tname !== '' && str_contains($tname, 'urine')) || $isUrineName) {
+                            $synth = [
+                                // Physical
+                                'Colour', 'Appearance', 'Sediment', 'Specific gravity',
+                                // Chemical
+                                'Reaction', 'Phosphate', 'Albumin', 'Sugar', 'Bile Salt', 'Bile Pigment', 'Ketone body',
+                                // Microscopic
+                                'Pus cell', 'Epithelial cell', 'RBC', 'RBC Cast', 'Bacteria', 'Hyaline Cast',
+                                // Crystals (as individual parameters)
+                                'Cal-oxalate', 'Triple phosphate', 'Uric Acid', 'Amorphous Phosphate'
+                            ];
+
+                            $gen = collect($synth)->map(function ($name, $i) {
+                                return [
+                                    'id' => 'gen:' . preg_replace('/[^A-Za-z0-9_\-]/', '_', strtolower($name)),
+                                    'name' => $name,
+                                    'reference_from' => '',
+                                    'reference_to' => '',
+                                    'unit' => '',
+                                    'generated' => true,
+                                ];
+                            });
+
+                            if ($gen->isNotEmpty()) {
+                                $params = $gen;
+                            }
+                        }
+                    } catch (\Throwable $_) {
+                        // ignore
+                    }
+                }
+
+                // Group parameters into common sections (Physical / Chemical / Microscopic)
+                // Check Microscopic keywords before Chemical so crystal subtypes map correctly
+                $groupRules = [
+                    'Physical Examination' => ['colour', 'color', 'appearance', 'sediment', 'specific gravity', 'sg'],
+                    'Microscopic Examination' => ['pus', 'pus cell', 'pus cells', 'epithelial', 'epithelial cell', 'epithelial cells', 'rbc', 'rbc cast', 'rbc casts', 'bacteria', 'hyaline', 'crystal', 'casts', 'oxalate', 'triple', 'uric', 'cal-oxalate', 'amorphous'],
+                    'Chemical Examination' => ['reaction', 'phosphate', 'albumin', 'sugar', 'bile', 'bile salt', 'bile pigment', 'ketone', 'ph', 'bilirubin'],
+                ];
+
+                $grouped = [];
+                foreach (array_keys($groupRules) as $g) {
+                    $grouped[$g] = [];
+                }
+                $grouped['Other'] = [];
+
+                $genCounter = 0;
+                foreach ($params as $p) {
+                    $placed = false;
+                    $lname = mb_strtolower($p['name'] ?? '');
+                    foreach ($groupRules as $g => $keywords) {
+                        foreach ($keywords as $kw) {
+                            if (mb_stripos($lname, $kw) !== false) {
+                                $grouped[$g][] = $p;
+                                $placed = true;
+                                break 2;
+                            }
+                        }
+                    }
+
+                    if (!$placed) {
+                        $grouped['Other'][] = $p;
+                    }
+                }
+
+                // Convert to indexed groups and attach
+                $item->parameter_groups = collect($grouped)
+                    ->map(function ($rows, $title) {
+                        return [
+                            'title' => $title,
+                            'parameters' => array_values($rows),
+                        ];
+                    })->values()->toArray();
+
+                // Keep legacy flat array for backward compatibility
+                    $item->parameters = $params->toArray();
+
+                    // load any previously saved parameter results for this bill item
+                    $existing = BillItemParameterResult::query()
+                        ->where('bill_item_id', $item->id)
+                        ->whereIn('pathology_test_parameter_id', array_filter($params->pluck('id')->all(), fn($v) => $v !== null))
+                        ->pluck('value', 'pathology_test_parameter_id')
+                        ->toArray();
+
+                    $item->saved_parameter_values = $existing;
+                } else {
+                    // not a urine/R&E test: ensure no parameter groups/parameters are exposed
+                    $item->parameters = [];
+                    $item->parameter_groups = [];
+                    $item->saved_parameter_values = [];
+                }
             }
 
             $item->default_report_range = $defaultRange;
 
             return $item;
         });
+
+        // Enforce department-level filtering again on the final items collection
+        if ($requestedDept === 'ultrasound') {
+            $items = $items->filter(function ($it) {
+                $name = strtolower((string) ($it->item_name ?? ''));
+                $cat = strtolower((string) ($it->category ?? ''));
+                $keywords = ['usg', 'ultrasound', 'ultrasonogram', 'ultrasonography'];
+                $matchesKeyword = false;
+                foreach ($keywords as $kw) {
+                    if (str_contains($name, $kw) || str_contains($cat, $kw)) {
+                        $matchesKeyword = true;
+                        break;
+                    }
+                }
+                return $matchesKeyword;
+            })->values();
+        } elseif ($requestedDept === 'xray') {
+            $items = $items->filter(function ($it) {
+                $name = strtolower((string) ($it->item_name ?? ''));
+                $cat = strtolower((string) ($it->category ?? ''));
+                $keywords = ['xray', 'x-ray', 'radiograph', 'radiography', 'x ray'];
+                $matchesKeyword = false;
+                foreach ($keywords as $kw) {
+                    if (str_contains($name, $kw) || str_contains($cat, $kw)) {
+                        $matchesKeyword = true;
+                        break;
+                    }
+                }
+                return $matchesKeyword;
+            })->values();
+        }
 
         if ($items->isEmpty()) {
             return redirect()->route('backend.reporting.index')
@@ -215,6 +751,7 @@ class ReportingController extends Controller
             'pageTitle' => 'Report Entry',
             'billing' => $billing,
             'billItems' => $items,
+            'department' => $requestedDept,
         ]);
     }
 
@@ -498,7 +1035,16 @@ class ReportingController extends Controller
                 ->with('warning', 'Reporting is not available for IPD invoices.');
         }
 
-        $allowedCategories = $this->resolveDepartmentCategories();
+        $requestedDept = trim((string) $request->input('department', ''));
+        if ($requestedDept === 'ultrasound') {
+            $allowedCategories = ['Ultrasound', 'Ultrasonogram', 'Ultrasonography'];
+        } elseif ($requestedDept === 'xray') {
+            $allowedCategories = ['Radiology'];
+        } elseif ($requestedDept === 'pathology') {
+            $allowedCategories = ['Pathology'];
+        } else {
+            $allowedCategories = $this->resolveDepartmentCategories();
+        }
         $validated = $request->validate([
             'report_notes' => ['array'],
             'report_notes.*' => ['nullable', 'string'],
@@ -510,8 +1056,27 @@ class ReportingController extends Controller
             ->where('billing_id', $billing->id)
             ->whereIn('category', $allowedCategories)
             ->whereNotNull('sample_collected_at')
-            ->whereNull('reported_at')
-            ->get();
+            ->whereNull('reported_at');
+
+        if ($requestedDept === 'xray') {
+            $items->where(function ($q) {
+                $q->where('item_name', 'like', '%xray%')
+                    ->orWhere('item_name', 'like', '%x-ray%')
+                    ->orWhere('item_name', 'like', '%radiograph%')
+                    ->orWhere('item_name', 'like', '%x ray%');
+            });
+        }
+
+        if ($requestedDept === 'ultrasound') {
+            $items->where(function ($q) {
+                $q->where('item_name', 'like', '%usg%')
+                    ->orWhere('item_name', 'like', '%ultrasound%')
+                    ->orWhere('item_name', 'like', '%ultrasonogram%')
+                    ->orWhere('item_name', 'like', '%ultrasonography%');
+            });
+        }
+
+        $items = $items->get();
 
         foreach ($items as $item) {
             $note = $validated['report_notes'][$item->id] ?? null;
@@ -528,8 +1093,36 @@ class ReportingController extends Controller
             $item->save();
         }
 
+        // Redirect back to the department-specific reporting list when possible
+        if ($requestedDept === 'ultrasound') {
+            return redirect()->route('backend.reporting.ultrasound')
+                ->with([
+                    'successMessage' => 'Report saved successfully.',
+                    'success' => 'Report saved successfully.',
+                ]);
+        }
+
+        if ($requestedDept === 'xray') {
+            return redirect()->route('backend.reporting.xray')
+                ->with([
+                    'successMessage' => 'Report saved successfully.',
+                    'success' => 'Report saved successfully.',
+                ]);
+        }
+
+        if ($requestedDept === 'pathology') {
+            return redirect()->route('backend.reporting.pathology')
+                ->with([
+                    'successMessage' => 'Report saved successfully.',
+                    'success' => 'Report saved successfully.',
+                ]);
+        }
+
         return redirect()->route('backend.reporting.index')
-            ->with('success', 'Report saved successfully.');
+            ->with([
+                'successMessage' => 'Report saved successfully.',
+                'success' => 'Report saved successfully.',
+            ]);
     }
 
     public function updateItem(Request $request, BillItem $billItem)
@@ -539,7 +1132,16 @@ class ReportingController extends Controller
             return back()->with('warning', 'Reporting is not available for IPD invoices.');
         }
 
-        $allowedCategories = $this->resolveDepartmentCategories();
+        $requestedDept = trim((string) $request->input('department', ''));
+        if ($requestedDept === 'ultrasound') {
+            $allowedCategories = ['Ultrasound', 'Ultrasonogram', 'Ultrasonography'];
+        } elseif ($requestedDept === 'xray') {
+            $allowedCategories = ['Radiology'];
+        } elseif ($requestedDept === 'pathology') {
+            $allowedCategories = ['Pathology'];
+        } else {
+            $allowedCategories = $this->resolveDepartmentCategories();
+        }
         $request->validate([
             'report_note' => ['nullable', 'string'],
             'report_range' => ['nullable', 'string', 'max:255'],
@@ -548,8 +1150,25 @@ class ReportingController extends Controller
             'parameter_values.*' => ['nullable', 'string'],
         ]);
 
-        if (!in_array($billItem->category, $allowedCategories, true)) {
-            return back()->with('warning', 'Invalid report item.');
+        // Validate department context more strictly: allow explicit ultrasound names
+        $isAllowedByCategory = in_array($billItem->category, $allowedCategories, true);
+        $nameLc = strtolower((string) ($billItem->item_name ?? ''));
+
+        $isUltrasoundByName = str_contains($nameLc, 'usg') || str_contains($nameLc, 'ultrasound') || str_contains($nameLc, 'ultrasonogram') || str_contains($nameLc, 'ultrasonography');
+        $isXrayByName = str_contains($nameLc, 'xray') || str_contains($nameLc, 'x-ray') || str_contains($nameLc, 'radiograph') || str_contains($nameLc, 'x ray');
+
+        if ($requestedDept === 'ultrasound') {
+            if (!($isAllowedByCategory || $isUltrasoundByName)) {
+                return back()->with('warning', 'Invalid report item for Ultrasound.');
+            }
+        } elseif ($requestedDept === 'xray') {
+            if (!($isAllowedByCategory && $isXrayByName)) {
+                return back()->with('warning', 'Invalid report item for X-ray.');
+            }
+        } else {
+            if (!$isAllowedByCategory) {
+                return back()->with('warning', 'Invalid report item.');
+            }
         }
 
         if (empty($billItem->sample_collected_at)) {
@@ -571,6 +1190,41 @@ class ReportingController extends Controller
         }
         $billItem->save();
 
+        // If saving from pathology or xray department, mark other matching
+        // bill items in the same billing as reported as well so that the
+        // department view shows all tests as ready.
+        try {
+            if ($requestedDept === 'pathology') {
+                \App\Models\BillItem::query()
+                    ->where('billing_id', $billItem->billing_id)
+                    ->where('category', 'Pathology')
+                    ->whereNull('reported_at')
+                    ->update([
+                        'reported_at' => now(),
+                        'reported_by' => auth('admin')->id(),
+                    ]);
+            } elseif ($requestedDept === 'xray') {
+                // Mark other radiology items that look like xray/radiograph
+                \App\Models\BillItem::query()
+                    ->where('billing_id', $billItem->billing_id)
+                    ->where('category', 'Radiology')
+                    ->whereNull('reported_at')
+                    ->where(function ($q) {
+                        $q->where('item_name', 'like', '%xray%')
+                          ->orWhere('item_name', 'like', '%x-ray%')
+                          ->orWhere('item_name', 'like', '%radiograph%')
+                          ->orWhere('item_name', 'like', '%radiography%')
+                          ->orWhere('item_name', 'like', '%x ray%');
+                    })
+                    ->update([
+                        'reported_at' => now(),
+                        'reported_by' => auth('admin')->id(),
+                    ]);
+            }
+        } catch (\Throwable $_) {
+            // ignore marking failures; main item already saved
+        }
+
         // Persist structured parameter results (if provided)
         $parameterValues = $request->input('parameter_values', []);
         if (is_array($parameterValues)) {
@@ -578,18 +1232,58 @@ class ReportingController extends Controller
             foreach ($parameterValues as $paramId => $val) {
                 $val = trim((string) ($val ?? ''));
                 if ($val === '') continue;
-                $param = PathologyTestParameter::with('pathologyUnit', 'testParameter')->find($paramId);
+
+                $genName = null;
+                $paramModel = null;
+
+                if (is_string($paramId) && str_starts_with($paramId, 'gen:')) {
+                    $genName = trim(substr($paramId, 4));
+                } else {
+                    $paramModel = PathologyTestParameter::with('pathologyUnit', 'testParameter')->find($paramId);
+                }
+
                 BillItemParameterResult::create([
                     'bill_item_id' => $billItem->id,
-                    'pathology_test_parameter_id' => $paramId,
-                    'name' => $param ? trim((string) ($param->name ?? data_get($param, 'testParameter.name') ?? '')) : null,
+                    'pathology_test_parameter_id' => $paramModel ? $paramModel->id : null,
+                    'name' => $paramModel ? trim((string) ($paramModel->name ?? data_get($paramModel, 'testParameter.name') ?? '')) : ($genName ?: null),
                     'value' => $val,
-                    'unit' => $param ? trim((string) data_get($param, 'pathologyUnit.name') ?? '') : null,
+                    'unit' => $paramModel ? trim((string) data_get($paramModel, 'pathologyUnit.name') ?? '') : null,
                 ]);
             }
         }
+        // If this is an XHR/Inertia visit, return JSON so the client can
+        // show a toast and update UI without performing a full redirect.
+        $billingId = $billItem->billing_id ?? ($billItem->billing?->id ?? null);
+        $remaining = 0;
+        if ($billingId) {
+            $remaining = BillItem::query()->where('billing_id', $billingId)->whereNull('reported_at')->count();
+        }
 
-        return back()->with('success', 'Report saved successfully.');
+        if ($request->header('X-Inertia') || $request->expectsJson() || $request->ajax() || $request->wantsJson()) {
+            return response()->json([
+                'ok' => true,
+                'successMessage' => 'Report saved successfully.',
+                'removedItemId' => $billItem->id,
+                'remainingCount' => $remaining,
+            ]);
+        }
+
+        // Otherwise redirect back to the billing edit page for the same department so UI remains scoped.
+        if ($billingId) {
+            $routeParams = ['billing' => $billingId];
+            if ($requestedDept !== '') $routeParams['department'] = $requestedDept;
+            return redirect()->route('backend.reporting.edit', $routeParams)
+                ->with([
+                    'successMessage' => 'Report saved successfully.',
+                    'success' => 'Report saved successfully.',
+                ]);
+        }
+
+        return redirect()->route('backend.reporting.index')
+            ->with([
+                'successMessage' => 'Report saved successfully.',
+                'success' => 'Report saved successfully.',
+            ]);
     }
 
     public function print(BillItem $billItem)
@@ -609,7 +1303,46 @@ class ReportingController extends Controller
 
         $allowedCategories = $this->resolveDepartmentCategories();
 
-        if (!in_array($billItem->category, $allowedCategories, true)) {
+        // If the item category is not within the user's resolved department scope,
+        // allow printing when the user explicitly has a matching department permission
+        // (e.g., `ultrasound-reporting`, `xray-reporting`, `pathology-reporting`),
+        // or when they have the global `reporting`/`report-delivery` permission.
+        $user = auth('admin')->user();
+        $categoryAllowedByScope = in_array($billItem->category, $allowedCategories, true);
+
+        $explicitAllow = false;
+        try {
+            if ($user) {
+                if ($user->can('reporting') || $user->can('report-delivery')) {
+                    $explicitAllow = true;
+                }
+
+                // Pathology explicit permission
+                if (!$explicitAllow && $user->can('pathology-reporting') && $billItem->category === 'Pathology') {
+                    $explicitAllow = true;
+                }
+
+                // Ultrasound permission: allow if user has ultrasound-reporting and item looks like USG
+                if (!$explicitAllow && $user->can('ultrasound-reporting')) {
+                    $reportTitleTmp = $this->resolveReportTitle($billItem);
+                    if ($this->isUltrasonogramBillItem($billItem, $reportTitleTmp)) {
+                        $explicitAllow = true;
+                    }
+                }
+
+                // X-ray permission: allow when user has xray-reporting and item name/title contains xray/radiograph
+                if (!$explicitAllow && $user->can('xray-reporting')) {
+                    $txt = strtolower(trim((string) ($billItem->item_name ?? '') . ' ' . ($billItem->category ?? '')));
+                    if (str_contains($txt, 'xray') || str_contains($txt, 'x-ray') || str_contains($txt, 'radiograph') || str_contains($txt, 'radiography')) {
+                        $explicitAllow = true;
+                    }
+                }
+            }
+        } catch (\Throwable $_) {
+            // ignore permission check failures and fall back to scope check
+        }
+
+        if (! $categoryAllowedByScope && ! $explicitAllow) {
             return redirect()->route('backend.reporting.index')
                 ->with('warning', 'Invalid report item.');
         }
@@ -793,7 +1526,7 @@ class ReportingController extends Controller
             $dob = new \DateTime($patient->dob);
             $now = new \DateTime();
             $ageYears = $now->diff($dob)->y;
-            $age = $ageYears . ' Year (As Of Date ' . $now->format('d.m.Y') . ')';
+            $age = $ageYears . ' Year';
         } elseif (!empty($patient?->age)) {
             $age = $patient->age . ' Y';
         }
@@ -910,6 +1643,47 @@ class ReportingController extends Controller
                     $fromNum = $this->parseNumeric($from);
                     $toNum = $this->parseNumeric($to);
 
+                    // If controller did not get explicit from/to numbers, try to
+                    // extract numeric bounds from the assembled range string
+                    // (covers cases like item->report_range = "0.6-1.2 mg/dl" or "0.6 - 1.2").
+                    $rangeCandidate = trim((string) ($rangeStr ?? ''));
+                    if ($rangeCandidate === '' && isset($it) && isset($it->report_range)) {
+                        $rangeCandidate = trim((string) $it->report_range);
+                    }
+                    if ($rangeCandidate !== '') {
+                        $r = preg_replace('/[–—]/u', '-', $rangeCandidate);
+                        // comparator like '< 150' or '<150' or '>= 0.6'
+                        if ($fromNum === null || $toNum === null) {
+                            if (preg_match('/([<>]=?)\s*([+-]?[0-9]+(?:[\.,][0-9]+)?)/u', $r, $mc)) {
+                                $op = $mc[1];
+                                $limit = floatval(str_replace(',', '.', $mc[2]));
+                                if ($op === '<' || $op === '<=') {
+                                    $toNum = $limit;
+                                } elseif ($op === '>' || $op === '>=') {
+                                    $fromNum = $limit;
+                                }
+                            } elseif (preg_match_all('/[+-]?[0-9]+(?:[\.,][0-9]+)?/u', $r, $mn) && count($mn[0]) >= 2) {
+                                $fromNum = floatval(str_replace(',', '.', $mn[0][0]));
+                                $toNum = floatval(str_replace(',', '.', $mn[0][1]));
+                            }
+                        }
+                    }
+
+                    // If a single bound string actually contains a min-max (eg "0.6 - 1.2" in reference_from),
+                    // try to extract both numbers from that string so we treat them as low/high.
+                    if ($fromNum !== null && $toNum === null) {
+                        if (preg_match_all('/[+-]?[0-9]+(?:[\.,][0-9]+)?/u', $from, $m) && count($m[0]) >= 2) {
+                            $fromNum = floatval(str_replace(',', '.', $m[0][0]));
+                            $toNum = floatval(str_replace(',', '.', $m[0][1]));
+                        }
+                    }
+                    if ($toNum !== null && $fromNum === null) {
+                        if (preg_match_all('/[+-]?[0-9]+(?:[\.,][0-9]+)?/u', $to, $m2) && count($m2[0]) >= 2) {
+                            $fromNum = floatval(str_replace(',', '.', $m2[0][0]));
+                            $toNum = floatval(str_replace(',', '.', $m2[0][1]));
+                        }
+                    }
+
                     // Only mark as out-of-range when a numeric value exists and
                     // it falls strictly outside the provided bounds. Handle
                     // situations where only one bound is provided and where
@@ -922,11 +1696,13 @@ class ReportingController extends Controller
                             if ($valNum < $low || $valNum > $high) {
                                 $isOut = true;
                             }
-                        } elseif ($fromNum !== null) {
+                        } elseif ($fromNum !== null && $toNum === null) {
+                            // only lower bound provided -> value less than lower is out
                             if ($valNum < $fromNum) {
                                 $isOut = true;
                             }
-                        } elseif ($toNum !== null) {
+                        } elseif ($toNum !== null && $fromNum === null) {
+                            // only upper bound provided -> value greater than upper is out
                             if ($valNum > $toNum) {
                                 $isOut = true;
                             }
@@ -946,11 +1722,159 @@ class ReportingController extends Controller
                         'param' => $name,
                         'value' => $displayValue,
                         'normal_range' => $rangeStr,
+                        'is_out' => $isOut,
+                        'value_num' => $valNum,
                     ];
+
+                        // Temporary debug log for all parameters (will help diagnose mismatches)
+                        try {
+                            Log::info('ReportingController::print param debug', [
+                                'bill_item_id' => $billItem->id ?? null,
+                                'item_id' => $it->item_id ?? null,
+                                'param_name' => $name,
+                                'raw_value' => $val,
+                                'display_value' => $displayValue,
+                                'from_raw' => $from,
+                                'to_raw' => $to,
+                                'from_num' => $fromNum,
+                                'to_num' => $toNum,
+                                'value_num' => $valNum,
+                                'is_out' => $isOut,
+                            ]);
+                        } catch (\Throwable $_) {
+                            // ignore logging failures
+                        }
                 }
 
                 $it->report_note = implode("\n", $plainLines);
                 $it->printed_parameter_rows = $printRows;
+            } else {
+                // Fallback: try to parse free-text report_note into parameter rows
+                $plain = trim((string) ($it->report_note ?? ''));
+                $printRows2 = [];
+                if ($plain !== '') {
+                    $lines = preg_split('/\r?\n/', $plain);
+                    foreach ($lines as $line) {
+                        $line = trim((string) $line);
+                        if ($line === '') continue;
+
+                        $name = '';
+                        $val = '';
+                        $unit = '';
+
+                        // Try common patterns: "Name: 0.8 mg/dl" or "Name - 0.8 mg/dl"
+                        if (preg_match('/^(.*?)[\:\-\t]\s*([+-]?[0-9]+(?:[\.,][0-9]+)?)(.*)$/u', $line, $m)) {
+                            $name = trim($m[1]);
+                            $val = trim($m[2]);
+                            $unit = trim($m[3]);
+                        } else {
+                            // Try to locate first number token as value
+                            if (preg_match('/([+-]?[0-9]+(?:[\.,][0-9]+)?)/u', $line, $m2)) {
+                                $val = trim($m2[1]);
+                                // name is everything except the matched number
+                                $name = trim(preg_replace('/' . preg_quote($m2[0], '/') . '/u', '', $line, 1));
+                                // try to extract trailing unit text
+                                $unit = trim(preg_replace('/^.*' . preg_quote($m2[0], '/') . '/u', '', $line));
+                            } else {
+                                // no numeric value found: treat whole line as a value string
+                                $name = '';
+                                $val = $line;
+                            }
+                        }
+
+                        $displayValue = $val . ($unit !== '' ? ' ' . $unit : '');
+
+                        // Build a candidate range from item-level report_range or suggested defaults
+                        $rangeStr = trim((string) ($it->report_range ?? ''));
+                        if ($rangeStr === '') {
+                            try {
+                                $rangeStr = (string) ($this->suggestNormalRangeByTestName($it) ?? '');
+                            } catch (\Throwable $_) {
+                                $rangeStr = '';
+                            }
+                        }
+
+                        $valNum = $this->parseNumeric($val);
+                        $fromNum = null;
+                        $toNum = null;
+
+                        // Try to extract bounds from rangeStr similar to structured path
+                        $rc = trim((string) $rangeStr);
+                        if ($rc !== '') {
+                            $r = preg_replace('/[–—]/u', '-', $rc);
+                            if (preg_match('/([<>]=?)\s*([+-]?[0-9]+(?:[\.,][0-9]+)?)/u', $r, $mc)) {
+                                $op = $mc[1];
+                                $limit = floatval(str_replace(',', '.', $mc[2]));
+                                if ($op === '<' || $op === '<=') {
+                                    $toNum = $limit;
+                                } elseif ($op === '>' || $op === '>=') {
+                                    $fromNum = $limit;
+                                }
+                            } elseif (preg_match_all('/[+-]?[0-9]+(?:[\.,][0-9]+)?/u', $r, $mn) && count($mn[0]) >= 2) {
+                                $fromNum = floatval(str_replace(',', '.', $mn[0][0]));
+                                $toNum = floatval(str_replace(',', '.', $mn[0][1]));
+                            }
+                        }
+
+                        $isOut = false;
+                        if ($valNum !== null) {
+                            if ($fromNum !== null && $toNum !== null) {
+                                $low = min($fromNum, $toNum);
+                                $high = max($fromNum, $toNum);
+                                if ($valNum < $low || $valNum > $high) $isOut = true;
+                            } elseif ($fromNum !== null && $toNum === null) {
+                                if ($valNum < $fromNum) $isOut = true;
+                            } elseif ($toNum !== null && $fromNum === null) {
+                                if ($valNum > $toNum) $isOut = true;
+                            }
+                        } else {
+                            // when no numeric value but there is a textual range, mark outside conservatively
+                            if ($rangeStr !== '' && !preg_match('/[0-9]/', $rangeStr)) {
+                                if (mb_strtolower($displayValue) !== mb_strtolower($rangeStr)) $isOut = true;
+                            }
+                        }
+
+                        // If parsed name looks like a unit (eg 'mg/dl'), try to infer real parameter name
+                        if ($name !== '') {
+                            $nameLc = mb_strtolower($name);
+                            if (preg_match('/^(mg|mg\/dl|mmol\/l|mmol|mmol\/L|mmol\/l|g\/dl|μmol\/l|umol\/l|mmol\/L|mmol\/l|mmol\/L|mmol\/L|mmol\/?l|mg\/?dl)$/i', $nameLc) || preg_match('/^[\p{L}\/\s%]+$/u', $nameLc) && strlen(trim($nameLc)) <= 5) {
+                                // try to find a known parameter token in the full line
+                                $tokens = ['creatinine','creat','s\.creatinine','s creatinine','urea','triglyceride','triglycerides','triglycerid','cholesterol','hdl','ldl','glucose','rbs','hba1c','uric acid','uricacid','uric'];
+                                $found = '';
+                                foreach ($tokens as $t) {
+                                    try {
+                                        if (preg_match('/' . $t . '/iu', $line) === 1) { $found = $t; break; }
+                                    } catch (\Throwable $_) { }
+                                }
+                                if ($found !== '') {
+                                    $name = ucwords(str_replace(['.', '_'], ' ', preg_replace('/[^a-z0-9\.\s]/i', '', $found)));
+                                } else {
+                                    // fallback to item name if available
+                                    $name = trim((string) ($it->item_name ?? 'Result'));
+                                }
+                            }
+                        }
+
+                        $printRows2[] = [
+                            'result_html' => ($name === '' ? ($isOut ? '<strong>' . e($displayValue) . '</strong>' : e($displayValue)) : e($name) . ': ' . ($isOut ? '<strong>' . e($displayValue) . '</strong>' : e($displayValue))),
+                            'param' => $name,
+                            'value' => $displayValue,
+                            'normal_range' => $rangeStr,
+                            'is_out' => $isOut,
+                            'value_num' => $valNum,
+                        ];
+                    }
+                }
+
+                $it->report_note = $plain;
+                $it->printed_parameter_rows = $printRows2;
+                // Log fallback parse results to help debugging (temporary)
+                try {
+                    foreach ($it->printed_parameter_rows as $dbg) {
+                        Log::info('ReportingController::print param debug (fallback)', array_merge(['bill_item_id' => $billItem->id ?? null, 'item_id' => $it->item_id ?? null], $dbg));
+                    }
+                } catch (\Throwable $_) {
+                }
             }
         }
 
@@ -1085,11 +2009,61 @@ class ReportingController extends Controller
 
             $categoryName = trim((string) ($test?->pathologyCategory?->name ?? ''));
         } elseif ($billItem->category === 'Radiology' && !empty($billItem->item_id)) {
-            $radiologyTest = RadiologyTest::query()
-                ->with('test.pathologyCategory')
-                ->find($billItem->item_id);
+            // `bill_items.item_id` may reference either a RadiologyTest record
+            // or directly a Test record. Try both patterns to reliably resolve
+            // the main category name.
+            $categoryName = '';
 
-            $categoryName = trim((string) ($radiologyTest?->test?->pathologyCategory?->name ?? ''));
+            // Try as RadiologyTest id -> RadiologyTest->test->pathologyCategory
+            try {
+                $radiologyTest = RadiologyTest::query()
+                    ->with('test.pathologyCategory')
+                    ->find($billItem->item_id);
+                $categoryName = trim((string) ($radiologyTest?->test?->pathologyCategory?->name ?? ''));
+            } catch (\Throwable $_) {
+                // ignore
+            }
+
+            // If not found, try interpreting item_id as Test id
+            if ($categoryName === '') {
+                try {
+                    $t = Test::query()->with('pathologyCategory')->find($billItem->item_id);
+                    $categoryName = trim((string) ($t?->pathologyCategory?->name ?? ''));
+                } catch (\Throwable $_) {
+                    // ignore
+                }
+            }
+        }
+
+        // If still empty, try additional heuristics from the itemable relation
+        if ($categoryName === '' && $billItem->relationLoaded('itemable') || $billItem->itemable) {
+            try {
+                $itemable = $billItem->itemable;
+                if ($itemable) {
+                    // common patterns: test_id or test_category_id
+                    if (isset($itemable->test_id) && !empty($itemable->test_id)) {
+                        $t = Test::with('pathologyCategory')->find($itemable->test_id);
+                        $categoryName = trim((string) ($t?->pathologyCategory?->name ?? ''));
+                    }
+
+                    if ($categoryName === '' && isset($itemable->test_category_id) && !empty($itemable->test_category_id)) {
+                        $tc = \App\Models\TestCategory::find($itemable->test_category_id);
+                        $categoryName = trim((string) ($tc?->name ?? ''));
+                    }
+
+                    // some itemables expose a `test` relation
+                    if ($categoryName === '' && method_exists($itemable, 'test')) {
+                        try {
+                            $t2 = $itemable->test()->with('pathologyCategory')->first();
+                            $categoryName = trim((string) ($t2?->pathologyCategory?->name ?? ''));
+                        } catch (\Throwable $_) {
+                            // ignore
+                        }
+                    }
+                }
+            } catch (\Throwable $_) {
+                // ignore
+            }
         }
 
         if ($categoryName === '') {

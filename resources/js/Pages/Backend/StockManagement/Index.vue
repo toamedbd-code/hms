@@ -22,6 +22,14 @@ const applyPerPage = () => {
     replace: true,
   });
 };
+
+const goBack = () => {
+  if (window.history.length > 1) {
+    window.history.back();
+  } else {
+    router.visit(route('backend.dashboard'));
+  }
+};
 </script>
 
 <template>
@@ -30,6 +38,7 @@ const applyPerPage = () => {
       <div class="flex flex-wrap items-center justify-between gap-3 p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h1>
         <div class="flex flex-wrap items-center gap-2">
+          <button type="button" @click="goBack" class="px-3 py-2 text-sm font-semibold text-white bg-red-600 rounded hover:bg-red-700">Back</button>
           <a :href="route('backend.stock.item.create')" class="px-3 py-2 text-sm font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700">Store Item Setup</a>
           <a :href="route('backend.stock.grns')" class="px-3 py-2 text-sm font-semibold text-white bg-cyan-600 rounded hover:bg-cyan-700">GRN Receive</a>
           <a :href="route('backend.stock.requisitions')" class="px-3 py-2 text-sm font-semibold text-white bg-teal-600 rounded hover:bg-teal-700">Requisitions</a>

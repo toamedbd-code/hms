@@ -34,6 +34,10 @@ class AdminAuth
             });
             return $next($request);
         } else {
+            if ($request->header('X-Inertia')) {
+                return Inertia::location(route('backend.auth.login'));
+            }
+
             if ($request->expectsJson() || $request->ajax()) {
                 return response()->json([
                     'message' => 'Session expired or unauthorized. Please login again.',

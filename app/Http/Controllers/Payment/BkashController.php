@@ -93,7 +93,7 @@ class BkashController extends Controller
         $sub->save();
         Subscription::clearCurrentCache();
 
-        return redirect()->route('settings.payment.bkash')->with('successMessage', 'Simulated payment applied. Subscription active until ' . $sub->expires_at->toDateString());
+        return redirect()->route('settings.payment.bkash')->with('successMessage', 'Simulated payment applied. Transaction ID: ' . $payment->provider_payment_id . '. Subscription active until ' . $sub->expires_at->toDateString());
     }
 
     /**
@@ -150,8 +150,7 @@ class BkashController extends Controller
         ]);
 
         try {
-            // If configured for sandbox, the service will return a simulate page.
-            $result = $service->createPayment($payment);
+            $result = $service->createCheckout($payment, 'payment.bkash.simulate.public.page');
 
             if (! empty($result['payment_id'])) {
                 $payment->provider_payment_id = $result['payment_id'];
@@ -210,7 +209,7 @@ class BkashController extends Controller
         $sub->save();
         Subscription::clearCurrentCache();
 
-        return redirect()->route($loginRoute)->with('successMessage', 'Simulated payment applied. Subscription active until ' . $sub->expires_at->toDateString());
+        return redirect()->route($loginRoute)->with('successMessage', 'Simulated payment applied. Transaction ID: ' . $payment->provider_payment_id . '. Subscription active until ' . $sub->expires_at->toDateString());
     }
 
     public function publicUnsubscribe(Request $request)

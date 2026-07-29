@@ -7,7 +7,9 @@ use Illuminate\Http\Request;
 use App\Models\Billing;
 use App\Models\DueCollection;
 use App\Models\OpdPatient;
+use App\Services\ActivityLogService;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 class DueCollectController extends Controller
@@ -33,14 +35,22 @@ class DueCollectController extends Controller
             }
         }
 
+        $vatAmount = round((float) ($billing->vat_amount ?? 0), 2);
+        $discountAmount = round((float) ($billing->discount ?? 0), 2);
+        $extraDiscountAmount = round((float) ($billing->extra_flat_discount ?? 0), 2);
+        $effectiveNetAmount = max(0, (float) ($billing->payable_amount ?? ($billing->total - $discountAmount - $extraDiscountAmount + $vatAmount)));
+        $effectiveDueAmount = max(0, $effectiveNetAmount - (float) ($billing->paid_amt ?? 0));
+
         // safety check
-        if ($billing->due_amount <= 0) {
+        if ($effectiveDueAmount <= 0) {
             return redirect()
                 ->route('backend.billing.list')
                 ->with('error', 'No due amount available');
         }
 
-        return view('backend.due_collect.index', compact('billing', 'redirectTo', 'returnTo'));
+        $submissionToken = (string) Str::uuid();
+
+        return view('backend.due_collect.index', compact('billing', 'redirectTo', 'returnTo', 'submissionToken', 'effectiveNetAmount', 'effectiveDueAmount'));
     }
 
     /**
@@ -55,39 +65,94 @@ class DueCollectController extends Controller
         $billing = Billing::findOrFail($id);
         $collectedAmount = (float) $request->amount;
         $returnTo = (string) $request->input('return_to', '');
+        $ipdPatientId = (int) $request->input('ipd_patient_id', 0);
+        $submissionToken = (string) $request->input('submission_token', '');
+        $cacheKey = 'due_collect.billing.' . $billing->id . '.' . $submissionToken;
+
+        if ($submissionToken !== '' && Cache::has($cacheKey)) {
+            return redirect()
+                ->back()
+                ->withErrors(['amount' => 'This due collection has already been submitted. Please refresh the page and try again.'])
+                ->withInput();
+        }
+
+        $currentDue = max(0, (float) ($billing->payable_amount ?? 0) - (float) ($billing->paid_amt ?? 0));
+        if ($collectedAmount > $currentDue) {
+            return redirect()
+                ->back()
+                ->withErrors(['amount' => 'Collect amount cannot exceed due amount.'])
+                ->withInput();
+        }
 
         // save due collection
         DueCollection::create([
             'billing_id'       => $billing->id,
             'collected_amount' => $collectedAmount,
             'collected_at'     => now(),
+            'created_by'       => auth('admin')->id(),
         ]);
 
         // update billing
         $billing->paid_amt += $collectedAmount;
-        $billing->due_amount -= $collectedAmount;
+        $billing->due_amount = max(0, $currentDue - $collectedAmount);
 
         if ($billing->due_amount <= 0) {
             $billing->payment_status = 'Paid';
-            $billing->due_amount = 0;
         } else {
             $billing->payment_status = 'Partial';
         }
 
         $billing->save();
 
+        ActivityLogService::log(
+            'Due Collection',
+            'COLLECT',
+            'Collected billing due for Invoice ' . ($billing->invoice_number ?: $billing->bill_number),
+            [
+                'billing_id' => $billing->id,
+                'bill_number' => $billing->bill_number,
+                'invoice_number' => $billing->invoice_number,
+                'collected_amount' => $collectedAmount,
+                'remaining_due_amount' => (float) $billing->due_amount,
+                'payment_status' => $billing->payment_status,
+            ]
+        );
+
+        if ($submissionToken !== '') {
+            Cache::put($cacheKey, true, now()->addMinutes(30));
+        }
+
         $invoiceNo = $billing->invoice_number ?: $billing->bill_number;
         $message = 'Due collected from Invoice ' . $invoiceNo
             . ' | Collected: ' . number_format($collectedAmount, 2)
             . ' | Remaining Due: ' . number_format((float) $billing->due_amount, 2);
 
-        $redirectUrl = $this->isInternalRedirectUrl($returnTo)
-            ? $returnTo
-            : route('backend.billing.list');
+        $redirectUrl = $this->resolvePostCollectionRedirectUrl($returnTo, $ipdPatientId);
 
         return redirect()
             ->to($redirectUrl)
             ->with('successMessage', $message);
+    }
+
+    private function resolvePostCollectionRedirectUrl(?string $returnTo, int $ipdPatientId): string
+    {
+        if ($this->isDischargeCertificateRedirect($returnTo) && $ipdPatientId > 0) {
+            $showUrl = route('backend.ipdpatient.show', $ipdPatientId);
+            $showUrl = rtrim($showUrl, '/') . '?open_certificate=1&certificate_route=' . urlencode($returnTo);
+
+            return $showUrl;
+        }
+
+        return $this->isInternalRedirectUrl($returnTo)
+            ? $returnTo
+            : route('backend.billing.list');
+    }
+
+    private function isDischargeCertificateRedirect(?string $url): bool
+    {
+        $url = trim((string) $url);
+
+        return $url !== '' && Str::contains($url, '/discharge-certificate/');
     }
 
     private function isInternalRedirectUrl(?string $url): bool
@@ -114,7 +179,9 @@ class DueCollectController extends Controller
                 ->with('errorMessage', 'No due amount available for this OPD invoice.');
         }
 
-        return view('backend.due_collect.opd', compact('opdPatient'));
+        $submissionToken = (string) Str::uuid();
+
+        return view('backend.due_collect.opd', compact('opdPatient', 'submissionToken'));
     }
 
     public function opdStore(Request $request, $id)
@@ -126,6 +193,15 @@ class DueCollectController extends Controller
         $opdPatient = OpdPatient::findOrFail($id);
         $collectAmount = (float) $request->amount;
         $currentDue = (float) $opdPatient->balance_amount;
+        $submissionToken = (string) $request->input('submission_token', '');
+        $cacheKey = 'due_collect.opd.' . $opdPatient->id . '.' . $submissionToken;
+
+        if ($submissionToken !== '' && Cache::has($cacheKey)) {
+            return redirect()
+                ->back()
+                ->withErrors(['amount' => 'This due collection has already been submitted. Please refresh the page and try again.'])
+                ->withInput();
+        }
 
         if ($collectAmount > $currentDue) {
             return redirect()
@@ -145,6 +221,9 @@ class DueCollectController extends Controller
         }
 
         $opdPatient->save();
+        if ($submissionToken !== '') {
+            Cache::put($cacheKey, true, now()->addMinutes(30));
+        }
 
         DueCollection::create([
             'billing_id' => null,
@@ -154,6 +233,19 @@ class DueCollectController extends Controller
             'note' => 'OPD due collected for opd_patient_id:' . $opdPatient->id,
             'created_by' => auth('admin')->id(),
         ]);
+
+        ActivityLogService::log(
+            'OPD Due Collection',
+            'COLLECT',
+            'Collected OPD due for invoice ' . ($opdPatient->invoice_no ?? ('OPD#' . $opdPatient->id)),
+            [
+                'opd_patient_id' => $opdPatient->id,
+                'invoice_no' => $opdPatient->invoice_no,
+                'collected_amount' => $collectAmount,
+                'remaining_due_amount' => (float) $opdPatient->balance_amount,
+                'payment_status' => $opdPatient->payment_status,
+            ]
+        );
 
         return redirect()
             ->route('backend.billing.list')

@@ -85,7 +85,11 @@ class AdminService
     public function AdminExists($userName)
     {
         $table = $this->adminModel->getTable();
-        return $this->adminModel->whereNull($table . '.deleted_at')
+        // Optimized query - select only essential columns for login
+        // Note: Admin model exposes `name` via an accessor (first_name + last_name),
+        // so select the underlying columns instead of a non-existent `name` DB column.
+        return $this->adminModel->select('id', 'email', 'phone', 'password', 'status', 'first_name', 'last_name')
+            ->whereNull($table . '.deleted_at')
             ->where(function ($q) use ($userName) {
                 $q->where('email', strtolower($userName))
                     ->orWhere('phone', $userName);

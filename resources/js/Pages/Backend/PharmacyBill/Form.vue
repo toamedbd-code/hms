@@ -302,14 +302,18 @@ onMounted(() => {
 
 const submit = (shouldPrint = false) => {
     let printTab = null;
+    let printToken = null;
     if (shouldPrint) {
         try {
-            const features = 'noopener,noreferrer,width=1000,height=800,left=200,top=200,resizable,scrollbars';
-            // open a plain new tab (no popup feature string)
-            printTab = window.open('about:blank', '_blank');
+            // generate a short random token
+            printToken = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+            // open preview waiting page immediately with token so user sees instant feedback
+            const previewUrl = route('backend.download.invoice.preview', { print_token: printToken, module: 'pharmacy' });
+            printTab = window.open(previewUrl, '_blank');
             try { if (printTab) printTab.opener = null; } catch (e) { /* ignore */ }
         } catch (e) {
             printTab = null;
+            printToken = null;
         }
     }
 
@@ -329,6 +333,12 @@ const submit = (shouldPrint = false) => {
     const routeName = props.id ?
         route('backend.pharmacybill.update', props.id) :
         route('backend.pharmacybill.store');
+
+    // attach print_token so server can map token -> billing id for fast preview
+    if (printToken) {
+        // attach extra param; Laravel will accept unexpected input
+        form.print_token = printToken;
+    }
 
     form.post(routeName, {
         onSuccess: (page) => {

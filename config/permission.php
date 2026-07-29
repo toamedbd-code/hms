@@ -179,8 +179,12 @@ return [
          * You may optionally indicate a specific cache driver to use for permission and
          * role caching using any of the `store` drivers listed in the cache.php config
          * file. Using 'default' here means to use the `default` set in cache.php.
+         *
+         * When the application default cache driver is set to database, the cache
+         * table may not exist yet during fresh migrations. In that case use the file
+         * store for permission caching by default.
          */
 
-        'store' => 'default',
+        'store' => env('SPATIE_PERMISSION_CACHE_STORE', env('CACHE_DRIVER', 'file') === 'database' ? 'file' : 'default'),
     ],
 ];

@@ -13,12 +13,19 @@ class ReferralPersonService
 
     public function list()
     {
-        return  $this->referralpersonModel->whereNull('deleted_at');
+        return $this->referralpersonModel
+            ->whereNull('deleted_at')
+            ->orderByRaw('LOWER(name) ASC')
+            ->orderBy('id', 'asc');
     }
 
     public function all()
     {
-        return  $this->referralpersonModel->whereNull('deleted_at')->all();
+        return $this->referralpersonModel
+            ->whereNull('deleted_at')
+            ->orderByRaw('LOWER(name) ASC')
+            ->orderBy('id', 'asc')
+            ->get();
     }
 
     public function find($id)
@@ -66,7 +73,12 @@ class ReferralPersonService
 
     public function activeList()
     {
-        return  $this->referralpersonModel->whereNull('deleted_at')->where('status', 'Active')->get();
+        return $this->referralpersonModel
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->orderByRaw('LOWER(name) ASC')
+            ->orderBy('id', 'asc')
+            ->get();
     }
 
 }

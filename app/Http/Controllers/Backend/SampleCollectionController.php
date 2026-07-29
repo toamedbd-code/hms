@@ -42,6 +42,7 @@ class SampleCollectionController extends Controller
                         ->orWhereHas('billItems', function ($itemQuery) use ($search, $allowedCategories) {
                             $itemQuery
                                 ->whereIn('category', $allowedCategories)
+                                ->where('requires_sample', true)
                                 ->whereNull('sample_collected_at')
                                 ->where('item_name', 'like', "%{$search}%");
                         });
@@ -49,12 +50,14 @@ class SampleCollectionController extends Controller
             })
             ->whereHas('billItems', function ($query) use ($allowedCategories) {
                 $query->whereIn('category', $allowedCategories)
+                    ->where('requires_sample', true)
                     ->whereNull('sample_collected_at');
             })
             ->with([
                 'patient',
                 'billItems' => function ($query) use ($allowedCategories) {
                     $query->whereIn('category', $allowedCategories)
+                        ->where('requires_sample', true)
                         ->whereNull('sample_collected_at')
                         ->with('collectedBy');
                 },
@@ -84,6 +87,7 @@ class SampleCollectionController extends Controller
         BillItem::query()
             ->where('billing_id', $billing->id)
             ->whereIn('category', $allowedCategories)
+            ->where('requires_sample', true)
             ->whereNull('sample_collected_at')
             ->update([
                 'sample_collected_at' => now(),
@@ -105,7 +109,7 @@ class SampleCollectionController extends Controller
 
         $allowedCategories = $this->resolveDepartmentCategories();
 
-        if (! in_array($billItem->category, $allowedCategories)) {
+        if (! in_array($billItem->category, $allowedCategories) || ! $billItem->requires_sample) {
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
@@ -136,6 +140,7 @@ class SampleCollectionController extends Controller
         $items = BillItem::query()
             ->where('billing_id', $billing->id)
             ->whereIn('category', $allowedCategories)
+            ->where('requires_sample', true)
             ->whereNull('sample_collected_at')
             ->get();
 

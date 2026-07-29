@@ -22,6 +22,15 @@ const goToInvoiceDesignAdd = () => {
     router.visit(route('backend.invoicedesign.create'));
 };
 
+const goBack = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+
+    router.visit(route('backend.dashboard'));
+};
+
 </script>
 
 <template>
@@ -37,6 +46,13 @@ const goToInvoiceDesignAdd = () => {
 
                 <div class="p-4 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button
+                            type="button"
+                            @click="goBack"
+                            class="inline-flex items-center justify-center px-3 py-2 text-sm font-semibold text-white bg-red-600 rounded-md shadow-lg hover:bg-red-700"
+                        >
+                            Back
+                        </button>
                         <div class="flex items-center bg-gray-50 dark:bg-gray-800 rounded-lg p-1 shadow-inner">
                             <button @click="goToInvoiceDesignAdd"
                                 class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out"

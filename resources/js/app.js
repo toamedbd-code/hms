@@ -9,7 +9,7 @@ import { createInertiaApp } from '@inertiajs/vue3';
 // dynamic import resolver (avoid laravel-vite-plugin dependency)
 import { ZiggyVue } from 'ziggy-js';
 
-const appName = import.meta.env.VITE_APP_NAME || 'base-laravel-inertiajs';
+const appName = import.meta.env.VITE_APP_NAME || 'ToaMed';
 let runtimeAppName = appName;
 const pages = import.meta.glob('./Pages/**/*.vue');
 
@@ -87,7 +87,7 @@ const setTheme = (themeName) => {
 
 const resolveFavicon = (webSetting) => {
     try {
-        const version = webSetting?.updated_at || Date.now();
+        const version = Date.now();
         if (typeof route === 'function' && route().has('backend.favicon.dynamic')) {
             return route('backend.favicon.dynamic', { v: encodeURIComponent(version) });
         }
@@ -99,9 +99,8 @@ const resolveFavicon = (webSetting) => {
         return null;
     }
 
-    const logo = typeof webSetting.logo === 'string' ? webSetting.logo.trim() : '';
     const icon = typeof webSetting.icon === 'string' ? webSetting.icon.trim() : '';
-    const source = logo || icon;
+    const source = icon;
 
     if (!source) {
         return null;
@@ -120,6 +119,43 @@ const resolveFavicon = (webSetting) => {
     const separator = normalizedSource.includes('?') ? '&' : '?';
 
     return `${normalizedSource}${separator}v=${encodeURIComponent(version)}`;
+};
+
+const normalizePublicAssetUrl = (source) => {
+    if (!source || typeof source !== 'string') {
+        return '';
+    }
+
+    const rawValue = source.trim().replace(/\\/g, '/');
+    if (rawValue === '') {
+        return '';
+    }
+
+    const lower = rawValue.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('data:')) {
+        return rawValue;
+    }
+
+    const normalized = rawValue.replace(/^\/+/, '');
+    const storagePath = normalized.replace(/^(?:storage\/app\/public\/|public\/storage\/|storage\/)/, '');
+
+    try {
+        if (typeof route === 'function' && route().has('backend.public.storage.file')) {
+            return route('backend.public.storage.file', { path: storagePath });
+        }
+    } catch (_) {
+        // fallback to asset below
+    }
+
+    if (typeof window !== 'undefined') {
+        try {
+            return new URL(normalized, window.location.origin).toString();
+        } catch (_) {
+            return normalized;
+        }
+    }
+
+    return normalized;
 };
 
 const resolveRuntimeAppName = (webSetting) => {
@@ -144,15 +180,18 @@ const resolveRuntimeAppName = (webSetting) => {
     return appName;
 };
 
-const updateDocumentTitle = (runtimeName) => {
+const updateDocumentTitle = (runtimeName, pageTitle = '') => {
     if (typeof document === 'undefined') {
         return;
     }
 
-    const currentTitle = document.title || '';
-    const titleParts = currentTitle.split(' - ');
-    const pageTitle = titleParts[0] || runtimeName;
-    document.title = `${pageTitle} - ${runtimeName}`;
+    const normalizedPageTitle = (typeof pageTitle === 'string' ? pageTitle.trim() : '') || runtimeName;
+    if (normalizedPageTitle === runtimeName) {
+        document.title = runtimeName;
+        return;
+    }
+
+    document.title = `${normalizedPageTitle} - ${runtimeName}`;
 };
 
 const detectFaviconType = (url) => {
@@ -165,39 +204,48 @@ const detectFaviconType = (url) => {
     return 'image/png';
 };
 
+const cleanupFaviconLinks = () => {
+    if (typeof document === 'undefined') {
+        return;
+    }
+
+    document
+        .querySelectorAll('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"], link[data-app-favicon="true"]')
+        .forEach((node) => node.remove());
+};
+
 const setFavicon = (webSetting) => {
     if (typeof document === 'undefined') {
         return;
     }
 
-    const faviconUrl = resolveFavicon(webSetting);
+    const fallbackUrl = typeof window !== 'undefined'
+        ? new URL(`/favicon.ico?v=${Date.now()}`, window.location.origin).toString()
+        : '/favicon.ico';
+
+    const faviconUrl = resolveFavicon(webSetting) || fallbackUrl;
     if (!faviconUrl) {
         return;
     }
 
-    const iconType = detectFaviconType(faviconUrl);
-    const rels = ['icon', 'shortcut icon'];
+    cleanupFaviconLinks();
 
-    rels.forEach((relValue, index) => {
+    const iconType = detectFaviconType(faviconUrl);
+    const rels = ['icon', 'shortcut icon', 'apple-touch-icon'];
+
+    rels.forEach((relValue) => {
         let favicon = document.querySelector(`link[data-app-favicon="true"][data-favicon-rel="${relValue}"]`);
         if (!favicon) {
             favicon = document.createElement('link');
             favicon.setAttribute('data-app-favicon', 'true');
             favicon.setAttribute('data-favicon-rel', relValue);
+            favicon.setAttribute('rel', relValue);
             document.head.appendChild(favicon);
         }
 
-        favicon.setAttribute('rel', relValue);
         favicon.setAttribute('type', iconType);
         favicon.setAttribute('href', faviconUrl);
     });
-
-    document
-        .querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]')
-        .forEach((node) => {
-            node.setAttribute('href', faviconUrl);
-            node.setAttribute('type', iconType);
-        });
 };
 
 const applyRuntimeBranding = (pageProps) => {
@@ -268,57 +316,53 @@ const applyRuntimeBranding = (pageProps) => {
     // consistent across navigation that omits branding props.
     try {
         if (!brandingPayload && typeof window !== 'undefined' && window.__last_branding_payload) {
+            // Only prepare the candidate branding payload here. Avoid
+            // writing it into page props now; we'll perform a safe merge
+            // into the props later so we don't overwrite unrelated data.
             brandingPayload = window.__last_branding_payload;
-            if (pageProps) {
-                pageProps.companyInfo = brandingPayload;
-                pageProps.webSetting = brandingPayload;
-                pageProps.websetting = brandingPayload;
-            }
-            if (typeof window !== 'undefined' && window.__inertia && window.__inertia.page && window.__inertia.page.props) {
-                window.__inertia.page.props.companyInfo = brandingPayload;
-                window.__inertia.page.props.webSetting = brandingPayload;
-                window.__inertia.page.props.websetting = brandingPayload;
-            }
         }
     } catch (e) {
         // ignore
     }
 
     try {
-        // Safe update: avoid overwriting a newer in-memory branding with an
-        // older server response. Compare timestamps between any previously
-        // persisted payload and the server candidate and choose the newer
-        // as the `window.__last_branding_payload`.
-        const prev = (typeof window !== 'undefined' && window.__last_branding_payload) ? window.__last_branding_payload : null;
+        // If the server provided a branding payload, treat it as authoritative
+        // and update the persisted payload immediately. This avoids stale icon
+        ///logo values from localStorage being reused after a branding update.
+        if (serverCandidate) {
+            window.__last_branding_payload = serverCandidate;
+            brandingPayload = serverCandidate;
+        } else {
+            const prev = (typeof window !== 'undefined' && window.__last_branding_payload) ? window.__last_branding_payload : null;
 
-        const parseTs = (v) => {
-            if (!v) return NaN;
-            const s = String(v);
-            const t = Date.parse(s);
-            return Number.isFinite(t) ? t : NaN;
-        };
+            const parseTs = (v) => {
+                if (!v) return NaN;
+                const s = String(v);
+                const t = Date.parse(s);
+                return Number.isFinite(t) ? t : NaN;
+            };
 
-        if (!prev && brandingPayload) {
-            window.__last_branding_payload = brandingPayload;
-        } else if (prev && brandingPayload) {
-            const prevTs = parseTs(prev.updated_at ?? prev.updatedAt ?? null);
-            const newTs = parseTs(brandingPayload.updated_at ?? brandingPayload.updatedAt ?? null);
-
-            if (!Number.isFinite(prevTs) && !Number.isFinite(newTs)) {
-                // No reliable timestamps: keep existing persisted payload
-                window.__last_branding_payload = prev;
-                brandingPayload = prev;
-            } else if (!Number.isFinite(prevTs) && Number.isFinite(newTs)) {
+            if (!prev && brandingPayload) {
                 window.__last_branding_payload = brandingPayload;
-            } else if (Number.isFinite(prevTs) && !Number.isFinite(newTs)) {
-                window.__last_branding_payload = prev;
-                brandingPayload = prev;
-            } else {
-                if (newTs >= prevTs) {
-                    window.__last_branding_payload = brandingPayload;
-                } else {
+            } else if (prev && brandingPayload) {
+                const prevTs = parseTs(prev.updated_at ?? prev.updatedAt ?? null);
+                const newTs = parseTs(brandingPayload.updated_at ?? brandingPayload.updatedAt ?? null);
+
+                if (!Number.isFinite(prevTs) && !Number.isFinite(newTs)) {
                     window.__last_branding_payload = prev;
                     brandingPayload = prev;
+                } else if (!Number.isFinite(prevTs) && Number.isFinite(newTs)) {
+                    window.__last_branding_payload = brandingPayload;
+                } else if (Number.isFinite(prevTs) && !Number.isFinite(newTs)) {
+                    window.__last_branding_payload = prev;
+                    brandingPayload = prev;
+                } else {
+                    if (newTs >= prevTs) {
+                        window.__last_branding_payload = brandingPayload;
+                    } else {
+                        window.__last_branding_payload = prev;
+                        brandingPayload = prev;
+                    }
                 }
             }
         }
@@ -348,7 +392,7 @@ const applyRuntimeBranding = (pageProps) => {
     // `company_name`.
     const normalizeBranding = (b) => {
         if (!b || typeof b !== 'object') return b;
-        return {
+        const normalized = {
             id: b.id ?? null,
             name: b.name ?? b.company_name ?? '',
             short_name: b.short_name ?? b.company_short_name ?? '',
@@ -365,6 +409,12 @@ const applyRuntimeBranding = (pageProps) => {
             updated_at: b.updated_at ?? b.updatedAt ?? null,
             current_theme: b.current_theme ?? b.currentTheme ?? undefined,
         };
+
+        normalized.logo = normalizePublicAssetUrl(normalized.logo);
+        normalized.favicon = normalizePublicAssetUrl(normalized.favicon);
+        normalized.icon = normalizePublicAssetUrl(b.icon ?? normalized.favicon ?? normalized.logo);
+
+        return normalized;
     };
 
     // Allow pages that are clearly the public website (they include
@@ -433,19 +483,41 @@ const applyRuntimeBranding = (pageProps) => {
     }
 
     // Apply the effective branding into the Inertia page props so that a
-    // full reload or initial render shows the chosen payload.
+    // full reload or initial render shows the chosen payload. Merge the
+    // branding into any existing objects instead of replacing them to
+    // avoid wiping unrelated props (e.g. `sidebarMenus`).
+    const mergeBrandingInto = (targetObj, brandingObj) => {
+        if (!targetObj || !brandingObj || typeof targetObj !== 'object' || typeof brandingObj !== 'object') return;
+
+        const keys = ['companyInfo', 'webSetting', 'websetting'];
+        const brandingKeys = ['id','company_name','company_short_name','name','short_name','phone','email','logo','favicon','icon','address','sorting','status','created_at','updated_at','current_theme'];
+
+        keys.forEach((k) => {
+            try {
+                const existing = targetObj[k] && typeof targetObj[k] === 'object' ? targetObj[k] : {};
+                // Copy only recognized branding keys to preserve other data
+                brandingKeys.forEach((bk) => {
+                    if (brandingObj[bk] !== undefined) existing[bk] = brandingObj[bk];
+                });
+                // normalize common aliases
+                if (brandingObj.name !== undefined && existing.company_name === undefined) existing.company_name = brandingObj.name;
+                if (brandingObj.short_name !== undefined && existing.company_short_name === undefined) existing.company_short_name = brandingObj.short_name;
+
+                targetObj[k] = existing;
+            } catch (e) {
+                // ignore merge failures
+            }
+        });
+    };
+
     try {
         if (effectiveBrandingNormalized && pageProps) {
-            pageProps.companyInfo = effectiveBrandingNormalized;
-            pageProps.webSetting = effectiveBrandingNormalized;
-            pageProps.websetting = effectiveBrandingNormalized;
+            mergeBrandingInto(pageProps, effectiveBrandingNormalized);
         }
 
         if (typeof window !== 'undefined' && window.__inertia && window.__inertia.page && window.__inertia.page.props) {
             if (effectiveBrandingNormalized) {
-                window.__inertia.page.props.companyInfo = effectiveBrandingNormalized;
-                window.__inertia.page.props.webSetting = effectiveBrandingNormalized;
-                window.__inertia.page.props.websetting = effectiveBrandingNormalized;
+                mergeBrandingInto(window.__inertia.page.props, effectiveBrandingNormalized);
             }
         }
 
@@ -484,10 +556,61 @@ const applyRuntimeBranding = (pageProps) => {
     const runtimeName = resolveRuntimeAppName(effectiveBranding ?? null);
     runtimeAppName = runtimeName;
 
-    updateDocumentTitle(runtimeName);
+    updateDocumentTitle(runtimeName, pageProps?.pageTitle ?? '');
     setTheme(effectiveBranding?.current_theme ?? 'default');
     setFavicon(effectiveBranding ?? { icon: effectiveBranding?.favicon, logo: effectiveBranding?.logo, updated_at: effectiveBranding?.updated_at });
 };
+
+const applyLastBrandingPayload = (payload) => {
+    if (!payload || typeof payload !== 'object') {
+        return;
+    }
+
+    const normalizedPayload = {
+        ...payload,
+        name: payload.name ?? payload.company_name ?? '',
+        company_name: payload.company_name ?? payload.name ?? '',
+        favicon: payload.favicon ?? payload.icon ?? '',
+        icon: payload.icon ?? payload.favicon ?? '',
+        updated_at: payload.updated_at ?? payload.updatedAt ?? null,
+    };
+
+    try {
+        if (typeof window !== 'undefined') {
+            window.__last_branding_payload = normalizedPayload;
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem('__last_branding_payload', JSON.stringify(normalizedPayload));
+            }
+        }
+    } catch (e) {
+        // ignore storage write errors
+    }
+
+    updateDocumentTitle(resolveRuntimeAppName(normalizedPayload));
+    setTheme(normalizedPayload?.current_theme ?? 'default');
+    setFavicon(normalizedPayload);
+
+    try {
+        if (typeof eventBus !== 'undefined' && eventBus && typeof eventBus.emit === 'function') {
+            eventBus.emit('branding.updated', normalizedPayload);
+        }
+    } catch (e) {
+        // ignore
+    }
+};
+
+window.addEventListener('storage', (event) => {
+    if (event.key !== '__last_branding_payload' || !event.newValue) {
+        return;
+    }
+
+    try {
+        const storedPayload = JSON.parse(event.newValue);
+        applyLastBrandingPayload(storedPayload);
+    } catch (e) {
+        // ignore invalid storage value
+    }
+});
 
 document.addEventListener('inertia:success', (event) => {
     const page = event?.detail?.page;
@@ -506,7 +629,7 @@ document.addEventListener('inertia:success', (event) => {
 
 createInertiaApp({
     page: resolveInitialInertiaPage(typeof document === 'undefined' ? null : document.getElementById('app')),
-    title: (title) => `${title} - ${runtimeAppName}`,
+    title: (title) => title ? `${title} - ${runtimeAppName}` : runtimeAppName,
     resolve: async (name) => {
         const path = `./Pages/${name}.vue`;
         const importer = pages[path];
@@ -598,7 +721,6 @@ createInertiaApp({
 
         return mounted;
     },
-    progress: {
-        color: '#4B5563',
-    },
+    // Disable Inertia/NProgress top progress bar — user requested no reload bar
+    progress: false,
 });

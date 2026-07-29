@@ -15,6 +15,7 @@ use App\Services\AdminService;
 use App\Services\BillingService;
 use App\Services\ActivityLogService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use App\Services\PathologyService;
 use App\Services\PatientService;
@@ -100,6 +101,19 @@ class PathologyController extends Controller
                 ];
             }
 
+            // Delete action
+            if (
+                $gate->allows('pathology-delete') ||
+                $gate->allows('pathology-list-delete') ||
+                $gate->allows('pathology-destroy')
+            ) {
+                $customData->links[] = [
+                    'linkClass' => 'bg-red-600 text-white deleteButton',
+                    'link' => route('backend.pathology.destroy', $data->id),
+                    'linkLabel' => getLinkLabel('Delete', null, null)
+                ];
+            }
+
 
             return $customData;
         });
@@ -150,7 +164,7 @@ class PathologyController extends Controller
         // Get active pathology tests
         $pathologyTests = Test::where('category_type', 'Pathology')
             ->where('status', 'Active')
-            ->select('id', 'test_name', 'test_short_name', 'report_days', 'tax', 'standard_charge', 'amount')
+            ->select('id', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount')
             ->orderBy('test_name')
             ->get();
 
@@ -232,6 +246,16 @@ class PathologyController extends Controller
                     ]
                 );
 
+                // If frontend provided a print_token, map it so preview tab can resolve immediately
+                try {
+                    $printToken = request()->input('print_token');
+                    if (!empty($printToken)) {
+                        Cache::put('print_token_' . $printToken, $billing->id, now()->addMinutes(10));
+                    }
+                } catch (\Throwable $e) {
+                    // ignore cache failures
+                }
+
                 DB::commit();
 
                 return redirect()
@@ -298,7 +322,7 @@ class PathologyController extends Controller
 
         $pathologyTests = Test::where('category_type', 'Pathology')
             ->where('status', 'Active')
-            ->select('id', 'test_name', 'test_short_name', 'report_days', 'tax', 'standard_charge', 'amount')
+            ->select('id', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount')
             ->orderBy('test_name')
             ->get();
 
@@ -403,6 +427,17 @@ class PathologyController extends Controller
                 DB::commit();
 
                 $billing = Billing::where('bill_number', $pathology->bill_no)->first();
+
+                // Map print_token for preview tab if present (on update)
+                try {
+                    $printToken = request()->input('print_token');
+                    if (!empty($printToken) && $billing) {
+                        Cache::put('print_token_' . $printToken, $billing->id, now()->addMinutes(10));
+                    }
+                } catch (\Throwable $e) {
+                    // ignore cache issues
+                }
+
                 return redirect()
                     ->back()
                     ->with('successMessage', $message)
@@ -632,17 +667,45 @@ class PathologyController extends Controller
             $testInfo = Test::find($test['testId']);
 
             if ($testInfo) {
+                // Determine bill item category. Default to 'Pathology', but map
+                // specific test categories (or names) to 'ECG' or 'Ultrasound'
+                $billCategory = 'Pathology';
+
+                $pathologyCatName = strtolower($testInfo->pathologyCategory->name ?? '');
+                $testNameLower = strtolower($testInfo->test_name ?? '');
+                $chargeNameLower = strtolower($testInfo->charge_name ?? '');
+
+                if (str_contains($pathologyCatName, 'ecg') || str_contains($pathologyCatName, 'echo') || str_contains($testNameLower, 'ecg') || str_contains($testNameLower, 'echo') || str_contains($chargeNameLower, 'ecg') || str_contains($chargeNameLower, 'echo')) {
+                    $billCategory = 'ECG';
+                } elseif (str_contains($pathologyCatName, 'ultrasound') || str_contains($pathologyCatName, 'usg') || str_contains($testNameLower, 'ultrasound') || str_contains($testNameLower, 'usg') || str_contains($chargeNameLower, 'ultrasound') || str_contains($chargeNameLower, 'usg')) {
+                    $billCategory = 'Ultrasound';
+                }
+
+                $isDisposable = false;
+                // Mark common disposable keywords or explicit pathology category 'Disposable'
+                if (str_contains($pathologyCatName, 'disposable')
+                    || str_contains($testNameLower, 'tube')
+                    || str_contains($testNameLower, 'butterfly')
+                    || str_contains($testNameLower, 'needle')
+                    || str_contains($chargeNameLower, 'butterfly')
+                    || str_contains($chargeNameLower, 'needle')
+                ) {
+                    $isDisposable = true;
+                }
+
                 BillItem::create([
                     'billing_id' => $billing->id,
                     'item_id' => $test['testId'],
                     'item_name' => $testInfo->test_name,
-                    'category' => 'Pathology',
+                    'room_no' => $test['room_no'] ?? $test['roomNo'] ?? null,
+                    'category' => $billCategory,
                     'unit_price' => floatval($test['amount'] ?? $testInfo->amount ?? $testInfo->standard_charge),
                     'quantity' => 1,
                     'total_amount' => floatval($test['amount'] ?? $testInfo->amount ?? $testInfo->standard_charge),
                     'discount' => 0,
                     'rugound' => 0,
                     'net_amount' => floatval($test['amount'] ?? $testInfo->amount ?? $testInfo->standard_charge),
+                    'requires_sample' => ! $isDisposable,
                     'commissionable' => $testInfo->commissionable ?? null,
                     'commission_rate' => $testInfo->commission_rate ?? null,
                     'status' => 'Active',

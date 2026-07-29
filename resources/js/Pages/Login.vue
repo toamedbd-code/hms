@@ -1,6 +1,6 @@
 <script setup>
 import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import InputError from '@/Components/InputError.vue';
 
 const props = defineProps({
@@ -23,20 +23,13 @@ const form = useForm({
 });
 
 const showRenewModal = ref(false);
-const renewStep = ref(1);
-const walletNumber = ref('');
-const otp = ref('');
 const selectedPeriod = ref(props.subscriptionDefaultPeriod || 'monthly');
-
-const onEmailFocus = () => {
-    const shouldShow = (props.showSubscriptionRenewal || (props.subscriptionEnforced && !props.subscriptionActive)) && props.bkashEnabled;
-    if (shouldShow) {
-        showRenewModal.value = true;
-        renewStep.value = 1;
-    }
-};
-
 const page = usePage();
+const status = page.props.status;
+
+const shouldShowRenewal = computed(() => {
+    return (props.showSubscriptionRenewal || (props.subscriptionEnforced && !props.subscriptionActive)) && props.bkashEnabled;
+});
 
 const submit = () => {
     form.transform(data => ({
@@ -51,9 +44,9 @@ const submit = () => {
 };
 
 const renew = (period = null) => {
-    const p = period || props.subscriptionDefaultPeriod || 'monthly';
+    const p = period || selectedPeriod.value || props.subscriptionDefaultPeriod || 'monthly';
     const amount = p === 'yearly' ? (props.bkashYearlyAmount || props.bkashMonthlyAmount || '') : (props.bkashMonthlyAmount || '');
-    const emailParam = walletNumber.value || form.email || '';
+    const emailParam = form.email || '';
     const url = route('backend.payment.bkash.initiate.public', { amount: amount, email: emailParam, period: p });
     window.location.href = url;
 };
@@ -105,6 +98,40 @@ const renew = (period = null) => {
                     <div class="rounded-3xl border border-[#d5d0c7] bg-white/90 p-6 sm:p-8 shadow-[0_20px_70px_-35px_rgba(20,33,31,0.45)] backdrop-blur">
                         <div v-if="status" class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
                             {{ status }}
+                        </div>
+                        <div v-if="props.errorMessage" class="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+                            {{ props.errorMessage }}
+                        </div>
+                        <div v-if="props.successMessage" class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+                            {{ props.successMessage }}
+                        </div>
+                        <div v-if="props.warningMessage" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
+                            {{ props.warningMessage }}
+                        </div>
+
+                        <div v-if="shouldShowRenewal" class="mb-4 rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+                            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <p class="font-semibold">Subscription inactive</p>
+                                    <p class="text-xs text-rose-800/80">Renew your subscription to continue using the system.</p>
+                                </div>
+                                <div class="grid gap-2 sm:grid-cols-2">
+                                    <button
+                                        v-if="props.bkashMonthlyAmount"
+                                        @click.prevent="renew('monthly')"
+                                        class="rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700"
+                                    >
+                                        Pay Monthly — {{ props.bkashMonthlyAmount }}
+                                    </button>
+                                    <button
+                                        v-if="props.bkashYearlyAmount"
+                                        @click.prevent="renew('yearly')"
+                                        class="rounded-2xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-600"
+                                    >
+                                        Pay Yearly — {{ props.bkashYearlyAmount }}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
                         <form @submit.prevent="submit" class="space-y-5">

@@ -4,6 +4,7 @@ import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { router, usePage } from '@inertiajs/vue3';
+import { useModalSubmissionGuard } from '@/Composables/useModalSubmissionGuard';
 
 let props = defineProps({
     filters: Object,
@@ -26,7 +27,14 @@ const page = usePage();
 const rows = computed(() => page.props.datas?.data ?? []);
 
 const showCollectModal = ref(false);
-const isCollecting = ref(false);
+const {
+    isSubmitting: isCollecting,
+    prepareSubmissionToken,
+    ensureSubmissionToken,
+    beginSubmission,
+    endSubmission,
+    resetSubmissionToken,
+} = useModalSubmissionGuard('supplier_due');
 const collectForm = ref({
     supplierId: null,
     supplierName: '',
@@ -44,6 +52,7 @@ const closeCollectModal = (force = false) => {
         dueAmount: 0,
         amount: '',
     };
+    resetSubmissionToken();
 };
 
 const openCollectModal = (row) => {
@@ -57,6 +66,7 @@ const openCollectModal = (row) => {
         amount: due,
     };
 
+    prepareSubmissionToken();
     showCollectModal.value = true;
 };
 
@@ -80,9 +90,10 @@ const submitCollect = () => {
         return;
     }
 
-    isCollecting.value = true;
+    beginSubmission();
     router.post(route('backend.supplierpayment.pay-due-by-supplier', supplierId), {
         amount,
+        submission_token: ensureSubmissionToken(),
     }, {
         preserveScroll: true,
         onSuccess: () => {
@@ -90,7 +101,7 @@ const submitCollect = () => {
             router.reload({ only: ['datas'], preserveScroll: true });
         },
         onFinish: () => {
-            isCollecting.value = false;
+            endSubmission();
         },
     });
 };

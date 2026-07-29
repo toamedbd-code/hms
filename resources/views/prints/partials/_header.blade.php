@@ -35,6 +35,8 @@
     $showHeaderFooter = $showHeaderFooter ?? true;
 
     $hdr = trim((string) ($headerImage ?? $header_image ?? $headerSrc ?? ''));
+    $headerTitle = trim((string) ($headerTitle ?? $header_title ?? config('app.name', 'TOAMED HOSPITAL')));
+    $headerSubtitle = trim((string) ($headerSubtitle ?? $header_subtitle ?? ''));
     $headerHeight = (int) ($headerHeight ?? $header_height ?? $reportHeaderHeight ?? ($invoiceDesign?->header_height ?? 0));
     $footerHeight = (int) ($footerHeight ?? $footer_height ?? $reportFooterHeight ?? ($invoiceDesign?->footer_height ?? 0));
 
@@ -102,12 +104,48 @@
         height: 100%;
         visibility: hidden;
     }
+
+    .print-shared-header-fallback {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 10px 16px;
+        border-bottom: 1px solid #d0d7de;
+        background: linear-gradient(90deg, #f8fafc 0%, #ffffff 100%);
+        color: #0f172a;
+    }
+
+    .print-shared-header-title {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .print-shared-header-subtitle {
+        margin-top: 4px;
+        font-size: 12px;
+        color: #475569;
+    }
 </style>
 
 <div class="print-shared-header header-section">
     @if (!empty($hdr))
         <img src="{{ $hdr }}" alt="Header" class="print-shared-header-image header-image header-img">
     @else
-        <div class="print-shared-header-placeholder header-placeholder"></div>
+        @if($showHeaderFooter)
+            <div class="print-shared-header-fallback">
+                <div class="print-shared-header-title">{{ $headerTitle }}</div>
+                @if($headerSubtitle !== '')
+                    <div class="print-shared-header-subtitle">{{ $headerSubtitle }}</div>
+                @endif
+            </div>
+        @else
+            <div class="print-shared-header-placeholder header-placeholder"></div>
+        @endif
     @endif
 </div>

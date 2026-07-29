@@ -22,6 +22,7 @@ class Investigation extends Model
         'test_sub_category_id',
         'method',
         'report_days',
+        'room_no',
         'charge_category_id',
         'charge_name',
         'tax',

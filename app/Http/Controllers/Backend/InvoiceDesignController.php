@@ -213,6 +213,7 @@ class InvoiceDesignController extends Controller
             'footer_photo_url' => $invoicedesign->footer_photo_url,
             'header_height' => $invoicedesign->header_height,
             'footer_height' => $invoicedesign->footer_height,
+            'footer_font_size' => $invoicedesign->footer_font_size,
             'status' => $invoicedesign->status,
         ] : null;
 

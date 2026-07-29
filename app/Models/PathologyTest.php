@@ -20,6 +20,7 @@ class PathologyTest extends Model
         'pathology_sub_category',
         'method',
         'report_days',
+        'room_no',
         'charge_category_id',
         'charge_name',
         'tax',

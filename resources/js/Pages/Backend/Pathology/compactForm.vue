@@ -15,6 +15,7 @@ const createTestRow = () => ({
     testId: '',
     testName: '',
     reportDays: '',
+    roomNo: '',
     reportDate: '',
     tax: '',
     amount: ''
@@ -65,6 +66,7 @@ const onTestChange = (testRowIndex, selectedTestId) => {
         testRows.value[testRowIndex].testId = selectedTestId;
         testRows.value[testRowIndex].testName = selectedTest.test_name;
         testRows.value[testRowIndex].reportDays = selectedTest.report_days || '';
+        testRows.value[testRowIndex].roomNo = selectedTest.room_no || '';
         testRows.value[testRowIndex].tax = selectedTest.tax || '';
         testRows.value[testRowIndex].amount = selectedTest.amount || selectedTest.standard_charge || '';
         
@@ -155,6 +157,7 @@ onMounted(async () => {
             testId: test.testId || '',
             testName: test.test_name || '',
             reportDays: test.report_days || '',
+            roomNo: test.room_no || '',
             reportDate: test.report_date || '',
             tax: test.tax || '',
             amount: test.amount || ''
@@ -225,6 +228,7 @@ const updateFormTests = () => {
         testId: test.testId,
         testName: test.testName,
         reportDays: test.reportDays,
+        room_no: test.roomNo,
         reportDate: test.reportDate,
         tax: test.tax,
         amount: test.amount
@@ -370,6 +374,15 @@ watch(() => form.net_amount, (newVal) => {
                                     </option>
                                 </select>
                                 <InputError class="mt-0.5 text-xs" :message="form.errors[`tests.${index}.testId`]" />
+                            </div>
+
+                            <div>
+                                <div class="mb-1">
+                                    <span class="text-xs font-medium text-black">Room No</span>
+                                </div>
+                                <input v-model="test.roomNo" type="text"
+                                    class="block w-full px-2 py-1 text-xs border border-gray-300 rounded focus:border-blue-500 focus:outline-none" />
+                                <InputError class="mt-0.5 text-xs" :message="form.errors[`tests.${index}.room_no`]" />
                             </div>
 
                             <div>

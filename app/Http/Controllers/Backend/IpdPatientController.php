@@ -13,6 +13,8 @@ use App\Services\PatientService;
 use App\Services\IpdAutoChargeService;
 use App\Services\IpdDischargeBillingService;
 use App\Services\ActivityLogService;
+use App\Services\MedicineInventoryService;
+use Illuminate\Support\Facades\Schema;
 
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -26,10 +28,14 @@ use App\Models\Admin;
 use App\Models\InvoiceDesign;
 use App\Models\WebSetting;
 use App\Models\Payment;
+use App\Models\DueCollection;
 use App\Models\Bed;
 use App\Models\IpdNote;
 use App\Models\IpdPatient;
 use App\Models\SymptomType;
+use App\Models\Designation;
+use App\Models\Department;
+use App\Models\Specialist;
 use App\Models\Billing;
 use App\Models\BillItem;
 use App\Models\Charge;
@@ -37,6 +43,8 @@ use App\Models\ChargeType;
 use App\Models\ChargeCategory;
 use App\Models\ChargeUnitType;
 use App\Models\ChargeTaxCategory;
+use App\Models\Test;
+use App\Models\MedicineInventory;
 use Illuminate\Support\Facades\Storage;
 use Milon\Barcode\DNS1D;
 use Milon\Barcode\DNS2D;
@@ -48,11 +56,12 @@ class IpdPatientController extends Controller
     use SystemTrait;
 
     protected $ipdpatientService, $patientService, $adminService, $bedGroupService, $bedService;
+    protected $medicineInventoryService;
     protected IpdAutoChargeService $ipdAutoChargeService;
     protected IpdDischargeBillingService $ipdDischargeBillingService;
     protected $chargeService;
 
-    public function __construct(IpdPatientService $ipdpatientService, PatientService $patientService, AdminService $adminService, BedGroupService $bedGroupService, BedService $bedService, IpdAutoChargeService $ipdAutoChargeService, IpdDischargeBillingService $ipdDischargeBillingService, \App\Services\ChargeService $chargeService)
+    public function __construct(IpdPatientService $ipdpatientService, PatientService $patientService, AdminService $adminService, BedGroupService $bedGroupService, BedService $bedService, IpdAutoChargeService $ipdAutoChargeService, IpdDischargeBillingService $ipdDischargeBillingService, \App\Services\ChargeService $chargeService, MedicineInventoryService $medicineInventoryService)
 
     {
         $this->ipdpatientService = $ipdpatientService;
@@ -63,6 +72,7 @@ class IpdPatientController extends Controller
         $this->ipdAutoChargeService = $ipdAutoChargeService;
         $this->ipdDischargeBillingService = $ipdDischargeBillingService;
         $this->chargeService = $chargeService;
+        $this->medicineInventoryService = $medicineInventoryService;
 
 
         $this->middleware('auth:admin');
@@ -134,6 +144,15 @@ class IpdPatientController extends Controller
         return 'IPD';
     }
 
+    protected function paymentQuery()
+    {
+        $query = Payment::query();
+        if (Schema::hasColumn((new Payment())->getTable(), 'deleted_at')) {
+            $query->whereNull('deleted_at');
+        }
+        return $query;
+    }
+
 
 
     
@@ -167,17 +186,25 @@ class IpdPatientController extends Controller
         );
     }
 
+    protected function applyStatusFilter($query, bool $onlyDischarged = false)
+    {
+        if ($onlyDischarged) {
+            return $query->where('status', 'Inactive');
+        }
+
+        return $query->where('status', 'Active');
+    }
+
     private function getDatas(bool $onlyDischarged = false)
     {
         $query = $this->ipdpatientService->list();
+        $query = $this->applyStatusFilter($query, $onlyDischarged);
 
-        if ($onlyDischarged) {
-            $query->where('status', 'Inactive');
+        if (request()->filled('name')) {
+            $query->whereHas('patient', function ($patientQuery) {
+                $patientQuery->where('name', 'like', request()->name . '%');
+            });
         }
-
-
-        if (request()->filled('name'))
-            $query->where('name', 'like', request()->name . '%');
 
         $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
 
@@ -223,6 +250,7 @@ class IpdPatientController extends Controller
                                     $customData->links[] = [
                 'linkClass' => 'bg-green-600 hover:bg-green-700 hover:opacity-100 text-white semi-bold',
                 'link' => route('backend.ipdpatient.show', $data->id),
+                'target' => '_blank',
                 'linkLabel' => getLinkLabel('Overview', null, null)
             ];
 
@@ -249,15 +277,17 @@ class IpdPatientController extends Controller
 
                         $customData->links[] = [
                             'linkClass' => 'bg-cyan-700 text-white semi-bold',
-                            'link' => route('backend.ipdpatient.running-bill.print', $data->id),
-                            'linkLabel' => getLinkLabel('Running Bill', null, null),
+                            'link' => $data->status === 'Inactive'
+                                ? route('backend.print.ipd.final-bill', ['id' => $data->id, 'auto_print' => 1, 'fast_open' => 1])
+                                : route('backend.ipdpatient.running-bill.print', $data->id),
+                            'linkLabel' => getLinkLabel($data->status === 'Inactive' ? 'Final Bill' : 'Running Bill', null, null),
                             'target' => '_blank',
                         ];
 
                         if ($data->status === 'Inactive') {
                 $customData->links[] = [
                     'linkClass' => 'bg-teal-600 text-white semi-bold',
-                                'link' => route('backend.ipdpatient.discharge-certificate.print', $data->id),
+                                'link' => route('backend.ipdpatient.discharge-certificate.prepare', $data->id),
                     'target' => '_blank',
                     'linkLabel' => getLinkLabel('Discharge Certificate', null, null)
                 ];
@@ -314,15 +344,94 @@ class IpdPatientController extends Controller
 
     public function create()
     {
+        // Get all active tests (include IPD tests so Item Charge IPD items are available in IPD form)
+        $pathologyAndRadiologyTests = Test::whereIn('category_type', ['Pathology', 'Radiology', 'ECG', 'Ultrasound', 'IPD', 'Disposable', 'OPD', 'Appointment'])
+            ->where('status', 'Active')
+            ->select('id', 'category_type', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount', 'referral_percentage')
+            ->orderBy('test_name')
+            ->get()
+            ->map(function ($test) {
+                return [
+                    'id' => $test->id,
+                    'category_type' => $test->category_type,
+                    'test_name' => $test->test_name,
+                    'test_short_name' => $test->test_short_name,
+                    'report_days' => $test->report_days,
+                    'room_no' => $test->room_no ?? null,
+                    'tax' => $test->tax,
+                    'standard_charge' => $test->standard_charge,
+                    'amount' => $test->amount,
+                    'referral_percentage' => $test->referral_percentage ?? 0,
+                ];
+            });
+
+        $medicineInventories = $this->medicineInventoryService->activeList();
+        
+        // Prepare hospital charges with a normalized `module` value
+        $hospitalChargesEnv = env('HOSPITAL_CHARGES_ENABLED', null);
+        $hospitalChargesEnabled = true;
+        if ($hospitalChargesEnv !== null && $hospitalChargesEnv !== '') {
+            $hospitalChargesEnabled = filter_var($hospitalChargesEnv, FILTER_VALIDATE_BOOLEAN);
+        }
+
+        if ($hospitalChargesEnabled) {
+            $rawCharges = Charge::with('chargeType')->whereNull('deleted_at')->get();
+        } else {
+            $rawCharges = collect([]);
+        }
+
+        $hospitalCharges = [];
+        foreach ($rawCharges as $ch) {
+            $modules = [];
+            if (!empty($ch->module)) {
+                $modules = is_array($ch->module) ? $ch->module : preg_split('/\s*,\s*/', trim($ch->module));
+            }
+
+            if (empty($modules) && !empty($ch->chargeType?->modules)) {
+                $ct = $ch->chargeType->modules;
+                $decoded = null;
+                try {
+                    $decoded = json_decode($ct, true);
+                } catch (\Throwable $e) {
+                    $decoded = null;
+                }
+
+                if (is_array($decoded) && count($decoded) > 0) {
+                    $modules = $decoded;
+                } else {
+                    $modules = preg_split('/\s*,\s*/', trim((string)$ct));
+                }
+            }
+
+            $modules = array_values(array_filter(array_map(function ($m) {
+                return trim((string) $m);
+            }, (array) $modules)));
+
+            $hospitalCharges[] = [
+                'id' => $ch->id,
+                'name' => $ch->name,
+                'module' => count($modules) ? json_encode($modules) : '',
+                'amount' => $ch->standard_charge ?? 0,
+                'standard_charge' => $ch->standard_charge,
+                'short_name' => $ch->short_name ?? '',
+            ];
+        }
+
         return Inertia::render(
             'Backend/IpdPatient/Form',
             [
                 'pageTitle' => fn() => 'IpdPatient Create',
                 'patients' => fn() => $this->patientService->activeList(),
                 'doctors' => fn() => $this->adminService->activeDoctors(),
+                'designations' => fn() => Designation::query()->where('status', 'Active')->orderBy('name')->get(),
+                'departments' => fn() => Department::query()->where('status', 'Active')->orderBy('name')->get(),
+                'specialists' => fn() => Specialist::query()->where('status', 'Active')->orderBy('name')->get(),
                 'bedGroups' => fn() => $this->bedGroupService->activeList(),
                 'beds' => fn() => $this->bedService->activeList()->load('bedGroup'),
                 'symptomTypes' => fn() => SymptomType::query()->where('status', 'Active')->orderBy('name')->get(),
+                'pathologyAndRadiologyTests' => fn() => $pathologyAndRadiologyTests,
+                'medicineInventories' => fn() => $medicineInventories,
+                'hospitalCharges' => fn() => $hospitalCharges,
             ]
         );
     }
@@ -386,9 +495,9 @@ class IpdPatientController extends Controller
                     ]);
                 }
 
-                // If manual hospital charge items were provided at admission,
-                // create a Billing with those items.
+                // process manual hospital charge items provided at admission as item charges
                 $manualItems = $request->input('hospital_charge_items', []);
+
                 if (is_array($manualItems) && count($manualItems) > 0) {
                     $lines = [];
                     foreach ($manualItems as $item) {
@@ -462,7 +571,11 @@ class IpdPatientController extends Controller
                         }
 
                         // attach any IPD payments (advance) to this billing
-                        Payment::query()->whereNull('deleted_at')->where('status', 'Active')->where('ipd_patient_id', $dataInfo->id)->whereNull('billing_id')->update(['billing_id' => $billing->id]);
+                        $this->paymentQuery()
+                            ->where('status', 'Active')
+                            ->where('ipd_patient_id', $dataInfo->id)
+                            ->whereNull('billing_id')
+                            ->update(['billing_id' => $billing->id]);
 
                         $dataInfo->billing_id = $billing->id;
                         $dataInfo->save();
@@ -487,9 +600,11 @@ class IpdPatientController extends Controller
 
                 DB::commit();
 
-
+                // After creating IPD patient, redirect to the IPD patient details page
+                // and provide the IPD id as a flash `billId` so the frontend can
+                // open the invoice when requested (save & print behavior).
                 return redirect()
-                    ->back()
+                    ->route('backend.ipdpatient.show', $dataInfo->id)
                     ->with('successMessage', $message)
                     ->with('billId', $dataInfo->id);
             } else {
@@ -533,8 +648,7 @@ class IpdPatientController extends Controller
         ]);
 
         // Payments related to this IPD patient
-        $payments = Payment::query()
-            ->whereNull('deleted_at')
+        $payments = $this->paymentQuery()
             ->where('status', 'Active')
             ->where('ipd_patient_id', $ipdpatient->id)
             ->get();
@@ -553,22 +667,52 @@ class IpdPatientController extends Controller
             'doctor_visit_charges' => $ipdpatient->doctorVisitCharges()->count(),
         ];
 
+        // If a Billing record exists for this IPD admission, include discount and
+        // return amount in overview totals so the frontend can display them.
+        $billing = $ipdpatient->billing ?? null;
+        $overviewTotals['discount'] = 0;
+        $overviewTotals['return_amount'] = 0;
+        if ($billing) {
+            $discountAmt = (float) ($billing->discount ?? 0);
+            $discountAmt += (float) ($billing->extra_flat_discount ?? 0);
+            $overviewTotals['discount'] = round($discountAmt, 2);
+
+            $returnAmt = (float) ($billing->return_amt ?? 0);
+            if ($returnAmt <= 0) {
+                $receiving = (float) ($billing->receiving_amt ?? 0);
+                $payable = (float) ($billing->payable_amount ?? $billing->total ?? 0);
+                $returnAmt = max(0, $receiving - $payable);
+            }
+            $overviewTotals['return_amount'] = round($returnAmt, 2);
+        }
+
         $runningBill = $this->ipdDischargeBillingService->getRunningSummary($ipdpatient);
+
+        $hospitalChargesEnv = env('HOSPITAL_CHARGES_ENABLED', null);
+        $hospitalChargesEnabled = true;
+        if ($hospitalChargesEnv !== null && $hospitalChargesEnv !== '') {
+            $hospitalChargesEnabled = filter_var($hospitalChargesEnv, FILTER_VALIDATE_BOOLEAN);
+        }
+
+        $pageTitle = $ipdpatient->status === 'Inactive'
+            ? 'IPD Discharged Patient'
+            : 'IPD Admission Patient';
 
         return Inertia::render(
             'Backend/IpdPatient/Show',
             [
-                'pageTitle' => fn() => 'IPD Discharged Patient',
+                'pageTitle' => fn() => $pageTitle,
                 'ipdpatient' => fn() => $ipdpatient,
                 'latestPrescription' => fn() => $ipdpatient->latestPrescription,
                 'payments' => fn() => $payments,
                 'overviewTotals' => fn() => $overviewTotals,
                 'runningBill' => fn() => $runningBill,
-                    'charges' => fn() => $this->chargeService->activeList(),
-                    'chargeTypes' => fn() => ChargeType::query()->where('status', 'Active')->orderBy('name')->get(),
-                    'chargeCategories' => fn() => ChargeCategory::query()->where('status', 'Active')->orderBy('name')->get(),
-                    'chargeUnits' => fn() => ChargeUnitType::query()->where('status', 'Active')->orderBy('name')->get(),
-                    'taxCategories' => fn() => ChargeTaxCategory::query()->where('status', 'Active')->orderBy('name')->get(),
+                'hospitalChargesEnabled' => fn() => $hospitalChargesEnabled,
+                'charges' => fn() => $this->chargeService->activeList(),
+                'chargeTypes' => fn() => ChargeType::query()->where('status', 'Active')->orderBy('name')->get(),
+                'chargeCategories' => fn() => ChargeCategory::query()->where('status', 'Active')->orderBy('name')->get(),
+                'chargeUnits' => fn() => ChargeUnitType::query()->where('status', 'Active')->orderBy('name')->get(),
+                'taxCategories' => fn() => ChargeTaxCategory::query()->where('status', 'Active')->orderBy('name')->get(),
             ]
         );
     }
@@ -591,6 +735,9 @@ class IpdPatientController extends Controller
                 'id' => fn() => $id,
                 'patients' => fn() => $this->patientService->activeList(),
                 'doctors' => fn() => $this->adminService->activeDoctors(),
+                'designations' => fn() => Designation::query()->where('status', 'Active')->orderBy('name')->get(),
+                'departments' => fn() => Department::query()->where('status', 'Active')->orderBy('name')->get(),
+                'specialists' => fn() => Specialist::query()->where('status', 'Active')->orderBy('name')->get(),
 
                 // needed by the Form (bed group + bed dropdowns)
                 'bedGroups' => fn() => $this->bedGroupService->activeList(),
@@ -667,9 +814,9 @@ class IpdPatientController extends Controller
             // Auto-sync running charges when bed changes (and also fills rate if previously 0).
             $this->ipdAutoChargeService->syncAdmissionCharges($dataInfo, auth('admin')->id());
 
-            // If manual hospital charge items were provided during update,
-            // create or append Billing items.
+            // process manual hospital charge items sent during update as item charges
             $manualItems = $request->input('hospital_charge_items', []);
+
             if (is_array($manualItems) && count($manualItems) > 0) {
                 $lines = [];
                 foreach ($manualItems as $item) {
@@ -755,7 +902,7 @@ class IpdPatientController extends Controller
                     // recalc totals
                     $billing->loadMissing('billItems');
                     $newTotal = (float) ($billing->billItems?->sum('net_amount') ?? 0);
-                    $paymentsSum = (float) Payment::where('billing_id', $billing->id)->sum('amount');
+                    $paymentsSum = (float) $this->paymentQuery()->where('billing_id', $billing->id)->sum('amount');
                     $dueAmount = max(0, $newTotal - $paymentsSum);
                     $billing->fill([
                         'total' => $newTotal,
@@ -767,7 +914,11 @@ class IpdPatientController extends Controller
                     ]);
                     $billing->save();
 
-                    Payment::query()->whereNull('deleted_at')->where('status', 'Active')->where('ipd_patient_id', $dataInfo->id)->whereNull('billing_id')->update(['billing_id' => $billing->id]);
+                    $this->paymentQuery()
+                        ->where('status', 'Active')
+                        ->where('ipd_patient_id', $dataInfo->id)
+                        ->whereNull('billing_id')
+                        ->update(['billing_id' => $billing->id]);
                 }
             }
 
@@ -810,6 +961,18 @@ class IpdPatientController extends Controller
      */
     public function addHospitalCharges(Request $request, $id)
     {
+        $hospitalChargesEnv = env('HOSPITAL_CHARGES_ENABLED', null);
+        $hospitalChargesEnabled = true;
+        if ($hospitalChargesEnv !== null && $hospitalChargesEnv !== '') {
+            $hospitalChargesEnabled = filter_var($hospitalChargesEnv, FILTER_VALIDATE_BOOLEAN);
+        }
+
+        if (!$hospitalChargesEnabled) {
+            if ($request->expectsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'Hospital charges are disabled.'], 403);
+            }
+            return redirect()->back()->with('errorMessage', 'Hospital charges are disabled.');
+        }
         $validated = $request->validate([
             'hospital_charge_ids' => 'required|array|min:1',
             'hospital_charge_ids.*' => 'integer|exists:charges,id',
@@ -953,7 +1116,7 @@ class IpdPatientController extends Controller
             $billing->save();
 
             // attach any IPD payments to billing
-            Payment::query()->whereNull('deleted_at')->where('status', 'Active')->where('ipd_patient_id', $ipdpatient->id)->whereNull('billing_id')->update(['billing_id' => $billing->id]);
+            $this->paymentQuery()->where('status', 'Active')->where('ipd_patient_id', $ipdpatient->id)->whereNull('billing_id')->update(['billing_id' => $billing->id]);
 
             DB::commit();
 
@@ -1120,7 +1283,7 @@ class IpdPatientController extends Controller
             $billing->save();
 
             // attach any IPD payments to billing
-            Payment::query()->whereNull('deleted_at')->where('status', 'Active')->where('ipd_patient_id', $ipdpatient->id)->whereNull('billing_id')->update(['billing_id' => $billing->id]);
+            $this->paymentQuery()->where('status', 'Active')->where('ipd_patient_id', $ipdpatient->id)->whereNull('billing_id')->update(['billing_id' => $billing->id]);
 
             DB::commit();
 
@@ -1371,12 +1534,40 @@ class IpdPatientController extends Controller
 
             $payment = Payment::create($paymentData);
 
-            // refresh billing totals if billing present
+            // If billing present, record a DueCollection (so it appears in billing invoice)
             if ($billingId) {
                 try {
-                    $this->ipdDischargeBillingService->refreshBillingTotals($ipdpatient, auth('admin')->id());
+                    $billing = Billing::query()->find($billingId);
+                    if ($billing) {
+                        // create due collection entry (records date/time + creator)
+                        DueCollection::create([
+                            'billing_id' => $billing->id,
+                            'collected_amount' => (float) $validated['amount'],
+                            'collected_at' => now(),
+                            'payment_method' => $validated['payment_method'] ?? 'Cash',
+                            'note' => $validated['notes'] ?? ('Collected via IPD payment id:' . ($payment->id ?? '')),
+                            'created_by' => auth('admin')->id(),
+                        ]);
+
+                        // ensure bed charges are present in billing; regenerate if missing
+                        $hasBed = (bool) $billing->billItems()->whereRaw('LOWER(category) LIKE ?', ['%bed%'])->exists();
+                        if (! $hasBed) {
+                            try {
+                                $this->ipdDischargeBillingService->regenerateForDischarge($ipdpatient, auth('admin')->id());
+                            } catch (Exception $_e) {
+                                Log::warning('Failed to regenerate billing items for IPD after payment', ['err' => $_e->getMessage()]);
+                            }
+                        }
+
+                        // refresh billing totals to reflect payment + due collection
+                        try {
+                            $this->ipdDischargeBillingService->refreshBillingTotals($ipdpatient, auth('admin')->id());
+                        } catch (Exception $_e) {
+                            Log::warning('Failed to refresh billing totals after payment', ['err' => $_e->getMessage()]);
+                        }
+                    }
                 } catch (Exception $_e) {
-                    Log::warning('Failed to refresh billing totals after payment', ['err' => $_e->getMessage()]);
+                    Log::warning('Failed to attach due collection or refresh billing after payment', ['err' => $_e->getMessage()]);
                 }
             }
 
@@ -1689,8 +1880,7 @@ class IpdPatientController extends Controller
         ];
 
         // Payments breakdown
-        $paymentsQuery = Payment::query()
-            ->whereNull('deleted_at')
+        $paymentsQuery = $this->paymentQuery()
             ->where('status', 'Active')
             ->where('ipd_patient_id', $ipdpatient->id);
         $paymentsCol = $paymentsQuery->get();
@@ -2045,6 +2235,47 @@ class IpdPatientController extends Controller
         ];
     }
 
+    protected function shouldGateDischargeCertificate($billing): bool
+    {
+        if (empty($billing)) {
+            return false;
+        }
+
+        return (float) ($billing->due_amount ?? 0) > 0;
+    }
+
+    public function prepareDischargeCertificate($id)
+    {
+        $ipdpatient = $this->ipdpatientService->find($id);
+
+        if (!$ipdpatient) {
+            return redirect()
+                ->route('backend.ipdpatient.index')
+                ->with('errorMessage', 'IPD patient not found.');
+        }
+
+        if ($ipdpatient->status !== 'Inactive') {
+            return redirect()
+                ->route('backend.ipdpatient.show', $id)
+                ->with('errorMessage', 'Patient is not discharged yet.');
+        }
+
+        $billing = null;
+        if (!empty($ipdpatient->billing_id)) {
+            $billing = Billing::query()->find($ipdpatient->billing_id);
+        }
+
+        if ($this->shouldGateDischargeCertificate($billing)) {
+            return view('backend.ipd.discharge-certificate-due-gate', [
+                'ipdpatient' => $ipdpatient,
+                'billing' => $billing,
+                'returnTo' => route('backend.ipdpatient.discharge-certificate.print', $id),
+            ]);
+        }
+
+        return redirect()->route('backend.ipdpatient.discharge-certificate.print', $id);
+    }
+
     public function printDischargeCertificate($id)
     {
         $printData = $this->buildDischargeCertificatePrintData($id);
@@ -2340,6 +2571,11 @@ class IpdPatientController extends Controller
         }
     }
 
+    protected function resolveStatusRedirectRoute(string $status): string
+    {
+        return $status === 'Inactive' ? 'backend.ipdpatient.discharged' : 'backend.ipdpatient.index';
+    }
+
         public function regenerateDischargeBilling($id)
     {
         DB::beginTransaction();
@@ -2369,34 +2605,31 @@ class IpdPatientController extends Controller
     {
         DB::beginTransaction();
 
-
         try {
-
-                        $dataInfo = $this->ipdpatientService->changeStatus($id, $status, auth('admin')->id());
-
+            $dataInfo = $this->ipdpatientService->changeStatus($id, $status, auth('admin')->id());
 
             if ($dataInfo->wasChanged()) {
-                $message = 'IpdPatient ' . request()->status . ' Successfully';
+                $message = 'IpdPatient ' . $status . ' Successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'ipdpatients', $message);
 
                 DB::commit();
 
                 return redirect()
-                    ->back()
+                    ->route($this->resolveStatusRedirectRoute($status))
                     ->with('successMessage', $message);
-            } else {
-                DB::rollBack();
-
-                $message = "Failed To " . request()->status . "IpdPatient.";
-                return redirect()
-                    ->back()
-                    ->with('errorMessage', $message);
             }
-                } catch (Exception $err) {
+
+            DB::rollBack();
+
+            $message = 'Failed To ' . $status . 'IpdPatient.';
+            return redirect()
+                ->back()
+                ->with('errorMessage', $message);
+        } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'IpdPatientController', 'changeStatus', substr($err->getMessage(), 0, 1000));
 
-                    $message = 'Server Errors Occur. Please Try Again. (' . $err->getMessage() . ')';
+            $message = 'Server Errors Occur. Please Try Again. (' . $err->getMessage() . ')';
 
             return redirect()
                 ->back()

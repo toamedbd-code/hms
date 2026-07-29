@@ -1,11 +1,11 @@
 <script setup>
-import { computed, nextTick, reactive } from 'vue';
+import { computed, nextTick, reactive, ref } from 'vue';
 import { useForm, Link } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import InputError from '@/Components/InputError.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
-import { warningMessage, errorMessage } from '@/responseMessage.js';
+import { warningMessage, errorMessage, showToastIfNoFlash, successMessage } from '@/responseMessage.js';
 
 const props = defineProps({
   billing: Object,
@@ -14,9 +14,14 @@ const props = defineProps({
     type: String,
     default: 'Report Entry',
   },
+  department: {
+    type: String,
+    default: '',
+  },
 });
 
-const items = computed(() => props.billItems ?? []);
+const hiddenItemIds = ref([]);
+const items = computed(() => (props.billItems ?? []).filter((it) => !hiddenItemIds.value.includes(it.id)));
 
 const itemForms = reactive({});
 const editorRefs = reactive({});
@@ -155,6 +160,7 @@ items.value.forEach((item) => {
     use_full_page: initialUseFullPage,
     // parameter_values will be populated below (empty by default)
     parameter_values: {},
+    department: props.department || '',
   });
 
   fileUiState[item.id] = {
@@ -172,12 +178,19 @@ items.value.forEach((item) => {
     tableBorderWidth: '1',
   };
 
-  // Initialize parameter_values from saved data or empty strings
-  if (Array.isArray(item.parameters) && item.parameters.length) {
+  // Initialize parameter_values from grouped parameters (preferred) or flat list
+  const savedVals = item.saved_parameter_values ?? {};
+  if (Array.isArray(item.parameter_groups) && item.parameter_groups.length) {
     itemForms[item.id].parameter_values = {};
-    const saved = item.saved_parameter_values ?? {};
+    item.parameter_groups.forEach((g) => {
+      (g.parameters || []).forEach((p) => {
+        itemForms[item.id].parameter_values[p.id] = String(savedVals[p.id] ?? '');
+      });
+    });
+  } else if (Array.isArray(item.parameters) && item.parameters.length) {
+    itemForms[item.id].parameter_values = {};
     item.parameters.forEach((p) => {
-      itemForms[item.id].parameter_values[p.id] = String(saved[p.id] ?? '');
+      itemForms[item.id].parameter_values[p.id] = String(savedVals[p.id] ?? '');
     });
   }
 
@@ -1098,6 +1111,12 @@ const getParameterNoteFor = (itemId) => {
 };
 
 const submitItem = (itemId) => {
+  if (!itemForms[itemId]) {
+    console.warn('[Reporting] submitItem called for uninitialized itemId', itemId);
+    errorMessage('Report form uninitialized — পেজ রিফ্রেশ করে চেষ্টা করুন।');
+    return;
+  }
+
   const useFullPage = !!itemForms[itemId].use_full_page;
 
   if (useFullPage) {
@@ -1112,19 +1131,80 @@ const submitItem = (itemId) => {
     itemForms[itemId].report_note = normalizeReportNote(itemForms[itemId].report_note, unit);
   }
 
-  itemForms[itemId].post(route('backend.reporting.item.update', itemId), {
-    forceFormData: true,
-    preserveScroll: true,
-    onSuccess: () => {
-      const selected = itemForms[itemId].report_file;
-      if (selected instanceof File) {
-        fileUiState[itemId].savedName = selected.name;
-        fileUiState[itemId].savedUrl = fileUiState[itemId].previewUrl || fileUiState[itemId].savedUrl;
+  (async () => {
+    itemForms[itemId].processing = true;
+    itemForms[itemId].errors = {};
+
+    const fd = new FormData();
+    fd.append('_token', document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
+    fd.append('report_note', itemForms[itemId].report_note || '');
+    fd.append('report_range', itemForms[itemId].report_range || '');
+    fd.append('department', itemForms[itemId].department || props.department || '');
+
+    const paramVals = itemForms[itemId].parameter_values || {};
+    Object.keys(paramVals).forEach((k) => {
+      fd.append(`parameter_values[${k}]`, paramVals[k] ?? '');
+    });
+
+    const selectedFile = itemForms[itemId].report_file;
+    if (selectedFile instanceof File) {
+      fd.append('report_file', selectedFile);
+    }
+
+    try {
+      const res = await fetch(route('backend.reporting.item.update', itemId), {
+        method: 'POST',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: fd,
+      });
+
+      const payload = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        if (res.status === 422 && payload && payload.errors) {
+          itemForms[itemId].errors = payload.errors;
+          warningMessage('Validation failed. ঠিক করে চেক করুন।');
+        } else {
+          errorMessage(payload?.message || 'Save failed.');
+        }
+        return;
+      }
+
+      // Success: show toast and update UI
+      try {
+        if (payload?.successMessage) {
+          successMessage(payload.successMessage);
+        } else {
+          showToastIfNoFlash({ props: { flash: { successMessage: 'Report saved successfully.' } } });
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      if (selectedFile instanceof File) {
+        try {
+          fileUiState[itemId].savedName = selectedFile.name;
+          fileUiState[itemId].savedUrl = fileUiState[itemId].previewUrl || fileUiState[itemId].savedUrl;
+        } catch (_) {}
       }
 
       itemForms[itemId].report_note = stripFullPageMarker(itemForms[itemId].report_note);
-    },
-  });
+
+      if (!hiddenItemIds.value.includes(itemId)) hiddenItemIds.value.push(itemId);
+
+      try { delete itemForms[itemId]; } catch (_) {}
+      try { delete fileUiState[itemId]; } catch (_) {}
+      try { delete editorUiState[itemId]; } catch (_) {}
+      try { delete editorRefs[itemId]; } catch (_) {}
+    } catch (err) {
+      console.error(err);
+      errorMessage('Save request failed.');
+    } finally {
+      itemForms[itemId].processing = false;
+    }
+  })();
 };
 
 const formatSampleDateTime = (value) => {
@@ -1157,6 +1237,45 @@ const formatSampleDateTime = (value) => {
   return `${day}-${month}-${year} ${hour}:${minute}:${second} ${dayPeriod}`;
 };
 
+const backRoute = computed(() => {
+  const dept = String(props.department || '').trim();
+  if (dept === 'ultrasound') return route('backend.reporting.ultrasound');
+  if (dept === 'xray') return route('backend.reporting.xray');
+  if (dept === 'pathology') return route('backend.reporting.pathology');
+  return route('backend.reporting.index');
+});
+
+const printPage = () => {
+  try {
+    const firstId = (items.value && items.value.length && items.value[0].id) ? items.value[0].id : (props.billItems && props.billItems.length ? props.billItems[0].id : null);
+    if (firstId) {
+      const url = route('backend.reporting.print', firstId);
+      // Open in new tab/window without keeping opener reference
+      let w = null;
+      try {
+        w = window.open(url, '_blank');
+        try { if (w) w.opener = null; } catch (e) { /* ignore */ }
+      } catch (e) {
+        try { w = window.open(url, '_blank'); } catch (e2) { w = null; }
+      }
+
+      // Attempt to auto-trigger print in the opened window after a short delay
+      if (w) {
+        setTimeout(() => {
+          try { w.focus(); } catch (e) {}
+          try { w.print(); } catch (e) {}
+        }, 300);
+        return;
+      }
+    }
+
+    // Fallback: print current page
+    window.print();
+  } catch (e) {
+    console.warn('Print failed', e);
+  }
+};
+
 </script>
 
 <template>
@@ -1167,7 +1286,10 @@ const formatSampleDateTime = (value) => {
           <h1 class="text-lg font-semibold text-gray-800">{{ pageTitle }}</h1>
           <p class="text-sm text-gray-600">Bill No: {{ billing.bill_number ?? 'N/A' }}</p>
         </div>
-        <Link :href="route('backend.reporting.index')" class="text-sm text-blue-600 hover:underline">Back</Link>
+        <div class="flex items-center gap-2">
+          <button type="button" @click="printPage" class="text-sm px-3 py-1 bg-white border border-slate-300 rounded text-slate-700 hover:bg-slate-50">Print</button>
+          <Link :href="backRoute" class="text-sm text-blue-600 hover:underline">Back</Link>
+        </div>
       </div>
 
       <div class="mt-4 space-y-4">
@@ -1178,6 +1300,10 @@ const formatSampleDateTime = (value) => {
                 <div class="text-xs text-gray-500">{{ item.category }} | Sample: {{ formatSampleDateTime(item.sample_collected_at) }}</div>
               </div>
               <div class="flex flex-wrap items-center gap-2 mb-2">
+                <div class="flex items-center gap-2 ml-auto">
+                  <button type="button" class="px-2 py-1 text-xs border rounded" @click="deactivateFullPageEditor(item.id)" :disabled="!itemForms[item.id]?.use_full_page">প্যারামিটার</button>
+                  <button type="button" class="px-2 py-1 text-xs border rounded" @click="activateFullPageEditor(item.id)" :disabled="itemForms[item.id]?.use_full_page">ফুল পেজ</button>
+                </div>
                 <select class="px-2 py-1 text-xs border rounded" @change="(e) => setEditorBlockFormat(item.id, e.target.value)">
                   <option value="P">Paragraph</option>
                   <option value="H1">Heading 1</option>
@@ -1267,16 +1393,17 @@ const formatSampleDateTime = (value) => {
                 <div class="text-xs text-gray-500">{{ item.category }} | Sample: {{ formatSampleDateTime(item.sample_collected_at) }}</div>
               </div>
 
-              <div v-if="!shouldRenderLargeResultBox(item.id)">
-                <InputLabel :for="`range_top_${item.id}`" value="Normal Range" />
+                <div v-if="!shouldRenderLargeResultBox(item.id)">
+                <InputLabel v-if="department !== 'ultrasound' && department !== 'xray'" :for="`range_top_${item.id}`" value="Normal Range" />
                 <input
+                  v-if="department !== 'ultrasound' && department !== 'xray'"
                   :id="`range_top_${item.id}`"
                   v-model="itemForms[item.id].report_range"
                   type="text"
                   class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 focus:border-indigo-300"
                   placeholder="Enter normal range"
                 />
-                <InputError class="mt-1" :message="itemForms[item.id].errors.report_range" />
+                <InputError v-if="department !== 'ultrasound' && department !== 'xray'" class="mt-1" :message="itemForms[item.id].errors.report_range" />
               </div>
 
               <div>
@@ -1329,9 +1456,49 @@ const formatSampleDateTime = (value) => {
 
             <div v-if="!shouldRenderLargeResultBox(item.id)" class="grid grid-cols-1 gap-4 mt-3 sm:grid-cols-2 lg:grid-cols-3">
               <div class="lg:col-span-3">
-                <div v-if="item.parameters && item.parameters.length" class="mb-3">
+                <div v-if="(item.parameter_groups && item.parameter_groups.length) || (item.parameters && item.parameters.length)" class="mb-3">
                   <div class="text-sm font-semibold mb-1">Parameters</div>
-                  <div class="grid grid-cols-1 gap-2">
+
+                  <!-- Grouped parameter view (preferred) -->
+                  <div v-if="item.parameter_groups && item.parameter_groups.length" class="space-y-4">
+                    <div v-for="group in item.parameter_groups" :key="group.title">
+                      <div class="w-full overflow-auto">
+                        <table class="param-table w-full" style="border-collapse: collapse;">
+                          <colgroup>
+                            <col style="width:70%" />
+                            <col style="width:30%" />
+                          </colgroup>
+                          <thead>
+                            <tr>
+                              <th colspan="2" class="param-table-header">{{ group.title }}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="param in (group.parameters || [])" :key="param.id">
+                              <td class="param-name-cell">
+                                <div class="text-sm font-medium">{{ param.name }}</div>
+                                <div class="text-xs text-gray-500">
+                                  <span v-if="param.reference_from || param.reference_to">{{ param.reference_from }}<span v-if="param.reference_from && param.reference_to"> - </span>{{ param.reference_to }}</span>
+                                  <span v-if="param.unit"> {{ param.unit }}</span>
+                                </div>
+                              </td>
+                              <td class="param-value-cell">
+                                <input
+                                  type="text"
+                                  v-model="itemForms[item.id].parameter_values[param.id]"
+                                  placeholder="Result"
+                                  class="w-40 p-2 text-sm border rounded text-center"
+                                />
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Fallback flat parameter list -->
+                  <div v-else class="grid grid-cols-1 gap-2">
                     <div v-for="param in item.parameters" :key="param.id" class="flex items-center gap-2">
                       <div class="flex-1">
                         <div class="text-xs font-medium">{{ param.name }}</div>
@@ -1361,7 +1528,7 @@ const formatSampleDateTime = (value) => {
                   :placeholder="getReportNotePlaceholder(item.id)"
                 ></textarea>
 
-                <p v-if="getUnitFromRange(itemForms[item.id].report_range)" class="mt-1 text-xs text-gray-500">
+                <p v-if="department !== 'ultrasound' && department !== 'xray' && getUnitFromRange(itemForms[item.id].report_range)" class="mt-1 text-xs text-gray-500">
                   Unit: {{ getUnitFromRange(itemForms[item.id].report_range) }}
                 </p>
                 <InputError class="mt-1" :message="itemForms[item.id].errors.report_note" />
@@ -1407,4 +1574,28 @@ const formatSampleDateTime = (value) => {
 .report-editable-field:focus {
   outline: none;
 }
+
+/* Parameter table styles to resemble printed lab format */
+.param-table {
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 13px;
+}
+.param-table thead .param-table-header {
+  text-align: center;
+  font-weight: 800;
+  padding: 8px 12px;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+}
+.param-table td {
+  border-bottom: 1px solid #eef2f6;
+  padding: 8px 12px;
+  vertical-align: middle;
+}
+.param-name-cell { text-align: left; }
+.param-value-cell { text-align: center; width: 30%; }
+.param-table tbody tr:last-child td { border-bottom: none; }
+
 </style>

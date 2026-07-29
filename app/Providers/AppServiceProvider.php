@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Services\ActivityLogService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Pivot;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
@@ -118,8 +119,14 @@ class AppServiceProvider extends ServiceProvider
             }
 
             if (!empty($dbName) && !empty($dbUser)) {
-                config(['database.connections.mysql.host' => $dbHost ?? config('database.connections.mysql.host')]);
-                config(['database.connections.mysql.port' => $dbPort ?? config('database.connections.mysql.port')]);
+                // Capture previous effective DB config so we only log changes
+                $prevHost = config('database.connections.mysql.host') ?? '';
+                $prevPort = config('database.connections.mysql.port') ?? '';
+                $prevDatabase = config('database.connections.mysql.database') ?? '';
+                $prevUsername = config('database.connections.mysql.username') ?? '';
+
+                config(['database.connections.mysql.host' => $dbHost ?? $prevHost]);
+                config(['database.connections.mysql.port' => $dbPort ?? $prevPort]);
                 config(['database.connections.mysql.database' => $dbName]);
                 config(['database.connections.mysql.username' => $dbUser]);
                 config(['database.connections.mysql.password' => $dbPass]);
@@ -137,11 +144,18 @@ class AppServiceProvider extends ServiceProvider
                 @putenv("DB_PASSWORD={$dbPass}");
 
                 // Log non-sensitive DB info for diagnostics (do not log password)
-                Log::info('AppServiceProvider: enforced DB config at runtime', [
-                    'db_host' => $dbHost,
-                    'db_database' => $dbName,
-                    'db_username' => $dbUser,
-                ]);
+                if ($prevHost !== ($dbHost ?? '') || $prevDatabase !== ($dbName ?? '') || $prevUsername !== ($dbUser ?? '')) {
+                    Log::info('AppServiceProvider: enforced DB config at runtime', [
+                        'db_host' => $dbHost,
+                        'db_database' => $dbName,
+                        'db_username' => $dbUser,
+                    ]);
+                } else {
+                    // No effective change — log only when app debug is enabled to avoid noise
+                    if (config('app.debug', false)) {
+                        Log::debug('AppServiceProvider: DB config enforcement no-op (no changes)');
+                    }
+                }
 
                 try {
                     if (trim(strtolower((string) $cacheDriver)) === 'database') {
@@ -179,6 +193,21 @@ class AppServiceProvider extends ServiceProvider
     {
         date_default_timezone_set((string) config('app.timezone', 'Asia/Dhaka'));
 
+        // Ensure polymorphic morph map so `category` strings (stored in bill_items)
+        // correctly resolve to the application's model classes. This avoids
+        // runtime errors like "Class 'Radiology' not found" when Eloquent
+        // attempts to instantiate a related model by type name.
+        try {
+            Relation::morphMap([
+                'Radiology' => \App\Models\RadiologyTest::class,
+                'Ultrasonogram' => \App\Models\RadiologyTest::class,
+                'Ultrasonography' => \App\Models\RadiologyTest::class,
+                'Pathology' => \App\Models\Test::class,
+            ], false);
+        } catch (\Throwable $_) {
+            // ignore failures during early bootstrap
+        }
+
         $logsPath = storage_path('logs');
         $logFile = $logsPath . DIRECTORY_SEPARATOR . 'laravel.log';
         $permissionPaths = [
@@ -208,20 +237,24 @@ class AppServiceProvider extends ServiceProvider
             // Avoid breaking the request cycle if permissions are locked down.
         }
 
-        // Share side menus for admin users with Inertia so frontend can render sidebar
-        Inertia::share('auth.sideMenus', function () {
-            try {
-                if (auth()->guard('admin')->check() && strcasecmp(trim((string) (auth()->guard('admin')->user()->status ?? '')), 'Active') === 0) {
-                    return getSideMenus(auth()->guard('admin')->user());
-                }
-            } catch (\Throwable $e) {
-                // ignore errors while preparing side menus
-            }
-
-            return [];
-        });
+        // Sidebar menu props are shared by HandleInertiaRequests middleware.
+        // Avoid duplicate auth.sideMenus sharing here to prevent stale/empty
+        // sidebar payloads on hard page refresh.
+        
+        // Register observers for automatic cache invalidation
+        $this->registerModelObservers();
+        
         $this->registerCrudActivityLogging();
 
+    }
+
+    private function registerModelObservers(): void
+    {
+        try {
+            \App\Models\Menu::observe(\App\Observers\MenuObserver::class);
+        } catch (\Throwable $e) {
+            // ignore if observer not yet available
+        }
     }
 
     private function registerCrudActivityLogging(): void

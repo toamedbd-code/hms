@@ -18,6 +18,7 @@ const createTestRow = () => ({
     testId: '',
     testName: '',
     reportDays: '',
+    roomNo: '',
     reportDate: '',
     tax: '',
     amount: ''
@@ -135,6 +136,7 @@ const selectTest = async (rowIndex, test) => {
     row.testId = test.id;
     row.testName = test.test_name;
     row.reportDays = test.report_days || '';
+    row.roomNo = test.room_no || '';
     row.tax = test.tax || '';
     row.amount = test.amount || test.standard_charge || '';
 
@@ -351,6 +353,7 @@ onMounted(async () => {
             testId: test.testId || '',
             testName: test.test_name || '',
             reportDays: test.report_days || '',
+            roomNo: test.room_no || '',
             reportDate: test.reportDate || '',
             tax: test.tax || '',
             amount: test.amount || ''
@@ -425,6 +428,7 @@ const updateFormTests = () => {
         testId: test.testId,
         testName: test.testName,
         reportDays: test.reportDays,
+        room_no: test.roomNo,
         reportDate: test.reportDate,
         tax: test.tax,
         amount: test.amount
@@ -449,10 +453,22 @@ const submit = () => {
 
     // Open blank tab synchronously to avoid popup blockers when navigating later
     let invoiceWindow = null;
+    let __pendingInvoiceTimeout = null;
+    let printToken = null;
     try {
-        // open a plain new tab (no popup feature string)
-        invoiceWindow = window.open('', '_blank');
-        try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
+        const token = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'pt_' + Date.now();
+        printToken = token;
+        form.print_token = token;
+
+        // Open preview route directly to show server wait/preview page and avoid
+        // injecting HTML into about:blank which can lead to layout/print issues.
+        try {
+            const previewUrl = route('backend.download.invoice.preview', { print_token: token, module: 'pathology' });
+            invoiceWindow = window.open(previewUrl, '_blank');
+            try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
+        } catch (e) {
+            // ignore preview generation errors
+        }
     } catch (e) {
         invoiceWindow = null;
     }
@@ -478,7 +494,18 @@ const submit = () => {
                             const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'pathology' });
                             try {
                                 if (invoiceWindow && !invoiceWindow.closed) {
-                                    invoiceWindow.location = invoiceUrl;
+                                    try { invoiceWindow.location = invoiceUrl; invoiceWindow.focus(); } catch (e) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                                    try { if (__pendingInvoiceTimeout) { clearTimeout(__pendingInvoiceTimeout); __pendingInvoiceTimeout = null; } } catch (ct) { /* ignore */ }
+                                    __pendingInvoiceTimeout = setTimeout(() => {
+                                        try {
+                                            if (!invoiceWindow || invoiceWindow.closed) {
+                                                window.open(invoiceUrl, '_blank');
+                                            } else {
+                                                try { invoiceWindow.location.href = invoiceUrl; invoiceWindow.focus(); } catch (err) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                                            }
+                                        } catch (err) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                                        __pendingInvoiceTimeout = null;
+                                    }, 800);
                                 } else {
                                     try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
                                 }
@@ -501,7 +528,18 @@ const submit = () => {
                     const invoiceUrl = route("backend.download.invoice", { id: billId, module: 'pathology' });
                     try {
                         if (invoiceWindow && !invoiceWindow.closed) {
-                            invoiceWindow.location = invoiceUrl;
+                            try { invoiceWindow.location = invoiceUrl; invoiceWindow.focus(); } catch (e) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                            try { if (__pendingInvoiceTimeout) { clearTimeout(__pendingInvoiceTimeout); __pendingInvoiceTimeout = null; } } catch (ct) { /* ignore */ }
+                            __pendingInvoiceTimeout = setTimeout(() => {
+                                try {
+                                    if (!invoiceWindow || invoiceWindow.closed) {
+                                        window.open(invoiceUrl, '_blank');
+                                    } else {
+                                        try { invoiceWindow.location.href = invoiceUrl; invoiceWindow.focus(); } catch (err) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                                    }
+                                } catch (err) { try { window.open(invoiceUrl, '_blank'); } catch (ee) { /* ignore */ } }
+                                __pendingInvoiceTimeout = null;
+                            }, 800);
                         } else {
                             try { window.open(invoiceUrl, '_blank'); } catch (e) { window.open(invoiceUrl, '_blank'); }
                         }
@@ -577,6 +615,14 @@ const goToPathologyList = () => {
     router.visit(route('backend.pathology.index'));
 };
 
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    router.visit(route('backend.pathology.index'));
+};
+
 const nextBillNumber = computed(() => {
     if (!props.billNo) return 'BILL' + new Date().toISOString().slice(0, 7).replace('-', '') + '0001';
 
@@ -642,6 +688,15 @@ const nextCaseId = computed(() => {
                 </div>
                 <div class="p-2 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button @click="goBack"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gray-500 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gray-600">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                            </svg>
+                            Back
+                        </button>
+
                         <button @click="goToPathologyList"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-400 to-blue-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-blue-500 hover:to-blue-700 ml-2">
                             <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"

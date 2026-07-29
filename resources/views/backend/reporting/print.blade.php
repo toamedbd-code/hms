@@ -217,9 +217,11 @@
             word-break: break-word;
         }
         .signature-line { display: none; }
+        .signature-designation { white-space: pre-line; }
         .signature-block .label { min-height: 18px; width: 100%; }
         .signature-block .meta { min-height: 16px; width: 100%; text-align: center; }
         .signature-block .meta.multiline { white-space: pre-line; }
+        .no-wrap { white-space: nowrap; }
         @media print {
             .content-section { padding-bottom: 72px; }
             .footer-section {
@@ -293,8 +295,12 @@
         </tr>
         <tr>
             <td style="width: 15%; vertical-align: top; padding: 2px 0; font-weight: bold;">Refd. By</td>
-            <td style="width: 2%; vertical-align: top; padding: 2px 0;">:</td>
-            <td colspan="4" style="width: 78%; vertical-align: top; padding: 2px 0;">{{ $refd_by }}</td>
+            <td colspan="5" style="vertical-align: top; padding: 2px 0;">
+                <div style="display:flex; align-items:flex-start; gap:8px;">
+                    <div style="min-width:8px; font-weight:700;">:</div>
+                    <div style="flex:1; white-space:normal; word-break:break-word;">{{ $refd_by }}</div>
+                </div>
+            </td>
         </tr>
     </table>
 
@@ -302,7 +308,7 @@
         @if($isFullPageReport)
             <div class="ultra-test-name">{{ $primaryItem->item_name ?? 'Ultrasonogram' }}</div>
             <div class="ultra-report-body">{!! $noteLooksHtml ? $primaryNoteBody : nl2br(e($primaryNoteBody)) !!}</div>
-            @if(!empty($primaryItem->report_range))
+            @if(!empty($primaryItem->report_range) && !$isUltrasonogramReport && !$isXrayReport)
                 <div class="ultra-range"><strong>Reference:</strong> {{ $primaryItem->report_range }}</div>
             @endif
         @else
@@ -330,8 +336,10 @@
 
                                     $paramRows[] = [
                                         'param' => $pName ?: trim((string) ($it->item_name ?? '')),
-                                        'value' => $pVal,
-                                        'range' => $pr['normal_range'] ?? ($it->report_range ?? ''),
+                                            'value' => $pVal,
+                                            'range' => $pr['normal_range'] ?? ($it->report_range ?? ''),
+                                            'is_out' => array_key_exists('is_out', $pr) ? (bool) $pr['is_out'] : null,
+                                            'value_num' => array_key_exists('value_num', $pr) ? $pr['value_num'] : null,
                                         'item_name' => $it->item_name ?? '',
                                     ];
                                 }
@@ -340,6 +348,8 @@
                             'param' => trim((string) ($it->item_name ?? '')) ?: 'N/A',
                             'value' => trim((string) ($it->report_note ?? '')),
                             'range' => $it->report_range ?? '',
+                                    'is_out' => null,
+                                    'value_num' => null,
                             'item_name' => $it->item_name ?? '',
                         ];
                     }
@@ -457,39 +467,41 @@
                             @php
                                 $valRaw = trim((string) ($row['value'] ?? ''));
                                 $rangeRaw = trim((string) ($row['range'] ?? ''));
-                                $outside = false;
 
-                                // try parse numeric value: extract first numeric token (handles units and notes)
-                                $valNum = null;
-                                if (preg_match('/[+-]?[0-9]+(?:[\.,][0-9]+)?/u', $valRaw, $vm)) {
+                                // Prefer server-side evaluation when available
+                                $outside = isset($row['is_out']) && $row['is_out'] !== null ? (bool) $row['is_out'] : false;
+
+                                // Try to extract a numeric value from the result (first numeric token)
+                                $valNum = $row['value_num'] ?? null;
+                                if ($valNum === null && preg_match('/[+-]?[0-9]+(?:[\.,][0-9]+)?/u', $valRaw, $vm)) {
                                     $valNum = floatval(str_replace(',', '.', $vm[0]));
                                 }
 
-                                // normalize rangeRaw for matching (use hyphen OR en-dash/em-dash)
-                                $rangeForMatch = $rangeRaw;
-
-                                // check range formats like "min - max" (allow -, –, —)
-                                if ($valNum !== null && preg_match('/^\s*([+-]?[0-9]+(?:[\.,][0-9]+)?)\s*[-\x{2013}\x{2014}]\s*([+-]?[0-9]+(?:[\.,][0-9]+)?)\s*$/u', $rangeForMatch, $m)) {
-                                    $min = floatval(str_replace(',', '.', $m[1]));
-                                    $max = floatval(str_replace(',', '.', $m[2]));
-                                    if ($valNum < $min || $valNum > $max) $outside = true;
-                                }
-
-                                // check range formats like "<5", "<=5", ">5", ">=5" (allow spaces)
-                                if ($valNum !== null && !$outside && preg_match('/^\s*([<>]=?)\s*([+-]?[0-9]+(?:[\.,][0-9]+)?)\s*$/u', $rangeForMatch, $m2)) {
-                                    $op = $m2[1];
-                                    $limit = floatval(str_replace(',', '.', $m2[2]));
-                                    if ($op === '<' && !($valNum < $limit)) $outside = true;
-                                    if ($op === '<=' && !($valNum <= $limit)) $outside = true;
-                                    if ($op === '>' && !($valNum > $limit)) $outside = true;
-                                    if ($op === '>=' && !($valNum >= $limit)) $outside = true;
-                                }
-
-                                // fallback: if two numbers appear anywhere, treat as min/max
-                                if ($valNum !== null && !$outside && preg_match_all('/[+-]?[0-9]+(?:[\.,][0-9]+)?/u', $rangeForMatch, $nums) && count($nums[0]) >= 2) {
-                                    $min = floatval(str_replace(',', '.', $nums[0][0]));
-                                    $max = floatval(str_replace(',', '.', $nums[0][1]));
-                                    if ($valNum < $min || $valNum > $max) $outside = true;
+                                // If server didn't provide `is_out`, perform client-side evaluation as fallback
+                                if (!isset($row['is_out']) || $row['is_out'] === null) {
+                                    if ($rangeRaw !== '') {
+                                        if ($valNum === null && !preg_match('/[0-9]/', $rangeRaw)) {
+                                            if (mb_strtolower($valRaw) !== mb_strtolower($rangeRaw)) {
+                                                $outside = true;
+                                            }
+                                        } elseif ($valNum !== null) {
+                                            $r = preg_replace('/[–—]/u', '-', $rangeRaw);
+                                            if (preg_match('/([<>]=?)\s*([+-]?[0-9]+(?:[\.,][0-9]+)?)/u', $r, $m2)) {
+                                                $op = $m2[1];
+                                                $limit = floatval(str_replace(',', '.', $m2[2]));
+                                                if ($op === '<' && !($valNum < $limit)) $outside = true;
+                                                if ($op === '<=' && !($valNum <= $limit)) $outside = true;
+                                                if ($op === '>' && !($valNum > $limit)) $outside = true;
+                                                if ($op === '>=' && !($valNum >= $limit)) $outside = true;
+                                            } else {
+                                                if (preg_match_all('/[+-]?[0-9]+(?:[\.,][0-9]+)?/u', $r, $nums) && count($nums[0]) >= 2) {
+                                                    $min = floatval(str_replace(',', '.', $nums[0][0]));
+                                                    $max = floatval(str_replace(',', '.', $nums[0][1]));
+                                                    if ($valNum < $min || $valNum > $max) $outside = true;
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             @endphp
                             <tr>

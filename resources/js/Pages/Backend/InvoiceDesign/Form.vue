@@ -41,6 +41,7 @@ const form = useForm({
     header_height: props.invoicedesign?.header_height ?? 115,
     footer_height: props.invoicedesign?.footer_height ?? 70,
     footer_content_position: props.invoicedesign?.footer_content_position ?? 'above',
+    footer_font_size: props.invoicedesign?.footer_font_size ?? 14,
 
     _method: props.invoicedesign?.id ? 'put' : 'post',
 });
@@ -91,6 +92,15 @@ const submit = () => {
 const goToInvoiceDesignList = () => {
     router.visit(route('backend.invoicedesign.index'));
 };
+
+const goBack = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+
+    router.visit(route('backend.dashboard'));
+};
 </script>
 
 <template>
@@ -104,6 +114,10 @@ const goToInvoiceDesignList = () => {
 
                 <div class="p-2 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
+                        <button type="button" @click="goBack"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-red-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-red-700 ml-2">
+                            Back
+                        </button>
                         <button @click="goToInvoiceDesignList"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-400 to-blue-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-blue-500 hover:to-blue-700 ml-2">
                             <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -187,6 +201,14 @@ const goToInvoiceDesignList = () => {
                         <InputError class="mt-1" :message="form.errors.footer_content_position" />
                     </div>
 
+                    <!-- Footer Font Size -->
+                    <div class="col-span-1 md:col-span-1">
+                        <InputLabel for="footer_font_size" value="Footer Font Size (px)" />
+                        <input id="footer_font_size" type="number" min="6" max="72" step="1" v-model.number="form.footer_font_size"
+                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                        <InputError class="mt-1" :message="form.errors.footer_font_size" />
+                    </div>
+
                     <!-- Header/Footer Height -->
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="header_height" value="Header Height (px)" />
@@ -246,10 +268,10 @@ const goToInvoiceDesignList = () => {
                                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
                                 </path>
                             </svg>
-                            Processing...
+                            Saving...
                         </span>
                         <span v-else>
-                            {{ props.id ? 'Update Design' : 'Create Design' }}
+                            Save Design
                         </span>
                     </PrimaryButton>
                 </div>

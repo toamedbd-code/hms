@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Billing Invoice</title>
+    <style>
+                
+                        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            font-size: 17px;
+            line-height: 1.3;
+        }
+
+        /* Constrain images to avoid huge intrinsic height causing extra pages */
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            page-break-inside: avoid;
+        }
+
+        .invoice-container {
+            width: 100%;
+        }
+
+        /* Header Section */
+        .header-section {
+            width: 100%;
+            text-align: center;
+            margin-bottom: 0;
+            height: 0px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .header-placeholder {
+            width: 100%;
+            height: 0px;
+            visibility: hidden;
+        }
+
+        .header-image {
+            width: 100%;
+            max-height: 0px;
+            height: auto;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* Content Section */
+        .content-section {
+            padding: 0 5mm;
+            /* Reserve space at bottom so fixed footer doesn't overlap content */
+            padding-bottom: 6px;
+        }
+
+        /* Title section with barcode */
+        .title-section-table {
+            width: 100%;
+            margin-bottom: 12px;
+        }
+
+        .barcode-cell-left {
+            width: 20%;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .barcode-cell-right {
+            width: 20%;
+            text-align: right;
+            vertical-align: top;
+        }
+
+        .title-cell-center {
+            width: 60%;
+            text-align: center;
+        }
+
+        .barcode-image {
+            height: 25px;
+            width: 120px;
+        }
+
+        .receipt-title {
+            font-size: 20px;
+            font-weight: bold;
+            font-family: Verdana, Geneva, Tahoma, sans-serif;
+            margin: 0;
+            letter-spacing: 2px;
+        }
+
+        .patient-details-table {
+            width: 100%;
+            border: none;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .patient-details-table td {
+            vertical-align: top;
+            padding: 0;
+            border: none;
+        }
+
+        .patient-left {
+            width: 50%;
+            padding-right: 15px;
+            vertical-align: top;
+        }
+
+        .patient-right {
+            width: 50%;
+            padding-left: 15px;
+            vertical-align: top;
+        }
+
+        /* FIXED: Consistent alignment for both columns */
+        .detail-row {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 4px;
+            min-height: 18px;
+        }
+
+        .detail-label {
+            font-weight: bold;
+            min-width: 85px;
+            flex-shrink: 0;
+            text-align: left;
+        }
+
+        .detail-value {
+            flex: 1;
+            text-align: left;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        .detail-colon {
+            margin-right: 4px;
+            flex-shrink: 0;
+        }
+
+        /* NEW: Full line detail row for Refd. By */
+        .full-line-detail-row {
+            display: block;
+            margin-bottom: 4px;
+            line-height: 1.4;
+            vertical-align: middle;
+        }
+        /* align the full-line detail start to the right column (same as Contact No column) */
+        .full-line-detail-row.right-align {
+            margin: -6px 0 6px 50%;
+        }
+
+        .full-line-label {
+            font-weight: bold;
+            display: inline;
+        }
+
+        .full-line-colon {
+            margin-right: 4px;
+        }
+
+        .full-line-value {
+            display: inline-block;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            max-width: 100%;
+            vertical-align: middle;
+        }
+        .full-line-value.nowrap {
+            display: inline-block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 70%;
+            vertical-align: middle;
+            font-size: 14px;
+        }
+
+        /* Ensure value cells can be prevented from wrapping when needed */
+        .info-table .value.nowrap {
+            white-space: nowrap;
+        }
+
+        /* IPD-style info table (match IPD invoice alignment) */
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+
+        .info-table td {
+            padding: 2px 6px;
+            vertical-align: top;
+        }
+
+        .info-table .label {
+            font-weight: bold;
+            width: 18%;
+            white-space: nowrap;
+        }
+
+        .info-table .colon {
+            width: 2%;
+            text-align: center;
+        }
+
+        .info-table .value {
+            width: 30%;
+            padding-right: 6px;
+        }
+
+        /* Refd. By value: allow wrapping starting from second line, keep right padding */
+        .refd-value {
+            display: block;
+            white-space: normal;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            padding-right: 6px;
+            margin: 0;
+        }
+        .info-table .nowrap {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Items table */
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: inherit;
+            border: 1px solid #bdbdbd;
+        }
+
+        .items-table th {
+            padding: 5px 3px;
+            text-align: left;
+            font-weight: bold;
+            border: 1px solid #b8b8b8;
+            background-color: #f2f2f2;
+        }
+
+        .items-table td {
+            padding: 4px;
+            vertical-align: top;
+            border: 1px solid #c4c4c4;
+        }
+
+        .items-table tr:last-child {
+            border-bottom: none;
+        }
+
+        .items-table .sl-col {
+            width: 10%;
+            text-align: center;
+        }
+
+        .items-table .test-col {
+            width: 45%;
+        }
+
+        .items-table .room-col {
+            width: 12%;
+            text-align: center;
+        }
+
+        .items-table .qty-col {
+            width: 10%;
+            text-align: center;
+        }
+
+        .items-table .price-col {
+            width: 15%;
+            text-align: right;
+        }
+
+        /* Delivery date */
+        .delivery-date {
+            margin: 8px 0;
+            font-weight: bold;
+        }
+
+        /* Bottom section */
+        .bottom-section {
+            width: 100%;
+            border: none;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+
+        .bottom-section td {
+            vertical-align: top;
+            width: 50%;
+            padding: 0;
+            border: none;
+        }
+
+        .left-bottom {
+            padding-right: 15px;
+        }
+
+        .right-bottom {
+            padding-left: 15px;
+        }
+
+        /* Due section */
+        .due-section {
+            margin: 8px 0;
+        }
+
+        .due-badge {
+            background-color: #ff4444;
+            color: white;
+            padding: 4px 8px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 4px;
+            font-size: 16px;
+        }
+
+        .paid-badge {
+            background-color: #28a745;
+            color: white;
+            padding: 4px 8px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 4px;
+            font-size: 16px;
+        }
+
+        /* Totals table */
+        .totals-table {
+            width: 100%;
+            font-size: inherit;
+            margin-top: 0px;
+        }
+
+        .totals-table td {
+            padding: 2px 4px;
+            border-bottom: 1px solid #c3c3c3;
+        }
+
+        .totals-table .label-col {
+            text-align: left;
+            width: 60%;
+        }
+
+        .totals-table .amount-col {
+            text-align: right;
+            width: 40%;
+        }
+
+        /* Amount in words */
+        .amount-words {
+            margin-top: 8px;
+            font-weight: bold;
+            text-align: right;
+            font-size: 16px;
+        }
+
+        .amount-words-inline {
+            padding-top: 4px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 16px;
+            line-height: 1.2;
+        }
+
+        .prepared-by {
+            margin-top: 8px;
+        }
+
+        .portal-qr {
+            margin-top: 8px;
+            display: inline-block;
+            text-align: left;
+        }
+
+        .portal-qr img {
+            width: 92px;
+            height: 92px;
+            background: #fff;
+        }
+
+        /* Footer Section - fixed at bottom of page */
+        .footer-section {
+            position: fixed; /* keep footer fixed at page bottom */
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            padding-bottom: 0px;
+            height: 0px;
+            display: block;
+            z-index: 9999;
+            pointer-events: none; /* avoid capturing clicks when overlaying */
+        }
+
+        .footer-placeholder {
+            width: 100%;
+            height: 0px;
+            visibility: hidden;
+        }
+
+        .footer-image {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            height: 0px;
+            max-height: 0px;
+            object-fit: contain;
+            object-position: bottom center;
+            z-index: 9998;
+            pointer-events: none;
+        }
+
+        .footer-content {
+            /* position relative so it sits above the footer image inside the footer area */
+            position: relative;
+            left: 0;
+            right: 0;
+            margin: 0 auto;
+            font-size: 14px !important;
+                        text-align: center;
+            padding: 2px 20px;
+            width: 100%;
+            z-index: 10000; /* above footer image */
+            background: transparent;
+            pointer-events: auto; /* allow selection of footer text if needed */
+            line-height: 1.2;
+            white-space: normal;
+            word-break: break-word;
+        }
+
+        .footer-content p,
+        .footer-content div {
+            margin: 0;
+            padding: 0;
+        }
+
+        
+        .footer-meta-wrap {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0px;
+            width: 100%;
+            padding: 0 20px;
+            margin-bottom: 0;
+            z-index: 10000;
+            pointer-events: auto;
+        }
+
+        .footer-meta-wrap.with-image {
+            bottom: calc(0px - 36px);
+        }
+
+        .footer-meta-wrap.no-image {
+            bottom: 0;
+        }
+
+        .footer-date-time {
+            font-size: 13px;
+            text-align: left;
+            margin-top: 0;
+            color: #000000ff;
+            width: 100%;
+            padding: 0;
+            margin-bottom: 0;
+            line-height: 1.15;
+        }
+
+        .footer-custom-line {
+            text-align: center;
+            padding: 0;
+            font-size: 14px !important;
+            line-height: 1.15;
+            white-space: normal;
+            word-break: normal;
+            overflow-wrap: normal;
+            word-wrap: normal;
+            hyphens: none;
+            margin: 0;
+        }
+
+        .footer-custom-item {
+            display: inline-block;
+            white-space: nowrap;
+            margin-bottom: 0;
+        }
+
+        .footer-separator {
+            display: inline-block;
+            white-space: nowrap;
+            margin: 0 4px 0 0;
+        }
+
+        .footer-meta-row {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .footer-meta-left {
+            text-align: left;
+            white-space: nowrap;
+            padding: 0 8px 0 0;
+            vertical-align: middle;
+        }
+
+        .footer-meta-right {
+            text-align: right;
+            white-space: nowrap;
+            padding: 0 0 0 8px;
+            vertical-align: middle;
+        }
+
+        .footer-meta-left,
+        .footer-meta-right {
+            line-height: 1.1;
+        }
+
+        
+                @media screen {
+            html,
+            body {
+                background: #eceff3;
+            }
+
+            body {
+                padding: 12px 0;
+            }
+
+            .invoice-container {
+                width: 210mm;
+                min-height: 297mm;
+                margin: 0 auto;
+                background: #ffffff;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+                position: relative;
+                overflow: hidden;
+            }
+
+            .content-section {
+                padding-bottom: 26px !important;
+            }
+
+            .footer-section {
+                position: absolute !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                width: 100% !important;
+                height: 0px !important;
+                margin-top: 0 !important;
+                z-index: 9999;
+                pointer-events: none;
+            }
+
+            .footer-meta-wrap,
+            .footer-meta-wrap.with-image,
+            .footer-meta-wrap.no-image {
+                position: absolute !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: calc(0px - 36px + 3.5mm) !important;
+                margin: 0 !important;
+                padding: 0 20px !important;
+            }
+
+            .footer-meta-wrap.no-image {
+                bottom: 3.5mm !important;
+            }
+
+            .footer-image {
+                position: absolute !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                width: 100% !important;
+                height: 0px !important;
+                max-height: 0px !important;
+                object-fit: contain;
+                object-position: bottom center;
+                display: block;
+            }
+        }
+        
+        /* Print specific styles */
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+                height: auto;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+
+            .invoice-container {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+
+            .print-shared-header.header-section,
+            .header-section {
+                margin-top: 0 !important;
+                margin-bottom: 0 !important;
+            }
+
+            .content-section {
+                padding-bottom: 24px;
+            }
+
+            .header-section,
+            .header-placeholder,
+            .header-image {
+                /* avoid fixed positioning for mPDF */
+                position: static;
+                top: auto;
+                left: auto;
+                right: auto;
+                width: 100%;
+                z-index: 50;
+            }
+
+            .header-image { object-fit: cover; height: 0px; }
+
+            .header-placeholder,
+            .footer-placeholder {
+                display: none;
+            }
+
+            .footer-date-time {
+                color: #000;
+            }
+
+            /* Ensure proper alignment in print */
+            .detail-row {
+                min-height: 16px;
+            }
+        }
+
+        @page {
+            size: auto;
+            margin: 0;
+        }
+
+        /* A4 Print Settings */
+        @media print {
+            body {
+                font-size: 17px !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+                height: auto;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+
+            .receipt-title {
+                font-size: 20px;
+            }
+
+            .header-section {
+                height: 0px;
+            }
+
+            .header-image {
+                height: 100%;
+            }
+
+            .barcode-image {
+                height: 25px;
+                width: 120px;
+            }
+
+            .content-section {
+                padding: 0 5mm;
+                padding-bottom: 26px;
+            }
+
+            .items-table,
+            .totals-table {
+                font-size: 17px !important;
+            }
+
+            .items-table {
+                border: 1px solid #bdbdbd !important;
+            }
+
+            .items-table th {
+                border: 1px solid #b8b8b8 !important;
+                background-color: #f2f2f2 !important;
+            }
+
+            .items-table td {
+                border: 1px solid #c4c4c4 !important;
+            }
+
+            .due-badge,
+            .paid-badge {
+                font-size: 17px;
+            }
+
+            .amount-words {
+                font-size: 17px;
+            }
+
+            .amount-words-inline {
+                font-size: 17px !important;
+                padding-top: 3px !important;
+            }
+
+            .footer-section {
+                height: 0px;
+            }
+
+            .footer-image {
+                height: 0px;
+                max-height: 0px;
+            }
+
+            .footer-date-time {
+                font-size: 14px !important;
+            }
+
+            .footer-meta-wrap.with-image {
+                bottom: calc(0px - 36px + 3.5mm) !important;
+            }
+
+            .footer-meta-wrap.no-image {
+                bottom: 3.5mm !important;
+            }
+        }
+
+        /* A5 Print Settings */
+        @media print and (max-height: 8.3in) and (max-width: 5.8in) {
+            body {
+                font-size: 11px !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+
+            .receipt-title {
+                font-size: 12px !important;
+            }
+
+            .header-section {
+                height: 0px !important;
+                margin: 0 !important;
+            }
+
+            .header-image {
+                height: 100% !important;
+                width: 100% !important;
+                object-fit: fill !important;
+            }
+
+            .print-shared-header .print-shared-header-image {
+                width: 100% !important;
+                object-fit: fill !important;
+            }
+
+            .barcode-image {
+                height: 21px !important;
+                width: 100px !important;
+            }
+
+            .barcode-cell-left img,
+            .barcode-cell-left svg,
+            .barcode-cell-right img,
+            .barcode-cell-right svg {
+                width: 100px !important;
+                height: 21px !important;
+            }
+
+            .content-section {
+                padding: 0 5mm !important;
+                padding-bottom: 24px !important;
+            }
+
+            .items-table,
+            .totals-table {
+                font-size: 11px !important;
+            }
+
+            .items-table {
+                border: 1px solid #bdbdbd !important;
+                margin: 8px 0 !important;
+            }
+
+            .items-table th {
+                padding: 1px 2px !important;
+                border: 1px solid #b8b8b8 !important;
+                background-color: #f4f4f4 !important;
+            }
+
+            .items-table td {
+                padding: 2px 2px !important;
+                line-height: 1.15 !important;
+                border: 1px solid #c4c4c4 !important;
+            }
+
+            .title-section-table {
+                margin-bottom: 4px !important;
+            }
+
+            .detail-row {
+                margin-bottom: 0 !important;
+                min-height: 10px !important;
+            }
+
+            .due-badge,
+            .paid-badge {
+                font-size: 11px !important;
+                padding: 1px 4px !important;
+            }
+
+            .amount-words {
+                font-size: 11px !important;
+                margin-top: 1px !important;
+            }
+
+            .amount-words-inline {
+                font-size: 11px !important;
+                padding-top: 1px !important;
+                line-height: 1.1 !important;
+            }
+
+            .delivery-date {
+                margin: 2px 0 !important;
+                font-size: 11px !important;
+            }
+
+            .bottom-section {
+                margin-top: 2px !important;
+            }
+
+            .bottom-section td {
+                padding: 0 !important;
+            }
+
+            .due-section {
+                margin: 2px 0 !important;
+            }
+
+            .prepared-by {
+                margin-top: 2px !important;
+                font-size: 11px !important;
+            }
+
+            img[alt="Patient Portal QR"] {
+                width: 52px !important;
+                height: 52px !important;
+            }
+
+            .totals-table td {
+                padding: 1px 2px !important;
+            }
+
+            .footer-section {
+                height: 0px !important;
+                bottom: 0 !important;
+            }
+
+            .footer-image {
+                height: 0px !important;
+                max-height: 0px !important;
+                bottom: 0 !important;
+            }
+
+            .footer-content {
+                font-size: 11px !important;
+            }
+
+            .footer-date-time {
+                font-size: 9px !important;
+            }
+
+            .footer-meta-wrap {
+                margin-bottom: 0 !important;
+                padding: 0 20px !important;
+            }
+
+            .footer-meta-wrap.with-image {
+                bottom: calc(0px - 36px) !important;
+            }
+
+            .footer-custom-line {
+                margin: 0 !important;
+                padding: 0 !important;
+                line-height: 1.15 !important;
+            }
+
+            /* Adjust for A5 */
+            .detail-label {
+                min-width: 70px;
+            }
+            
+        }
+    </style>
+</head>
+
+<body>
+    <div class="invoice-container">
+        
+        <style>
+    :root { --report-header-height: 0px; --report-footer-height: 70px; }
+
+    .print-shared-header {
+        width: 100%;
+        height: var(--report-header-height);
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        box-sizing: border-box;
+    }
+
+    .print-shared-header .print-shared-header-image {
+        width: 100%;
+        height: 100%;
+        object-fit: fill;
+        display: block;
+    }
+
+    .print-shared-header .print-shared-header-placeholder {
+        width: 100%;
+        height: 100%;
+        visibility: hidden;
+    }
+
+    .print-shared-header-fallback {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 10px 16px;
+        border-bottom: 1px solid #d0d7de;
+        background: linear-gradient(90deg, #f8fafc 0%, #ffffff 100%);
+        color: #0f172a;
+    }
+
+    .print-shared-header-title {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .print-shared-header-subtitle {
+        margin-top: 4px;
+        font-size: 12px;
+        color: #475569;
+    }
+</style>
+
+<div class="print-shared-header header-section">
+                        <div class="print-shared-header-placeholder header-placeholder"></div>
+            </div>
+
+        <div class="content-section">
+            <table class="title-section-table">
+                <tr>
+                    <td class="barcode-cell-left">
+                        <div style="font-size:0;position:relative;width:145px;height:30px;">
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:0px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:3px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:6px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:11px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:15px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:17px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:22px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:27px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:31px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:33px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:37px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:40px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:44px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:48px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:51px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:55px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:57px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:4px;height:30px;position:absolute;left:61px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:66px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:70px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:73px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:77px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:82px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:85px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:88px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:91px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:96px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:99px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:102px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:106px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:110px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:114px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:118px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:121px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:124px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:127px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:132px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:137px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:141px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:143px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:0px;height:30px;position:absolute;left:145px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:0px;height:30px;position:absolute;left:145px;top:0px;">&nbsp;</div>
+</div>
+
+                    </td>
+                    <td class="title-cell-center">
+                        <div class="receipt-title">MONEY RECEIPT</div>
+                    </td>
+                    <td class="barcode-cell-right">
+                        <div style="font-size:0;position:relative;width:145px;height:30px;">
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:0px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:3px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:6px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:11px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:15px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:17px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:22px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:27px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:31px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:33px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:37px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:40px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:44px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:48px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:51px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:55px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:57px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:4px;height:30px;position:absolute;left:61px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:66px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:70px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:73px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:77px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:82px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:85px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:88px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:91px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:96px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:99px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:102px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:106px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:110px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:114px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:118px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:121px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:124px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:127px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:132px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:3px;height:30px;position:absolute;left:137px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:1px;height:30px;position:absolute;left:141px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:2px;height:30px;position:absolute;left:143px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:0px;height:30px;position:absolute;left:145px;top:0px;">&nbsp;</div>
+<div style="background-color:black;width:0px;height:30px;position:absolute;left:145px;top:0px;">&nbsp;</div>
+</div>
+
+                    </td>
+                </tr>
+            </table>
+
+            <!-- Patient / IPD Details Section (aligned like IPD invoice) -->
+                                    <table class="info-table">
+                <tr>
+                    <td class="label">Bill No</td><td class="colon">:</td><td class="value">BILL2026070027</td>
+                    <td class="label">Date &amp; Time</td><td class="colon">:</td><td class="value">23-Jul-2026 02:56:59 PM</td>
+                </tr>
+                                <tr>
+                    <td class="label">Patient Name</td><td class="colon">:</td><td class="value">Walk-in Patient</td>
+                    <td class="label">Age</td><td class="colon">:</td><td class="value">N/A</td>
+                </tr>
+                <tr>
+                    <td class="label">Gender</td><td class="colon">:</td><td class="value">Others</td>
+                    <td class="label">Phone</td><td class="colon">:</td><td class="value">N/A</td>
+                </tr>
+                                <tr>
+                    <td class="label">Refd. By</td><td class="colon">:</td><td class="value" colspan="4">N/A</td>
+                </tr>
+            </table>
+            
+            
+
+                
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th class="sl-col">SL</th>
+                        <th class="test-col">Item Name</th>
+                                                <th class="qty-col">Qty</th>
+                        <th class="price-col">Price (Tk.)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                                        <tr>
+                        <td class="sl-col">1</td>
+                        <td class="test-col">CBC</td>
+                                                <td class="qty-col">1</td>
+                        <td class="price-col">550.00</td>
+                    </tr>
+                                        <tr>
+                        <td class="sl-col">2</td>
+                        <td class="test-col">RBS</td>
+                                                <td class="qty-col">1</td>
+                        <td class="price-col">200.00</td>
+                    </tr>
+                                    </tbody>
+            </table>
+
+
+
+
+<div class="delivery-date">
+    Delivery Date & Time:
+    23-Jul-2026, 08:00 PM
+</div>
+
+
+<table class="bottom-section">
+    <tr>
+        <td class="left-bottom" style="vertical-align: top;">
+            <div class="due-section">
+                
+                                <div class="paid-badge">PAID</div>
+                
+                <div>Thank You</div>
+            </div>
+
+            <div class="prepared-by">
+                <strong>Prepared By:</strong> Toamed Developer
+            </div>
+
+                        <div class="portal-qr">
+                <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUUAAAFFAQMAAABBum0eAAAABlBMVEX///8AAABVwtN+AAAAAXRSTlMAQObYZgAAAAlwSFlzAAAOxAAADsQBlSsOGwAABSxJREFUaIHVmzGO60gMRCk4UDhH0E3kixmwAV/MvomOoFCBYS7rVWv2Y4MfLxUYPVbJQIvsYrG6J7KuLb8/z4w1Yjmm/Z5xzc+S37jk/N5vS/2ZeUQX5BFx2TL3Sxboss2Zz5xfEf6JWH8+cdRPRCPkNZ+FzMdS3z6WQj78XUw1An6sP/XRDllTnDTStDXKGt033a0w90OSgU7Da+Un6Vr5WdcatziaIZWfh9Jw1gsI/am4Bulad+9b/JHJDZBnBj7/8vEH2zRAntct8lVBKxqsyV6LC0eS1lv4z/V/R3Ifihchbs7P3G8Kc33oT7j/aIOcc4/lXGLF89SrlwrZFaas/Kz3UTnbBnlonG8I0fc/QS7WjG8hQhSvXLIPUrkYMe2MmCdy4qP8fCwQSf3EZ+mDrGhSoAYrUqrqVXxUmp/K1JJPWnuNkEw2oIqaoiNXEVb4vPaWWQ8efZBaZ4Gw+BqpkKo0K5o8PaMz2iAP6Yf64pmSrgvhE2kg0Gvt8bRVehPkLEKEyYmrH1xZYlWG812cWcG9bH2Qnp1kEblI/wQrJok7SX18WyFnDSshHwRyQ6qPVRgsticPLo2Qr59RqmatOCpwfUcZDt19BBwSbZDVMF1MH7NaXo3caEAkaCg9HX2Q9OpFjTfPHZ6HKVXIhiqcUBddkMORqDIsvVSMv2vtyZb4omn1AnTjaIPEeCgGLCaX2qs/P0u6+Mbd5ateCs1HE6R4Hh/C1Ej4rG55UD+Bzu2DzGTu4RhursUKH45E/U4mi/Log1SpkrO3iR8rkMpPG0ZSTmJFC9s2SMpStRx8XLZhHSl8YnypC103uzEtkEUV98Qmsp/MhzqpUAdyqM/KUeOaID33SVIJe0W6bxh9iI2ddn44ez2QK2vqR6JJt9wRUq8wlXfI49kL6TW1ic4X1t4plUT2qClEexfkPOwVrJTb4rorgZTyipJ2SpsBRxskrbvWlKqy0lBGn9ik3gLzVVtoddEEeSAsJnksvIAYtK/RbfFb0K5NH2QqK+15BflpZ+8W1OKx9misuiBxH9BGbm+Vi3jMFeGHfT9GRxukeG+RnHD5qsp1SfT6LJtcjC9KIbhdkBqrx1hG6+6EVN8x+kW181TiJkj6dzQtiy1Ye297zFKFgZOEx9IEiS9k7271M3SENe0hdm9uSPogRYj27ogrPO+d56uNvrDH1wc501QgJ95CXt13hBUHq/Dsdpsg6Q0t/iakktbZWw3i1+4r5IIP1gSJiEWle19m9RZAmkNcla/ZCUnkMFrObleNBvsyOjvwUlXOsbfbA+mzHKKP/HX22PNEtEsfLt7j6IP0hlJodqdewuRPFuApA5c+yPBBNYkmhN71d4cmrKHO3eg2SL7F7jIDqtUlKyuuNIjoDL2FNsiXSu7bh/DoQNxJcSZqoTeEOPsgj2m38b/4OMBaCWn3dRoWmGhfBbkLUhNGU9gmsiJfvYshsYvbLPneB3m27i65bGpw1MG7GN5zovntgoQ0guNpHBbQg+nmY/eZqO3c1GiCPOgNx5kAE8lCVeYkFKnJTnsfJOcEkEXefpl8/tNNvIjknsOl6ILkyrEb+HH4OK12ehMSFj491QQJh8S/PgRe5erKpYN5WoXI3jZISAPeI0nj94yuj7kPIcWK64K8YuhbWAxNq8OTm72xPLekoxcS29hKlkI25Zg2m2rajNqaIWEOz33lP0XYDdx9Vzrj8tuhNEBy1h33S/bePA4cD8PI+wCjQ2mC/A3fcp7ysse3QfG+4ea3CfIfj63kL4hcGmoAAAAASUVORK5CYII=" alt="Patient Portal QR" />
+            </div>
+                    </td>
+        <td class="right-bottom" style="vertical-align: top;">
+            <table class="totals-table">
+                <tr>
+                    <td class="label-col"><strong>Total Amount Tk.</strong></td>
+                    <td class="amount-col">
+                        <strong>750.00</strong>
+                    </td>
+                </tr>
+
+                
+                
+                
+                
+                                                        <tr>
+                        <td class="label-col">Discount Tk.</td>
+                        <td class="amount-col">40.00</td>
+                    </tr>
+                                    
+                                <tr>
+                    <td class="label-col">Extra Discount Tk.</td>
+                    <td class="amount-col">
+                        10.00
+                    </td>
+                </tr>
+                
+                <tr>
+                    <td class="label-col"><strong>Net Payable Tk.</strong></td>
+                    <td class="amount-col">
+                        <strong>700.00</strong>
+                    </td>
+                </tr>
+
+                
+                                <tr>
+                    <td class="label-col">Paid (Invoice Time)</td>
+                    <td class="amount-col">
+                        1,200.00
+                    </td>
+                </tr>
+                
+                
+                
+
+                
+                
+                                <tr>
+                    <td class="label-col"><strong>Total Paid Tk.</strong></td>
+                    <td class="amount-col">
+                        <strong>700.00</strong>
+                    </td>
+                </tr>
+                
+                                <tr>
+                    <td class="label-col"><strong>Return Amount Tk.</strong></td>
+                    <td class="amount-col">
+                        <strong>500.00</strong>
+                    </td>
+                </tr>
+                
+                
+                <tr>
+                    <td class="label-col"><strong>Due Tk.</strong></td>
+                    <td class="amount-col">
+                        <strong>0.00</strong>
+                    </td>
+                </tr>
+
+                
+                            </table>
+        </td>
+    </tr>
+    <tr>
+        <td colspan="2" class="amount-words-inline">
+            TEST
+        </td>
+    </tr>
+</table>
+
+        </div>
+
+        <!-- Footer Section -->
+            </div>
+    </body>
+</html>

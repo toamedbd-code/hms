@@ -511,33 +511,59 @@ $finalDue = max($netPayable - $totalPaid, 0);
 </td>
 </tr>
 
-<tr>
+@if ((float) ($vat ?? 0) !== 0)
+                <tr>
 <td class="label-col">Vat Tk.</td>
 <td class="amount-col">{{ number_format($vat, 2) }}</td>
 </tr>
+                @endif
 
-@if ($discount_type == 'percentage')
+@php
+    $baseTotal = round((float) ($total_amount ?? 0), 2);
+    $vatPercentLocal = round((float) ($vat_percentage ?? 0), 2);
+    $vatComputed = $vatPercentLocal > 0 ? round(($baseTotal * $vatPercentLocal) / 100, 2) : 0.00;
+    $extraDiscount = round((float) ($extra_flat_discount ?? 0), 2);
+    if (strtolower((string) ($discount_type ?? 'flat')) === 'percentage') {
+        $discountPercentLocal = round((float) ($discount ?? 0), 2);
+        $discountComputed = round(($baseTotal * $discountPercentLocal) / 100, 2);
+    } else {
+        $discountPercentLocal = null;
+        $discountComputed = round((float) ($discount ?? 0), 2);
+    }
+    $netComputed = round(max(0, $baseTotal + $vatComputed - $discountComputed - $extraDiscount), 2);
+@endphp
+
+@if ($vatComputed != 0)
 <tr>
-<td class="label-col">
-Discount ({{ number_format($discount, 2) }}%)
-</td>
-<td class="amount-col">
-{{ number_format(($total_amount * $discount / 100), 2) }}
-</td>
-</tr>
-@else
-<tr>
-<td class="label-col">Discount Tk.</td>
-<td class="amount-col">{{ number_format($discount, 2) }}</td>
+<td class="label-col">Vat Tk.</td>
+<td class="amount-col">{{ number_format($vatComputed, 2) }}</td>
 </tr>
 @endif
 
+@if ($discountComputed != 0)
+    @if ($discountPercentLocal !== null)
+    <tr>
+    <td class="label-col">
+    Discount ({{ number_format($discountPercentLocal, 2) }}%)
+    </td>
+    <td class="amount-col">
+    {{ number_format($discountComputed, 2) }}
+    </td>
+    </tr>
+    @else
+    <tr>
+    <td class="label-col">Discount Tk.</td>
+    <td class="amount-col">{{ number_format($discountComputed, 2) }}</td>
+    </tr>
+    @endif
+@endif
 
-@if ($extra_flat_discount != 0)
+
+@if ($extraDiscount != 0)
 <tr>
 <td class="label-col">Extra Discount Tk.</td>
 <td class="amount-col">
-{{ number_format($extra_flat_discount, 2) }}
+{{ number_format($extraDiscount, 2) }}
 </td>
 </tr>
 @endif
@@ -546,17 +572,19 @@ Discount ({{ number_format($discount, 2) }}%)
 <tr>
 <td class="label-col"><strong>Net Payable Tk.</strong></td>
 <td class="amount-col">
-<strong>{{ number_format($netPayable,2) }}</strong>
+<strong>{{ number_format($netComputed,2) }}</strong>
 </td>
 </tr>
 
 
+@if ((float) ($invoicePaid ?? 0) !== 0)
 <tr>
 <td class="label-col">Paid (Invoice Time)</td>
 <td class="amount-col">
 {{ number_format($invoicePaid,2) }}
 </td>
 </tr>
+@endif
 
 
 {{-- Due Collect History --}}
@@ -572,20 +600,28 @@ Discount ({{ number_format($discount, 2) }}%)
 </tr>
 @endforeach
 
+@php
+    $totalPaidOldVer = round((float) ($totalPaid ?? 0), 2);
+    $finalDueOldVer = round((float) ($finalDue ?? 0), 2);
+@endphp
 
+@if ($totalPaidOldVer != 0)
 <tr>
 <td class="label-col"><strong>Total Paid Tk.</strong></td>
 <td class="amount-col">
 <strong>{{ number_format($totalPaid,2) }}</strong>
 </td>
 </tr>
+@endif
 
+@if ($finalDueOldVer != 0)
 <tr>
 <td class="label-col"><strong>Due Tk.</strong></td>
 <td class="amount-col">
 <strong>{{ number_format($finalDue,2) }}</strong>
 </td>
 </tr>
+@endif
 
 </table>
 

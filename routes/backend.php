@@ -48,6 +48,7 @@ use App\Http\Controllers\Backend\SetupController;
 use App\Http\Controllers\Backend\DesignationController;
 use App\Http\Controllers\Backend\DepartmentController;
 use App\Http\Controllers\Backend\SpecialistController;
+use App\Http\Controllers\Backend\RefundController;
 use App\Http\Controllers\Backend\BloodIssueController;
 use App\Http\Controllers\Backend\BloodComponentIssueController;
 use App\Http\Controllers\Backend\BedTypeController;
@@ -95,10 +96,23 @@ use App\Http\Controllers\Backend\BkashSettingController;
 use App\Http\Controllers\Backend\PayslipController;
 
 use App\Http\Controllers\Backend\PharmacyBillController;
+use App\Http\Controllers\Backend\CashCounterController;
 
 Route::get('/test-upload', function () {
     return ini_get('upload_tmp_dir');
 });
+
+Route::prefix('cash-counter')->name('cash-counter.')->group(function () {
+    Route::get('/', [CashCounterController::class, 'index'])->name('index');
+    Route::get('/{sessionId}/handover-print', [CashCounterController::class, 'handoverPrint'])->name('handover-print');
+    Route::post('/quick-start', [CashCounterController::class, 'quickStart'])->name('quick-start');
+    Route::post('/quick-close', [CashCounterController::class, 'quickClose'])->name('quick-close');
+    Route::post('/start', [CashCounterController::class, 'start'])->name('start');
+    Route::post('/input', [CashCounterController::class, 'input'])->name('input');
+    Route::post('/handover', [CashCounterController::class, 'handover'])->name('handover');
+    Route::post('/close', [CashCounterController::class, 'close'])->name('close');
+});
+
 use App\Http\Controllers\Backend\StaffAttendanceController;
 use App\Http\Controllers\Backend\AttendanceSyncController;
 use App\Http\Controllers\Backend\FaceAttendanceController;
@@ -281,10 +295,10 @@ Route::get('/test/attendance/face/page', function () {
 });
 
 // Public invoice download (allow anonymous access via query string)
-Route::get('/download-invoice', [InvoiceController::class, 'downloadInvoice']);
+Route::get('/download-invoice', [InvoiceController::class, 'downloadInvoice'])->name('download.invoice');
 
 // Public IPD invoice download (anonymous access)
-Route::get('/download/ipd/invoice', [InvoiceController::class, 'downloadIpdInvoice']);
+Route::get('/download/ipd/invoice', [InvoiceController::class, 'downloadIpdInvoice'])->name('download.ipd.invoice');
 
 Route::get('/cache-clear', function () {
     try {
@@ -330,10 +344,13 @@ Route::get('/public-storage/{path}', [PublicStorageController::class, 'show'])
     ->where('path', '.*')
     ->name('public.storage.file');
 
+Route::get('/webSetting/{path}', [PublicStorageController::class, 'show'])
+    ->where('path', '.*');
+
 Route::group(['as' => 'auth.'], function () {
     Route::get('/login', [LoginController::class, 'loginPage'])->name('login2')->middleware('AuthCheck');
     Route::post('/login', [LoginController::class, 'login'])->name('login');
-    Route::get('/logout', [LoginController::class, 'logout'])->name('logout');
+    Route::match(['get','post'], '/logout', [LoginController::class, 'logout'])->name('logout');
 });
 
 // Legacy redirects: keep old /admin/login and /admin/logout working
@@ -342,7 +359,9 @@ Route::permanentRedirect('/admin/logout', '/logout');
 
 // Public bKash endpoints for subscription renewal (used from login page)
 Route::get('payment/bkash/renew', [\App\Http\Controllers\Payment\BkashController::class, 'publicInitiate'])->name('payment.bkash.initiate.public');
-Route::get('payment/bkash/simulate-public/{payment}/approve', [\App\Http\Controllers\Payment\BkashController::class, 'publicSimulateApprove'])->name('payment.bkash.simulate.approve.public');
+Route::get('payment/bkash/unsubscribe', [\App\Http\Controllers\Payment\BkashController::class, 'publicUnsubscribe'])->name('payment.bkash.unsubscribe.public');
+Route::get('payment/bkash/simulate-public/{payment}', [\App\Http\Controllers\Payment\BkashController::class, 'publicSimulatePage'])->name('payment.bkash.simulate.public.page');
+Route::post('payment/bkash/simulate-public/{payment}/approve', [\App\Http\Controllers\Payment\BkashController::class, 'publicSimulateApprove'])->name('payment.bkash.simulate.approve.public');
 
 Route::post('/website/appointment', [HomeController::class, 'storeAppointment'])
     ->middleware('throttle:8,1')
@@ -405,6 +424,7 @@ Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], fun
     // bKash settings (admin)
     Route::get('settings/payment/bkash', [BkashSettingController::class, 'index'])->name('settings.payment.bkash');
     Route::post('settings/payment/bkash', [BkashSettingController::class, 'store'])->name('settings.payment.bkash.store');
+    Route::post('settings/payment/bkash/test', [BkashSettingController::class, 'test'])->name('settings.payment.bkash.test');
 
     // bKash payment endpoints (admin)
     Route::post('payment/bkash/initiate', [\App\Http\Controllers\Payment\BkashController::class, 'initiate'])->name('payment.bkash.initiate');
@@ -459,17 +479,21 @@ Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], fun
 
 
     //for Billing
-    Route::resource('billing', BillingController::class);
+    // Exclude 'show' from resource routes to avoid conflict with custom routes
+    // like 'billing/hospital-charges' which would otherwise be captured by
+    // the resource `show` route and dispatch to a non-existent `show()` method.
+    Route::resource('billing', BillingController::class)->except(['show']);
     Route::get('billing/{id}/status/{status}/change', [BillingController::class, 'changeStatus'])->name('billing.status.change');
     Route::get('billing', [BillingController::class, 'billing'])->name('billing.Page');
     Route::get('view-billing-page', [BillingController::class, 'billingPage'])->name('billing.view');
+    // Hospital charges feature removed — Billing uses Item/Test lists only.
+    // Hospital charges route removed — feature disabled and UI removed.
     Route::get('pending-billings', [BillingController::class, 'pendingList'])->name('pending.list');
 
     Route::get('view-billing-list-page', [BillingController::class, 'index'])->name('billing.list');
     Route::match(['post', 'put'], '/print/bill', [BillingController::class, 'printBill'])->name('print.bill');
 
-    Route::get('/invoice/{id}', [BillingController::class, 'invoice'])->name('invoice');
-    Route::get('/download-invoice', [InvoiceController::class, 'downloadInvoice'])->name('download.invoice');
+    Route::get('/invoice/{id}', [InvoiceController::class, 'downloadInvoice'])->name('invoice');
     Route::get('/download-report', [ReportingController::class, 'downloadReport'])->name('download.report');
     Route::get('/search/billing', [BillingController::class, 'searchShow'])->name('billing.search');
     Route::get('/billing/prescriptions/suggest', [BillingController::class, 'searchPrescriptionSuggestions'])->name('billing.prescriptions.suggest');
@@ -477,6 +501,12 @@ Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], fun
 
     Route::get('/billing/doctors/search', [BillingController::class, 'searchDoctors'])->name('billing.doctors.search');
     Route::post('/billing/doctors/create', [BillingController::class, 'createBillingDoctor'])->name('billing.doctors.create');
+
+    // Refund Management Routes
+    Route::get('refunds', [RefundController::class, 'index'])->name('refunds.index');
+    Route::post('refunds/process', [RefundController::class, 'processRefund'])->name('refunds.process');
+    Route::get('refunds/list', [BillingController::class, 'refundList'])->name('refunds.list');
+    Route::get('refunds/{billing_id}', [RefundController::class, 'show'])->whereNumber('billing_id')->name('refunds.show');
 
     //for Appoinment
     Route::resource('appoinment', AppoinmentController::class);
@@ -549,8 +579,10 @@ Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], fun
     Route::post('ipdpatient/{id}/charges/hospital/manual', [IpdPatientController::class, 'addManualHospitalCharge'])->name('ipdpatient.charges.hospital.manual.store');
 
 
+
     // Discharge Certificate
 
+    Route::get('ipdpatient/{id}/discharge-certificate/prepare', [IpdPatientController::class, 'prepareDischargeCertificate'])->name('ipdpatient.discharge-certificate.prepare');
     Route::get('ipdpatient/{id}/discharge-certificate/print', [IpdPatientController::class, 'printDischargeCertificate'])->name('ipdpatient.discharge-certificate.print');
     Route::get('ipdpatient/{id}/discharge-certificate/pdf', [IpdPatientController::class, 'downloadDischargeCertificatePdf'])->name('ipdpatient.discharge-certificate.pdf');
 
@@ -616,6 +648,7 @@ Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], fun
     Route::get('referral/{id}/commission-payment/partial', [ReferralController::class, 'commissionPaymentForm'])->name('referral.commission.payment.form');
     Route::get('referral/payee/{payeeId}/commission-payment/paid', [ReferralController::class, 'commissionPaymentPayeePaid'])->name('referral.commission.payment.payee.paid');
     Route::get('referral/payee/{payeeId}/commission-payment/partial', [ReferralController::class, 'commissionPaymentPayeeForm'])->name('referral.commission.payment.payee.form');
+    Route::get('referral/payee/{payeeId}/commission-payment/bills', [ReferralController::class, 'commissionPaymentPayeeBills'])->name('referral.commission.payment.payee.bills');
     Route::get('referral/payee/{payeeId}/commission-payment/print', [ReferralController::class, 'commissionPaymentPayeePrint'])->name('referral.commission.payment.payee.print');
     Route::post('referral/payee/{payeeId}/commission-payment', [ReferralController::class, 'commissionPaymentPayee'])->name('referral.commission.payment.payee');
 
@@ -663,6 +696,11 @@ Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], fun
     Route::get('reporting/item/{billItem}/file', [ReportingController::class, 'viewFile'])->name('reporting.item.file');
     Route::post('reporting/item/{billItem}/import-text', [ReportingController::class, 'importStoredFileText'])->name('reporting.item.import-text');
     Route::get('reporting/print/{billItem}', [ReportingController::class, 'print'])->name('reporting.print');
+
+    // Radiology-specific reporting menus
+    Route::get('reporting/ultrasound', [ReportingController::class, 'ultrasoundIndex'])->name('reporting.ultrasound');
+    Route::get('reporting/xray', [ReportingController::class, 'xrayIndex'])->name('reporting.xray');
+    Route::get('reporting/pathology', [ReportingController::class, 'pathologyIndex'])->name('reporting.pathology');
 
     // for Report Delivery
     Route::get('report-delivery', [ReportDeliveryController::class, 'index'])->name('report-delivery.index');
@@ -927,6 +965,7 @@ Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], fun
     Route::get('general-setting/module/payroll', [WebSettingController::class, 'module'])->defaults('module', 'payroll')->name('websetting.module.payroll');
     Route::get('general-setting/module/reporting', [WebSettingController::class, 'module'])->defaults('module', 'reporting')->name('websetting.module.reporting');
     Route::get('general-setting/section/other', [WebSettingController::class, 'section'])->defaults('section', 'other')->name('websetting.section.other');
+    Route::get('general-setting/section/sidebar', [WebSettingController::class, 'section'])->defaults('section', 'sidebar')->name('websetting.section.sidebar');
     Route::match(['get', 'post'], 'general-setting-store', [WebSettingController::class, 'store'])->name('websetting.store');
 
     // Bulk SMS
@@ -1027,10 +1066,11 @@ Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], fun
     // for activity logs
     Route::get('activity-logs', [ActivityLogController::class, 'index'])->name('activity-logs.index');
     Route::get('activity-logs/print', [ActivityLogController::class, 'print'])->name('activity-logs.print');
-    Route::get('activity-logs/{activityLog}', [ActivityLogController::class, 'show'])->name('activity-logs.show');
     Route::get('activity-logs/user/summary', [ActivityLogController::class, 'userSummary'])->name('activity-logs.user-summary');
     Route::get('activity-logs/module/summary', [ActivityLogController::class, 'moduleSummary'])->name('activity-logs.module-summary');
+    Route::get('activity-logs/alerts', [ActivityLogController::class, 'alerts'])->name('activity-logs.alerts');
     Route::get('activity-logs/export', [ActivityLogController::class, 'export'])->name('activity-logs.export');
+    Route::get('activity-logs/{activityLog}', [ActivityLogController::class, 'show'])->name('activity-logs.show');
     Route::post('activity-logs/delete-old', [ActivityLogController::class, 'deleteOldLogs'])->name('activity-logs.delete-old');
 
     // for pathology machine integration logs
@@ -1061,6 +1101,7 @@ Route::post('opd-due-collect/{id}', [DueCollectController::class, 'opdStore'])
     // throwing exceptions when the app tries to generate URLs for them.
     try {
         $menuRoutes = \App\Models\Menu::whereNotNull('route')->pluck('route')->unique()->filter()->values();
+        $createdPlaceholderNames = []; // track created placeholder names to avoid duplicates
         foreach ($menuRoutes as $menuRoute) {
             $menuRoute = trim((string) $menuRoute);
             if ($menuRoute === '') continue;
@@ -1094,10 +1135,19 @@ Route::post('opd-due-collect/{id}', [DueCollectController::class, 'opdStore'])
             // a naming collision doesn't throw and abort route loading.
             // Use a reserved '__placeholder.' name prefix so these auto-
             // registered routes cannot collide with real route names.
+            // If we've already created a placeholder for this safe name during
+            // this request, skip creating another one. This prevents multiple
+            // placeholder routes from being registered with the same name
+            // (which causes route:cache to fail during serialization).
+            if (in_array($safeRegistrationName, $createdPlaceholderNames, true)) {
+                continue;
+            }
+
             try {
                 \Illuminate\Support\Facades\Route::get('/__placeholder/' . $slug, function () use ($menuRoute) {
                     return \Inertia\Inertia::render('Backend/Placeholder', ['title' => $menuRoute]);
                 })->name('__placeholder.' . $safeRegistrationName);
+                $createdPlaceholderNames[] = $safeRegistrationName;
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\Log::warning('Skipping placeholder for ' . $menuRoute . ': ' . $e->getMessage());
                 continue;

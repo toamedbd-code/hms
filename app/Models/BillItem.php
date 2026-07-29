@@ -20,6 +20,7 @@ class BillItem extends Model
         'delivered_at' => 'datetime',
         'commissionable' => 'boolean',
         'commission_rate' => 'decimal:2',
+        'requires_sample' => 'boolean',
     ];
 
     public function billing()

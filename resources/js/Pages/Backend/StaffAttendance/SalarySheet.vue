@@ -566,7 +566,7 @@ const unpaidCellClass = (row) =>
           </a>
           <Link
             :href="route('backend.staffattendance.report')"
-            class="px-3 py-2 text-sm !text-white bg-gray-600 rounded hover:bg-gray-700"
+            class="px-3 py-2 text-sm !text-white bg-red-600 rounded hover:bg-red-700"
           >
             Back
           </Link>

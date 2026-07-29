@@ -20,12 +20,34 @@
         .amount { text-align: right; white-space: nowrap; }
         .no-wrap { white-space: nowrap; }
         .section-title { font-weight: bold; margin-top: 16px; margin-bottom: 6px; }
-        .summary-table { width: 48%; margin-left: auto; margin-top: 8px; }
+        .summary-table { width: 48%; margin-left: auto; margin-top: 8px; table-layout: auto; font-size: 12px; }
+        .summary-table td { white-space: nowrap; padding: 5px 6px; line-height: 1.3; font-size: 12px; }
+        .summary-table .summary-label { text-align: left; }
+        .summary-table .summary-value { text-align: right; }
+        .module-details-table { table-layout: fixed; width: 100%; }
+        .module-details-table thead th {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 6px 8px;
+            font-size: 16px;
+            vertical-align: middle;
+            line-height: 1.1;
+            text-align: center;
+        }
+        .module-details-table td {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 6px 8px;
+            font-size: 16px;
+            vertical-align: middle;
+        }
+        .module-details-table td.details { white-space: normal; }
+        .module-details-table tfoot td { white-space: nowrap; }
         /* Avoid breaking rows across pages in PDF renderers */
         tr { page-break-inside: avoid; break-inside: avoid; }
         tbody { display: table-row-group; }
-        /* Slightly smaller font for wide tables to prevent overflow */
-        .module-details-table th, .module-details-table td, .combined-totals th, .combined-totals td { font-size: 11px; }
         /* Currency styling: make the currency symbol slightly larger */
         .tk { white-space: nowrap; }
         .tk .tk-symbol { font-size: 14px; font-weight: 600; margin-right: 4px; }
@@ -109,7 +131,7 @@
     @endphp
 
         @if(!isset($show_header_footer) || $show_header_footer)
-            @includeIf('prints.partials._header')
+            @includeIf('prints.partials._header', ['show_header_footer' => true])
         @endif
 
     <div class="header">
@@ -259,32 +281,36 @@
 
     <table class="summary-table" style="margin-top: 20px;">
         <tr>
-            <td class="summary-label">Total Net</td>
-            <td class="summary-value">{!! $fmtTk($totals['net_amount'] ?? 0) !!}</td>
+            <td class="summary-label"><strong>Total Net</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($totals['net_amount'] ?? 0) !!}</strong></td>
         </tr>
                 <tr>
-            <td class="summary-label">Total Paid</td>
-            <td class="summary-value">{!! $fmtTk(($totals['paid_amount'] ?? 0) + ($totals['due_collected'] ?? $totals['due_collection'] ?? 0)) !!}</td>
+            <td class="summary-label"><strong>Total Paid</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($totals['paid_amount'] ?? 0) !!}</strong></td>
         </tr>
         <tr>
-            <td class="summary-label">Total Due</td>
-            <td class="summary-value">{!! $fmtTk($totals['due_amount'] ?? 0) !!}</td>
+            <td class="summary-label"><strong>Total Due</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($totals['due_amount'] ?? 0) !!}</strong></td>
         </tr>
         <tr>
-            <td class="summary-label">Total Actual Due</td>
-            <td class="summary-value">{!! $fmtTk($totals['actual_due'] ?? 0) !!}</td>
+            <td class="summary-label"><strong>Total Actual Due</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($totals['actual_due'] ?? 0) !!}</strong></td>
         </tr>
                 <tr>
-            <td class="summary-label">Total Due Collected</td>
-            <td class="summary-value">{!! $fmtTk($totals['due_collected'] ?? $totals['due_collection'] ?? 0) !!}</td>
+            <td class="summary-label"><strong>Total Due Collected</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($totals['due_collected'] ?? $totals['due_collection'] ?? 0) !!}</strong></td>
         </tr>
         <tr>
-            <td class="summary-label">Total Expense</td>
-            <td class="summary-value">{!! $fmtTk($totals['total_expense'] ?? 0) !!}</td>
+            <td class="summary-label"><strong>Total Refund</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($totals['total_return_amount'] ?? 0) !!}</strong></td>
+        </tr>
+        <tr>
+            <td class="summary-label"><strong>Total Expense</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($totals['total_expense'] ?? 0) !!}</strong></td>
         </tr>
                 <tr>
-            <td class="summary-label">Final Income</td>
-            <td class="summary-value">{!! $fmtTk((($totals['paid_amount'] ?? 0) + ($totals['due_collected'] ?? $totals['due_collection'] ?? 0)) - ($totals['total_expense'] ?? 0)) !!}</td>
+            <td class="summary-label"><strong>Final Income</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk((($totals['paid_amount'] ?? 0) + ($totals['due_collected'] ?? $totals['due_collection'] ?? 0)) - ($totals['total_expense'] ?? 0) - ($totals['total_return_amount'] ?? 0)) !!}</strong></td>
         </tr>
     </table>
 
@@ -452,13 +478,7 @@
 
     if (isset($totals)) {
         $moduleTotals['total_expense'] = $totals['total_expense'] ?? 0;
-        $moduleTotals['due_collection'] = max(
-            (float)($totals['due_collection'] ?? 0),
-            (float)($moduleTotals['due_collected'] ?? 0)
-        );
-
-        // For combined (all_module) reports, prefer the row-derived due_collected
-        // but fall back to controller-provided due_collection when rows have none.
+        $moduleTotals['total_return_amount'] = $totals['total_return_amount'] ?? 0;
         $moduleTotals['due_collection'] = max(
             (float)($totals['due_collection'] ?? 0),
             (float)($moduleTotals['due_collected'] ?? 0)
@@ -466,34 +486,40 @@
 
         // Ensure due_collected mirrors the resolved due_collection if rows didn't provide it
         $moduleTotals['due_collected'] = (float)($moduleTotals['due_collected'] ?? $moduleTotals['due_collection'] ?? 0);
-        $moduleTotals['final_income'] = $totals['final_income'] ?? (($moduleTotals['paid_amount'] ?? 0) + ($moduleTotals['due_collection'] ?? 0) - ($moduleTotals['total_expense'] ?? 0));
+        $moduleTotals['final_income'] = $totals['final_income'] ?? (((float)($moduleTotals['paid_amount'] ?? 0) + (float)($moduleTotals['due_collection'] ?? 0)) - ((float)($moduleTotals['total_expense'] ?? 0) + (float)($moduleTotals['total_return_amount'] ?? 0)));
         $moduleTotals['actual_due'] = $totals['actual_due'] ?? ($moduleTotals['due_amount'] ?? 0);
-
-        if (in_array(($selectedModuleKey ?? ''), ['all_module', 'billing'], true)) {
-            $moduleTotals['due_amount'] = (float)($moduleTotals['actual_due'] ?? $moduleTotals['due_amount'] ?? 0);
-            $moduleTotals['final_income'] = ((float)($moduleTotals['paid_amount'] ?? 0) + (float)($moduleTotals['due_collection'] ?? 0)) - (float)($moduleTotals['total_expense'] ?? 0);
-        }
     }
 
         // Normalize due_collected/final_income to prefer row-level due_collected
         $moduleTotals['due_collected'] = (float)($moduleTotals['due_collected'] ?? $moduleTotals['due_collection'] ?? $totals['due_collection'] ?? 0);
         $moduleTotals['due_collection'] = (float)($moduleTotals['due_collection'] ?? $moduleTotals['due_collected'] ?? $totals['due_collection'] ?? 0);
-        $moduleTotals['final_income'] = ((float)($moduleTotals['paid_amount'] ?? 0) + (float)($moduleTotals['due_collected'] ?? $moduleTotals['due_collection'] ?? 0)) - (float)($moduleTotals['total_expense'] ?? 0);
+        $moduleTotals['final_income'] = ((float)($moduleTotals['paid_amount'] ?? 0) + (float)($moduleTotals['due_collected'] ?? $moduleTotals['due_collection'] ?? 0)) - ((float)($moduleTotals['total_expense'] ?? 0) + (float)($moduleTotals['total_return_amount'] ?? 0));
 
     @endphp
 
     <table class="module-details-table">
+        <colgroup>
+            <col style="width:16%">
+            <col style="width:9%">
+            <col style="width:11%">
+            <col style="width:8%">
+            <col style="width:8%">
+            <col style="width:11%">
+            <col style="width:11%">
+            <col style="width:11%">
+            <col style="width:11%">
+        </colgroup>
         <thead>
             <tr>
                 <th>Bill No</th>
                 <th>Billing Date</th>
-                <th>Total Amount (TK.)</th>
-                <th>Discount Amt (TK.)</th>
-                <th>Extra Discount (TK.)</th>
-                <th>Net Amount (TK.)</th>
-                <th>Paid Amount (TK.)</th>
-                <th>Due Amount (TK.)</th>
-                <th>Due Collected (TK.)</th>
+                <th>Total Amount</th>
+                <th>Discount</th>
+                <th>Extra Discount</th>
+                <th>Net Amount</th>
+                <th>Paid Amount</th>
+                <th>Due Amount</th>
+                <th>Due Collected</th>
             </tr>
         </thead>
         <tbody>
@@ -530,271 +556,40 @@
 
     <table class="summary-table" style="margin-top: 20px;">
         <tr>
-            <td class="summary-label">Total Net</td>
-            <td class="summary-value">{!! $fmtTk($moduleTotals['net_amount'] ?? 0) !!}</td>
+            <td class="summary-label"><strong>Total Net</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($moduleTotals['net_amount'] ?? 0) !!}</strong></td>
         </tr>
                 <tr>
-            <td class="summary-label">Total Paid</td>
-            <td class="summary-value">{!! $fmtTk(($moduleTotals['paid_amount'] ?? 0) + ($moduleTotals['due_collected'] ?? $moduleTotals['due_collection'] ?? 0)) !!}</td>
+            <td class="summary-label"><strong>Total Paid</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($moduleTotals['paid_amount'] ?? 0) !!}</strong></td>
         </tr>
         <tr>
-            <td class="summary-label">Total Due</td>
-            <td class="summary-value">{!! $fmtTk($moduleTotals['due_amount'] ?? 0) !!}</td>
+            <td class="summary-label"><strong>Total Due</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($moduleTotals['due_amount'] ?? 0) !!}</strong></td>
         </tr>
         <tr>
-            <td class="summary-label">Total Actual Due</td>
-            <td class="summary-value">{!! $fmtTk($moduleTotals['actual_due'] ?? 0) !!}</td>
+            <td class="summary-label"><strong>Total Actual Due</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($moduleTotals['actual_due'] ?? 0) !!}</strong></td>
         </tr>
                 <tr>
-            <td class="summary-label">Total Due Collected</td>
-            <td class="summary-value">{!! $fmtTk($moduleTotals['due_collected'] ?? $moduleTotals['due_collection'] ?? 0) !!}</td>
+            <td class="summary-label"><strong>Total Due Collected</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($moduleTotals['due_collected'] ?? $moduleTotals['due_collection'] ?? 0) !!}</strong></td>
         </tr>
         <tr>
-            <td class="summary-label">Total Expense</td>
-            <td class="summary-value">{!! $fmtTk($moduleTotals['total_expense'] ?? 0) !!}</td>
+            <td class="summary-label"><strong>Total Refund</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($moduleTotals['total_return_amount'] ?? 0) !!}</strong></td>
+        </tr>
+        <tr>
+            <td class="summary-label"><strong>Total Expense</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($moduleTotals['total_expense'] ?? 0) !!}</strong></td>
         </tr>
                 <tr>
-            <td class="summary-label">Final Income</td>
-            <td class="summary-value">{!! $fmtTk((($moduleTotals['paid_amount'] ?? 0) + ($moduleTotals['due_collected'] ?? $moduleTotals['due_collection'] ?? 0)) - ($moduleTotals['total_expense'] ?? 0)) !!}</td>
+            <td class="summary-label"><strong>Final Income</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk($moduleTotals['final_income'] ?? 0) !!}</strong></td>
         </tr>
     </table>
 
-    @if (false && (($selectedModuleKey ?? '') === 'all_module'))
-    @php
-        $moduleTotalsMap = !empty($allModuleTotals) ? $allModuleTotals : [
-            'opd' => ['label' => 'OPD', 'records' => 0, 'revenue' => 0],
-            'ipd' => ['label' => 'IPD', 'records' => 0, 'revenue' => 0],
-            'pharmacy' => ['label' => 'Pharmacy', 'records' => 0, 'revenue' => 0],
-            // Default Billing entry requested: show 3 records with zero revenue
-            'billing' => ['label' => 'Billing', 'records' => 3, 'revenue' => 0],
-        ];
-
-        if (empty($allModuleTotals)) {
-            foreach (($reportRows ?? []) as $moduleRow) {
-                $moduleKey = strtolower((string)($moduleRow['module'] ?? ''));
-                if ($moduleKey === 'medicine') {
-                    $moduleKey = 'pharmacy';
-                }
-
-                if (array_key_exists($moduleKey, $moduleTotalsMap)) {
-                    $moduleTotalsMap[$moduleKey]['records'] += (float)($moduleRow['records'] ?? 0);
-                    $moduleTotalsMap[$moduleKey]['revenue'] += (float)($moduleRow['revenue'] ?? 0);
-                }
-            }
-        }
-
-        $moduleGrandRevenue = collect($moduleTotalsMap)->sum('revenue');
-        $moduleGrandRecords = collect($moduleTotalsMap)->sum('records');
-    @endphp
-
-    @if (!empty($reportRows))
-        @php
-            $moduleDetailRows = collect($reportRows ?? []);
-
-            $pharmacyMergedRows = $moduleDetailRows
-                ->filter(function ($row) {
-                    $module = strtolower((string)($row['module'] ?? ''));
-                    return in_array($module, ['pharmacy', 'medicine'], true);
-                })
-                ->groupBy(function ($row) {
-                    $dateKey = \Carbon\Carbon::parse($row['date'] ?? now())->format('Y-m-d');
-                    $billNoKey = trim((string)($row['bill_no'] ?? ''));
-
-                    if ($billNoKey === '') {
-                        $billNoKey = 'NO-BILL-' . md5(($row['item_name'] ?? '') . '|' . ($row['quantity'] ?? '') . '|' . ($row['revenue'] ?? 0));
-                    }
-
-                    return $dateKey . '|' . $billNoKey;
-                })
-                ->map(function ($rows) {
-                    $first = $rows->first();
-                    $billNo = trim((string)($first['bill_no'] ?? ''));
-                    $itemCount = $rows->count();
-                    $totalQty = (float)$rows->sum(function ($r) {
-                        return (float)($r['quantity'] ?? $r['records'] ?? 0);
-                    });
-
-                    $details = ($first['item_name'] ?? 'N/A') . ' | Qty: ' . number_format($totalQty, 3);
-                    if ($itemCount > 1) {
-                        $details = 'Items: ' . $itemCount . ' | Qty: ' . number_format($totalQty, 3);
-                    }
-                    if ($billNo !== '') {
-                        $details = 'Bill No: ' . $billNo . ' | ' . $details;
-                    }
-
-                    return [
-                        'date' => $first['date'] ?? now()->format('Y-m-d'),
-                        'module' => 'pharmacy',
-                        'records' => $totalQty,
-                        'revenue' => (float)$rows->sum('revenue'),
-                        'status' => $first['status'] ?? 'completed',
-                        'details_text' => $details,
-                        'bill_no' => $billNo,
-                    ];
-                })
-                ->values();
-
-            $moduleDetailRows = $moduleDetailRows
-                ->filter(function ($row) {
-                    $module = strtolower((string)($row['module'] ?? ''));
-                    return !in_array($module, ['pharmacy', 'medicine'], true);
-                })
-                ->concat($pharmacyMergedRows)
-                ->sortBy(function ($row) {
-                    return strtotime((string)($row['date'] ?? now()->format('Y-m-d')));
-                })
-                ->values();
-        @endphp
-        <div class="section-title">Module-wise Details (OPD / IPD / Pharmacy)</div>
-
-        @php
-            // If module detail rows are empty for all-module, provide three placeholder billing rows
-            if ((empty($moduleDetailRows) || $moduleDetailRows->isEmpty()) && (($selectedModuleKey ?? '') === 'all_module')) {
-                $dateLabel = now()->format('d-M-Y');
-                if (!empty($dateRange)) {
-                    $parts = preg_split('/\s*-+\s*/', $dateRange);
-                    if (!empty($parts[0])) {
-                        $dateLabel = trim($parts[0]);
-                    }
-                }
-
-                $moduleDetailRows = collect([
-                    ['date' => $dateLabel, 'module' => 'billing', 'records' => 1, 'revenue' => 0, 'status' => 'pending', 'details_text' => 'Bill No: BILL2026020001'],
-                    ['date' => $dateLabel, 'module' => 'billing', 'records' => 1, 'revenue' => 0, 'status' => 'completed', 'details_text' => 'Bill No: BILL2026020002'],
-                    ['date' => $dateLabel, 'module' => 'billing', 'records' => 1, 'revenue' => 0, 'status' => 'completed', 'details_text' => 'Bill No: BILL-2026-000001'],
-                ]);
-            }
-        @endphp
-
-        @if(!empty($moduleDetailRows))
-<table class="module-details-table">
-    <thead>
-        <tr>
-            <th>Date</th>
-            <th>Module</th>
-            <th>Records</th>
-            <th>Revenue (TK.)</th>
-            <th>Status</th>
-            <th>Details</th>
-        </tr>
-    </thead>
-
-    <tbody>
-        @foreach($moduleDetailRows as $row)
-        @php
-            $module = strtolower((string)($row['module'] ?? 'n/a'));
-            $moduleLabel = $module === 'medicine' ? 'Pharmacy' : strtoupper($module);
-
-            if (!in_array($module, ['opd','ipd','pharmacy','medicine'])) {
-                $moduleLabel = ucfirst($module);
-            }
-
-            $details = '-';
-            if ($module === 'opd') {
-                $details = ($row['patient_name'] ?? 'N/A') . ' | Dr. ' . ($row['doctor_name'] ?? 'N/A');
-            } elseif ($module === 'ipd') {
-                $details = ($row['patient_name'] ?? 'N/A') . ' | Bed: ' . ($row['bed_number'] ?? 'N/A');
-            } elseif ($module === 'pharmacy' || $module === 'medicine') {
-                $details = $row['details_text'] ?? (($row['item_name'] ?? 'N/A').' | Qty: '.($row['quantity'] ?? 'N/A'));
-            }
-        @endphp
-
-        <tr>
-            <td class="center">
-                {{ !empty($row['date']) ? \Carbon\Carbon::parse($row['date'])->format('d-M-Y') : 'N/A' }}
-            </td>
-            <td class="center">{{ $moduleLabel }}</td>
-            <td class="amount">{{ $row['records'] ?? 0 }}</td>
-            <td class="amount">{!! $fmtTk($row['revenue'] ?? 0) !!}</td>
-            <td class="center">{{ ucfirst((string)($row['status'] ?? 'N/A')) }}</td>
-            <td>{{ $details }}</td>
-        </tr>
-        @endforeach
-    </tbody>
-</table>
-@endif
-
-    @else
-        <div class="section-title center">No module-wise details available.</div>
-    @endif
-
-    @php
-    // IPD module fallback: group IPD admissions by discharge date (or admission date) and sum linked billing payable amounts
-    if ($selectedModuleKey === 'ipd' && empty($reportRows)) {
-        $ipdPatients = \App\Models\IpdPatient::with('billing')
-            ->where(function ($q) {
-                $q->whereNull('status')->orWhere('status', '!=', 'Deleted');
-            })->get();
-
-        if ($ipdPatients->isNotEmpty()) {
-            $grouped = $ipdPatients->groupBy(function ($p) {
-                $date = $p->discharged_at ?? $p->created_at ?? now();
-                return \Carbon\Carbon::parse($date)->format('Y-m-d');
-            })->map(function ($dayPatients, $date) {
-                $totalAmount = $dayPatients->sum(function ($p) { return (float) optional($p->billing)->payable_amount ?? 0; });
-                $totalPaid = $dayPatients->sum(function ($p) { return (float) optional($p->billing)->paid_amt ?? 0; });
-                $totalDue = max(0, $totalAmount - $totalPaid);
-
-                    return [
-                        'date' => \Carbon\Carbon::parse($date)->format('d-M-Y'),
-                        'records' => $dayPatients->count(),
-                        'revenue' => $totalAmount,
-                        'paid_amount' => $totalPaid,
-                        'due_amount' => $totalDue,
-                    ];
-            });
-
-            $reportRows = $grouped->values()->all();
-            $ipdTotals = [
-                'records' => $grouped->sum('records'),
-                'revenue' => $grouped->sum('revenue'),
-                'paid_amount' => $grouped->sum('paid_amount'),
-                'due_amount' => $grouped->sum('due_amount'),
-            ];
-
-            $totals['net_amount'] = $ipdTotals['revenue'];
-            $totals['paid_amount'] = $ipdTotals['paid_amount'];
-            $totals['due_amount'] = $ipdTotals['due_amount'];
-            $totals['actual_due'] = $ipdTotals['due_amount'];
-            $totals['due_collection'] = $totals['due_collection'] ?? 0;
-            $totals['final_income'] = (($ipdTotals['paid_amount'] ?? 0) + ($totals['due_collection'] ?? 0)) - ($totals['total_expense'] ?? 0);
-        }
-    }
-
-    // Pharmacy / Medicine module fallback: group bill items of category 'medicine' by billing date and sum amounts
-    if (in_array($selectedModuleKey, ['pharmacy', 'medicine']) && empty($reportRows)) {
-        $items = \App\Models\BillItem::with('billing')
-            ->where('category', 'medicine')
-            ->get();
-
-        if ($items->isNotEmpty()) {
-            $grouped = $items->groupBy(function ($it) {
-                $date = optional($it->billing)->created_at ?? $it->created_at ?? now();
-                return \Carbon\Carbon::parse($date)->format('Y-m-d');
-            })->map(function ($dayItems, $date) {
-                $totalAmount = $dayItems->sum(function ($it) { return (float) ($it->total_price ?? $it->amount ?? optional($it->billing)->payable_amount ?? 0); });
-                    return [
-                        'date' => \Carbon\Carbon::parse($date)->format('d-M-Y'),
-                        'records' => $dayItems->count(),
-                        'revenue' => $totalAmount,
-                    ];
-            });
-
-            $reportRows = $grouped->values()->all();
-            $phTotals = [
-                'records' => $grouped->sum('records'),
-                'revenue' => $grouped->sum('revenue'),
-            ];
-
-            $totals['net_amount'] = $phTotals['revenue'];
-            $totals['paid_amount'] = $totals['paid_amount'] ?? 0;
-            $totals['due_amount'] = $totals['due_amount'] ?? 0;
-            $totals['final_income'] = ($totals['paid_amount'] ?? 0) - ($totals['total_expense'] ?? 0);
-        }
-    }
-    @endphp
-
-    @endif
+    {{-- Module-wise details removed per user request --}}
 
     @else
         <div class="section-title center">No data found for this report.</div>

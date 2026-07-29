@@ -14,6 +14,14 @@ class WebSettingRequest extends FormRequest
     public function rules()
     {
         $section = $this->input('activeSection') ?? $this->input('section') ?? null;
+
+        if ($section === 'sidebar') {
+            return [
+                'sidebar_menu_order' => 'nullable|array',
+                'sidebar_menu_order.*' => 'nullable|integer',
+            ];
+        }
+
         if ($section === 'cms') {
             // Only CMS fields required, rest nullable
             return [
@@ -49,6 +57,8 @@ class WebSettingRequest extends FormRequest
                     'time_zone' => 'required|string|max:100',
                     'currency' => 'required|string|max:20',
                     'currency_symbol' => 'required|string|max:20',
+                    'vat_enabled' => 'nullable|boolean',
+                    'vat_percent' => 'nullable|numeric|min:0|max:100',
                     'credit_limit' => 'required|numeric|min:0',
                     'max_billing_discount_percent' => 'required|numeric|min:0|max:100',
                     'low_stock_threshold' => 'nullable|integer|min:0|max:100000',
@@ -138,6 +148,8 @@ class WebSettingRequest extends FormRequest
                     'time_zone' => 'required|string|max:100',
                     'currency' => 'required|string|max:20',
                     'currency_symbol' => 'required|string|max:20',
+                    'vat_enabled' => 'nullable|boolean',
+                    'vat_percent' => 'nullable|numeric|min:0|max:100',
                     'credit_limit' => 'required|numeric|min:0',
                     'max_billing_discount_percent' => 'required|numeric|min:0|max:100',
                     'low_stock_threshold' => 'nullable|integer|min:0|max:100000',

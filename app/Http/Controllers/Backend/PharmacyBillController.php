@@ -17,6 +17,7 @@ use App\Services\PharmacyBillService;
 use App\Services\AdminService;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
@@ -456,6 +457,16 @@ class PharmacyBillController extends Controller
                 );
                 DB::commit();
 
+                // If caller supplied a print_token, map it to the created billing id for instant preview
+                try {
+                    $printToken = $request->input('print_token');
+                    if (!empty($printToken) && is_string($printToken)) {
+                        Cache::put('print_token_' . $printToken, $billing->id, now()->addMinutes(5));
+                    }
+                } catch (\Throwable $e) {
+                    // ignore caching errors
+                }
+
                 return redirect()
                     ->back()
                     ->with('successMessage', $message)
@@ -521,6 +532,7 @@ class PharmacyBillController extends Controller
                 'billing_id' => $billing->id,
                 'item_id' => $product['productId'],
                 'item_name' => $product['productName'],
+                'room_no' => $product['room_no'] ?? $product['roomNo'] ?? null,
                 'category' => 'Medicine',
                 'unit_price' => $product['rate'],
                 'quantity' => $product['quantity'],
@@ -698,6 +710,16 @@ class PharmacyBillController extends Controller
                 );
                 DB::commit();
 
+                // Map print_token -> billing id for preview tab if present
+                try {
+                    $printToken = $request->input('print_token');
+                    if (!empty($printToken) && is_string($printToken)) {
+                        Cache::put('print_token_' . $printToken, $billing?->id, now()->addMinutes(5));
+                    }
+                } catch (\Throwable $e) {
+                    // ignore
+                }
+
                 return redirect()
                     ->back()
                     ->with('successMessage', $message)
@@ -784,6 +806,7 @@ class PharmacyBillController extends Controller
                     'billing_id' => $billing->id,
                     'item_id' => $product['productId'],
                     'item_name' => $product['productName'],
+                    'room_no' => $product['room_no'] ?? $product['roomNo'] ?? null,
                     'category' => 'Medicine',
                     'unit_price' => $product['rate'],
                     'quantity' => $product['quantity'],

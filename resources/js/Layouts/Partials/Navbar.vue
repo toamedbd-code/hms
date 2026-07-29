@@ -125,11 +125,12 @@ const totalMedicineAlerts = computed(() => {
     const expiringSoon = Number(medicineExpiryAlert.value.expiring_soon_count || 0);
     return expired + expiringSoon;
 });
-const activityLogAlert = computed(() => page.props?.activityLogAlerts || {
+const activityLogAlertsState = ref(page.props?.activityLogAlerts || {
     can_view: false,
     today_count: 0,
     recent: [],
 });
+const activityLogAlert = computed(() => activityLogAlertsState.value);
 const failedRecentCount = computed(() => {
     return (activityLogAlert.value?.recent || []).filter((log) => log?.status === 'failed').length;
 });
@@ -167,10 +168,27 @@ const groupedBeds = computed(() => {
 });
 const bedLoading = ref(false);
 const bedError = ref('');
+let activityAlertsTimer = null;
 
 const toggleSidebar = () => {
     sideBarFlag.value = !sideBarFlag.value;
     eventBus.emit('sidebarToggled', sideBarFlag.value);
+    try {
+        window.localStorage.setItem('backend.sidebar.collapsed', String(sideBarFlag.value));
+    } catch (error) {
+        // ignore
+    }
+};
+
+const restoreSidebarState = () => {
+    try {
+        const saved = window.localStorage.getItem('backend.sidebar.collapsed');
+        if (saved === null) return;
+        sideBarFlag.value = saved === 'true';
+        eventBus.emit('sidebarToggled', sideBarFlag.value);
+    } catch (error) {
+        // ignore
+    }
 };
 
 const logout = () => {
@@ -229,6 +247,55 @@ const toggleActivityPanel = () => {
     }
 };
 
+const refreshActivityAlerts = async () => {
+    if (!activityLogAlert.value?.can_view) {
+        return;
+    }
+
+    try {
+        const resolveAlertsUrl = () => {
+            if (typeof route === 'function') {
+                try {
+                    return route('backend.activity-logs.alerts');
+                } catch (error) {
+                    // continue to fallback
+                }
+
+                try {
+                    return route('activity-logs.alerts');
+                } catch (error) {
+                    // continue to fallback
+                }
+            }
+
+            return `${window.location.origin}/activity-logs/alerts`;
+        };
+
+        const alertsUrl = resolveAlertsUrl();
+
+        const response = await fetch(alertsUrl, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'include',
+        });
+
+        if (!response.ok) {
+            return;
+        }
+
+        const data = await response.json();
+        activityLogAlertsState.value = {
+            can_view: activityLogAlert.value?.can_view ?? false,
+            today_count: Number(data.today_count || 0),
+            recent: Array.isArray(data.recent) ? data.recent : [],
+        };
+    } catch (error) {
+        // ignore refresh failures
+    }
+};
+
 const closeNotificationPanels = () => {
     isBedPanelOpen.value = false;
     isExpiryPanelOpen.value = false;
@@ -280,10 +347,22 @@ const bedTooltip = (bed) => {
 
 onMounted(() => {
     document.addEventListener('click', handleOutsideClick);
+    restoreSidebarState();
+
+    activityAlertsTimer = window.setInterval(() => {
+        if (document.visibilityState === 'visible') {
+            refreshActivityAlerts();
+        }
+    }, 20000);
+
+    refreshActivityAlerts();
 });
 
 onBeforeUnmount(() => {
     document.removeEventListener('click', handleOutsideClick);
+    if (activityAlertsTimer) {
+        window.clearInterval(activityAlertsTimer);
+    }
 });
 </script>
 
@@ -420,16 +499,21 @@ onBeforeUnmount(() => {
                                 <div class="max-h-[360px] overflow-y-auto p-2 space-y-2">
                                     <a v-for="log in filteredActivityLogs" :key="log.id"
                                         :href="route('backend.activity-logs.show', log.id)"
-                                        class="block rounded border border-gray-200 hover:border-blue-200 hover:bg-blue-50/40 px-2 py-2 transition">
+                                        :class="[
+                                            'block rounded border px-2 py-2 transition',
+                                            !isDark ? 'border-transparent hover:bg-blue-600/30' : 'border-gray-200 hover:border-blue-200 hover:bg-blue-50/40'
+                                        ]">
                                         <div class="flex items-center justify-between gap-2">
-                                            <span class="text-xs font-semibold text-gray-800 truncate">{{ log.module }} - {{ log.action }}</span>
+                                            <span :class="['text-xs font-semibold truncate', !isDark ? 'text-white' : 'text-gray-800']">{{ log.module }} - {{ log.action }}</span>
                                             <span class="text-[10px] px-1.5 py-0.5 rounded"
-                                                :class="log.status === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'">
+                                                :class="log.status === 'success'
+                                                    ? (!isDark ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-700')
+                                                    : (!isDark ? 'bg-rose-700 text-white' : 'bg-rose-100 text-rose-700')">
                                                 {{ log.status }}
                                             </span>
                                         </div>
-                                        <p class="text-[11px] text-gray-600 mt-1 truncate">{{ log.description || 'No description' }}</p>
-                                        <div class="text-[10px] text-gray-500 mt-1">{{ log.user_name || 'System' }} | {{ log.created_at }}</div>
+                                        <p :class="['text-[11px] mt-1 truncate', !isDark ? 'text-gray-200' : 'text-gray-600']">{{ log.description || 'No description' }}</p>
+                                        <div :class="['text-[10px] mt-1', !isDark ? 'text-gray-300' : 'text-gray-500']">{{ log.user_name || 'System' }} | {{ log.created_at }}</div>
                                     </a>
                                     <div v-if="!filteredActivityLogs.length" class="text-xs text-gray-500 text-center py-4">
                                         {{ showOnlyFailedActivities ? 'No failed logs in recent activities.' : 'No activity logs available.' }}

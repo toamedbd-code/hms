@@ -30,7 +30,28 @@ class WebSettingService
 
     public function first()
     {
-        return $this->websettingModel->first();
+        $query = $this->websettingModel->query();
+
+        $activeSetting = $query
+            ->where(function ($q) {
+                $q->whereNull('deleted_at')
+                  ->orWhere('deleted_at', '');
+            })
+            ->where('status', 'Active')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($activeSetting) {
+            return $activeSetting;
+        }
+
+        return $query
+            ->where(function ($q) {
+                $q->whereNull('deleted_at')
+                  ->orWhere('deleted_at', '');
+            })
+            ->orderByDesc('id')
+            ->first();
     }
 
     public function create(array $data)

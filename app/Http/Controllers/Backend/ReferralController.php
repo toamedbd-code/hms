@@ -45,6 +45,7 @@ class ReferralController extends Controller
             'Backend/Referral/Index',
             [
                 'pageTitle' => fn() => 'Referral List',
+                'filters' => fn() => request()->only(['numOfData', 'payee_name', 'bill_number']),
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
@@ -58,13 +59,13 @@ class ReferralController extends Controller
 
         if (request()->filled('payee_name')) {
             $query->whereHas('payee', function ($q) {
-                $q->where('name', 'like', request()->payee_name . '%');
+                $q->where('name', 'like', '%' . request()->payee_name . '%');
             });
         }
 
         if (request()->filled('bill_number')) {
             $query->whereHas('billing', function ($q) {
-                $q->where('bill_number', 'like', request()->bill_number . '%');
+                $q->where('bill_number', 'like', '%' . request()->bill_number . '%');
             });
         }
 
@@ -130,6 +131,12 @@ class ReferralController extends Controller
             }
 
             $customData->links[] = [
+                'linkClass' => 'bg-indigo-600 text-white semi-bold',
+                'linkLabel' => getLinkLabel('Bill-wise', null, null),
+                'link' => route('backend.referral.commission.payment.payee.bills', $first->payee_id),
+            ];
+
+            $customData->links[] = [
                 'linkClass' => 'bg-slate-600 text-white semi-bold',
                 'linkLabel' => getLinkLabel('Print', null, null),
                 'link' => route('backend.referral.commission.payment.payee.print', $first->payee_id),
@@ -142,22 +149,6 @@ class ReferralController extends Controller
         return regeneratePagination($formatedDatas, $grouped->count(), $perPage, $page);
     }
 
-    private function dataFields()
-    {
-        return [
-            ['fieldName' => 'index', 'class' => 'text-center w-10'],
-            ['fieldName' => 'payee_name', 'class' => 'text-left w-72 whitespace-nowrap'],
-            ['fieldName' => 'payee_phone', 'class' => 'text-center'],
-            ['fieldName' => 'bill_count', 'class' => 'text-center'],
-            ['fieldName' => 'bill_list', 'class' => 'text-left'],
-            ['fieldName' => 'commission_amount', 'class' => 'text-center'],
-            ['fieldName' => 'paid_amount', 'class' => 'text-center'],
-            ['fieldName' => 'pending_amount', 'class' => 'text-center'],
-            ['fieldName' => 'paid_status', 'class' => 'text-center'],
-            ['fieldName' => 'status', 'class' => 'text-center'],
-        ];
-    }
-
     private function getTableHeaders()
     {
         return [
@@ -165,13 +156,27 @@ class ReferralController extends Controller
             'Payee Name',
             'Phone',
             'Bill Count',
-            'Bill List',
             'Commission Total',
             'Paid',
             'Pending',
             'Paid Status',
             'Status',
             'Action',
+        ];
+    }
+
+    private function dataFields()
+    {
+        return [
+            ['fieldName' => 'index', 'class' => 'text-center w-10'],
+            ['fieldName' => 'payee_name', 'class' => 'text-left w-72 whitespace-nowrap'],
+            ['fieldName' => 'payee_phone', 'class' => 'text-center'],
+            ['fieldName' => 'bill_count', 'class' => 'text-center'],
+            ['fieldName' => 'commission_amount', 'class' => 'text-center'],
+            ['fieldName' => 'paid_amount', 'class' => 'text-center'],
+            ['fieldName' => 'pending_amount', 'class' => 'text-center'],
+            ['fieldName' => 'paid_status', 'class' => 'text-center'],
+            ['fieldName' => 'status', 'class' => 'text-center'],
         ];
     }
 
@@ -203,6 +208,7 @@ class ReferralController extends Controller
                     'standard_commission' => $referrer->standard_commission,
                     'pathology_commission' => $referrer->pathology_commission,
                     'radiology_commission' => $referrer->radiology_commission,
+                    'use_item_referral' => $referrer->use_item_referral ?? false,
                     'pharmacy_commission' => $referrer->pharmacy_commission,
                 ];
             });
@@ -588,11 +594,39 @@ class ReferralController extends Controller
         ]);
     }
 
-    public function commissionPaymentPayeePrint($payeeId)
+    public function commissionPaymentPayeePrint(Request $request, $payeeId)
     {
-        $referrals = $this->referralService->activeList()
+        $search = trim($request->query('search', ''));
+        $dateFrom = trim($request->query('date_from', ''));
+        $dateTo = trim($request->query('date_to', ''));
+
+        $referralsQuery = $this->referralService->activeList()
             ->where('payee_id', $payeeId)
-            ->get();
+            ->with(['billing', 'payee']);
+
+        if ($search !== '') {
+            $referralsQuery->whereHas('billing', function ($query) use ($search) {
+                $query->where('bill_number', 'like', "%{$search}%");
+            });
+        }
+
+        if ($dateFrom) {
+            try {
+                $referralsQuery->whereDate('date', '>=', Carbon::parse($dateFrom)->format('Y-m-d'));
+            } catch (Exception $e) {
+                // ignore invalid date filter
+            }
+        }
+
+        if ($dateTo) {
+            try {
+                $referralsQuery->whereDate('date', '<=', Carbon::parse($dateTo)->format('Y-m-d'));
+            } catch (Exception $e) {
+                // ignore invalid date filter
+            }
+        }
+
+        $referrals = $referralsQuery->get();
 
         if ($referrals->isEmpty()) {
             return redirect()
@@ -628,11 +662,13 @@ class ReferralController extends Controller
             $totalCommission = (float) ($referral->total_commission_amount ?? 0);
             $paidAmount = (float) ($referral->paid_amount ?? 0);
             $pendingAmount = max(0, $totalCommission - $paidAmount);
+            $paidDateTime = $referral->last_paid_at ? Carbon::parse($referral->last_paid_at)->format('d-M-Y h:i A') : 'N/A';
             return [
                 'bill_no' => $referral->billing->bill_number ?? 'N/A',
                 'date' => $referral->date ? Carbon::parse($referral->date)->format('d-M-Y') : 'N/A',
                 'commission' => $totalCommission,
                 'paid' => $paidAmount,
+                'paid_date_time' => $paidDateTime,
                 'pending' => $pendingAmount,
             ];
         })->values();
@@ -645,7 +681,102 @@ class ReferralController extends Controller
             'billList' => $billList,
             'billDateRange' => $billDateRange,
             'billRows' => $billRows,
+            'filters' => [
+                'search' => $search,
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+            ],
         ]);
+    }
+
+    public function commissionPaymentPayeeBills(Request $request, $payeeId)
+    {
+        $search = trim($request->query('search', ''));
+        $dateFrom = trim($request->query('date_from', ''));
+        $dateTo = trim($request->query('date_to', ''));
+
+        $referralsQuery = $this->referralService->activeList()
+            ->where('payee_id', $payeeId)
+            ->with(['billing', 'payee'])
+            ->orderBy('date');
+
+        if ($search !== '') {
+            $referralsQuery->whereHas('billing', function ($query) use ($search) {
+                $query->where('bill_number', 'like', "%{$search}%");
+            });
+        }
+
+        if ($dateFrom) {
+            try {
+                $referralsQuery->whereDate('date', '>=', Carbon::parse($dateFrom)->format('Y-m-d'));
+            } catch (Exception $e) {
+                // ignore invalid date filter
+            }
+        }
+
+        if ($dateTo) {
+            try {
+                $referralsQuery->whereDate('date', '<=', Carbon::parse($dateTo)->format('Y-m-d'));
+            } catch (Exception $e) {
+                // ignore invalid date filter
+            }
+        }
+
+        $referrals = $referralsQuery->get();
+
+        if ($referrals->isEmpty()) {
+            return redirect()
+                ->route('backend.referral.index')
+                ->with('errorMessage', 'Referral not found.');
+        }
+
+        $payee = $referrals->first()->payee;
+        $totalCommission = (float) $referrals->sum('total_commission_amount');
+        $paidAmount = (float) $referrals->sum('paid_amount');
+        $pendingAmount = max(0, $totalCommission - $paidAmount);
+
+        $billRows = $referrals->map(function ($referral) {
+            $totalCommission = (float) ($referral->total_commission_amount ?? 0);
+            $paidAmount = (float) ($referral->paid_amount ?? 0);
+            $pendingAmount = max(0, $totalCommission - $paidAmount);
+            $paidDateTime = $referral->last_paid_at ? Carbon::parse($referral->last_paid_at)->format('d-M-Y h:i A') : 'N/A';
+
+            return [
+                'id' => $referral->id,
+                'bill_number' => $referral->billing->bill_number ?? 'N/A',
+                'date' => $referral->date ? Carbon::parse($referral->date)->format('d-M-Y') : 'N/A',
+                'commission_amount' => $totalCommission,
+                'paid_amount' => $paidAmount,
+                'pending_amount' => $pendingAmount,
+                'paid_date_time' => $paidDateTime,
+                'paid_status' => $referral->paid_status,
+                'referral' => $referral,
+            ];
+        })->values();
+
+        return Inertia::render(
+            'Backend/Referral/PayeeBills',
+            [
+                'pageTitle' => fn() => 'Payee Bill-wise Referral',
+                'payee' => fn() => [
+                    'id' => $payee->id,
+                    'name' => $payee->name,
+                    'phone' => $payee->phone,
+                ],
+                'totals' => fn() => [
+                    'totalCommission' => $totalCommission,
+                    'paidAmount' => $paidAmount,
+                    'pendingAmount' => $pendingAmount,
+                    'billCount' => $billRows->count(),
+                ],
+                'filters' => fn() => [
+                    'search' => $search,
+                    'date_from' => $dateFrom,
+                    'date_to' => $dateTo,
+                ],
+                'billRows' => fn() => $billRows,
+            ]
+        );
     }
 
     public function commissionPaymentPayee(Request $request, $payeeId)
@@ -726,7 +857,16 @@ class ReferralController extends Controller
 
             $categoryBreakdown[$category]['amount'] += $itemAmount;
 
+            // Prefer item-level referral percentage when available (fallback to payee/category rate)
             $commissionRate = $this->getCommissionRateByCategory($payee, $category);
+            try {
+                if (isset($item->itemable) && isset($item->itemable->referral_percentage) && $item->itemable->referral_percentage > 0) {
+                    $commissionRate = (float) $item->itemable->referral_percentage;
+                }
+            } catch (\Exception $e) {
+                // ignore and keep category rate
+            }
+
             $categoryBreakdown[$category]['commission_rate'] = $commissionRate;
 
             $itemCommission = ($itemAmount * $commissionRate) / 100;

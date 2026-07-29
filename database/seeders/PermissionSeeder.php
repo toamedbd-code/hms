@@ -43,6 +43,11 @@ class PermissionSeeder extends Seeder
             ['parent_id' => $webSettingPermission->id]
         );
 
+        Permission::firstOrCreate(
+            ['name' => 'sidebar-setting', 'guard_name' => 'admin'],
+            ['parent_id' => $webSettingPermission->id]
+        );
+
         // Add requested setting prefixes under websetting
         $prefixes = [
             'setting',
@@ -107,8 +112,14 @@ class PermissionSeeder extends Seeder
             case 'pathology-list':
                 $this->createPathologyPermissions($menu);
                 break;
+            case 'ecg-list':
+                $this->createEcgPermissions($menu);
+                break;
             case 'radiology-list':
                 $this->createRadiologyPermissions($menu);
+                break;
+            case 'ultrasound-list':
+                $this->createUltrasoundPermissions($menu);
                 break;
             case 'pharmacy-bill-list':
                 $this->createPharmacyBillPermissions($menu);
@@ -286,7 +297,7 @@ class PermissionSeeder extends Seeder
 
     private function createPathologyPermissions($pathologyMenu)
     {
-        $pathologyPermissions = ['pathology-create', 'pathology-edit', 'pathology-invoice'];
+        $pathologyPermissions = ['pathology-create', 'pathology-edit', 'pathology-invoice', 'pathology-delete'];
 
         $pathologyPermission = Permission::where('name', 'pathology-list')->first();
 
@@ -299,13 +310,39 @@ class PermissionSeeder extends Seeder
 
     private function createRadiologyPermissions($radiologyMenu)
     {
-        $radiologyPermissions = ['radiology-create', 'radiology-edit', 'radiology-invoice'];
+        $radiologyPermissions = ['radiology-create', 'radiology-edit', 'radiology-invoice', 'radiology-delete'];
 
         $radiologyPermission = Permission::where('name', 'radiology-list')->first();
 
         if ($radiologyPermission) {
             foreach ($radiologyPermissions as $permissionName) {
                 $this->createPermissionIfNotExists($permissionName, $radiologyPermission->id);
+            }
+        }
+    }
+    
+    private function createEcgPermissions($ecgMenu)
+    {
+        $ecgPermissions = ['ecg-create', 'ecg-edit', 'ecg-invoice'];
+
+        $ecgPermission = Permission::where('name', 'ecg-list')->first();
+
+        if ($ecgPermission) {
+            foreach ($ecgPermissions as $permissionName) {
+                $this->createPermissionIfNotExists($permissionName, $ecgPermission->id);
+            }
+        }
+    }
+
+    private function createUltrasoundPermissions($ultrasoundMenu)
+    {
+        $ultrasoundPermissions = ['ultrasound-create', 'ultrasound-edit', 'ultrasound-invoice'];
+
+        $ultrasoundPermission = Permission::where('name', 'ultrasound-list')->first();
+
+        if ($ultrasoundPermission) {
+            foreach ($ultrasoundPermissions as $permissionName) {
+                $this->createPermissionIfNotExists($permissionName, $ultrasoundPermission->id);
             }
         }
     }
@@ -435,10 +472,16 @@ class PermissionSeeder extends Seeder
             'dashboard-card-pharmacy-income',
             'dashboard-card-pathology-income',
             'dashboard-card-radiology-income',
+            'dashboard-card-disposable-income',
+            // Bar / Pie chart permissions for income visualizations
+            'dashboard-chart-income-by-department',
+            'dashboard-chart-income-distribution',
             'dashboard-card-blood-bank-income',
             'dashboard-card-expenses',
             'dashboard-card-pending-income',
+            'dashboard-card-referral-commission',
             'dashboard-card-net-income',
+            'dashboard-card-refunds',
             'dashboard-card-total-discount',
             'dashboard-card-expired-medicines',
             'dashboard-card-expiring-medicines',

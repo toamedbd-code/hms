@@ -1,6 +1,6 @@
 <script setup>
 import { reactive } from 'vue';
-import { useForm } from '@inertiajs/vue3';
+import { router, useForm } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import InputError from '@/Components/InputError.vue';
@@ -95,6 +95,15 @@ const submit = () => {
     onError: (errors) => displayWarning(errors),
   });
 };
+
+const goBack = () => {
+  if (typeof window !== 'undefined' && window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+
+  router.visit(route('backend.dashboard'));
+};
 </script>
 
 <template>
@@ -102,6 +111,15 @@ const submit = () => {
     <div class="w-full bg-white rounded-md">
       <div class="flex items-center justify-between w-full text-gray-700 bg-gray-100 rounded-md">
         <h1 class="p-4 text-xl font-bold">{{ pageTitle }}</h1>
+        <div class="p-4">
+          <button
+            type="button"
+            @click="goBack"
+            class="px-3 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+          >
+            Back
+          </button>
+        </div>
       </div>
 
       <form @submit.prevent="submit" class="p-4">

@@ -13,12 +13,19 @@ class BillingDoctorService
 
     public function list()
     {
-        return  $this->billingdoctorModel->whereNull('deleted_at');
+        return $this->billingdoctorModel
+            ->whereNull('deleted_at')
+            ->orderByRaw('LOWER(name) ASC')
+            ->orderBy('id', 'asc');
     }
 
     public function all()
     {
-        return  $this->billingdoctorModel->whereNull('deleted_at')->all();
+        return $this->billingdoctorModel
+            ->whereNull('deleted_at')
+            ->orderByRaw('LOWER(name) ASC')
+            ->orderBy('id', 'asc')
+            ->get();
     }
 
     public function find($id)
@@ -77,7 +84,12 @@ class BillingDoctorService
 
     public function activeList()
     {
-        return  $this->billingdoctorModel->whereNull('deleted_at')->where('status', 'Active')->get();
+        return $this->billingdoctorModel
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->orderByRaw('LOWER(name) ASC')
+            ->orderBy('id', 'asc')
+            ->get();
     }
 
 }

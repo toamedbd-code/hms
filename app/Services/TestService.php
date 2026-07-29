@@ -14,12 +14,25 @@ class TestService
 
     public function list()
     {
-        return  $this->pathologytestModel->whereNull('deleted_at');
+        return $this->pathologytestModel
+            ->whereNull('tests.deleted_at')
+            ->leftJoin('testcategories as tc', 'tests.test_category_id', '=', 'tc.id')
+            ->select('tests.*', 'tc.name as category_name')
+            ->orderByRaw('LOWER(COALESCE(tests.test_name, "")) ASC')
+            ->orderByRaw('LOWER(COALESCE(tc.name, "")) ASC')
+            ->orderBy('tests.id', 'asc');
     }
 
     public function all()
     {
-        return  $this->pathologytestModel->whereNull('deleted_at')->all();
+        return $this->pathologytestModel
+            ->whereNull('tests.deleted_at')
+            ->leftJoin('testcategories as tc', 'tests.test_category_id', '=', 'tc.id')
+            ->select('tests.*', 'tc.name as category_name')
+            ->orderByRaw('LOWER(COALESCE(tests.test_name, "")) ASC')
+            ->orderByRaw('LOWER(COALESCE(tc.name, "")) ASC')
+            ->orderBy('tests.id', 'asc')
+            ->get();
     }
 
     public function find($id)
@@ -77,7 +90,15 @@ class TestService
 
     public function activeList()
     {
-        return  $this->pathologytestModel->whereNull('deleted_at')->where('status', 'Active')->get();
+        return $this->pathologytestModel
+            ->whereNull('tests.deleted_at')
+            ->where('status', 'Active')
+            ->leftJoin('testcategories as tc', 'tests.test_category_id', '=', 'tc.id')
+            ->select('tests.*', 'tc.name as category_name')
+            ->orderByRaw('LOWER(COALESCE(tests.test_name, "")) ASC')
+            ->orderByRaw('LOWER(COALESCE(tc.name, "")) ASC')
+            ->orderBy('tests.id', 'asc')
+            ->get();
     }
 
 

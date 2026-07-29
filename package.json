@@ -3,7 +3,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build && php artisan cache:sidebar-refresh"
   },
   "devDependencies": {
     "@inertiajs/vue3": "^1.0.0",
