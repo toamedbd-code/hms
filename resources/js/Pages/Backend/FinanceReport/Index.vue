@@ -148,21 +148,57 @@ const downloadPDF = async () => {
     }
 
     try {
-        // Use a named window and open the PDF URL directly to avoid creating an initial blank page
+        // Reuse a module-scoped reference to avoid opening duplicate tabs and
+        // close any intermediate blank window if created by the browser.
         const winName = 'financeReportPopup';
-        let newWin = null;
+        // store reference on window to persist across component reloads
+        if (!window.__financeReportWin) window.__financeReportWin = null;
 
         try {
-            newWin = window.open(pdfUrl, winName, 'noopener,noreferrer');
-            if (newWin) {
-                try { newWin.focus(); } catch (e) { /* ignore */ }
+            // If we already have a reference and it's open, reuse it
+            if (window.__financeReportWin && !window.__financeReportWin.closed) {
+                try {
+                    window.__financeReportWin.location.href = pdfUrl;
+                    window.__financeReportWin.focus();
+                } catch (e) {
+                    // If navigating existing window fails, null it to open anew
+                    window.__financeReportWin = null;
+                }
+            }
+
+            if (!window.__financeReportWin) {
+                // Try to get a handle to a window with the name without creating a blank page
+                let probe = null;
+                try {
+                    probe = window.open('', winName);
+                } catch (e) {
+                    probe = null;
+                }
+
+                // If probe exists and is not an about:blank placeholder, reuse it
+                if (probe && probe.location && probe.location.href && probe.location.href !== 'about:blank') {
+                    try {
+                        probe.location.href = pdfUrl;
+                        probe.focus();
+                        window.__financeReportWin = probe;
+                    } catch (e) {
+                        // fallthrough to open normally
+                        try { probe.close(); } catch (ee) { /* ignore */ }
+                        window.__financeReportWin = window.open(pdfUrl, winName, 'noopener,noreferrer');
+                    }
+                } else {
+                    // If probe is a blank window, close it to avoid leftover blank tab
+                    if (probe && probe.location && probe.location.href === 'about:blank') {
+                        try { probe.close(); } catch (e) { /* ignore */ }
+                    }
+
+                    // Open the PDF directly in a named window
+                    window.__financeReportWin = window.open(pdfUrl, winName, 'noopener,noreferrer');
+                    try { if (window.__financeReportWin) window.__financeReportWin.focus(); } catch (e) { /* ignore */ }
+                }
             }
         } catch (openErr) {
-            newWin = null;
-        }
-
-        if (!newWin) {
-            // Popup likely blocked; try anchor-click fallback (targets same named window)
+            console.warn('Primary open method failed, attempting anchor fallback', openErr);
             try {
                 const a = document.createElement('a');
                 a.href = pdfUrl;
@@ -174,7 +210,6 @@ const downloadPDF = async () => {
                 document.body.removeChild(a);
             } catch (anchorErr) {
                 console.warn('Anchor fallback failed, attempting fetch-and-open fallback', anchorErr);
-                // Final fallback: fetch PDF blob and open (use named window)
                 try {
                     const resp = await fetch(pdfUrl, { credentials: 'same-origin' });
                     if (!resp.ok) throw new Error('Network response was not ok');
@@ -182,13 +217,15 @@ const downloadPDF = async () => {
                     const blobUrl = URL.createObjectURL(blob);
                     const bw = window.open(blobUrl, winName);
                     if (!bw) {
-                        // As last resort, trigger download
                         const dl = document.createElement('a');
                         dl.href = blobUrl;
                         dl.download = `${selectedReport.value || 'report'}.pdf`;
                         document.body.appendChild(dl);
                         dl.click();
                         document.body.removeChild(dl);
+                    } else {
+                        window.__financeReportWin = bw;
+                        try { window.__financeReportWin.focus(); } catch (e) { /* ignore */ }
                     }
                 } catch (fetchErr) {
                     console.error('Final fetch fallback failed:', fetchErr);
