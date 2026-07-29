@@ -112,6 +112,14 @@ const getCurrentDateTime = () => {
     return `${day}/${month}/${year} ${hours}:${minutes}`;
 };
 
+const goBack = () => {
+    if (window.history.length > 1) {
+        window.history.back();
+        return;
+    }
+    router.visit(route('backend.dashboard'));
+};
+
 // Open PDF in a new tab like the report generator flow
 const downloadPDF = async () => {
     if (!dateFrom.value || !dateTo.value) {
@@ -119,74 +127,86 @@ const downloadPDF = async () => {
         return;
     }
 
-    // Prevent double-open when user clicks multiple times quickly
     if (pdfOpening.value) return;
     pdfOpening.value = true;
-
     isLoading.value = true;
 
+    const params = new URLSearchParams({
+        report_type: selectedReport.value,
+        date_from: dateFrom.value,
+        date_to: dateTo.value,
+        inline: '1',
+    });
+
+    let pdfUrl = '/finance/report/download-pdf';
+    if (typeof route === 'function') {
+        pdfUrl = `${route('backend.finance.report.pdf')}?${params.toString()}`;
+    } else if (typeof window !== 'undefined' && typeof window.route === 'function') {
+        pdfUrl = `${window.route('backend.finance.report.pdf')}?${params.toString()}`;
+    } else {
+        pdfUrl = `/finance/report/download-pdf?${params.toString()}`;
+    }
+
     try {
-        const url = route('backend.finance.report.pdf', {
-            report_type: selectedReport.value,
-            date_from: dateFrom.value,
-            date_to: dateTo.value,
-        });
+        // Use a named window so multiple calls reuse the same tab instead of opening duplicates
+        const winName = 'financeReportPopup';
 
-        // Open a single blank tab synchronously (user-initiated) so repeated clicks won't open multiple tabs.
-        const features = 'noopener,noreferrer,width=1000,height=800,left=200,top=200,resizable,scrollbars';
-        const win = (() => {
-            try {
-                // open a plain new tab (no popup feature string)
-                const w = window.open('', '_blank');
-                try { if (w) w.opener = null; } catch (e) { /* ignore */ }
-                return w;
-            } catch (e) {
-                return null;
-            }
-        })();
-
-        // Fetch the PDF as a blob and navigate the opened window to the blob URL.
-        const resp = await fetch(url, { credentials: 'include', headers: { Accept: 'application/pdf' } });
-        if (!resp.ok) throw new Error('PDF fetch failed');
-        const blob = await resp.blob();
-        const blobUrl = URL.createObjectURL(blob);
-
+        // Best-effort: open a named window (may return a reference or null if blocked)
+        let newWin = null;
         try {
-            if (win) {
-                try {
-                    win.location.href = blobUrl;
-                    try { win.opener = null; } catch (e) { /* ignore */ }
-                } catch (e) {
-                    // Some browsers block setting location on windows opened with empty URL; fallback to anchor click targeting _blank
-                    const a = document.createElement('a');
-                    a.href = blobUrl;
-                    a.target = '_blank';
-                    a.rel = 'noopener';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                }
-            } else {
-                // If window.open was blocked, fallback to anchor click
+            // Open an empty named window first to improve popup-blocker behavior
+            newWin = window.open('', winName, 'noopener,noreferrer');
+            if (newWin) {
+                // Navigate the opened window to the PDF URL
+                newWin.location = pdfUrl;
+                try { newWin.focus(); } catch (e) { /* ignore */ }
+            }
+        } catch (openErr) {
+            newWin = null;
+        }
+
+        if (!newWin) {
+            // Popup likely blocked; try anchor-click fallback (also uses named window target)
+            try {
                 const a = document.createElement('a');
-                a.href = blobUrl;
-                a.target = '_blank';
-                a.rel = 'noopener';
+                a.href = pdfUrl;
+                a.target = winName; // target the same named window
+                a.rel = 'noopener noreferrer';
+                a.style.display = 'none';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
+            } catch (anchorErr) {
+                console.warn('Anchor fallback failed, attempting fetch-and-open fallback', anchorErr);
+                // Final fallback: fetch PDF blob and open (use named window)
+                try {
+                    const resp = await fetch(pdfUrl, { credentials: 'same-origin' });
+                    if (!resp.ok) throw new Error('Network response was not ok');
+                    const blob = await resp.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    const bw = window.open(blobUrl, winName);
+                    if (!bw) {
+                        // As last resort, trigger download
+                        const dl = document.createElement('a');
+                        dl.href = blobUrl;
+                        dl.download = `${selectedReport.value || 'report'}.pdf`;
+                        document.body.appendChild(dl);
+                        dl.click();
+                        document.body.removeChild(dl);
+                    }
+                } catch (fetchErr) {
+                    console.error('Final fetch fallback failed:', fetchErr);
+                    alert('Unable to open PDF. Please try downloading from the server.');
+                }
             }
-        } finally {
-            // Revoke blob URL after some time
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
         }
     } catch (error) {
-        console.error('Error opening PDF:', error);
-        alert('Error opening PDF. Please try again.');
+        console.error('Error opening report URL:', error);
     } finally {
         isLoading.value = false;
-        // Release the guard after a short delay to avoid accidental double-opens
-        setTimeout(() => { pdfOpening.value = false; }, 800);
+        setTimeout(() => {
+            pdfOpening.value = false;
+        }, 800);
     }
 };
 
@@ -278,7 +298,7 @@ const downloadExcelWithRawData = () => {
         // Prepare data for Excel
         const excelData = [];
 
-        // Add title rows - FIXED: Proper alignment using merged cells
+        // Add title rows - proper alignment using merged cells
         excelData.push([getReportTitle().toUpperCase()]);
         excelData.push([`Generated on: ${getCurrentDateTime()}`]);
         excelData.push([`Date Range: ${formatDate(dateFrom.value)} to ${formatDate(dateTo.value)}`]);
@@ -289,14 +309,16 @@ const downloadExcelWithRawData = () => {
         }
         excelData.push([]); // Empty row for spacing
 
-        // Add table headers
-        excelData.push(props.tableHeaders);
+        // Record header start row index then add table headers
+        const totalCols = visibleTableHeaders.value.length;
+        const headerStartIndex = excelData.length;
+        excelData.push(visibleTableHeaders.value);
 
         // Add data rows
         props.reportData.forEach(row => {
             const dataRow = [];
 
-            props.dataFields.forEach((field) => {
+            visibleDataFields.value.forEach((field) => {
                 let value = row[field.fieldName];
 
                 // Use raw numeric values where available
@@ -323,19 +345,22 @@ const downloadExcelWithRawData = () => {
             excelData.push(dataRow);
         });
 
-        // Add footer totals if available
+        // Add footer totals if available: place GRAND TOTAL row directly under table columns
         if (showFooterTotals.value) {
-            excelData.push([]); // Empty row for spacing
+            // Empty row spacing
+            excelData.push([]);
 
             const summaryRow = [];
-            props.tableHeaders.forEach((header, index) => {
+            visibleTableHeaders.value.forEach((header, index) => {
                 if (index < getFooterColumnSpan.value) {
                     summaryRow.push(index === 0 ? 'GRAND TOTAL' : '');
                 } else {
-                    // Add footer totals for appropriate columns
-                    const fieldName = props.dataFields[index]?.fieldName;
-                    if (fieldName && props.footerTotals[fieldName.replace('_raw', '')]) {
-                        summaryRow.push(props.footerTotals[fieldName.replace('_raw', '')]);
+                    const fieldName = visibleDataFields.value[index]?.fieldName;
+                    const totalKey = fieldName ? fieldName.replace('_raw', '') : null;
+                    if (totalKey && props.footerTotals[totalKey] !== undefined) {
+                        // For numeric totals, use formatted currency string where appropriate
+                        const val = props.footerTotals[totalKey];
+                        summaryRow.push(typeof val === 'number' ? val : val);
                     } else {
                         summaryRow.push('');
                     }
@@ -348,23 +373,21 @@ const downloadExcelWithRawData = () => {
         const ws = XLSX.utils.aoa_to_sheet(excelData);
 
         // Set column widths
-        const colWidths = props.tableHeaders.map(() => ({ width: 15 }));
+        const colWidths = visibleTableHeaders.value.map(() => ({ width: 15 }));
         ws['!cols'] = colWidths;
 
-        // FIXED: Define merge ranges for title alignment
+        // Define merge ranges for title alignment using actual row indexes
         const mergeRanges = [];
-
-        // Merge cells for title rows to center them
-        const headerRowCount = 6 + (props.footerTotals.total_transactions ? 1 : 0);
-        const totalCols = props.tableHeaders.length;
-
-        // Merge title cells across all columns
-        mergeRanges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } }); // Main title
-        mergeRanges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } }); // Generated date
-        mergeRanges.push({ s: { r: 2, c: 0 }, e: { r: 2, c: totalCols - 1 } }); // Date range
-        mergeRanges.push({ s: { r: 4, c: 0 }, e: { r: 4, c: totalCols - 1 } }); // Total records
+        // Main title at row 0
+        mergeRanges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } });
+        // Generated date row 1
+        mergeRanges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } });
+        // Date range row 2
+        mergeRanges.push({ s: { r: 2, c: 0 }, e: { r: 2, c: totalCols - 1 } });
+        // Total records row 4 (if present)
+        mergeRanges.push({ s: { r: 4, c: 0 }, e: { r: 4, c: totalCols - 1 } });
         if (props.footerTotals.total_transactions) {
-            mergeRanges.push({ s: { r: 5, c: 0 }, e: { r: 5, c: totalCols - 1 } }); // Total transactions
+            mergeRanges.push({ s: { r: 5, c: 0 }, e: { r: 5, c: totalCols - 1 } });
         }
 
         ws['!merges'] = mergeRanges;
@@ -372,32 +395,24 @@ const downloadExcelWithRawData = () => {
         // Apply styling
         const range = XLSX.utils.decode_range(ws['!ref']);
 
-        // Style title rows with center alignment
-        for (let r = 0; r <= 5; r++) {
+        // Style title rows with center alignment (only rows that exist)
+        const titleRows = [0, 1, 2, 4];
+        if (props.footerTotals.total_transactions) titleRows.push(5);
+        titleRows.forEach(r => {
             for (let c = 0; c < totalCols; c++) {
                 const cell = XLSX.utils.encode_cell({ r, c });
                 if (ws[cell]) {
-                    if (r === 0) {
-                        // Main title
-                        ws[cell].s = {
-                            font: { bold: true, sz: 16 },
-                            alignment: { horizontal: 'center', vertical: 'center' }
-                        };
-                    } else if (r <= 5) {
-                        // Other title rows
-                        ws[cell].s = {
-                            font: { bold: true, sz: 12 },
-                            alignment: { horizontal: 'center', vertical: 'center' }
-                        };
-                    }
+                    ws[cell].s = {
+                        font: { bold: true, sz: r === 0 ? 16 : 12 },
+                        alignment: { horizontal: 'center', vertical: 'center' }
+                    };
                 }
             }
-        }
+        });
 
-        // Style header row
-        const headerRow = props.footerTotals.total_transactions ? 7 : 6;
+        // Style header row (the actual headerStartIndex)
         for (let C = range.s.c; C <= range.e.c; ++C) {
-            const cell = XLSX.utils.encode_cell({ r: headerRow, c: C });
+            const cell = XLSX.utils.encode_cell({ r: headerStartIndex, c: C });
             if (ws[cell]) {
                 ws[cell].s = {
                     font: { bold: true, color: { rgb: "FFFFFF" } },
@@ -433,6 +448,21 @@ const showFooterTotals = computed(() => {
     return hasReportData.value && Object.keys(props.footerTotals).length > 0;
 });
 
+const showsRefundColumn = computed(() => {
+    if (!hasReportData.value) return false;
+    return props.reportData.some(row => Number(row.total_return_amount_raw ?? row.total_return_amount ?? 0) > 0)
+        || Number(props.footerTotals.total_return_amount ?? 0) > 0;
+});
+
+const visibleTableHeaders = computed(() => {
+    if (showsRefundColumn.value) return props.tableHeaders;
+    return props.tableHeaders.filter(header => header !== 'Refund' && header !== 'Total Refund');
+});
+
+const visibleDataFields = computed(() => {
+    return props.dataFields.filter(field => field.fieldName !== 'total_return_amount' || showsRefundColumn.value);
+});
+
 const getFooterColumnSpan = computed(() => {
     const spans = {
         'daily-transaction': 2,
@@ -452,11 +482,21 @@ const getFooterColumnSpan = computed(() => {
 
 <template>
     <BackendLayout>
-        <div class="container mx-auto px-3 sm:px-4 py-4 sm:py-6">
+        <div class="fixed-report-top container mx-auto px-3 sm:px-4 py-4 sm:py-6">
             <!-- Header -->
-            <div class="mb-4 sm:mb-6">
-                <h1 class="text-xl sm:text-2xl font-semibold text-gray-800">Finance Reports</h1>
-                <p class="text-sm text-gray-600 mt-1">Generate and view comprehensive financial reports</p>
+            <div class="mb-4 sm:mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                    <h1 class="text-xl sm:text-2xl font-semibold text-gray-800">Finance Reports</h1>
+                    <p class="text-sm text-gray-600 mt-1">Generate and view comprehensive financial reports</p>
+                </div>
+                <button @click="goBack"
+                    class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-red-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-red-700">
+                    <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                    </svg>
+                    Back
+                </button>
             </div>
 
             <!-- Report Options Grid -->
@@ -494,7 +534,7 @@ const getFooterColumnSpan = computed(() => {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                 </svg>
-                                {{ isLoading ? 'Generating PDF...' : 'PDF' }}
+                                {{ isLoading ? 'Opening Report...' : 'Report' }}
                             </button>
                             <button type="button" @click="downloadExcelWithRawData"
                                 class="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm font-medium">
@@ -581,9 +621,9 @@ const getFooterColumnSpan = computed(() => {
                             <table class="min-w-full divide-y divide-gray-200">
                                 <thead class="bg-gray-50">
                                     <tr>
-                                        <th v-for="(header, index) in tableHeaders" :key="index" :class="[
+                                        <th v-for="(header, index) in visibleTableHeaders" :key="index" :class="[
                                             'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider',
-                                            dataFields[index]?.class || ''
+                                            visibleDataFields[index]?.class || ''
                                         ]">
                                             {{ header }}
                                         </th>
@@ -592,7 +632,7 @@ const getFooterColumnSpan = computed(() => {
                                 <tbody class="bg-white divide-y divide-gray-200">
                                     <tr v-for="(row, rowIndex) in reportData" :key="rowIndex"
                                         :class="rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'">
-                                        <td v-for="(field, fieldIndex) in dataFields" :key="fieldIndex"
+                                        <td v-for="(field, fieldIndex) in visibleDataFields" :key="fieldIndex"
                                             :class="['px-4 py-3 whitespace-nowrap text-sm', field.class]"
                                             v-html="row[field.fieldName]"></td>
                                     </tr>
@@ -615,6 +655,9 @@ const getFooterColumnSpan = computed(() => {
                                             </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_discount || 0) }}
+                                            </td>
+                                            <td v-if="showsRefundColumn" class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_return_amount || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.amount_after_discount || 0) }}
@@ -650,6 +693,9 @@ const getFooterColumnSpan = computed(() => {
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_discount || 0) }}
                                             </td>
+                                            <td v-if="showsRefundColumn" class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_return_amount || 0) }}
+                                            </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.amount_after_discount || 0) }}
                                             </td>
@@ -681,6 +727,9 @@ const getFooterColumnSpan = computed(() => {
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.discount || 0) }}
                                             </td>
+                                            <td v-if="showsRefundColumn" class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_return_amount || 0) }}
+                                            </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.payable_amount || 0) }}
                                             </td>
@@ -705,6 +754,9 @@ const getFooterColumnSpan = computed(() => {
                                             </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.discount || 0) }}
+                                            </td>
+                                            <td v-if="showsRefundColumn" class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_return_amount || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.payable_amount || 0) }}
@@ -737,6 +789,9 @@ const getFooterColumnSpan = computed(() => {
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_discount || 0) }}
                                             </td>
+                                            <td v-if="showsRefundColumn" class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_return_amount || 0) }}
+                                            </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_income || 0) }}
                                             </td>
@@ -756,12 +811,18 @@ const getFooterColumnSpan = computed(() => {
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_expense || 0) }}
                                             </td>
+                                            <td v-if="showsRefundColumn" class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_return_amount || 0) }}
+                                            </td>
                                         </template>
 
                                         <!-- Referral Footer -->
                                         <template v-else-if="reportType === 'referral'">
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_bill_amount || 0) }}
+                                            </td>
+                                            <td v-if="showsRefundColumn" class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_return_amount || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_commission || 0) }}
@@ -775,6 +836,9 @@ const getFooterColumnSpan = computed(() => {
                                             </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.discount || 0) }}
+                                            </td>
+                                            <td v-if="showsRefundColumn" class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_return_amount || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.payable_amount || 0) }}
@@ -813,6 +877,12 @@ const getFooterColumnSpan = computed(() => {
         </div>
     </BackendLayout>
 </template>
+
+<style scoped>
+.fixed-report-top {
+    --report-page-top-margin: 48px;
+}
+</style>
 
 <style scoped>
 /* Custom responsive styles */
