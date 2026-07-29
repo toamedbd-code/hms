@@ -148,17 +148,13 @@ const downloadPDF = async () => {
     }
 
     try {
-        // Use a named window so multiple calls reuse the same tab instead of opening duplicates
+        // Use a named window and open the PDF URL directly to avoid creating an initial blank page
         const winName = 'financeReportPopup';
-
-        // Best-effort: open a named window (may return a reference or null if blocked)
         let newWin = null;
+
         try {
-            // Open an empty named window first to improve popup-blocker behavior
-            newWin = window.open('', winName, 'noopener,noreferrer');
+            newWin = window.open(pdfUrl, winName, 'noopener,noreferrer');
             if (newWin) {
-                // Navigate the opened window to the PDF URL
-                newWin.location = pdfUrl;
                 try { newWin.focus(); } catch (e) { /* ignore */ }
             }
         } catch (openErr) {
@@ -166,11 +162,11 @@ const downloadPDF = async () => {
         }
 
         if (!newWin) {
-            // Popup likely blocked; try anchor-click fallback (also uses named window target)
+            // Popup likely blocked; try anchor-click fallback (targets same named window)
             try {
                 const a = document.createElement('a');
                 a.href = pdfUrl;
-                a.target = winName; // target the same named window
+                a.target = winName;
                 a.rel = 'noopener noreferrer';
                 a.style.display = 'none';
                 document.body.appendChild(a);
