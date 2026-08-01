@@ -29,8 +29,11 @@ export default defineConfig({
         outDir: 'public/build',
         manifest: 'manifest.json',
         emptyOutDir: true,
-        // Use esbuild for faster minification
+        // Use esbuild for faster minification of JS
         minify: 'esbuild',
+        // Disable LightningCSS CSS minification because Tailwind generated attribute selectors
+        // are causing LightningCSS to fail during CSS minification.
+        cssMinify: false,
         // Raise chunk size warning limit to 800KB
         chunkSizeWarningLimit: 800,
         // Enable CSS code splitting for faster page loads

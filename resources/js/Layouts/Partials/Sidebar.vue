@@ -391,7 +391,7 @@ eventBus.on("sidebarToggled", (flag) => {
 });
 
 const navSidebar = reactive([
-  "flex items-center p-3 space-x-3 rounded-md cursor-pointer hover:bg-white hover:text-emerald-700 transition-all duration-200 group",
+  "flex items-center p-3 space-x-3 rounded-md cursor-pointer text-gray-700 dark:text-slate-200 hover:bg-white hover:text-emerald-700 dark:hover:bg-slate-700 dark:hover:text-emerald-300 transition duration-75 group",
 ]);
 
 // Local fallback storage for side menus if server-side Inertia props are empty
@@ -1018,13 +1018,10 @@ const scrollSelectedMenuIntoView = (event) => {
   const targetRect = target.getBoundingClientRect();
   const targetTop = targetRect.top - containerRect.top + container.scrollTop - 8;
 
-  container.scrollTo({
-    top: Math.max(targetTop, 0),
-    behavior: 'smooth',
-  });
+  container.scrollTop = Math.max(targetTop, 0);
 };
 
-const scrollRouteToTop = (routeName, behavior = 'smooth') => {
+const scrollRouteToTop = (routeName, behavior = 'auto') => {
   const container = sidebarScrollContainer.value;
   if (!container || !routeName) return;
 
@@ -1037,10 +1034,7 @@ const scrollRouteToTop = (routeName, behavior = 'smooth') => {
   const targetRect = li.getBoundingClientRect();
   const targetTop = targetRect.top - containerRect.top + container.scrollTop - 8;
 
-  container.scrollTo({
-    top: Math.max(targetTop, 0),
-    behavior,
-  });
+  container.scrollTop = Math.max(targetTop, 0);
 };
 
 const handleMenuClick = (event, routeName = null) => {
@@ -1490,7 +1484,7 @@ const getActiveRoute = (mainMenu) => {
 };
 
 const sidebarClasses = computed(() => {
-  const baseClasses = "bg-white text-gray-700 relative border-r border-gray-200 shadow-sm transition-all duration-200 flex-shrink-0";
+  const baseClasses = "bg-white text-gray-700 relative border-r border-gray-200 shadow-sm transition-all duration-200 flex-shrink-0 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700";
   if (sideBar.value) {
     return `block w-[70px] min-w-[70px] ${baseClasses}`;
   }
@@ -1502,21 +1496,21 @@ const sidebarClasses = computed(() => {
 <template>
   <div class="app-sidebar" :class="sidebarClasses">
     <!-- Header -->
-    <div class="w-full flex items-center h-[50px] border-b border-gray-200 bg-gray-100 px-4">
+    <div class="w-full flex items-center h-[50px] border-b border-gray-200 bg-gray-100 dark:bg-slate-900 dark:border-slate-700 px-4">
       <Link :href="route('backend.dashboard')"
-        class="text-xl font-bold text-gray-800 hover:text-emerald-700 transition-colors duration-200">
+        class="text-xl font-bold text-gray-800 dark:text-slate-100 hover:text-emerald-700 transition-colors duration-200">
       {{ sideBar ? webSetting?.company_short_name : webSetting?.company_name || 'Company Name' }}
-      <span v-if="!sideBar" class="block text-xs font-normal text-gray-500 mt-0.5"></span>
+      <span v-if="!sideBar" class="block text-xs font-normal text-gray-500 dark:text-slate-400 mt-0.5"></span>
       </Link>
     </div>
 
     <!-- Navigation Menu -->
-    <div ref="sidebarScrollContainer" style="width: inherit" class="h-[calc(100vh-60px)] overflow-y-auto bg-white">
+    <div ref="sidebarScrollContainer" style="width: inherit" class="h-[calc(100vh-60px)] overflow-y-auto bg-white dark:bg-slate-950">
       <ul class="w-full px-3 py-4 space-y-1">
         <!-- quickLinks will be inserted inline within the menu list (see insertionIndex) -->
 
         <template v-if="orderedMenus.length === 0">
-          <li class="px-4 py-3 text-sm text-gray-500 border border-dashed border-gray-200 rounded-md bg-gray-50">
+          <li class="px-4 py-3 text-sm text-gray-500 dark:text-slate-300 border border-dashed border-gray-200 dark:border-slate-700 rounded-md bg-gray-50 dark:bg-slate-950">
             Sidebar menu unavailable — refresh page or check permissions.
           </li>
         </template>
@@ -1533,7 +1527,9 @@ const sidebarClasses = computed(() => {
               <template #trigger>
                 <div :class="[
                   navSidebar,
-                  getActiveRoute(mainMenu) ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600' : 'bg-white text-gray-700'
+                  getActiveRoute(mainMenu)
+                    ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600'
+                    : 'bg-white text-gray-700 dark:bg-slate-950 dark:text-slate-200'
                 ]">
                   <div class="flex items-center justify-center w-5 h-5">
                     <FeatherIcon :name="mainMenu.icon" size="18" :class="[
@@ -1546,14 +1542,14 @@ const sidebarClasses = computed(() => {
               </template>
 
               <template #content>
-                <ul class="submenu bg-gray-100 border border-gray-200 rounded-md py-1">
+                <ul class="submenu bg-gray-100 border border-gray-200 rounded-md py-1 dark:bg-slate-950 dark:border-slate-700">
                   <li v-for="(submenu, subIndex) in getRenderedChildren(mainMenu)" :key="childUniqueKey(submenu)">
                     <template v-if="getMenuHref(submenu.route)">
                       <template v-if="isFullReloadRoute(submenu.route)">
-                        <a :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click="handleMenuClick($event, submenu.route)" :class="[
+                        <a :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click.stop="handleMenuClick($event, submenu.route)" :class="[
                           isRouteActive(submenu.route)
                             ? 'bg-emerald-500 text-white font-medium'
-                            : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
+                            : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-emerald-300',
                           'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-md mx-1',
                           sideBar ? '' : 'ml-3',
                         ]">
@@ -1562,10 +1558,10 @@ const sidebarClasses = computed(() => {
                         </a>
                       </template>
                       <template v-else>
-                        <Link :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click="handleMenuClick($event, submenu.route)" :class="[
+                        <Link :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click.stop="handleMenuClick($event, submenu.route)" :class="[
                           isRouteActive(submenu.route)
                             ? 'bg-emerald-500 text-white font-medium'
-                            : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
+                            : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-emerald-300',
                           'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-md mx-1',
                           sideBar ? '' : 'ml-3',
                         ]">
@@ -1575,8 +1571,8 @@ const sidebarClasses = computed(() => {
                       </template>
                     </template>
                     <template v-else>
-                      <a href="#" @click.prevent="navigateFallback(submenu.route, $event)" :class="[
-                        'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
+                      <a href="#" @click.prevent.stop="navigateFallback(submenu.route, $event)" :class="[
+                        'bg-white text-gray-700 hover:bg-white hover:text-emerald-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-emerald-300',
                         'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-md mx-1',
                         sideBar ? '' : 'ml-3',
                       ]">
@@ -1594,7 +1590,7 @@ const sidebarClasses = computed(() => {
           <li v-else :class="{ 'flex justify-center': sideBar }">
             <div v-if="getMenuHref(mainMenu.route)">
               <template v-if="isFullReloadRoute(mainMenu.route)">
-                <a :href="getMenuHref(mainMenu.route)" :data-menu-route="normalizeRouteName(mainMenu.route)" @click="handleMenuClick($event, mainMenu.route)" :class="[
+                <a :href="getMenuHref(mainMenu.route)" :data-menu-route="normalizeRouteName(mainMenu.route)" @click.stop="handleMenuClick($event, mainMenu.route)" :class="[
                   isRouteActive(mainMenu.route)
                     ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600'
                     : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
@@ -1610,7 +1606,7 @@ const sidebarClasses = computed(() => {
                 </a>
               </template>
               <template v-else>
-                <Link :href="getMenuHref(mainMenu.route)" :data-menu-route="normalizeRouteName(mainMenu.route)" @click="handleMenuClick($event, mainMenu.route)" :class="[
+                <Link :href="getMenuHref(mainMenu.route)" :data-menu-route="normalizeRouteName(mainMenu.route)" @click.stop="handleMenuClick($event, mainMenu.route)" :class="[
                   isRouteActive(mainMenu.route)
                     ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600'
                     : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
@@ -1638,7 +1634,7 @@ const sidebarClasses = computed(() => {
           <template v-if="showHrHub && Index === insertionIndex">
             <li v-for="quickLink in quickLinks" :key="`payroll-${quickLink.route}`" :class="{ 'flex justify-center': sideBar }">
               <template v-if="isFullReloadRoute(quickLink.route)">
-                <a :href="getMenuHref(quickLink.route)" :data-menu-route="normalizeRouteName(quickLink.route)" @click="handleMenuClick($event, quickLink.route)" :class="[
+                <a :href="getMenuHref(quickLink.route)" :data-menu-route="normalizeRouteName(quickLink.route)" @click.stop="handleMenuClick($event, quickLink.route)" :class="[
                   isRouteActive(quickLink.route)
                     ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600'
                     : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
@@ -1655,7 +1651,7 @@ const sidebarClasses = computed(() => {
               </template>
 
               <template v-else>
-                <Link :href="getMenuHref(quickLink.route)" :data-menu-route="normalizeRouteName(quickLink.route)" @click="handleMenuClick($event, quickLink.route)" :class="[
+                <Link :href="getMenuHref(quickLink.route)" :data-menu-route="normalizeRouteName(quickLink.route)" @click.stop="handleMenuClick($event, quickLink.route)" :class="[
                   isRouteActive(quickLink.route)
                     ? 'bg-emerald-500 text-white font-medium border-l-3 border-emerald-600'
                     : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700',
@@ -1722,6 +1718,32 @@ const sidebarClasses = computed(() => {
 
 .border-emerald-500 {
   border-color: var(--app-theme-primary) !important;
+}
+
+.dark .bg-white,
+.dark .bg-gray-50,
+.dark .bg-gray-100,
+.dark .bg-gray-200,
+.dark .bg-slate-50 {
+  background-color: #0f172a !important;
+}
+
+.dark .border-gray-200,
+.dark .border-gray-300,
+.dark .border-gray-50,
+.dark .border-white {
+  border-color: #2e3a53 !important;
+}
+
+.dark .text-gray-500,
+.dark .text-gray-700,
+.dark .text-gray-800,
+.dark .text-gray-900 {
+  color: #e2e8f0 !important;
+}
+
+.dark .hover\:bg-gray-50:hover {
+  background-color: #1e293b !important;
 }
 
 .hover\:bg-gray-50:hover {

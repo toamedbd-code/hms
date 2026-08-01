@@ -59,7 +59,7 @@ class Handler extends ExceptionHandler
         if ($request->expectsJson() || $request->ajax()) {
             if ($exception instanceof AuthenticationException) {
                 if ($request->header('X-Inertia')) {
-                    return Inertia::location(route('backend.auth.login'));
+                    return Inertia::location(route('backend.auth.login2'));
                 }
 
                 return response()->json([

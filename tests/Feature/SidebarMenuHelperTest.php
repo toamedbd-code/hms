@@ -52,29 +52,23 @@ class SidebarMenuHelperTest extends TestCase
         }));
     }
 
-    public function test_non_developer_admins_do_not_see_role_management_in_sidebar(): void
+    public function test_non_developer_admins_with_explicit_role_permissions_can_see_role_management_in_sidebar(): void
     {
-        $developerRole = Role::query()->create([
-            'name' => 'developer',
-            'guard_name' => 'admin',
-        ]);
-
         $role = Role::query()->create([
             'name' => 'admin-role',
             'guard_name' => 'admin',
         ]);
 
-        $developerPermission = Permission::query()->firstOrCreate([
+        $roleManagementPermission = Permission::query()->firstOrCreate([
             'name' => 'role-management',
             'guard_name' => 'admin',
         ]);
-        $rolePermission = Permission::query()->firstOrCreate([
+        $roleListPermission = Permission::query()->firstOrCreate([
             'name' => 'role-list',
             'guard_name' => 'admin',
         ]);
 
-        $developerRole->givePermissionTo($developerPermission, $rolePermission);
-        $role->givePermissionTo($developerPermission, $rolePermission);
+        $role->givePermissionTo($roleManagementPermission, $roleListPermission);
 
         $admin = Admin::query()->create([
             'first_name' => 'Basic',
@@ -88,7 +82,7 @@ class SidebarMenuHelperTest extends TestCase
 
         $admin->assignRole($role);
 
-        Menu::query()->create([
+        $roleManagementMenu = Menu::query()->create([
             'name' => 'Role Management',
             'icon' => 'role-management',
             'route' => null,
@@ -107,14 +101,14 @@ class SidebarMenuHelperTest extends TestCase
             'module_slug' => null,
             'description' => null,
             'sorting' => 1,
-            'parent_id' => 1,
+            'parent_id' => $roleManagementMenu->id,
             'permission_name' => 'role-list',
             'status' => 'Active',
         ]);
 
         $menus = getSideMenus($admin);
 
-        $this->assertFalse($menus->contains(function ($menu) {
+        $this->assertTrue($menus->contains(function ($menu) {
             return trim((string) ($menu['name'] ?? $menu->name ?? '')) === 'Role Management';
         }));
     }

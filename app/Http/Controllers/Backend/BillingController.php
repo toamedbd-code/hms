@@ -518,99 +518,23 @@ class BillingController extends Controller
         $lastPathology = Pathology::latest()->first();
         $lastBillNumber = $lastPathology ? $lastPathology->bill_no : null;
 
-        // Get all active tests (include IPD tests so Item Charge IPD items are available in Billing)
-        // Include Disposable tests so items like V. Tube are available in Billing
-        // Include OPD and Appointment tests so appointment items appear in Billing
-        $pathologyAndRadiologyTests = Test::whereIn('category_type', ['Pathology', 'Radiology', 'ECG', 'Ultrasound', 'IPD', 'Disposable', 'OPD', 'Appointment'])
-            ->where('status', 'Active')
-            ->select('id', 'category_type', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount', 'referral_percentage')
-            ->orderBy('test_name')
-            ->get()
-            ->map(function ($test) {
-                return [
-                    'id' => $test->id,
-                    'category_type' => $test->category_type,
-                    'test_name' => $test->test_name,
-                    'test_short_name' => $test->test_short_name,
-                    'report_days' => $test->report_days,
-                    'room_no' => $test->room_no ?? null,
-                    'tax' => $test->tax,
-                    'standard_charge' => $test->standard_charge,
-                    'amount' => $test->amount,
-                    'referral_percentage' => $test->referral_percentage ?? 0,
-                ];
-            });
-
-        $medicineInventories = $this->medicineInventoryService->activeList();
-        $doctors = $this->adminService->activeDoctors();
-        $patients = $this->patientService->activeList();
-        $referrers = $this->referrerService->activeList();
-        // Prepare hospital charges with a normalized `module` value (JSON string or empty)
-        // Fetch non-deleted charges (include Active/any status) to ensure items are available.
-        // Treat unspecified env value as enabled; accept boolean-like strings
-        $hospitalChargesEnv = env('HOSPITAL_CHARGES_ENABLED', null);
-        $hospitalChargesEnabled = true;
-        if ($hospitalChargesEnv !== null && $hospitalChargesEnv !== '') {
-            $hospitalChargesEnabled = filter_var($hospitalChargesEnv, FILTER_VALIDATE_BOOLEAN);
-        }
-
-        if ($hospitalChargesEnabled) {
-            $rawCharges = Charge::with('chargeType')->whereNull('deleted_at')->get();
-        } else {
-            $rawCharges = collect([]);
-        }
-
-        // Prepare hospital charges for frontend suggestions. Previously this
-        // feature was disabled (empty array), but include it so items like
-        // Disposable charges created via Item Edit are available in Billing.
-        $hospitalCharges = [];
-        foreach ($rawCharges as $ch) {
-            $modules = [];
-            if (!empty($ch->module)) {
-                $modules = is_array($ch->module) ? $ch->module : preg_split('/\s*,\s*/', trim($ch->module));
-            }
-
-            if (empty($modules) && !empty($ch->chargeType?->modules)) {
-                $ct = $ch->chargeType->modules;
-                $decoded = null;
-                try {
-                    $decoded = json_decode($ct, true);
-                } catch (\Throwable $e) {
-                    $decoded = null;
-                }
-
-                if (is_array($decoded) && count($decoded) > 0) {
-                    $modules = $decoded;
-                } else {
-                    $modules = preg_split('/\s*,\s*/', trim((string)$ct));
-                }
-            }
-
-            $modules = array_values(array_filter(array_map(function ($m) {
-                return trim((string) $m);
-            }, (array) $modules)));
-
-            $hospitalCharges[] = [
-                'id' => $ch->id,
-                'name' => $ch->name,
-                'module' => count($modules) ? json_encode($modules) : '',
-                'amount' => $ch->standard_charge ?? 0,
-            ];
-        }
+        $hospitalCharges = $this->getHospitalCharges();
         $authInfo = $this->adminService->getAuthInfo();
-        // dd($pathologyAndRadiologyTests);
 
         return Inertia::render(
             'Backend/Billing/BillingPage',
             [
                 'pageTitle' => fn() => 'Billing Page',
                 'billnumber' => fn() => $lastBillNumber,
-                'pathologyAndRadiologyTests' => fn() => $pathologyAndRadiologyTests,
+                'pathologyAndRadiologyTests' => Inertia::defer(fn() => $this->getBillingTests(
+                    ['Pathology', 'Radiology', 'ECG', 'Ultrasound', 'IPD', 'Disposable', 'OPD', 'Appointment'], 
+                    'billing:tests:all'
+                )),
                 'hospitalCharges' => fn() => $hospitalCharges,
-                'medicineInventories' => fn() => $medicineInventories,
-                'doctors' => fn() => $doctors,
-                'patients' => fn() => $patients,
-                'referrers' => fn() => $referrers,
+                'medicineInventories' => Inertia::defer(fn() => $this->getBillingMedicineInventories()),
+                'doctors' => Inertia::defer(fn() => $this->getBillingDoctors()),
+                'patients' => Inertia::defer(fn() => $this->getBillingPatients()),
+                'referrers' => Inertia::defer(fn() => $this->getBillingReferrers()),
                 'authInfo' => fn() => $authInfo,
             ]
         );
@@ -621,54 +545,172 @@ class BillingController extends Controller
      */
     public function hospitalChargesList()
     {
-        // Fetch non-deleted charges for API as well unless feature disabled.
+        return response()->json($this->getHospitalCharges());
+    }
+
+    private function getBillingTests(array $categories, string $cacheKey): array
+    {
+        return Cache::remember($cacheKey, 30, function () use ($categories) {
+            return Test::whereIn('category_type', $categories)
+                ->where('status', 'Active')
+                ->select('id', 'category_type', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount', 'referral_percentage')
+                ->orderBy('test_name')
+                ->get()
+                ->map(function ($test) {
+                    return [
+                        'id' => $test->id,
+                        'category_type' => $test->category_type,
+                        'test_name' => $test->test_name,
+                        'test_short_name' => $test->test_short_name,
+                        'report_days' => $test->report_days,
+                        'room_no' => $test->room_no ?? null,
+                        'tax' => $test->tax,
+                        'standard_charge' => $test->standard_charge,
+                        'amount' => $test->amount,
+                        'referral_percentage' => $test->referral_percentage ?? 0,
+                    ];
+                })
+                ->toArray();
+        });
+    }
+
+    private function getBillingMedicineInventories(): array
+    {
+        return Cache::remember('billing:medicine_inventories', 30, function () {
+            return MedicineInventory::whereNull('deleted_at')
+                ->where('status', 'Active')
+                ->select('id', 'medicine_name', 'medicine_unit_selling_price', 'medicine_quantity', 'status')
+                ->orderBy('medicine_name')
+                ->get()
+                ->map(function ($medicine) {
+                    return [
+                        'id' => $medicine->id,
+                        'medicine_name' => $medicine->medicine_name,
+                        'medicine_unit_selling_price' => $medicine->medicine_unit_selling_price,
+                        'medicine_quantity' => $medicine->medicine_quantity,
+                        'status' => $medicine->status,
+                    ];
+                })
+                ->toArray();
+        });
+    }
+
+    private function getBillingDoctors(): array
+    {
+        return Cache::remember('billing:doctors_active', 30, function () {
+            return Admin::whereNull('deleted_at')
+                ->where('status', 'Active')
+                ->whereHas('role', function ($query) {
+                    $query->where('name', 'Doctor');
+                })
+                ->select('id', 'first_name', 'last_name')
+                ->get()
+                ->map(function ($doctor) {
+                    return [
+                        'id' => $doctor->id,
+                        'name' => $doctor->name,
+                    ];
+                })
+                ->toArray();
+        });
+    }
+
+    private function getBillingPatients(): array
+    {
+        return Cache::remember('billing:patients_active', 30, function () {
+            return Patient::whereNull('deleted_at')
+                ->where('status', 'Active')
+                ->select('id', 'name', 'phone', 'gender', 'dob')
+                ->orderByRaw('LOWER(COALESCE(name, "")) ASC')
+                ->orderBy('id', 'asc')
+                ->get()
+                ->map(function ($patient) {
+                    return [
+                        'id' => $patient->id,
+                        'name' => $patient->name,
+                        'phone' => $patient->phone,
+                        'gender' => $patient->gender,
+                        'dob' => $patient->dob,
+                    ];
+                })
+                ->toArray();
+        });
+    }
+
+    private function getBillingReferrers(): array
+    {
+        return Cache::remember('billing:referrers_active', 30, function () {
+            return Referral::whereNull('deleted_at')
+                ->where('status', 'Active')
+                ->select('id', 'payee_id', 'date', 'total_commission_amount', 'total_bill_amount', 'status')
+                ->orderBy('id', 'asc')
+                ->get()
+                ->map(function ($referral) {
+                    return [
+                        'id' => $referral->id,
+                        'payee_id' => $referral->payee_id,
+                        'date' => $referral->date,
+                        'total_commission_amount' => $referral->total_commission_amount,
+                        'total_bill_amount' => $referral->total_bill_amount,
+                        'status' => $referral->status,
+                    ];
+                })
+                ->toArray();
+        });
+    }
+
+    private function getHospitalCharges(): array
+    {
         $hospitalChargesEnv = env('HOSPITAL_CHARGES_ENABLED', null);
         $hospitalChargesEnabled = true;
         if ($hospitalChargesEnv !== null && $hospitalChargesEnv !== '') {
             $hospitalChargesEnabled = filter_var($hospitalChargesEnv, FILTER_VALIDATE_BOOLEAN);
         }
 
-        if ($hospitalChargesEnabled) {
-            $rawCharges = Charge::with('chargeType')->whereNull('deleted_at')->get();
-        } else {
-            $rawCharges = collect([]);
+        if (!$hospitalChargesEnabled) {
+            return [];
         }
-        $hospitalCharges = [];
-        foreach ($rawCharges as $ch) {
-            $modules = [];
-            if (!empty($ch->module)) {
-                $modules = is_array($ch->module) ? $ch->module : preg_split('/\s*,\s*/', trim($ch->module));
-            }
 
-            if (empty($modules) && !empty($ch->chargeType?->modules)) {
-                $ct = $ch->chargeType->modules;
-                $decoded = null;
-                try {
-                    $decoded = json_decode($ct, true);
-                } catch (\Throwable $e) {
+        return Cache::remember('billing:hospital_charges', 30, function () {
+            $rawCharges = Charge::with('chargeType:id,modules')
+                ->whereNull('deleted_at')
+                ->select('id', 'name', 'module', 'standard_charge', 'charge_type_id')
+                ->get();
+
+            return $rawCharges->map(function ($ch) {
+                $modules = [];
+                if (!empty($ch->module)) {
+                    $modules = is_array($ch->module) ? $ch->module : preg_split('/\s*,\s*/', trim($ch->module));
+                }
+
+                if (empty($modules) && !empty($ch->chargeType?->modules)) {
+                    $ct = $ch->chargeType->modules;
                     $decoded = null;
+                    try {
+                        $decoded = json_decode($ct, true);
+                    } catch (\Throwable $e) {
+                        $decoded = null;
+                    }
+
+                    if (is_array($decoded) && count($decoded) > 0) {
+                        $modules = $decoded;
+                    } else {
+                        $modules = preg_split('/\s*,\s*/', trim((string)$ct));
+                    }
                 }
 
-                if (is_array($decoded) && count($decoded) > 0) {
-                    $modules = $decoded;
-                } else {
-                    $modules = preg_split('/\s*,\s*/', trim((string)$ct));
-                }
-            }
+                $modules = array_values(array_filter(array_map(function ($m) {
+                    return trim((string) $m);
+                }, (array) $modules)));
 
-            $modules = array_values(array_filter(array_map(function ($m) {
-                return trim((string) $m);
-            }, (array) $modules)));
-
-            $hospitalCharges[] = [
-                'id' => $ch->id,
-                'name' => $ch->name,
-                'module' => count($modules) ? json_encode($modules) : '',
-                'amount' => $ch->standard_charge ?? 0,
-            ];
-        }
-
-        return response()->json($hospitalCharges);
+                return [
+                    'id' => $ch->id,
+                    'name' => $ch->name,
+                    'module' => count($modules) ? json_encode($modules) : '',
+                    'amount' => $ch->standard_charge ?? 0,
+                ];
+            })->toArray();
+        });
     }
 
     private function normalizeReferralCommissionCategory(?string $category): string
@@ -2129,30 +2171,12 @@ class BillingController extends Controller
 
         $billing->load('billItems');
 
-        $pathologyAndRadiologyTests = Test::whereIn('category_type', ['Pathology', 'Radiology', 'ECG', 'Ultrasound'])
-            ->where('status', 'Active')
-            ->select('id', 'category_type', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount')
-            ->orderBy('test_name')
-            ->get()
-            ->map(function ($test) {
-                return [
-                    'id' => $test->id,
-                    'category_type' => $test->category_type,
-                    'test_name' => $test->test_name,
-                    'test_short_name' => $test->test_short_name,
-                    'report_days' => $test->report_days,
-                    'room_no' => $test->room_no ?? null,
-                    'tax' => $test->tax,
-                    'standard_charge' => $test->standard_charge,
-                    'amount' => $test->amount,
-                ];
-            });
+        $hospitalCharges = $this->getHospitalCharges();
 
-        $medicineInventories = $this->medicineInventoryService->activeList();
-        $doctors = $this->adminService->activeDoctors();
-        $patients = $this->patientService->activeList();
-
-        $patientDetails = $this->patientService->find($billing->patient_id);
+        $medicineInventories = $this->getBillingMedicineInventories();
+        $doctors = $this->getBillingDoctors();
+        $patients = $this->getBillingPatients();
+        $referrers = $this->getBillingReferrers();
 
         $editData = [
             'patient_id' => $billing->patient_id,
@@ -2226,12 +2250,15 @@ class BillingController extends Controller
                 ],
                 'billing' => fn() => $billing,
                 'editData' => fn() => $editData,
-                'pathologyAndRadiologyTests' => fn() => $pathologyAndRadiologyTests,
-                'medicineInventories' => fn() => $medicineInventories,
-                'doctors' => fn() => $doctors,
-                'patients' => fn() => $patients,
+                'pathologyAndRadiologyTests' => Inertia::defer(fn() => $this->getBillingTests(
+                    ['Pathology', 'Radiology', 'ECG', 'Ultrasound'], 
+                    'billing:tests:edit'
+                )),
+                'medicineInventories' => Inertia::defer(fn() => $this->getBillingMedicineInventories()),
+                'doctors' => Inertia::defer(fn() => $this->getBillingDoctors()),
+                'patients' => Inertia::defer(fn() => $this->getBillingPatients()),
                 'id' => fn() => $id,
-                'referrers' => fn() => $referrers,
+                'referrers' => Inertia::defer(fn() => $referrers),
 
             ]
         );

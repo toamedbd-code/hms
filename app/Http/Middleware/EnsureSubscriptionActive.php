@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use App\Models\Subscription;
+use App\Support\DefaultDeveloperManager;
 
 class EnsureSubscriptionActive
 {
@@ -20,6 +21,11 @@ class EnsureSubscriptionActive
     {
         // Allow disabling subscription enforcement via .env
         if (! (bool) env('SUBSCRIPTION_ENFORCE', true)) {
+            return $next($request);
+        }
+
+        $admin = auth('admin')->user();
+        if ($admin && DefaultDeveloperManager::isDeveloper($admin)) {
             return $next($request);
         }
 

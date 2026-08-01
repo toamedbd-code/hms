@@ -1,11 +1,13 @@
 <script setup>
 import { computed, onMounted, onUnmounted } from 'vue';
 import { router, Link } from '@inertiajs/vue3';
+import { useDark } from '@vueuse/core';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BarChart from '@/Components/Chart/BarChart.vue';
 import PieChart from '@/Components/Chart/PieChart.vue';
 
 const props = defineProps(['dashboardData', 'dashboardCardPermissions']);
+const isDark = useDark();
 
 // Format Tk.0.00
 const tkFormat = (value) => {
@@ -95,58 +97,49 @@ onUnmounted(() => {
 
 <template>
   <BackendLayout>
-
-    <!-- ===================== Stats Cards ===================== -->
     <section class="w-full transition duration-700 ease-in-out">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-4">
-
-        <!-- Card Component -->
+      <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <template v-for="card in statsCards" :key="card.key">
-
-          <Link :href="route(card.link, card.params || {})"
-            class="bg-white rounded-lg shadow-md hover:shadow-lg transition-all p-4 flex items-center hover:-translate-y-1">
-
-            <!-- Icon -->
-            <div
-              class="w-12 h-12 bg-green-500 text-white text-xl rounded-lg flex items-center justify-center mr-3">
+          <Link
+            :href="route(card.link, card.params || {})"
+            class="flex items-center rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900"
+          >
+            <div class="mr-3 flex h-12 w-12 items-center justify-center rounded-lg bg-green-500 text-xl text-white">
               {{ card.icon }}
             </div>
 
-            <!-- Text -->
             <div class="min-w-0">
-              <p class="text-sm font-medium text-gray-600">{{ card.name }}</p>
-              <p class="text-lg font-bold text-gray-900 truncate">
+              <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{{ card.name }}</p>
+              <p class="truncate text-lg font-bold text-slate-900 dark:text-slate-100">
                 {{ tkFormat(getStatValue(card.key)) }}
               </p>
             </div>
-
           </Link>
-
         </template>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+      <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Link v-if="canViewExpiredMedicines" :href="route('backend.medicineinventory.index', { expiry_filter: 'expired' })"
-          class="bg-rose-50 border border-rose-200 rounded-lg shadow-sm hover:shadow-md transition-all p-4 flex items-center hover:-translate-y-1">
-          <div class="w-12 h-12 bg-rose-500 text-white text-xl rounded-lg flex items-center justify-center mr-3">
+          class="flex items-center rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm transition hover:shadow-md dark:border-rose-500/40 dark:bg-slate-900">
+          <div class="mr-3 flex h-12 w-12 items-center justify-center rounded-lg bg-rose-500 text-xl text-white">
             !
           </div>
           <div>
-            <p class="text-sm font-medium text-rose-700">Expired Medicines</p>
-            <p class="text-lg font-bold text-rose-900">
+            <p class="text-sm font-medium text-rose-700 dark:text-rose-300">Expired Medicines</p>
+            <p class="text-lg font-bold text-rose-900 dark:text-rose-100">
               {{ countFormat($page.props.pharmacyAlerts?.medicineExpiry?.expired_count) }}
             </p>
           </div>
         </Link>
 
         <Link v-if="canViewExpiringMedicines" :href="route('backend.medicineinventory.index', { expiry_filter: 'expiring_soon' })"
-          class="bg-rose-50 border border-rose-200 rounded-lg shadow-sm hover:shadow-md transition-all p-4 flex items-center hover:-translate-y-1">
-          <div class="w-12 h-12 bg-amber-400 text-white text-xl rounded-lg flex items-center justify-center mr-3">
+          class="flex items-center rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm transition hover:shadow-md dark:border-rose-500/40 dark:bg-slate-900">
+          <div class="mr-3 flex h-12 w-12 items-center justify-center rounded-lg bg-rose-500 text-xl text-white">
             !!
           </div>
           <div>
-            <p class="text-sm font-medium text-amber-600">Expiring In 30 Days</p>
-            <p class="text-lg font-bold text-amber-700">
+            <p class="text-sm font-medium text-rose-700 dark:text-rose-300">Expiring In 30 Days</p>
+            <p class="text-lg font-bold text-rose-900 dark:text-rose-100">
               {{ countFormat($page.props.pharmacyAlerts?.medicineExpiry?.expiring_soon_count) }}
             </p>
           </div>
@@ -154,31 +147,24 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <!-- ===================== Charts Section ===================== -->
-    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
-
-        <!-- Bar Chart -->
-        <div v-if="props.dashboardCardPermissions?.chartIncomeByDepartment" class="bg-white rounded-lg shadow">
-          <div class="px-6 py-4 font-semibold border-b">Income by Department (Bar Chart)</div>
-          <div class="p-4 h-80">
-            <BarChart :dashboardData="props.dashboardData" />
-          </div>
+    <section class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div v-if="props.dashboardCardPermissions?.chartIncomeByDepartment" class="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div class="border-b border-slate-200 px-6 py-4 font-semibold text-slate-800 dark:border-slate-700 dark:text-slate-100">Income by Department (Bar Chart)</div>
+        <div class="h-80 p-4">
+          <BarChart :dashboardData="props.dashboardData" :isDark="isDark" />
         </div>
+      </div>
 
-        <!-- Pie Chart -->
-        <div v-if="props.dashboardCardPermissions?.chartIncomeDistribution" class="bg-white rounded-lg shadow">
-          <div class="px-6 py-4 font-semibold border-b">Income Distribution (Pie Chart)</div>
-          <div class="p-4 h-80">
-            <PieChart :dashboardData="props.dashboardData" />
-          </div>
+      <div v-if="props.dashboardCardPermissions?.chartIncomeDistribution" class="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div class="border-b border-slate-200 px-6 py-4 font-semibold text-slate-800 dark:border-slate-700 dark:text-slate-100">Income Distribution (Pie Chart)</div>
+        <div class="h-80 p-4">
+          <PieChart :dashboardData="props.dashboardData" :isDark="isDark" />
         </div>
-
+      </div>
     </section>
 
-    <!-- ===================== Footer ===================== -->
-    <div class="text-center text-gray-500 text-sm py-6">
+    <div class="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
       © {{ new Date().getFullYear() }} — Developed by ToaMed. All rights reserved.
     </div>
-
   </BackendLayout>
 </template>

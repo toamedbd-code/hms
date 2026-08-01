@@ -369,10 +369,10 @@ onBeforeUnmount(() => {
 <template>
     <div class="relative w-full">
         <div :class="['absolute', 'w-full', { 'md:pl-[70px]': sideBarFlag, 'pl-[240px]': !sideBarFlag }]">
-            <div class="flex px-4 items-center justify-between w-full border-b border-gray-200 bg-gray-100 py-3 h-[50px]">
-                <div>
+            <div :class="['flex px-4 items-center justify-between w-full py-3 h-[50px]', isDark ? 'border-b border-gray-700 bg-slate-900' : 'border-b border-gray-200 bg-gray-100']">
+                    <div>
                     <button type="button" @click="toggleSidebar"
-                        class="p-2 rounded text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors duration-200">
+                        :class="['p-2 rounded transition-colors duration-200', isDark ? 'text-white hover:text-white/90 hover:bg-slate-800' : 'text-gray-500 hover:text-blue-600 hover:bg-gray-100']">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                             stroke="currentColor" class="w-5 h-5">
                             <path stroke-linecap="round" stroke-linejoin="round"
@@ -384,24 +384,22 @@ onBeforeUnmount(() => {
                     <ul class="flex items-center space-x-2">
                         <li>
                             <button type="button" @click="toggleDark()"
-                                class="p-2 rounded text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors duration-200"
+                                :class="['p-2 rounded transition-colors duration-200', isDark ? 'text-gray-300 hover:text-blue-400 hover:bg-slate-800' : 'text-gray-500 hover:text-blue-600 hover:bg-gray-100']"
                                 :title="isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
-                                <svg v-if="isDark" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
-                                    stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
-                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                        d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
-                                </svg>
-                                <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
-                                    stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                                <svg v-if="isDark" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
                                     <path stroke-linecap="round" stroke-linejoin="round"
                                         d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
+                                </svg>
+                                <!-- Show sun icon when in light mode -->
+                                <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="w-5 h-5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25M12 18.75V21M4.5 12H6.75M17.25 12H19.5M6.343 6.343l1.591 1.591M16.066 16.066l1.591 1.591M6.343 17.657l1.591-1.591M16.066 7.934l1.591-1.591M12 8.25a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5z" />
                                 </svg>
                             </button>
                         </li>
 
                         <li class="relative" data-navbar-notification>
                             <button type="button" @click="toggleBedPanel"
-                                class="p-2 rounded text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors duration-200"
+                                :class="['p-2 rounded transition-colors duration-200', isDark ? 'text-gray-300 hover:text-blue-400 hover:bg-slate-800' : 'text-gray-500 hover:text-blue-600 hover:bg-gray-100']"
                                 title="Bed Status">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                                     stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
@@ -411,22 +409,22 @@ onBeforeUnmount(() => {
                             </button>
 
                             <div v-if="isBedPanelOpen"
-                                class="absolute right-0 mt-2 w-[720px] bg-white border border-gray-200 rounded shadow-lg z-50">
-                                <div class="px-3 py-2 border-b border-gray-200 text-xs font-semibold text-gray-700 flex items-center justify-between">
+                                :class="['absolute right-0 mt-2 w-[720px] rounded shadow-lg z-50', isDark ? 'bg-slate-900 border-gray-700' : 'bg-white border border-gray-200']">
+                                <div :class="['px-3 py-2 flex items-center justify-between text-xs font-semibold', isDark ? 'border-b border-gray-700 text-white' : 'border-b border-gray-200 text-gray-700']">
                                     <span>Bed Status</span>
-                                    <button type="button" class="text-[11px] text-gray-500 hover:text-gray-700"
+                                    <button type="button" :class="['text-[11px]', isDark ? 'text-gray-300 hover:text-gray-100' : 'text-gray-500 hover:text-gray-700']"
                                         @click="loadBedStatuses(); isBedPanelOpen = false">
                                         Back
                                     </button>
                                 </div>
 
                                 <div class="p-3">
-                                    <div v-if="bedLoading" class="text-xs text-gray-500">Loading...</div>
-                                    <div v-else-if="bedError" class="text-xs text-red-600">{{ bedError }}</div>
+                                    <div v-if="bedLoading" :class="['text-xs', isDark ? 'text-gray-300' : 'text-gray-500']">Loading...</div>
+                                    <div v-else-if="bedError" :class="['text-xs', isDark ? 'text-rose-300' : 'text-red-600']">{{ bedError }}</div>
 
                                     <div v-else class="space-y-4 max-h-[520px] overflow-y-auto">
                                         <div v-for="(beds, group) in groupedBeds" :key="group">
-                                            <div v-if="beds.length" class="text-xs font-semibold text-gray-700 mb-2">
+                                            <div v-if="beds.length" :class="['text-xs font-semibold mb-2', isDark ? 'text-white' : 'text-gray-700']">
                                                 {{ group }}
                                             </div>
                                             <div v-if="beds.length" class="grid grid-cols-4 gap-2">
@@ -435,15 +433,15 @@ onBeforeUnmount(() => {
                                                     :title="bedTooltip(bed)"
                                                     class="flex items-center justify-between rounded border px-2 py-1 text-xs"
                                                     :class="bed.is_available
-                                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                                        : 'border-rose-200 bg-rose-50 text-rose-700 cursor-not-allowed'">
+                                                        ? (isDark ? 'border-emerald-700 bg-emerald-800 text-white hover:bg-emerald-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100')
+                                                        : (isDark ? 'border-rose-700 bg-rose-800 text-white cursor-not-allowed' : 'border-rose-200 bg-rose-50 text-rose-700 cursor-not-allowed')">
                                                     <span class="truncate flex items-center gap-1">
                                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                                                             stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5">
                                                             <path stroke-linecap="round" stroke-linejoin="round"
                                                                 d="M3 7.5A2.25 2.25 0 0 1 5.25 5.25h13.5A2.25 2.25 0 0 1 21 7.5v6.75M3 14.25v-6.75M3 14.25v2.25M21 14.25v2.25M3 14.25h18M7.5 17.25v1.5m9-1.5v1.5" />
                                                         </svg>
-                                                        <span>{{ bed.name }}</span>
+                                                        <span :class="isDark ? 'text-white' : ''">{{ bed.name }}</span>
                                                     </span>
                                                     <span
                                                         class="ml-2 inline-flex h-2 w-2 rounded-full"
@@ -458,7 +456,7 @@ onBeforeUnmount(() => {
                         
                         <li v-if="activityLogAlert.can_view" class="relative" data-navbar-notification>
                             <button type="button" @click="toggleActivityPanel"
-                                class="p-2 rounded text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors duration-200 block relative"
+                                :class="['p-2 rounded transition-colors duration-200 block relative', isDark ? 'text-gray-300 hover:text-blue-400 hover:bg-slate-800' : 'text-gray-500 hover:text-blue-600 hover:bg-gray-100']"
                                 title="User Activity Logs">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                                     stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
@@ -473,12 +471,12 @@ onBeforeUnmount(() => {
                             </button>
 
                             <div v-if="isActivityPanelOpen"
-                                class="absolute right-0 mt-2 w-[380px] bg-white border border-gray-200 rounded shadow-lg z-50">
-                                <div class="px-3 py-2 border-b border-gray-200 text-xs font-semibold text-gray-700 flex items-center justify-between">
+                                :class="['absolute right-0 mt-2 w-[380px] rounded shadow-lg z-50', isDark ? 'bg-slate-900 border-gray-700' : 'bg-white border border-gray-200']">
+                                <div :class="['px-3 py-2 text-xs font-semibold flex items-center justify-between', isDark ? 'border-b border-gray-700 text-white' : 'border-b border-gray-200 text-white']">
                                     <span>User Activity Logs</span>
-                                    <span class="text-[11px] text-blue-700">Today: {{ activityLogAlert.today_count || 0 }}</span>
+                                    <span :class="['text-[11px]', isDark ? 'text-blue-700' : 'text-white']">Today: {{ activityLogAlert.today_count || 0 }}</span>
                                 </div>
-                                <div class="px-2 pt-2 flex items-center gap-2 border-b border-gray-100 pb-2">
+                                <div :class="['px-2 pt-2 flex items-center gap-2 pb-2', isDark ? 'border-b border-gray-700' : 'border-b border-gray-100']">
                                     <button type="button"
                                         @click="showOnlyFailedActivities = false"
                                         class="px-2 py-1 text-[11px] rounded border"
@@ -501,19 +499,19 @@ onBeforeUnmount(() => {
                                         :href="route('backend.activity-logs.show', log.id)"
                                         :class="[
                                             'block rounded border px-2 py-2 transition',
-                                            !isDark ? 'border-transparent hover:bg-blue-600/30' : 'border-gray-200 hover:border-blue-200 hover:bg-blue-50/40'
+                                            isDark ? 'border-gray-700 hover:border-blue-600/20 hover:bg-slate-800' : 'border-gray-200 hover:border-blue-200 hover:bg-blue-50/40'
                                         ]">
                                         <div class="flex items-center justify-between gap-2">
-                                            <span :class="['text-xs font-semibold truncate', !isDark ? 'text-white' : 'text-gray-800']">{{ log.module }} - {{ log.action }}</span>
+                                            <span :class="['text-xs font-semibold truncate', isDark ? 'text-gray-100' : 'text-white']">{{ log.module }} - {{ log.action }}</span>
                                             <span class="text-[10px] px-1.5 py-0.5 rounded"
                                                 :class="log.status === 'success'
-                                                    ? (!isDark ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-700')
-                                                    : (!isDark ? 'bg-rose-700 text-white' : 'bg-rose-100 text-rose-700')">
+                                                    ? (isDark ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-700 text-white')
+                                                    : (isDark ? 'bg-rose-100 text-rose-700' : 'bg-rose-700 text-white')">
                                                 {{ log.status }}
                                             </span>
                                         </div>
-                                        <p :class="['text-[11px] mt-1 truncate', !isDark ? 'text-gray-200' : 'text-gray-600']">{{ log.description || 'No description' }}</p>
-                                        <div :class="['text-[10px] mt-1', !isDark ? 'text-gray-300' : 'text-gray-500']">{{ log.user_name || 'System' }} | {{ log.created_at }}</div>
+                                        <p :class="['text-[11px] mt-1 truncate', isDark ? 'text-gray-300' : 'text-white']">{{ log.description || 'No description' }}</p>
+                                        <div :class="['text-[10px] mt-1', isDark ? 'text-gray-400' : 'text-white']">{{ log.user_name || 'System' }} | {{ log.created_at }}</div>
                                     </a>
                                     <div v-if="!filteredActivityLogs.length" class="text-xs text-gray-500 text-center py-4">
                                         {{ showOnlyFailedActivities ? 'No failed logs in recent activities.' : 'No activity logs available.' }}
@@ -529,7 +527,7 @@ onBeforeUnmount(() => {
 
                         <li class="relative" data-navbar-notification>
                             <button type="button" @click="toggleExpiryPanel"
-                                class="cursor-pointer p-2 rounded text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors duration-200 relative"
+                                :class="['cursor-pointer p-2 rounded transition-colors duration-200 relative', isDark ? 'text-gray-300 hover:text-blue-400 hover:bg-slate-800' : 'text-gray-500 hover:text-blue-600 hover:bg-gray-100']"
                                 title="Medicine Expiry Alert">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                                     stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
@@ -576,18 +574,18 @@ onBeforeUnmount(() => {
                                     <Dropdown align="right">
                                     <template #trigger>
                                         <div class="flex items-center gap-2">
-                                            <div class="h-7 w-7 rounded-full border border-gray-300 bg-gray-100 overflow-hidden flex items-center justify-center">
+                                            <div :class="['h-7 w-7 rounded-full overflow-hidden flex items-center justify-center', isDark ? 'border-gray-600 bg-slate-800' : 'border border-gray-300 bg-gray-100']">
                                                 <img
                                                     v-if="adminPhoto"
                                                     :src="adminPhoto"
                                                     alt="Profile"
                                                     class="h-full w-full object-cover"
                                                 >
-                                                <span v-else class="text-[10px] font-semibold text-gray-600">
+                                                <span v-else :class="['text-[10px] font-semibold', isDark ? 'text-gray-200' : 'text-gray-600']">
                                                     {{ adminInitials }}
                                                 </span>
                                             </div>
-                                            <span class="hidden md:block max-w-[130px] truncate text-xs font-semibold text-gray-700">
+                                            <span :class="['hidden md:block max-w-[130px] truncate text-xs font-semibold', isDark ? 'text-white' : 'text-gray-700']">
                                                 {{ adminDisplayName }}
                                             </span>
                                         </div>

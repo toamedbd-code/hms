@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Admin;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
@@ -75,6 +76,44 @@ class DeveloperAccessControlTest extends TestCase
         $response = $this->get(route('backend.admin.edit', $developer->id));
 
         $response->assertStatus(403);
+    }
+
+    public function test_user_with_role_list_edit_permission_can_open_role_edit_page(): void
+    {
+        $role = Role::query()->create([
+            'name' => 'role-editor',
+            'guard_name' => 'admin',
+            'is_private' => false,
+        ]);
+
+        $roleListPermission = Permission::query()->firstOrCreate([
+            'name' => 'role-list',
+            'guard_name' => 'admin',
+        ]);
+        $roleListEditPermission = Permission::query()->firstOrCreate([
+            'name' => 'role-list-edit',
+            'guard_name' => 'admin',
+        ]);
+
+        $role->givePermissionTo($roleListPermission, $roleListEditPermission);
+
+        $admin = Admin::query()->create([
+            'first_name' => 'Role',
+            'last_name' => 'Editor',
+            'email' => 'role-editor@example.test',
+            'phone' => '01710000003',
+            'password' => 'password',
+            'status' => 'Active',
+            'role_id' => $role->id,
+        ]);
+
+        $admin->assignRole($role);
+
+        $this->actingAs($admin, 'admin');
+
+        $response = $this->get(route('backend.role.index'));
+
+        $response->assertOk();
     }
 
     private function setEnv(string $key, string $value): void

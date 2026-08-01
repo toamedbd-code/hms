@@ -85,7 +85,7 @@ const exportUrl = computed(() => route('backend.activity-logs.export', filterFor
           >
             Back
           </button>
-          <a :href="printUrl" target="_blank" rel="noopener noreferrer" class="px-6 py-3 text-base font-bold text-white bg-slate-700 rounded hover:bg-slate-800">
+          <a :href="printUrl" target="_blank" rel="noopener noreferrer" class="px-6 py-3 text-base font-bold text-white bg-blue-600 rounded hover:bg-blue-700">
             Print
           </a>
           <a :href="exportUrl" class="px-6 py-3 text-base font-bold text-white bg-emerald-600 rounded hover:bg-emerald-700">

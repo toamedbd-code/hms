@@ -201,7 +201,7 @@ return [
          * Package Service Providers...
          */
         Spatie\Permission\PermissionServiceProvider::class,
-        Barryvdh\Debugbar\ServiceProvider::class,
+        Fruitcake\LaravelDebugbar\ServiceProvider::class,
 
         /*
          * Application Service Providers...
@@ -228,7 +228,7 @@ return [
     */
 
     'aliases' => Facade::defaultAliases()->merge([
-        'Debugbar' => Barryvdh\Debugbar\Facades\Debugbar::class
+        'Debugbar' => Fruitcake\LaravelDebugbar\Facades\Debugbar::class
     ])->toArray(),
 
 ];

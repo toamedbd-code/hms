@@ -201,7 +201,7 @@ class MenuSeeder extends Seeder
                     ],
                     [
                         'name' => 'Balance Sheet',
-                        'icon' => 'scale',
+                        'icon' => 'bar-chart-3',
                         'route' => 'backend.accounts.balance-sheet',
                         'description' => null,
                         'sorting' => 1,

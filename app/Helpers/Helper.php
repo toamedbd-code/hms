@@ -295,40 +295,11 @@ function getSideMenus($user)
         // ignore and continue with provided user
     }
 
-    $isDeveloperUser = false;
     try {
-        $isDeveloperUser = method_exists($user, 'hasRole') && $user->hasRole('developer');
+        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
     } catch (\Throwable $e) {
-        $isDeveloperUser = false;
+        // ignore cache refresh failures
     }
-
-    $isDeveloperOnlyMenu = function ($menuOrChild) use ($isDeveloperUser) {
-        if ($isDeveloperUser) {
-            return false;
-        }
-
-        $name = strtolower(trim((string) (($menuOrChild['name'] ?? $menuOrChild->name ?? ''))));
-        $permissionName = strtolower(trim((string) (($menuOrChild['permission_name'] ?? $menuOrChild->permission_name ?? ''))));
-        $route = strtolower(trim((string) (($menuOrChild['route'] ?? $menuOrChild->route ?? ''))));
-
-        $developerOnlyNames = ['role management', 'role list', 'permission manage', 'permission list', 'developer'];
-        $developerOnlyPermissions = ['role-management', 'role-list', 'permission-management', 'permission-list', 'permission-add', 'permission-edit', 'permission-delete'];
-        $developerOnlyRoutes = ['backend.role.index', 'backend.role.create', 'backend.role.edit', 'backend.role.destroy', 'backend.permission.index', 'backend.permission.create', 'backend.permission.edit', 'backend.permission.destroy'];
-
-        if (in_array($name, $developerOnlyNames, true)) {
-            return true;
-        }
-
-        if (in_array($permissionName, $developerOnlyPermissions, true)) {
-            return true;
-        }
-
-        if (in_array($route, $developerOnlyRoutes, true)) {
-            return true;
-        }
-
-        return false;
-    };
 
     $grantedPermissions = collect();
     try {
@@ -345,12 +316,35 @@ function getSideMenus($user)
     }
 
     $hasMenuPermission = function ($permissionName) use ($grantedPermissions) {
-        $permissionName = trim((string) $permissionName);
+        $permissionName = strtolower(trim((string) $permissionName));
         if ($permissionName === '') {
             return false;
         }
 
-        return $grantedPermissions->contains(strtolower($permissionName));
+        return $grantedPermissions->contains($permissionName);
+    };
+
+    $routeExists = function ($routeName) {
+        $routeName = trim((string) $routeName);
+        if ($routeName === '') {
+            return false;
+        }
+
+        $candidates = [$routeName];
+        if (!str_starts_with($routeName, 'backend.')) {
+            $candidates[] = 'backend.' . $routeName;
+        }
+        if (str_starts_with($routeName, 'backend.')) {
+            $candidates[] = str_replace('backend.', 'backend.backend.', $routeName);
+        }
+
+        foreach ($candidates as $candidate) {
+            if (\Illuminate\Support\Facades\Route::has($candidate)) {
+                return true;
+            }
+        }
+
+        return false;
     };
 
     $menus = Menu::with(['childrens' => function ($query) {
@@ -381,26 +375,19 @@ function getSideMenus($user)
 
     $hasAnyPermission = $grantedPermissions->isNotEmpty();
 
-    $result = $normalizedMenus->map(function ($menu) use ($hasMenuPermission, $hasAnyPermission, $isDeveloperOnlyMenu) {
+    $result = $normalizedMenus->map(function ($menu) use ($hasMenuPermission, $hasAnyPermission, $routeExists) {
         $menuArray = is_array($menu) ? $menu : (array) $menu;
-
-        if ($isDeveloperOnlyMenu($menuArray)) {
-            return null;
-        }
-
         $children = collect($menuArray['childrens'] ?? []);
-        $menuPermissionName = trim((string) ($menuArray['permission_name'] ?? $menuArray['permission'] ?? ''));
+        $menuPermissionName = strtolower(trim((string) ($menuArray['permission_name'] ?? $menuArray['permission'] ?? '')));
         $hasParentPermission = $menuPermissionName !== '' && $hasAnyPermission && $hasMenuPermission($menuPermissionName);
 
-        $filteredChildren = $children->filter(function ($child) use ($hasMenuPermission, $hasAnyPermission, $hasParentPermission, $isDeveloperOnlyMenu) {
-            if ($isDeveloperOnlyMenu($child)) {
-                return false;
-            }
+        $filteredChildren = $children->filter(function ($child) use ($hasMenuPermission, $hasAnyPermission, $hasParentPermission, $routeExists) {
+            $permissionName = strtolower(trim((string) ($child['permission_name'] ?? $child['permission'] ?? '')));
 
-            $permissionName = trim((string) ($child['permission_name'] ?? $child['permission'] ?? ''));
             if ($permissionName !== '' && $hasAnyPermission && !$hasMenuPermission($permissionName)) {
                 return false;
             }
+
             if ($permissionName === '' && $hasAnyPermission && !$hasParentPermission) {
                 return false;
             }
@@ -410,26 +397,9 @@ function getSideMenus($user)
                 return false;
             }
 
-            $routeCandidates = [$route];
-            if (!str_starts_with($route, 'backend.')) {
-                $routeCandidates[] = 'backend.' . $route;
-            }
-            if (str_starts_with($route, 'backend.')) {
-                $routeCandidates[] = str_replace('backend.', 'backend.backend.', $route);
-            }
-
-            foreach ($routeCandidates as $candidate) {
-                if (\Illuminate\Support\Facades\Route::has($candidate)) {
-                    return true;
-                }
-            }
-
-            return false;
+            return $routeExists($route);
         })->values()->all();
 
-        // If user lacks the parent-level permission, only hide the parent
-        // when there are no accessible children. Allow parent to remain
-        // visible when at least one child is accessible to the user.
         if ($menuPermissionName !== '' && $hasAnyPermission && !$hasMenuPermission($menuPermissionName) && empty($filteredChildren)) {
             return null;
         }
@@ -447,13 +417,9 @@ function getSideMenus($user)
         return $result;
     }
 
-    return $normalizedMenus->filter(function ($menu) use ($isDeveloperOnlyMenu) {
-        if ($isDeveloperOnlyMenu($menu)) {
-            return false;
-        }
-
+    return $normalizedMenus->filter(function ($menu) use ($routeExists) {
         $route = trim((string) ($menu['route'] ?? ''));
-        if ($route !== '' && \Illuminate\Support\Facades\Route::has($route)) {
+        if ($route !== '' && $routeExists($route)) {
             return true;
         }
 

@@ -67,6 +67,7 @@ export default {
         'doctor': 'stethoscope',
         'x-ray': 'activity',
         'xray': 'activity',
+        'scale': 'bar-chart-3',
       };
 
       const mappedName = aliasMap[iconName] || iconName;

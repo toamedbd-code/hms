@@ -48,6 +48,111 @@ body::before {
   z-index: -1;
 }
 
+.dark body {
+  background: #08111f !important;
+  color: #e2e8f0;
+}
+
+.dark body::before {
+  background:
+    radial-gradient(circle at 85% 12%, rgba(59, 130, 246, 0.14) 0%, transparent 36%),
+    radial-gradient(circle at 12% 88%, rgba(56, 189, 248, 0.08) 0%, transparent 32%);
+}
+
+.dark .app-shell-surface,
+.dark .app-content-surface {
+  background: #0f172a !important;
+}
+
+.dark .app-content-surface {
+  background: #0b1120 !important;
+}
+
+.dark .bg-white,
+.dark .bg-slate-100,
+.dark .bg-slate-200,
+.dark .bg-gray-50,
+.dark .bg-gray-100,
+.dark .bg-gray-200,
+.dark .bg-gray-300,
+.dark .bg-slate-50 {
+  background-color: #0f172a !important;
+}
+
+.dark .text-slate-900,
+.dark .text-gray-900 {
+  color: #f8fafc !important;
+}
+
+.dark .text-slate-800,
+.dark .text-gray-800,
+.dark .text-slate-700,
+.dark .text-gray-700,
+.dark .text-slate-600,
+.dark .text-gray-600 {
+  color: #e2e8f0 !important;
+}
+
+.dark .border-slate-200,
+.dark .border-slate-300,
+.dark .border-gray-200,
+.dark .border-gray-300,
+.dark .border-slate-100,
+.dark .border-gray-100,
+.dark .border-gray-50,
+.dark .border-white {
+  border-color: #2e3a53 !important;
+}
+
+.dark ::selection {
+  background: rgba(147, 197, 253, 0.4);
+  color: #0f172a;
+}
+
+.dark input[type="text"],
+.dark input[type="search"],
+.dark input[type="number"],
+.dark input[type="email"],
+.dark input[type="tel"],
+.dark select,
+.dark textarea,
+.dark .form-input,
+.dark .form-select,
+.dark .form-textarea {
+  background-color: #111827 !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+.dark input[type="search"],
+.dark input[placeholder*="Search"],
+.dark input[placeholder*="search"],
+.dark .search-field,
+.dark .search-input {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.dark input[type="text"]::placeholder,
+.dark input[type="search"]::placeholder,
+.dark input[type="number"]::placeholder,
+.dark input[type="email"]::placeholder,
+.dark input[type="tel"]::placeholder,
+.dark textarea::placeholder {
+  color: #94a3b8 !important;
+  opacity: 1 !important;
+}
+
+.dark .shadow,
+.dark .shadow-sm,
+.dark .shadow-md,
+.dark .shadow-lg {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.18),
+    0 10px 26px rgb(0 0 0 / 0.24) !important;
+}
+
 #app,
 #app > div {
   background: transparent;

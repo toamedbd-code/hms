@@ -21,6 +21,10 @@ export default {
     dashboardData: {
       type: Object,
       required: true
+    },
+    isDark: {
+      type: Boolean,
+      default: false
     }
   },
 
@@ -76,13 +80,17 @@ export default {
     },
 
     chartOptions() {
+      const textColor = this.isDark ? '#e2e8f0' : '#334155';
       return {
         responsive: true,
         maintainAspectRatio: false,
 
         plugins: {
           legend: {
-            position: "right"
+            position: "right",
+            labels: {
+              color: textColor
+            }
           },
 
           tooltip: {

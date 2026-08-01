@@ -71,16 +71,8 @@ const close = () => { open.value = false; };
       <slot name="trigger" />
     </div>
 
-    <transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="transform scale-95 opacity-0"
-      enter-to-class="transform scale-100 opacity-100"
-      leave-active-class="transition duration-75 ease-in"
-      leave-from-class="transform scale-100 opacity-100"
-      leave-to-class="transform scale-95 opacity-0"
-    >
       <div
-        v-if="open"
+        v-show="open"
         class="rounded-md"
         :class="[widthClass, alignmentClasses]"
       >
@@ -88,6 +80,5 @@ const close = () => { open.value = false; };
           <slot name="content" />
         </div>
       </div>
-    </transition>
   </div>
 </template>

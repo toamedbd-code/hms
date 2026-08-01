@@ -236,13 +236,13 @@ onUnmounted(() => {
                     <div class="flex flex-col md:flex-row md:items-center md:gap-2">
                         <div class="w-full md:flex-1 md:mr-2">
                             <input id="search" v-model="filters.search" @input="applyFilter"
-                                class="block w-full p-3 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-3 text-sm rounded-md border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 placeholder-gray-500 dark:placeholder-slate-400 focus:border-indigo-300 dark:focus:border-slate-500"
                                 type="text" placeholder="Search Date (dd/mm/yyyy), Bill No, Patient" />
                         </div>
 
                         <div class="w-full md:w-56 md:mx-2">
                             <input v-model="filters.user" @input="applyFilter"
-                                class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                class="block w-full p-2 text-sm rounded-md border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 placeholder-gray-500 dark:placeholder-slate-400 focus:border-indigo-300 dark:focus:border-slate-500"
                                 type="text" placeholder="Search by User (creator)" />
                         </div>
 

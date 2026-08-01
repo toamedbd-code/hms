@@ -24,6 +24,9 @@ Route::post('payment/bkash/webhook', [\App\Http\Controllers\Payment\BkashWebhook
 // Initiate bKash checkout (admin uses this form)
 Route::post('payment/bkash/initiate', [BkashController::class, 'initiate'])->name('payment.bkash.initiate');
 
+// bKash Tokenized Checkout callback (user returns from bKash hosted page)
+Route::match(['get', 'post'], 'payment/bkash/callback', [BkashController::class, 'callback'])->name('payment.bkash.callback');
+
 // Sandbox simulate approval (internal testing only)
 Route::get('payment/bkash/simulate/{payment}/approve', [BkashController::class, 'simulateApprove'])->name('payment.bkash.simulate.approve');
 

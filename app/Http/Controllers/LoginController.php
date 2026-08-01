@@ -49,10 +49,10 @@ class LoginController extends Controller
                 return Inertia::render('Login', ['errorMessage' => 'Your Account Temporary Blocked. Please Contact Administrator.']);
             }
 
-            // If subscription enforcement is enabled and subscription is inactive, show renew option and block login
-            $isDeveloper = DefaultDeveloperManager::isDeveloper($userInfo);
+            $isDeveloperUser = DefaultDeveloperManager::isDeveloper($userInfo);
 
-            if ($this->shouldEnforceSubscription() && ! $isDeveloper) {
+            // Developer users should bypass subscription enforcement and remain able to log in.
+            if ($this->shouldEnforceSubscription() && ! $isDeveloperUser) {
                 $sub = Subscription::getCurrent();
                 $setting = $this->getBkashSetting();
 
@@ -60,15 +60,38 @@ class LoginController extends Controller
                     return Inertia::render('Login', [
                         'errorMessage' => 'Subscription inactive. Please renew subscription to log in.',
                         'showSubscriptionRenewal' => true,
-                        'bkashEnabled' => config('payment.enabled') && ($setting ? ($setting->is_enabled ?? false) : true),
+                        'bkashEnabled' => $this->shouldShowSubscriptionPayment($setting),
                         'bkashMonthlyAmount' => config('subscription.monthly_amount', $setting->monthly_amount ?? 0),
                         'bkashYearlyAmount' => config('subscription.yearly_amount', 0),
                         'subscriptionDefaultPeriod' => config('subscription.default_period', 'monthly'),
+                        'isSandbox' => (bool) ($setting?->is_sandbox ?? true),
+                        'subscriptionEnforced' => true,
+                        'subscriptionActive' => false,
                     ]);
                 }
             }
 
             if (Hash::check(request()->password, $userInfo->password)) {
+                // Double-check subscription enforcement after credential verification
+                // to prevent races or alternate flows that bypass the earlier check.
+                if ($this->shouldEnforceSubscription() && ! DefaultDeveloperManager::isDeveloper($userInfo)) {
+                    $sub = Subscription::getCurrent();
+                    $setting = $this->getBkashSetting();
+                    if (! $sub || ! $sub->isActive()) {
+                        return Inertia::render('Login', [
+                            'errorMessage' => 'Subscription inactive. Please renew subscription to log in.',
+                            'showSubscriptionRenewal' => true,
+                            'bkashEnabled' => $this->shouldShowSubscriptionPayment($setting),
+                            'bkashMonthlyAmount' => config('subscription.monthly_amount', $setting->monthly_amount ?? 0),
+                            'bkashYearlyAmount' => config('subscription.yearly_amount', 0),
+                            'subscriptionDefaultPeriod' => config('subscription.default_period', 'monthly'),
+                            'isSandbox' => (bool) ($setting?->is_sandbox ?? true),
+                            'subscriptionEnforced' => true,
+                            'subscriptionActive' => false,
+                        ]);
+                    }
+                }
+
                 Auth::guard('admin')->login($userInfo);
                 // Ensure permission cache is cleared so newly-created/updated
                 // roles and permissions are reflected immediately after login.
@@ -106,20 +129,37 @@ class LoginController extends Controller
         $sub = Subscription::getCurrent();
         $active = $sub ? $sub->isActive() : false;
         $setting = $this->getBkashSetting();
+        $bkashEnabled = $this->shouldShowSubscriptionPayment($setting);
+        $showSubscriptionRenewal = $enforce && Subscription::tableExists() && ! $active;
 
         return Inertia::render('Login', [
             'subscriptionEnforced' => $enforce,
             'subscriptionActive' => $active,
-            'bkashEnabled' => config('payment.enabled') && ($setting ? ($setting->is_enabled ?? false) : true),
+            'showSubscriptionRenewal' => $showSubscriptionRenewal,
+            'bkashEnabled' => $bkashEnabled,
             'bkashMonthlyAmount' => config('subscription.monthly_amount', $setting->monthly_amount ?? 0),
             'bkashYearlyAmount' => config('subscription.yearly_amount', 0),
             'subscriptionDefaultPeriod' => config('subscription.default_period', 'monthly'),
+            'isSandbox' => (bool) ($setting?->is_sandbox ?? true),
+            'pendingBkashPaymentId' => session('bkash_pending_payment_id'),
+            'successMessage' => session('successMessage'),
+            'errorMessage' => session('errorMessage'),
+            'warningMessage' => session('warningMessage'),
         ]);
     }
 
     private function shouldEnforceSubscription(): bool
     {
         return (bool) env('SUBSCRIPTION_ENFORCE', true) && Subscription::tableExists();
+    }
+
+    private function shouldShowSubscriptionPayment(?BkashSetting $setting = null): bool
+    {
+        $paymentEnabled = config('payment.enabled') && ($setting ? (bool) ($setting->is_enabled ?? false) : true);
+        $monthlyAmount = (float) config('subscription.monthly_amount', $setting?->monthly_amount ?? 0);
+        $yearlyAmount = (float) config('subscription.yearly_amount', 0);
+
+        return $paymentEnabled && ($monthlyAmount > 0 || $yearlyAmount > 0);
     }
 
     private function getBkashSetting(): ?BkashSetting

@@ -14,20 +14,47 @@ const console = { log: () => {}, warn: () => {}, error: () => {} };
 
 const props = defineProps({
   pageTitle: String,
-  pathologyAndRadiologyTests: Array,
+  pathologyAndRadiologyTests: {
+    type: Array,
+    default: () => [],
+  },
   hospitalCharges: {
     type: Array,
     default: () => [],
   },
-  medicineInventories: Array,
-  doctors: Array,
-  patients: Array,
+  medicineInventories: {
+    type: Array,
+    default: () => [],
+  },
+  doctors: {
+    type: Array,
+    default: () => [],
+  },
+  patients: {
+    type: Array,
+    default: () => [],
+  },
   id: [String, Number],
-  editData: Object,
-  referrers: Array,
-  authInfo: Object,
-  billing: Object,
-  billingDoctors: Array,
+  editData: {
+    type: Object,
+    default: () => ({}),
+  },
+  referrers: {
+    type: Array,
+    default: () => [],
+  },
+  authInfo: {
+    type: Object,
+    default: () => ({}),
+  },
+  billing: {
+    type: Object,
+    default: () => ({}),
+  },
+  billingDoctors: {
+    type: Array,
+    default: () => [],
+  },
 });
 
 const page = usePage();

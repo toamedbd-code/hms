@@ -35,7 +35,7 @@ class AdminAuth
             return $next($request);
         } else {
             if ($request->header('X-Inertia')) {
-                return Inertia::location(route('backend.auth.login'));
+                return Inertia::location(route('backend.auth.login2'));
             }
 
             if ($request->expectsJson() || $request->ajax()) {
@@ -45,7 +45,7 @@ class AdminAuth
             }
 
             session()->flash('errMsg', 'Please Login First.');
-            return redirect()->route('backend.auth.login');
+            return redirect()->route('backend.auth.login2');
         }
     }
 }

@@ -359,6 +359,11 @@ Route::permanentRedirect('/admin/logout', '/logout');
 
 // Public bKash endpoints for subscription renewal (used from login page)
 Route::get('payment/bkash/renew', [\App\Http\Controllers\Payment\BkashController::class, 'publicInitiate'])->name('payment.bkash.initiate.public');
+Route::match(['get', 'post'], 'payment/bkash/callback', [\App\Http\Controllers\Payment\BkashController::class, 'callback'])->name('payment.bkash.callback');
+Route::get('payment/bkash/waiting/{payment}', [\App\Http\Controllers\Payment\BkashController::class, 'waiting'])->name('payment.bkash.waiting');
+Route::get('payment/bkash/waiting/{payment}/poll', [\App\Http\Controllers\Payment\BkashController::class, 'waitingPoll'])->name('payment.bkash.waiting.poll');
+Route::get('payment/bkash/confirm-pending', [\App\Http\Controllers\Payment\BkashController::class, 'confirmPending'])->name('payment.bkash.confirm.pending');
+Route::post('payment/bkash/webhook', [\App\Http\Controllers\Payment\BkashWebhookController::class, 'handle'])->name('payment.bkash.webhook');
 Route::get('payment/bkash/unsubscribe', [\App\Http\Controllers\Payment\BkashController::class, 'publicUnsubscribe'])->name('payment.bkash.unsubscribe.public');
 Route::get('payment/bkash/simulate-public/{payment}', [\App\Http\Controllers\Payment\BkashController::class, 'publicSimulatePage'])->name('payment.bkash.simulate.public.page');
 Route::post('payment/bkash/simulate-public/{payment}/approve', [\App\Http\Controllers\Payment\BkashController::class, 'publicSimulateApprove'])->name('payment.bkash.simulate.approve.public');

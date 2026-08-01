@@ -1,9 +1,14 @@
- /vendor
- /node_modules
- .env
- /storage/*.key
- /public/storage
- /.vscode
+/vendor
+/node_modules
+
+# Environment files (never commit secrets)
+.env
+.env.*
+!.env.example
+
+/storage/*.key
+/public/storage
+/.vscode
 
 # Ignore generated build assets and large files
 hms.zip

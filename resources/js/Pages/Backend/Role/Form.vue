@@ -22,11 +22,21 @@ const form = useForm({
 
 const submit = async () => {
     const routeName = props.id ? route('backend.role.update', props.id) : route('backend.role.store');
-    form.transform(data => ({
-        ...data,
-        remember: '',
-        isDirty: false,
-    })).post(routeName, {
+    form.transform((data) => {
+        const requestedPermissionIds = Array.isArray(data.permission_ids)
+            ? data.permission_ids.map((id) => String(id)).filter(Boolean)
+            : [];
+
+        const visibleSelectedIds = requestedPermissionIds.filter((id) => visiblePermissionIds.value.has(String(id)));
+        const preservedHiddenIds = requestedPermissionIds.filter((id) => !visiblePermissionIds.value.has(String(id)));
+
+        return {
+            ...data,
+            remember: '',
+            isDirty: false,
+            permission_ids: Array.from(new Set([...visibleSelectedIds, ...preservedHiddenIds])),
+        };
+    }).post(routeName, {
 
         onSuccess: async (response) => {
             if (!props.id)
@@ -127,6 +137,28 @@ const checkedPermissions = computed({
 
 const permissionSearch = ref('');
 
+const actorPermissionNames = computed(() => {
+    const raw = page.props.auth?.permissions ?? [];
+    let list = [];
+
+    if (Array.isArray(raw)) {
+        list = raw.map((p) => String(p ?? '').trim().toLowerCase());
+    } else if (raw && typeof raw === 'object') {
+        try {
+            list = Object.values(raw).map((p) => String(p ?? '').trim().toLowerCase());
+        } catch (e) {
+            list = [];
+        }
+    }
+
+    return Array.from(new Set(list.filter(Boolean)));
+});
+
+function hasActorPermission(permission) {
+    if (!permission) return false;
+    return actorPermissionNames.value.includes(String(permission).trim().toLowerCase());
+}
+
 function permissionMatches(permission, query) {
     const name = String(permission?.name ?? '').toLowerCase();
     const display = permissionDisplayLabel(permission).toLowerCase();
@@ -150,9 +182,43 @@ function filterPermissionTree(list, query) {
         .filter(Boolean);
 }
 
+function filterPermissionsByActor(list) {
+    return (list || [])
+        .map((permission) => {
+            const children = filterPermissionsByActor(permission?.child || []);
+            const hasOwnPermission = hasActorPermission(permission?.name);
+            if (!hasOwnPermission && !children.length) {
+                return null;
+            }
+            return {
+                ...permission,
+                child: children,
+            };
+        })
+        .filter(Boolean);
+}
+
 const filteredPermissions = computed(() => {
     const query = permissionSearch.value.trim().toLowerCase();
-    return filterPermissionTree(props.permissions || [], query);
+    const filtered = filterPermissionTree(props.permissions || [], query);
+    return filterPermissionsByActor(filtered);
+});
+
+const visiblePermissionIds = computed(() => {
+    const ids = new Set();
+    const walk = (nodes) => {
+        (nodes || []).forEach((permission) => {
+            const id = permission?.id;
+            if (id !== undefined && id !== null && id !== '') {
+                ids.add(String(id));
+            }
+            if (permission?.child && Array.isArray(permission.child)) {
+                walk(permission.child);
+            }
+        });
+    };
+    walk(filteredPermissions.value);
+    return ids;
 });
 
 const menuPermissionOrder = computed(() => {
@@ -436,7 +502,11 @@ const goBack = () => {
                                     @click="setActivePermissionGroup(permissionInfo.id)"
                                 >
                                     <p class="font-semibold text-sm">{{ permissionDisplayLabel(permissionInfo) }}</p>
-                                    <p class="text-xs mt-1 text-slate-500">{{ selectedCountInModule(permissionInfo) }}/{{ totalCountInModule(permissionInfo) }} selected</p>
+                                    <p :class="Number(activePermissionGroup?.id) === Number(permissionInfo.id)
+                                        ? 'text-white text-xs mt-1'
+                                        : 'text-slate-500 text-xs mt-1'">
+                                        {{ selectedCountInModule(permissionInfo) }}/{{ totalCountInModule(permissionInfo) }} selected
+                                    </p>
                                 </button>
                             </template>
 
@@ -449,7 +519,9 @@ const goBack = () => {
                             <div class="flex items-center justify-between gap-2 p-3 border-b border-slate-100">
                                 <div>
                                     <p class="font-semibold text-sm text-slate-800">{{ permissionDisplayLabel(activePermissionGroup) }}</p>
-                                    <p class="text-xs text-slate-500 mt-1">{{ selectedCountInModule(activePermissionGroup) }}/{{ totalCountInModule(activePermissionGroup) }} selected</p>
+                                    <p class="text-xs text-slate-500 mt-1">
+                                        {{ selectedCountInModule(activePermissionGroup) }}/{{ totalCountInModule(activePermissionGroup) }} selected
+                                    </p>
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <button

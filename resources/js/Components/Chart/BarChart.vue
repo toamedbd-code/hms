@@ -15,6 +15,10 @@ export default {
         dashboardData: {
             type: Object,
             required: true
+        },
+        isDark: {
+            type: Boolean,
+            default: false
         }
     },
     computed: {
@@ -83,6 +87,7 @@ export default {
             }
         },
         chartOptions() {
+            const textColor = this.isDark ? '#e2e8f0' : '#334155';
             return {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -90,6 +95,7 @@ export default {
                     title: {
                         display: true,
                         text: 'Hospital Income and Expense by Department',
+                        color: textColor,
                         font: {
                             size: 16,
                             weight: 'bold'
@@ -110,19 +116,25 @@ export default {
                     y: {
                         beginAtZero: true,
                         ticks: {
+                            color: textColor,
                             callback: function(value) {
                                 return 'Tk.' + value.toLocaleString()
                             }
                         },
                         title: {
                             display: true,
-                            text: 'Amount (Tk.)'
+                            text: 'Amount (Tk.)',
+                            color: textColor
                         }
                     },
                     x: {
+                        ticks: {
+                            color: textColor
+                        },
                         title: {
                             display: true,
-                            text: 'Department'
+                            text: 'Department',
+                            color: textColor
                         }
                     }
                 }

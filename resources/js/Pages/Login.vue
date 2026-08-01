@@ -15,21 +15,47 @@ const props = defineProps({
     bkashMonthlyAmount: [Number, String],
     bkashYearlyAmount: [Number, String],
     subscriptionDefaultPeriod: { type: String, default: 'monthly' },
+    isSandbox: { type: Boolean, default: true },
+    pendingBkashPaymentId: [Number, String],
 });
+
 const form = useForm({
     email: '',
     password: '',
     remember: false,
 });
 
-const showRenewModal = ref(false);
+const paying = ref(false);
+const pendingPayment = ref(props.pendingBkashPaymentId || null);
 const selectedPeriod = ref(props.subscriptionDefaultPeriod || 'monthly');
 const page = usePage();
 const status = page.props.status;
 
-const shouldShowRenewal = computed(() => {
-    return (props.showSubscriptionRenewal || (props.subscriptionEnforced && !props.subscriptionActive)) && props.bkashEnabled;
+const flashSuccess = computed(
+    () => props.successMessage || page.props.flash?.successMessage || null
+);
+const flashError = computed(
+    () => props.errorMessage || page.props.flash?.errorMessage || null
+);
+const flashWarning = computed(() => props.warningMessage || null);
+
+const needsRenewal = computed(
+    () =>
+        props.showSubscriptionRenewal ||
+        (props.subscriptionEnforced && !props.subscriptionActive)
+);
+
+const showPaymentGateway = computed(() => {
+    const hasPricing = Number(props.bkashMonthlyAmount || 0) > 0 || Number(props.bkashYearlyAmount || 0) > 0;
+    return Boolean(
+        props.pendingBkashPaymentId ||
+        props.showSubscriptionRenewal ||
+        (props.bkashEnabled && hasPricing && !props.subscriptionActive)
+    );
 });
+
+const monthlyAmount = computed(() => Number(props.bkashMonthlyAmount || 0));
+const yearlyAmount = computed(() => Number(props.bkashYearlyAmount || 0));
 
 const submit = () => {
     form.transform(data => ({
@@ -37,18 +63,36 @@ const submit = () => {
         remember: form.remember ? 'on' : '',
     })).post(route('backend.auth.login'), {
         onFinish: () => form.reset('password'),
-        onSuccess: () => {
-
-        },
     });
 };
 
-const renew = (period = null) => {
+const paymentUrl = (period = null) => {
     const p = period || selectedPeriod.value || props.subscriptionDefaultPeriod || 'monthly';
-    const amount = p === 'yearly' ? (props.bkashYearlyAmount || props.bkashMonthlyAmount || '') : (props.bkashMonthlyAmount || '');
+    const amount = p === 'yearly' ? (yearlyAmount.value || monthlyAmount.value || '') : (monthlyAmount.value || '');
     const emailParam = form.email || '';
-    const url = route('backend.payment.bkash.initiate.public', { amount: amount, email: emailParam, period: p });
-    window.location.href = url;
+
+    let url = `/payment/bkash/renew?amount=${encodeURIComponent(amount)}&period=${encodeURIComponent(p)}`;
+    if (emailParam) {
+        url += `&email=${encodeURIComponent(emailParam)}`;
+    }
+
+    try {
+        if (typeof route === 'function') {
+            url = route('backend.payment.bkash.initiate.public', {
+                amount,
+                email: emailParam,
+                period: p,
+            });
+        }
+    } catch (e) {
+        // keep hardcoded fallback URL
+    }
+
+    return url;
+};
+
+const confirmPendingPayment = () => {
+    window.location.assign('/payment/bkash/confirm-pending');
 };
 </script>
 
@@ -99,38 +143,80 @@ const renew = (period = null) => {
                         <div v-if="status" class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
                             {{ status }}
                         </div>
-                        <div v-if="props.errorMessage" class="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
-                            {{ props.errorMessage }}
+                        <div v-if="flashError" class="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+                            {{ flashError }}
                         </div>
-                        <div v-if="props.successMessage" class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
-                            {{ props.successMessage }}
+                        <div v-if="flashSuccess" class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+                            {{ flashSuccess }}
                         </div>
-                        <div v-if="props.warningMessage" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
-                            {{ props.warningMessage }}
+                        <div v-if="flashWarning" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
+                            {{ flashWarning }}
                         </div>
 
-                        <div v-if="shouldShowRenewal" class="mb-4 rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-                            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                    <p class="font-semibold">Subscription inactive</p>
-                                    <p class="text-xs text-rose-800/80">Renew your subscription to continue using the system.</p>
+                        <!-- bKash Subscription Payment Gateway -->
+                        <div
+                            v-if="showPaymentGateway"
+                            class="mb-5 overflow-hidden rounded-2xl border border-[#e8b4c4] bg-gradient-to-br from-[#fff7f9] to-[#fde8ef]"
+                        >
+                            <div class="flex items-center justify-between gap-3 border-b border-[#f0c9d6] px-4 py-3">
+                                <div class="flex items-center gap-2">
+                                    <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e2136e] text-xs font-bold text-white">bK</span>
+                                    <div>
+                                        <p class="text-sm font-semibold text-[#2a1a22]">bKash Payment Gateway</p>
+                                        <p class="text-[11px] text-[#7a4a5c]">
+                                            {{ needsRenewal ? 'Subscription inactive — pay to unlock login' : 'Renew or extend subscription' }}
+                                        </p>
+                                    </div>
                                 </div>
-                                <div class="grid gap-2 sm:grid-cols-2">
-                                    <button
-                                        v-if="props.bkashMonthlyAmount"
-                                        @click.prevent="renew('monthly')"
-                                        class="rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700"
-                                    >
-                                        Pay Monthly — {{ props.bkashMonthlyAmount }}
-                                    </button>
-                                    <button
-                                        v-if="props.bkashYearlyAmount"
-                                        @click.prevent="renew('yearly')"
-                                        class="rounded-2xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-600"
-                                    >
-                                        Pay Yearly — {{ props.bkashYearlyAmount }}
-                                    </button>
+                                <span
+                                    v-if="isSandbox"
+                                    class="rounded-full bg-[#e2136e]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#e2136e]"
+                                >
+                                    Sandbox
+                                </span>
+                            </div>
+
+                            <div class="space-y-3 p-4">
+                                <div
+                                    v-if="needsRenewal"
+                                    class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800"
+                                >
+                                    Pay with bKash, then return here and log in with your admin account.
                                 </div>
+
+                                <div class="grid gap-2" :class="yearlyAmount > 0 ? 'sm:grid-cols-2' : 'grid-cols-1'">
+                                    <a
+                                        v-if="monthlyAmount > 0"
+                                        :href="paymentUrl('monthly')"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        class="inline-flex items-center justify-center rounded-xl bg-[#e2136e] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#c41060]"
+                                    >
+                                        Pay Monthly — ৳{{ monthlyAmount }}
+                                    </a>
+                                    <a
+                                        v-if="yearlyAmount > 0"
+                                        :href="paymentUrl('yearly')"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        class="inline-flex items-center justify-center rounded-xl border border-[#e2136e] bg-white px-4 py-2.5 text-sm font-semibold text-[#e2136e] transition hover:bg-[#fff0f5]"
+                                    >
+                                        Pay Yearly — ৳{{ yearlyAmount }}
+                                    </a>
+                                </div>
+
+                                <button
+                                    v-if="pendingPayment"
+                                    type="button"
+                                    @click.prevent="confirmPendingPayment"
+                                    class="w-full rounded-xl bg-[#1f5f5b] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#174946]"
+                                >
+                                    Confirm Payment (after finishing on bKash)
+                                </button>
+
+                                <p v-if="isSandbox" class="text-[11px] leading-relaxed text-[#7a4a5c]">
+                                    Sandbox test: wallet <strong>01770618575</strong>, PIN <strong>12121</strong>, OTP <strong>123456</strong>
+                                </p>
                             </div>
                         </div>
 

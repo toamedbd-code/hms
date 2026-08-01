@@ -10,7 +10,6 @@ use App\Services\PermissionService;
 use App\Services\RoleService;
 use App\Services\AdminService;
 use App\Traits\SystemTrait;
-use App\Support\DefaultDeveloperManager;
 use Spatie\Permission\Models\Permission as SpatiePermission;
 use Spatie\Permission\PermissionRegistrar;
 use Illuminate\Support\Facades\DB;
@@ -31,15 +30,7 @@ class RoleController extends Controller
         $this->AdminService = $AdminService;
 
         $this->middleware('auth:admin');
-        $this->middleware(function ($request, $next) {
-            $actor = auth()->guard('admin')->user();
-            if (!DefaultDeveloperManager::isDeveloper($actor)) {
-                abort(403, 'Developer access only.');
-            }
-
-            return $next($request);
-        });
-        $this->middleware('permission:role-list');
+        $this->middleware('permission:role-list|role-list-create|role-list-edit|role-list-delete');
         $this->middleware('permission:role-list-create', ['only' => ['create', 'store']]);
         $this->middleware('permission:role-list-edit', ['only' => ['edit', 'update']]);
         $this->middleware('permission:role-list-delete', ['only' => ['destroy']]);
@@ -63,18 +54,31 @@ class RoleController extends Controller
 
     private function getDatas()
     {
+        try {
+            app(PermissionRegistrar::class)->forgetCachedPermissions();
+        } catch (\Throwable $e) {
+            // ignore cache refresh failures
+        }
+
         $query = $this->roleService->list();
 
         // Apply visibility rules: non-developers should not see developer role.
         try {
             $actor = auth()->guard('admin')->user();
+            if ($actor) {
+                try {
+                    $actor = $actor->fresh(['roles.permissions', 'permissions']);
+                } catch (\Throwable $e) {
+                    // ignore and continue with current actor instance
+                }
+            }
+
             if ($actor && method_exists($actor, 'hasRole') && !$actor->hasRole('developer')) {
                 $query->whereRaw('LOWER(name) <> ?', ['developer']);
             }
         } catch (\Throwable $e) {
             // ignore and continue
         }
-
 
         if (request()->filled('name')) {
             $query->where(function ($q) {
@@ -94,8 +98,15 @@ class RoleController extends Controller
             $customData->links = [];
             
             $user = auth()->guard('admin')->user();
+            try {
+                if ($user) {
+                    $user = $user->fresh(['roles.permissions', 'permissions']);
+                }
+            } catch (\Throwable $e) {
+                // ignore and keep current user instance
+            }
 
-            if ($user->can('role-list-edit')) {
+            if ($user && method_exists($user, 'can') && $user->can('role-list-edit')) {
                 $customData->links[] = [
                     'linkClass' => 'bg-yellow-400 text-black semi-bold',
                     'link' => route('backend.role.edit', $data->id),
@@ -103,7 +114,7 @@ class RoleController extends Controller
                 ];
             }
 
-            if ($user->can('role-list-delete')) {
+            if ($user && method_exists($user, 'can') && $user->can('role-list-delete')) {
                 $customData->links[] = [
                     'linkClass' => 'deleteButton bg-red-500 text-white semi-bold',
                     'link' => route('backend.role.destroy', $data->id),
@@ -143,45 +154,57 @@ class RoleController extends Controller
 
         // filter permissions by current admin's assigned module slugs
         $actor = auth()->guard('admin')->user();
-        // Developers see all permissions; others are restricted to their modules
+        $isSuperAdmin = $actor && method_exists($actor, 'hasRole') && $actor->hasRole('super admin');
+        // Developers and super admins see all permissions; others are restricted to their modules
         try {
-            if ($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer')) {
+            if ($actor && method_exists($actor, 'hasRole') && ($actor->hasRole('developer') || $isSuperAdmin)) {
                 $filtered = $allPermissions;
             } else {
                 $allowedModuleSlugs = collect();
+                $actorPermissionIds = collect();
                 try {
                     if ($actor) {
                         $allowedModuleSlugs = $actor->modules()->pluck('slug')->map(function ($s) {
                             return trim(strtolower((string) $s));
                         })->filter()->values();
+
+                        $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
+                            return (int) $i;
+                        })->filter()->values();
                     }
                 } catch (\Throwable $e) {
                     $allowedModuleSlugs = collect();
+                    $actorPermissionIds = collect();
                 }
 
-                $filterTree = function ($nodes) use (&$filterTree, $allowedModuleSlugs) {
-                    return $nodes->map(function ($node) use (&$filterTree, $allowedModuleSlugs) {
+                $filterTree = function ($nodes) use (&$filterTree, $allowedModuleSlugs, $actorPermissionIds) {
+                    return $nodes->map(function ($node) use (&$filterTree, $allowedModuleSlugs, $actorPermissionIds) {
                         $nodeModule = trim(strtolower((string) ($node->module_slug ?? '')));
+                        $nodeId = (int) ($node->id ?? 0);
 
-                        // filter children recursively
                         if ($node->relationLoaded('child') && $node->child) {
                             $node->child = $filterTree(collect($node->child))->filter()->values()->toArray();
                         }
 
                         $childCount = is_array($node->child) ? count($node->child) : (collect($node->child)->count() ?? 0);
                         $hasAllowedChild = $childCount > 0;
+                        $nodeIsActorPermission = $nodeId > 0 && $actorPermissionIds->contains($nodeId);
 
-                        // If node has an explicit module slug, keep it only if the module is allowed or any child remains
+                        // Keep the current node only when it is directly allowed by the actor,
+                        // when it has allowed children, or when it is a module parent node.
                         if ($nodeModule !== '') {
-                            if ($allowedModuleSlugs->contains($nodeModule) || $hasAllowedChild) {
+                            if ($nodeIsActorPermission || $hasAllowedChild) {
                                 return $node;
                             }
+
+                            if ($childCount > 0 && $allowedModuleSlugs->contains($nodeModule)) {
+                                return $node;
+                            }
+
                             return null;
                         }
 
-                        // nodeModule is empty (global group): keep only when it's a standalone global permission (no children)
-                        // or when it has allowed children after recursive filtering. This prevents showing empty groups.
-                        if ($childCount === 0 || $hasAllowedChild) {
+                        if ($nodeIsActorPermission || $hasAllowedChild) {
                             return $node;
                         }
 
@@ -334,9 +357,9 @@ class RoleController extends Controller
                 $submittedPermissionIds = is_array($request->permission_ids) ? $request->permission_ids : (array) ($request->permission_ids ?? []);
 
                 $permissionQuery = SpatiePermission::whereIn('id', $submittedPermissionIds)->where('guard_name', 'admin');
-                // Developers can assign any permission; others are restricted to their modules
-                // and only to global permissions they themselves already hold.
-                if (!($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer'))) {
+                // Developers and super admins can assign any permission; others are restricted to their modules
+                // and only to permissions they themselves already hold.
+                if (!($actor && method_exists($actor, 'hasRole') && ($actor->hasRole('developer') || $actor->hasRole('super admin')))) {
                     $actorPermissionIds = collect();
                     try {
                         if ($actor) {
@@ -425,24 +448,32 @@ class RoleController extends Controller
 
         // same filtering as create
         $actor = auth()->guard('admin')->user();
+        $isSuperAdmin = $actor && method_exists($actor, 'hasRole') && $actor->hasRole('super admin');
         try {
-            if ($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer')) {
+            if ($actor && method_exists($actor, 'hasRole') && ($actor->hasRole('developer') || $isSuperAdmin)) {
                 $filtered = $allPermissions;
             } else {
                 $allowedModuleSlugs = collect();
+                $actorPermissionIds = collect();
                 try {
                     if ($actor) {
                         $allowedModuleSlugs = $actor->modules()->pluck('slug')->map(function ($s) {
                             return trim(strtolower((string) $s));
                         })->filter()->values();
+
+                        $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
+                            return (int) $i;
+                        })->filter()->values();
                     }
                 } catch (\Throwable $e) {
                     $allowedModuleSlugs = collect();
+                    $actorPermissionIds = collect();
                 }
 
-                $filterTree = function ($nodes) use (&$filterTree, $allowedModuleSlugs) {
-                    return $nodes->map(function ($node) use (&$filterTree, $allowedModuleSlugs) {
+                $filterTree = function ($nodes) use (&$filterTree, $allowedModuleSlugs, $actorPermissionIds) {
+                    return $nodes->map(function ($node) use (&$filterTree, $allowedModuleSlugs, $actorPermissionIds) {
                         $nodeModule = trim(strtolower((string) ($node->module_slug ?? '')));
+                        $nodeId = (int) ($node->id ?? 0);
 
                         if ($node->relationLoaded('child') && $node->child) {
                             $node->child = $filterTree(collect($node->child))->filter()->values()->toArray();
@@ -450,15 +481,21 @@ class RoleController extends Controller
 
                         $childCount = is_array($node->child) ? count($node->child) : (collect($node->child)->count() ?? 0);
                         $hasAllowedChild = $childCount > 0;
+                        $nodeIsActorPermission = $nodeId > 0 && $actorPermissionIds->contains($nodeId);
 
                         if ($nodeModule !== '') {
-                            if ($allowedModuleSlugs->contains($nodeModule) || $hasAllowedChild) {
+                            if ($nodeIsActorPermission || $hasAllowedChild) {
                                 return $node;
                             }
+
+                            if ($childCount > 0 && $allowedModuleSlugs->contains($nodeModule)) {
+                                return $node;
+                            }
+
                             return null;
                         }
 
-                        if ($childCount === 0 || $hasAllowedChild) {
+                        if ($nodeIsActorPermission || $hasAllowedChild) {
                             return $node;
                         }
 

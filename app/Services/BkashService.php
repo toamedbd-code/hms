@@ -19,22 +19,32 @@ class BkashService
     protected function baseUrl()
     {
         if ($this->setting && ! $this->setting->is_sandbox) {
-            return config('bkash.production_base_url');
+            return rtrim((string) config('bkash.production_base_url'), '/');
         }
 
-        $base = rtrim(config('bkash.sandbox_base_url'), '/');
-        $parsed = parse_url($base);
-        $host = $parsed['host'] ?? '';
-        $scheme = $parsed['scheme'] ?? 'https';
+        $base = rtrim((string) config('bkash.sandbox_base_url'), '/');
+        $host = parse_url($base, PHP_URL_HOST) ?: '';
 
-        // Official sandbox API host is tokenized.sandbox.bka.sh.
-        // The public bka.sh site is only a landing page and should not be used
-        // as the API base for token/create calls.
-        if ($host === 'bka.sh' || $host === 'sandbox.bka.sh') {
-            return "$scheme://tokenized.sandbox.bka.sh";
+        // https://bka.sh / .../v2 alone are not usable Grant Token hosts.
+        // Live sandbox Grant Token succeeds on v1.2.0-beta.
+        if ($host === 'bka.sh' || $host === 'sandbox.bka.sh' || $base === '' || str_ends_with($base, '/v2')) {
+            return 'https://tokenized.sandbox.bka.sh/v1.2.0-beta';
         }
 
         return $base;
+    }
+
+    protected function httpClient()
+    {
+        $request = Http::acceptJson()
+            ->asJson()
+            ->timeout((int) config('bkash.http_timeout', 30));
+
+        if (! config('bkash.http_verify_ssl', false)) {
+            $request = $request->withoutVerifying();
+        }
+
+        return $request;
     }
 
     protected function shouldUseSandbox(): bool
@@ -154,20 +164,19 @@ class BkashService
         $payload = [
             'app_key' => $this->credential('app_key'),
             'app_secret' => $this->credential('app_secret'),
-            'username' => $this->credential('username'),
-            'password' => $this->credential('password'),
         ];
 
         $results = [];
         foreach ($this->getTokenEndpointCandidates() as $url) {
             try {
-                $request = Http::acceptJson()->asJson()->timeout(15);
-                if ($this->shouldUseAwsSignatureV4($url)) {
-                    $headers = $this->awsSignatureHeaders('POST', $url, json_encode($payload));
-                    $request = $request->withHeaders($headers);
-                }
+                $response = $this->httpClient()
+                    ->timeout(15)
+                    ->withHeaders([
+                        'username' => (string) $this->credential('username'),
+                        'password' => (string) $this->credential('password'),
+                    ])
+                    ->post($url, $payload);
 
-                $response = $request->post($url, $payload);
                 $body = $response->body();
                 $json = null;
                 try {
@@ -275,56 +284,63 @@ class BkashService
     }
 
     /**
-     * Grant a bKash auth token and cache it for reuse.
+     * Grant a bKash auth token (Tokenized Checkout) and cache it for reuse.
+     *
+     * Official auth: username/password as headers; app_key/app_secret in JSON body.
+     *
+     * @see https://developer.bka.sh/docs/grant-token-3
      */
     public function grantToken(): ?string
     {
-        // Cache key should vary by configured app_key to avoid cross-tenant collisions
-        // and to prevent repeated Grant Token API calls within the same hour.
-        $appKey = $this->setting->app_key ?? config('bkash.app_key');
-        $cacheKey = 'bkash_token_' . sha1((string) $appKey);
+        $appKey = $this->credential('app_key');
+        if (! $appKey) {
+            return null;
+        }
+
+        $cacheKey = 'bkash_token_' . sha1($appKey);
         $cached = Cache::get($cacheKey);
         if ($cached && ! empty($cached['token']) && isset($cached['expires_at']) && now()->lt($cached['expires_at'])) {
             return $cached['token'];
         }
 
-        $payload = [
-            'app_key' => $this->credential('app_key'),
-            'app_secret' => $this->credential('app_secret'),
-            'username' => $this->credential('username'),
-            'password' => $this->credential('password'),
-        ];
+        $username = $this->credential('username');
+        $password = $this->credential('password');
+        $appSecret = $this->credential('app_secret');
+        if (! $username || ! $password || ! $appSecret) {
+            return null;
+        }
 
-        $candidates = $this->getTokenEndpointCandidates();
+        $url = rtrim($this->baseUrl(), '/') . '/' . ltrim(config('bkash.token_endpoint'), '/');
 
-        foreach ($candidates as $url) {
-            try {
-                $request = Http::acceptJson()->asJson()->timeout(30);
-                if ($this->shouldUseAwsSignatureV4($url)) {
-                    $headers = $this->awsSignatureHeaders('POST', $url, json_encode($payload));
-                    $request = $request->withHeaders($headers);
-                }
+        try {
+            $resp = $this->httpClient()
+                ->withHeaders([
+                    'username' => $username,
+                    'password' => $password,
+                ])
+                ->post($url, [
+                    'app_key' => $appKey,
+                    'app_secret' => $appSecret,
+                ]);
 
-                $resp = $request->post($url, $payload);
-
-                if (! $resp->successful()) {
-                    continue;
-                }
-
-                $data = $resp->json();
-                $token = data_get($data, 'id_token') ?: data_get($data, 'access_token');
-                $expiresIn = (int) (data_get($data, 'expires_in') ?: 3600);
-                if ($token) {
-                    $ttlSeconds = max($expiresIn - 30, 30);
-                    Cache::put($cacheKey, [
-                        'token' => $token,
-                        'expires_at' => now()->addSeconds($ttlSeconds),
-                    ], $ttlSeconds);
-                    return $token;
-                }
-            } catch (\Throwable $e) {
-                continue;
+            if (! $resp->successful()) {
+                return null;
             }
+
+            $data = $resp->json();
+            $token = data_get($data, 'id_token') ?: data_get($data, 'access_token');
+            $expiresIn = (int) (data_get($data, 'expires_in') ?: 3600);
+            if ($token) {
+                $ttlSeconds = max($expiresIn - 30, 30);
+                Cache::put($cacheKey, [
+                    'token' => $token,
+                    'expires_at' => now()->addSeconds($ttlSeconds),
+                ], $ttlSeconds);
+
+                return $token;
+            }
+        } catch (\Throwable $e) {
+            return null;
         }
 
         return null;
@@ -447,14 +463,20 @@ class BkashService
 
         $endpoints = $this->getEndpointUrlCandidates($this->createPaymentEndpoint());
 
+        $appKey = $this->credential('app_key');
+
         foreach ($endpoints as $url) {
             try {
-                $response = Http::withToken($token)
-                    ->acceptJson()
-                    ->asJson()
-                    ->timeout(30)
+                $response = $this->httpClient()
+                    ->withToken($token)
+                    ->withHeaders(['X-App-Key' => (string) $appKey])
                     ->post($url, [
+                        'mode' => '0011',
+                        'payerReference' => ' ',
+                        'callbackURL' => url('/payment/bkash/callback'),
                         'amount' => (string) $payment->amount,
+                        'currency' => 'BDT',
+                        'intent' => 'sale',
                         'merchantInvoiceNumber' => (string) $payment->id,
                     ]);
 
@@ -513,12 +535,13 @@ class BkashService
             return [];
         }
 
+        $appKey = $this->credential('app_key');
+
         foreach ($this->getEndpointUrlCandidates(config('bkash.query_payment_endpoint')) as $url) {
             try {
-                $response = Http::withToken($token)
-                    ->acceptJson()
-                    ->asJson()
-                    ->timeout(30)
+                $response = $this->httpClient()
+                    ->withToken($token)
+                    ->withHeaders(['X-App-Key' => (string) $appKey])
                     ->post($url, [
                         'paymentID' => (string) $paymentId,
                     ]);
@@ -564,12 +587,13 @@ class BkashService
             return [];
         }
 
+        $appKey = $this->credential('app_key');
+
         foreach ($this->getEndpointUrlCandidates(config('bkash.execute_payment_endpoint')) as $url) {
             try {
-                $response = Http::withToken($token)
-                    ->acceptJson()
-                    ->asJson()
-                    ->timeout(30)
+                $response = $this->httpClient()
+                    ->withToken($token)
+                    ->withHeaders(['X-App-Key' => (string) $appKey])
                     ->post($url, [
                         'paymentID' => (string) $paymentId,
                     ]);
