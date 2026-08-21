@@ -35,6 +35,30 @@
                             <div class="alert alert-danger">{{ session('error') }}</div>
                         @endif
 
+                        @php
+                            $subscription = \App\Models\Subscription::ensureExists();
+                            $subscriptionActive = $subscription && $subscription->isActive();
+                        @endphp
+
+                        <div class="alert alert-secondary d-flex justify-content-between align-items-center mb-4">
+                            <div>
+                                <div class="fw-bold">Subscription Control</div>
+                                <div class="small">Current status: <strong>{{ $subscriptionActive ? 'ACTIVE' : 'INACTIVE' }}</strong></div>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <form method="POST" action="{{ route('backend.settings.payment.bkash.subscription.toggle') }}" class="d-inline">
+                                    @csrf
+                                    <input type="hidden" name="mode" value="off">
+                                    <button type="submit" class="btn btn-outline-danger">Inactive</button>
+                                </form>
+                                <form method="POST" action="{{ route('backend.settings.payment.bkash.subscription.toggle') }}" class="d-inline">
+                                    @csrf
+                                    <input type="hidden" name="mode" value="on">
+                                    <button type="submit" class="btn btn-success">Active</button>
+                                </form>
+                            </div>
+                        </div>
+
                         <form method="POST" action="{{ route('backend.settings.payment.bkash.store') }}">
                             @csrf
 
@@ -55,7 +79,8 @@
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">Merchant Number</label>
-                                    <input name="merchant_number" class="form-control" value="{{ old('merchant_number', optional($setting)->merchant_number) }}">
+                                    <input name="merchant_number" class="form-control" value="{{ old('merchant_number', '') }}">
+                                    <small class="form-text text-muted">Leave blank to hide merchant number on checkout.</small>
                                 </div>
                             </div>
 
@@ -86,26 +111,22 @@
                                 </div>
                             </div>
 
-                            <div class="alert alert-info mt-3">
-                                <div class="fw-bold mb-2">Official bKash Sandbox Test Instructions</div>
-                                <p class="mb-1">Use your official sandbox credentials and set <strong>Sandbox Mode = Yes</strong>.</p>
-                                <p class="mb-1"><strong>Mobile:</strong> 01770618575 or 01929918378</p>
-                                <p class="mb-1"><strong>OTP:</strong> 123456</p>
-                                <p class="mb-0"><strong>PIN:</strong> 12121</p>
-                            </div>
-
                             <div class="d-flex gap-2">
                                 <button class="btn btn-success btn-lg font-weight-bold" style="background-color: #16a34a; border-color: #16a34a; padding: 0.75rem 1.5rem; font-size: 1rem;">Save</button>
-                                @if(optional($setting)->is_enabled && (float) optional($setting)->monthly_amount > 0)
-                                    <form method="POST" action="{{ route('backend.payment.bkash.initiate') }}" style="display:inline">
-                                        @csrf
-                                        <input type="hidden" name="amount" value="{{ optional($setting)->monthly_amount }}">
-                                        <button type="submit" class="btn btn-success">Pay Monthly Now (BDT {{ number_format(optional($setting)->monthly_amount, 2) }})</button>
-                                    </form>
-                                @endif
-                                <button id="bkash-test" type="button" class="btn btn-outline-primary">Test connection</button>
                             </div>
                         </form>
+
+                        <div class="mt-3 d-flex gap-2">
+                            @if(optional($setting)->is_enabled && (float) optional($setting)->monthly_amount > 0)
+                                <form method="POST" action="{{ route('backend.payment.bkash.initiate') }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="amount" value="{{ optional($setting)->monthly_amount }}">
+                                    <button type="submit" class="btn btn-success">Pay Monthly Now (BDT {{ number_format(optional($setting)->monthly_amount, 2) }})</button>
+                                </form>
+                            @endif
+
+                            <button id="bkash-test" type="button" class="btn btn-outline-primary">Test connection</button>
+                        </div>
                     </div>
                 </div>
             </div>

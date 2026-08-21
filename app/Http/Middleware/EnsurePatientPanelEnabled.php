@@ -13,8 +13,9 @@ class EnsurePatientPanelEnabled
 
         $rawPatientPanel = $settings ? $settings->getRawOriginal('patient_panel') : null;
         $isExplicitlyDisabled = $rawPatientPanel !== null && (int) $rawPatientPanel === 0;
+        $hasQrAccess = $request->session()->get('patient_portal_qr_access', false);
 
-        if ($isExplicitlyDisabled) {
+        if ($isExplicitlyDisabled && !$hasQrAccess) {
             abort(403, 'Patient portal is disabled by administrator.');
         }
 

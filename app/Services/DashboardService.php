@@ -128,7 +128,7 @@ class DashboardService
                 $dbRange[1]->toDateString(),
             ])
             // fetch safe fields only; amount fields may not exist on all schemas
-            ->get(['id', 'bill_no', 'date']);
+            ->get(['id', 'bill_no', 'date', 'net_amount']);
 
         if ($pharmacyRows->isEmpty()) {
             return 0;
@@ -173,7 +173,7 @@ class DashboardService
             }
 
             // Treat both 'pharmacy' and 'medicine' categories as pharmacy items
-            $pharmacyItems = BillItem::whereRaw('LOWER(category) IN (?,?)', ['pharmacy', 'medicine'])
+                $pharmacyItems = BillItem::whereRaw('LOWER(category) IN (?,?)', ['pharmacy', 'medicine'])
                 ->where('status', 'Active')
                 ->whereIn('billing_id', $billingIds)
                 ->get($cols);
@@ -182,7 +182,10 @@ class DashboardService
                 // Sum per-billing pharmacy totals
                 // Compute each item's effective total using any available field
                 $pharmacyTotalsByBilling = $pharmacyItems->groupBy('billing_id')->map(function ($items) {
-                    return $items->sum(function ($it) {
+                        return $items->sum(function ($it) {
+                            if ($it->net_amount !== null) {
+                                return (float) $it->net_amount;
+                            }
                         $val = 0;
                         if (!empty($it->total_amount)) {
                             $val = (float) $it->total_amount;
@@ -201,37 +204,7 @@ class DashboardService
                     });
                 });
 
-                $billings = Billing::whereIn('id', $pharmacyTotalsByBilling->keys()->toArray())
-                    ->get(['id', 'total', 'discount', 'discount_type', 'extra_flat_discount']);
-
-                $netPharmacy = 0.0;
-                foreach ($billings as $billing) {
-                    $billingId = $billing->id;
-                    $pharmacyTotal = (float) ($pharmacyTotalsByBilling[$billingId] ?? 0);
-                    if ($pharmacyTotal <= 0) {
-                        continue;
-                    }
-
-                    // Calculate billing-level discount amount (includes extra flat)
-                    $billingDiscount = 0;
-                    if ($billing->discount > 0) {
-                        if (($billing->discount_type ?? '') === 'percentage') {
-                            $billingDiscount = ($billing->total * $billing->discount) / 100;
-                        } else {
-                            $billingDiscount = $billing->discount;
-                        }
-                    }
-                    $billingDiscount += max(0, (float) ($billing->extra_flat_discount ?? 0));
-
-                    // Allocate discount proportionally to pharmacy items
-                    $allocatedDiscount = 0;
-                    if ((float)$billing->total > 0) {
-                        $allocatedDiscount = ($billingDiscount * $pharmacyTotal) / (float)$billing->total;
-                    }
-
-                    $net = max(0, $pharmacyTotal - $allocatedDiscount);
-                    $netPharmacy += round($net, 2);
-                }
+                $netPharmacy = (float) $pharmacyTotalsByBilling->sum();
 
                 if ($netPharmacy > 0) {
                     return max(0, $netPharmacy - $returnDeduction);
@@ -267,20 +240,16 @@ class DashboardService
         $billingIds = $billItems->pluck('billing_id')->unique();
         $billings = Billing::whereIn('id', $billingIds)->get();
 
-        $totalDiscount = $billings->sum(function ($billing) {
-            $discount = ($billing->discount_type == 'percentage'
-                ? ($billing->total * $billing->discount) / 100
-                : $billing->discount) + $billing->extra_flat_discount;
-            return max(0, $discount);
-        });
-
-        $totalAmount = $billItems->sum('total_amount');
-
-        return max(0, $totalAmount - $totalDiscount);
+        return round((float) $billItems->sum('total_amount'), 2);
     }
 
     // ✔ Pathology Income - Net Income After Discount (from Billing)
     public function countPathologyIncome(array $dbRange, array $dateRange)
+    {
+        return (float) $this->getPathologyIncomeSummary($dbRange)['net'];
+    }
+
+    public function getPathologyIncomeSummary(array $dbRange): array
     {
         $billItems = BillItem::where('category', 'Pathology')
             ->where('status', 'Active')
@@ -295,43 +264,25 @@ class DashboardService
             })->get();
 
         if ($billItems->isEmpty()) {
-            return 0;
+            return ['total' => 0.0, 'discount' => 0.0, 'net' => 0.0];
         }
 
-        $pathologyTotalsByBilling = $billItems->groupBy('billing_id')->map(function ($items) {
-            return (float) $items->sum('total_amount');
+        $total = (float) $billItems->sum('total_amount');
+        $itemNet = (float) $billItems->sum(function ($item) {
+            return $item->net_amount !== null
+                ? $item->net_amount
+                : ((float) $item->total_amount - (float) ($item->discount ?? 0));
         });
+        $billings = Billing::whereIn('id', $billItems->pluck('billing_id')->unique())
+            ->get(['id', 'extra_flat_discount']);
+        $extraDiscount = (float) $billings->sum('extra_flat_discount');
+        $discount = max(0, $total - $itemNet + $extraDiscount);
 
-        $billingIds = $pathologyTotalsByBilling->keys()->toArray();
-        $billings = Billing::whereIn('id', $billingIds)
-            ->get(['id', 'total', 'discount', 'discount_type', 'extra_flat_discount']);
-
-        $netPathology = 0.0;
-        foreach ($billings as $billing) {
-            $pathologyTotal = (float) ($pathologyTotalsByBilling[$billing->id] ?? 0);
-            if ($pathologyTotal <= 0) {
-                continue;
-            }
-
-            $billingDiscount = 0;
-            if ((float) $billing->discount > 0) {
-                if (($billing->discount_type ?? '') === 'percentage') {
-                    $billingDiscount = ((float) $billing->total * (float) $billing->discount) / 100;
-                } else {
-                    $billingDiscount = (float) $billing->discount;
-                }
-            }
-            $billingDiscount += max(0, (float) ($billing->extra_flat_discount ?? 0));
-
-            $allocatedDiscount = 0;
-            if ((float) $billing->total > 0) {
-                $allocatedDiscount = ($billingDiscount * $pathologyTotal) / (float) $billing->total;
-            }
-
-            $netPathology += max(0, $pathologyTotal - $allocatedDiscount);
-        }
-
-        return round($netPathology, 2);
+        return [
+            'total' => round($total, 2),
+            'discount' => round($discount, 2),
+            'net' => round(max(0, $itemNet - $extraDiscount), 2),
+        ];
     }
 
     // ✔ Radiology Income - Net Income After Discount (from Billing)
@@ -348,23 +299,11 @@ class DashboardService
             return 0;
         }
 
-        // Get unique billing IDs
-        $billingIds = $billItems->pluck('billing_id')->unique();
-        $billings = Billing::whereIn('id', $billingIds)->get();
-
-        // Calculate discount from Billing records (includes extra_flat_discount)
-        $totalDiscount = $billings->sum(function ($billing) {
-            $discount = ($billing->discount_type == 'percentage'
-                ? ($billing->total * $billing->discount) / 100
-                : $billing->discount) + $billing->extra_flat_discount;
-            return max(0, $discount);
-        });
-
-        // Total amount from radiology items
-        $totalAmount = $billItems->sum('total_amount');
-
-        // Net amount = Total - Discount
-        return max(0, $totalAmount - $totalDiscount);
+        return round((float) $billItems->sum(function ($item) {
+            return $item->net_amount !== null
+                ? $item->net_amount
+                : ((float) $item->total_amount - (float) ($item->discount ?? 0));
+        }), 2);
     }
 
     // ✔ OPD Income (Today paid) - Actual paid amount
@@ -395,31 +334,12 @@ class DashboardService
                 return (float) $items->sum('total_amount');
             });
 
-            $billingIds = $totalsByBilling->keys()->toArray();
-            $billings = Billing::whereIn('id', $billingIds)->get(['id', 'total', 'discount', 'discount_type', 'extra_flat_discount']);
-
             $net = 0.0;
-            foreach ($billings as $billing) {
-                $amt = (float) ($totalsByBilling[$billing->id] ?? 0);
-                if ($amt <= 0) continue;
-
-                $billingDiscount = 0;
-                if ((float) $billing->discount > 0) {
-                    if (($billing->discount_type ?? '') === 'percentage') {
-                        $billingDiscount = ((float) $billing->total * (float) $billing->discount) / 100;
-                    } else {
-                        $billingDiscount = (float) $billing->discount;
-                    }
-                }
-                $billingDiscount += max(0, (float) ($billing->extra_flat_discount ?? 0));
-
-                $allocated = 0;
-                if ((float) $billing->total > 0) {
-                    $allocated = ($billingDiscount * $amt) / (float) $billing->total;
-                }
-
-                $net += max(0, $amt - $allocated);
-            }
+            $net = (float) $items->sum(function ($item) {
+                return $item->net_amount !== null
+                    ? $item->net_amount
+                    : ((float) $item->total_amount - (float) ($item->discount ?? 0));
+            });
 
             $opdPaid += round($net, 2);
         }
@@ -442,38 +362,7 @@ class DashboardService
             return 0;
         }
 
-        $totalsByBilling = $billItems->groupBy('billing_id')->map(function ($items) {
-            return (float) $items->sum('total_amount');
-        });
-
-        $billingIds = $totalsByBilling->keys()->toArray();
-        $billings = Billing::whereIn('id', $billingIds)
-            ->get(['id', 'total', 'discount', 'discount_type', 'extra_flat_discount']);
-
-        $netDisposable = 0.0;
-        foreach ($billings as $billing) {
-            $disTotal = (float) ($totalsByBilling[$billing->id] ?? 0);
-            if ($disTotal <= 0) continue;
-
-            $billingDiscount = 0;
-            if ((float) $billing->discount > 0) {
-                if (($billing->discount_type ?? '') === 'percentage') {
-                    $billingDiscount = ((float) $billing->total * (float) $billing->discount) / 100;
-                } else {
-                    $billingDiscount = (float) $billing->discount;
-                }
-            }
-            $billingDiscount += max(0, (float) ($billing->extra_flat_discount ?? 0));
-
-            $allocatedDiscount = 0;
-            if ((float) $billing->total > 0) {
-                $allocatedDiscount = ($billingDiscount * $disTotal) / (float) $billing->total;
-            }
-
-            $netDisposable += max(0, $disTotal - $allocatedDiscount);
-        }
-
-        return round($netDisposable, 2);
+        return round((float) $billItems->sum('total_amount'), 2);
     }
 
     // ✔ IPD Income (from IPD billing) - Collected amount
@@ -499,6 +388,19 @@ class DashboardService
 
         // Merge both sources of billing ids (from ipd_patient links and from IPD bill items)
         $billingIds = array_values(array_unique(array_merge($billingIdsFromIpd, $itemBillingIds)));
+
+        if (!empty($itemBillingIds)) {
+            $ipdItems = BillItem::whereRaw('LOWER(category) = ?', ['ipd'])
+                ->where('status', 'Active')
+                ->whereIn('billing_id', $itemBillingIds)
+                ->get(['total_amount', 'discount', 'net_amount']);
+
+            return round((float) $ipdItems->sum(function ($item) {
+                return $item->net_amount !== null
+                    ? $item->net_amount
+                    : ((float) $item->total_amount - (float) ($item->discount ?? 0));
+            }), 2);
+        }
 
         // Sum payments that are either explicitly linked to an IPD patient OR
         // are linked to a billing that belongs to an IPD discharge billing.
@@ -605,7 +507,7 @@ class DashboardService
         ]);
     }
 
-    // ✔ Net Income (Daily) = (Today Paid Billing + Due Collection) - Expense - Refund
+    // ✔ Net Income uses the same paid/due/expense/refund basis as reports.
     public function countNetIncome(array $dbRange, array $dateRange)
     {
         $dateConditions = [
@@ -613,14 +515,12 @@ class DashboardService
         ];
 
         $billRows = $this->accountingService->getBillRowsByDate($dateConditions);
-        $incomeTotals = $this->accountingService->calculateFinalIncomeTotals($billRows, $dateConditions);
-        $dueCollectionTotal = $this->accountingService->getDueCollectionTotal($dateConditions);
+        $totalPaid = (float) $billRows->sum('paid_amount');
+        $totalDueCollected = (float) $this->accountingService->getDueCollectionTotal($dateConditions);
+        $totalExpense = (float) $this->accountingService->getExpenseTotal($dateConditions);
+        $totalRefund = (float) $this->accountingService->getRefundTotal($dateConditions);
 
-        $totalPaidAmount = (float) ($incomeTotals['total_paid'] ?? 0);
-        $totalExpense = (float) ($incomeTotals['total_expense'] ?? 0);
-        $totalRefundAmount = (float) ($incomeTotals['total_return_amount'] ?? 0);
-
-        return $totalPaidAmount + $dueCollectionTotal - $totalExpense - $totalRefundAmount;
+        return round($totalPaid + $totalDueCollected - $totalExpense - $totalRefund, 2);
     }
 
     // ✔ Total Refunds (Daily) = Sum of processed refunds from refund transactions

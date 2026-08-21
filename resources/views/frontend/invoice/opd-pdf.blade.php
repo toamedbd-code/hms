@@ -367,7 +367,7 @@
                     <td>1</td>
                     <td>{{ $description }}</td>
                     <td>{{ number_format($tax_percent, 2) . '(%)' }}</td>
-                    <td class="amount-col">{{ number_format($amount, 2) }}</td>
+                    <td class="amount-col">{{ priceFormat($amount) }}</td>
                 </tr>
             </tbody>
         </table>
@@ -377,7 +377,7 @@
             <table class="summary-table">
                 <tr>
                     <td>Net Amount</td>
-                    <td class="amount-col">Tk {{ number_format($amount, 2) }}</td>
+                    <td class="amount-col">Tk {{ priceFormat($amount) }}</td>
                 </tr>
                 @php
                     $taxAmountOPD = round((float) ($tax_amount ?? 0), 2);
@@ -386,18 +386,18 @@
                 @if ($taxAmountOPD != 0)
                 <tr>
                     <td>Tax({{ number_format($tax_percent, 2) }}%)</td>
-                    <td class="amount-col">Tk {{ number_format($tax_amount, 2) }}</td>
+                    <td class="amount-col">Tk {{ priceFormat($tax_amount) }}</td>
                 </tr>
                 @endif
                 @if ($discountAmountOPD != 0)
                 <tr>
                     <td>Discount({{ number_format($discount, 2) }}%)</td>
-                    <td class="amount-col">Tk {{ number_format($discount_amount, 2) }}</td>
+                    <td class="amount-col">Tk {{ priceFormat($discount_amount) }}</td>
                 </tr>
                 @endif
                 <tr class="total-row">
                     <td>Total</td>
-                    <td class="amount-col">Tk {{ number_format($total_amount, 2) }}</td>
+                    <td class="amount-col">Tk {{ priceFormat($total_amount) }}</td>
                 </tr>
                 @php
                     $invoiceTimePaidOPD = round((float) ($invoice_time_paid_amount ?? $paid_amount ?? 0), 2);
@@ -407,7 +407,7 @@
                 @if ($invoiceTimePaidOPD != 0)
                 <tr>
                     <td>Paid (Invoice Time)</td>
-                    <td class="amount-col">Tk {{ number_format($invoice_time_paid_amount ?? $paid_amount, 2) }}</td>
+                    <td class="amount-col">Tk {{ priceFormat($invoice_time_paid_amount ?? $paid_amount) }}</td>
                 </tr>
                 @endif
                 @foreach(($opd_due_collections ?? []) as $dueCollection)
@@ -415,19 +415,19 @@
                     <td class="due-collect-label">
                         {{ \Carbon\Carbon::parse($dueCollection->collected_at)->format('d-M-Y h:i A') }} - Due Collect
                     </td>
-                    <td class="amount-col">Tk {{ number_format((float) $dueCollection->collected_amount, 2) }}</td>
+                    <td class="amount-col">Tk {{ priceFormat($dueCollection->collected_amount) }}</td>
                 </tr>
                 @endforeach
                 @if ($totalPaidOPD != 0)
                 <tr>
                     <td><strong>Total Paid Amount</strong></td>
-                    <td class="amount-col"><strong>Tk {{ number_format($paid_amount, 2) }}</strong></td>
+                    <td class="amount-col"><strong>Tk {{ priceFormat($paid_amount) }}</strong></td>
                 </tr>
                 @endif
                 @if ($balanceAmountOPD != 0)
                 <tr class="balance-row">
                     <td>Due Amount</td>
-                    <td class="amount-col">Tk {{ number_format($balance_amount, 2) }}</td>
+                    <td class="amount-col">Tk {{ priceFormat($balance_amount) }}</td>
                 </tr>
                 @endif
             </table>
@@ -444,7 +444,7 @@
                 'phone' => (string) ($patient_phone ?? ''),
                 'exp' => now()->addDays(30)->timestamp,
             ];
-            $portalToken = encrypt(json_encode($portalTokenPayload));
+            $portalToken = \Illuminate\Support\Facades\Crypt::encryptString(json_encode($portalTokenPayload));
         }
         $portalLoginUrl = $portalToken !== ''
             ? route('backend.patient.portal.login', ['token' => $portalToken])

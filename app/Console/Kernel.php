@@ -52,5 +52,6 @@ class Kernel extends ConsoleKernel
         Commands\SyncPurchaseLedgerCommand::class,
         Commands\GenerateInvoiceFullPdf::class,
         Commands\RecomputeRefundAmounts::class,
+        Commands\RecoverSystemDataCommand::class,
     ];
 }

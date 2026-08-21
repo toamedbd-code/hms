@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Billing;
+use App\Models\BillItem;
 use App\Models\DueCollection;
 use App\Models\Expense;
 use App\Models\OpdPatient;
@@ -97,12 +98,27 @@ class ReportAccountingService
             ->pluck('total_collected', 'billing_id');
 
         return $billings->map(function ($billing) use ($useDateRangeAmounts, $paidAtBillingById, $paidAtBillingByIdInRange, $dueCollectionsAll, $dueCollectionsByBillingInRange) {
-            $discountAmount = $billing->discount_type === 'percentage'
-                ? (($billing->total * $billing->discount) / 100)
+            $discountBase = (float) $billing->total;
+            if ($billing->discount_type === 'percentage') {
+                $discountBase = (float) BillItem::where('billing_id', $billing->id)
+                    ->whereRaw('LOWER(category) NOT IN (?, ?)', ['disposable', 'pathology'])
+                    ->sum('total_amount');
+            }
+
+            $billingDiscountAmount = $billing->discount_type === 'percentage'
+                ? (($discountBase * $billing->discount) / 100)
                 : $billing->discount;
 
-            $discountAmount = max(0, (float) $discountAmount);
+            $itemDiscountAmount = (float) BillItem::where('billing_id', $billing->id)
+                ->where('status', 'Active')
+                ->sum('discount');
             $extraDiscount = max(0, (float) $billing->extra_flat_discount);
+            $calculatedDiscount = max(0, (float) $billingDiscountAmount) + max(0, $itemDiscountAmount);
+            $storedNetAmount = max(0, (float) ($billing->payable_amount ?? 0) - (float) ($billing->vat_amount ?? 0));
+            $discountAmount = $storedNetAmount > 0 || (float) $billing->payable_amount === 0
+                ? max(0, (float) $billing->total - $storedNetAmount - $extraDiscount)
+                : $calculatedDiscount;
+            $discountAmount = min($discountAmount, (float) $billing->total);
             $netAmount = max(0, (float) $billing->total - $discountAmount - $extraDiscount);
 
             $paidAmount = (float) ($useDateRangeAmounts

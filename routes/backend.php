@@ -363,6 +363,7 @@ Route::match(['get', 'post'], 'payment/bkash/callback', [\App\Http\Controllers\P
 Route::get('payment/bkash/waiting/{payment}', [\App\Http\Controllers\Payment\BkashController::class, 'waiting'])->name('payment.bkash.waiting');
 Route::get('payment/bkash/waiting/{payment}/poll', [\App\Http\Controllers\Payment\BkashController::class, 'waitingPoll'])->name('payment.bkash.waiting.poll');
 Route::get('payment/bkash/confirm-pending', [\App\Http\Controllers\Payment\BkashController::class, 'confirmPending'])->name('payment.bkash.confirm.pending');
+Route::get('payment/bkash/invoice/{payment}', [\App\Http\Controllers\Payment\BkashController::class, 'paymentInvoice'])->name('payment.bkash.invoice');
 Route::post('payment/bkash/webhook', [\App\Http\Controllers\Payment\BkashWebhookController::class, 'handle'])->name('payment.bkash.webhook');
 Route::get('payment/bkash/unsubscribe', [\App\Http\Controllers\Payment\BkashController::class, 'publicUnsubscribe'])->name('payment.bkash.unsubscribe.public');
 Route::get('payment/bkash/simulate-public/{payment}', [\App\Http\Controllers\Payment\BkashController::class, 'publicSimulatePage'])->name('payment.bkash.simulate.public.page');
@@ -430,6 +431,7 @@ Route::group(['middleware' => ['AdminAuth', 'org.context', 'branch.scope']], fun
     Route::get('settings/payment/bkash', [BkashSettingController::class, 'index'])->name('settings.payment.bkash');
     Route::post('settings/payment/bkash', [BkashSettingController::class, 'store'])->name('settings.payment.bkash.store');
     Route::post('settings/payment/bkash/test', [BkashSettingController::class, 'test'])->name('settings.payment.bkash.test');
+    Route::post('settings/payment/bkash/subscription-toggle', [BkashSettingController::class, 'toggleSubscription'])->name('settings.payment.bkash.subscription.toggle');
 
     // bKash payment endpoints (admin)
     Route::post('payment/bkash/initiate', [\App\Http\Controllers\Payment\BkashController::class, 'initiate'])->name('payment.bkash.initiate');
@@ -1165,9 +1167,10 @@ Route::post('opd-due-collect/{id}', [DueCollectController::class, 'opdStore'])
 });
 
 // Patient Portal
+Route::get('patient-portal/login', [PatientPortalController::class, 'loginForm'])->name('patient.portal.login');
+Route::post('patient-portal/login', [PatientPortalController::class, 'login'])->name('patient.portal.login.post');
+
 Route::middleware(['patient.panel'])->group(function () {
-    Route::get('patient-portal/login', [PatientPortalController::class, 'loginForm'])->name('patient.portal.login');
-    Route::post('patient-portal/login', [PatientPortalController::class, 'login'])->name('patient.portal.login.post');
     Route::match(['get', 'post'], 'patient-portal/payment/callback', [PatientPortalController::class, 'paymentCallback'])->name('patient.portal.payment.callback');
 
     Route::middleware(['patient.auth'])->group(function () {

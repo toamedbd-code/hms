@@ -1,0 +1,66 @@
+[2026-08-13 19:20:25] local.DEBUG: billing.store.received {"billing_date":"2026-08-13","billing_time":"19:20:24"} 
+[2026-08-13 19:20:25] local.DEBUG: billing.store.items {"items":[{"id":175,"name":"CBC","category":"Pathology","unit_price":550,"quantity":1,"total_amount":550,"discount":0,"rugound":0,"net_amount":550,"room_no":null}]} 
+[2026-08-13 19:20:25] local.DEBUG: billing.store.items.normalized {"items":[{"id":175,"name":"CBC","category":"Pathology","unit_price":550,"quantity":1,"total_amount":550,"discount":0,"rugound":0,"net_amount":550,"room_no":null}]} 
+[2026-08-13 19:20:25] local.DEBUG: billing.store.item.snapshot {"item_id":175,"item_name":"CBC","category":"Pathology","commissionable":null,"commission_rate_snapshot":null} 
+[2026-08-13 19:27:41] local.DEBUG: billing.store.received {"billing_date":"2026-08-13","billing_time":"19:27:40"} 
+[2026-08-13 19:27:41] local.DEBUG: billing.store.items {"items":[{"id":12,"name":"RBS","category":"Pathology","unit_price":200,"quantity":1,"total_amount":200,"discount":0,"rugound":0,"net_amount":200,"room_no":null}]} 
+[2026-08-13 19:27:41] local.DEBUG: billing.store.items.normalized {"items":[{"id":12,"name":"RBS","category":"Pathology","unit_price":200,"quantity":1,"total_amount":200,"discount":0,"rugound":0,"net_amount":200,"room_no":null}]} 
+[2026-08-13 19:27:41] local.DEBUG: billing.store.item.snapshot {"item_id":12,"item_name":"RBS","category":"Pathology","commissionable":null,"commission_rate_snapshot":null} 
+[2026-08-13 19:39:28] local.ERROR: Command "db:query" is not defined.
+
+Did you mean one of these?
+    db
+    db:monitor
+    db:seed
+    db:show
+    db:table
+    db:wipe {"exception":"[object] (Symfony\\Component\\Console\\Exception\\CommandNotFoundException(code: 0): Command \"db:query\" is not defined.
+
+Did you mean one of these?
+    db
+    db:monitor
+    db:seed
+    db:show
+    db:table
+    db:wipe at C:/laragon/www/hms/vendor/symfony/console/Application.php:759)
+[stacktrace]
+#0 C:/laragon/www/hms/vendor/symfony/console/Application.php(298): Symfony/Component/Console/Application->find('db:query')
+#1 C:/laragon/www/hms/vendor/symfony/console/Application.php(195): Symfony/Component/Console/Application->doRun(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#2 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony/Component/Console/Application->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#3 C:/laragon/www/hms/artisan(35): Illuminate/Foundation/Console/Kernel->handle(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#4 {main}
+"} 
+[2026-08-13 19:39:34] local.ERROR: The "--columns" option does not exist. {"exception":"[object] (Symfony\\Component\\Console\\Exception\\RuntimeException(code: 0): The \"--columns\" option does not exist. at C:/laragon/www/hms/vendor/symfony/console/Input/ArgvInput.php:226)
+[stacktrace]
+#0 C:/laragon/www/hms/vendor/symfony/console/Input/ArgvInput.php(153): Symfony/Component/Console/Input/ArgvInput->addLongOption('columns', 'id,delivery_dat...')
+#1 C:/laragon/www/hms/vendor/symfony/console/Input/ArgvInput.php(88): Symfony/Component/Console/Input/ArgvInput->parseLongOption('--columns=id,de...')
+#2 C:/laragon/www/hms/vendor/symfony/console/Input/ArgvInput.php(77): Symfony/Component/Console/Input/ArgvInput->parseToken('--columns=id,de...', true)
+#3 C:/laragon/www/hms/vendor/symfony/console/Input/Input.php(53): Symfony/Component/Console/Input/ArgvInput->parse()
+#4 C:/laragon/www/hms/vendor/symfony/console/Command/Command.php(295): Symfony/Component/Console/Input/Input->bind(Object(Symfony/Component/Console/Input/InputDefinition))
+#5 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony/Component/Console/Command/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#6 C:/laragon/www/hms/vendor/symfony/console/Application.php(1117): Illuminate/Console/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#7 C:/laragon/www/hms/vendor/symfony/console/Application.php(356): Symfony/Component/Console/Application->doRunCommand(Object(Illuminate/Database/Console/TableCommand), Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#8 C:/laragon/www/hms/vendor/symfony/console/Application.php(195): Symfony/Component/Console/Application->doRun(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#9 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony/Component/Console/Application->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#10 C:/laragon/www/hms/artisan(35): Illuminate/Foundation/Console/Kernel->handle(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#11 {main}
+"} 
+[2026-08-13 19:39:39] local.ERROR: The "--where" option does not exist. {"exception":"[object] (Symfony\\Component\\Console\\Exception\\RuntimeException(code: 0): The \"--where\" option does not exist. at C:/laragon/www/hms/vendor/symfony/console/Input/ArgvInput.php:226)
+[stacktrace]
+#0 C:/laragon/www/hms/vendor/symfony/console/Input/ArgvInput.php(153): Symfony/Component/Console/Input/ArgvInput->addLongOption('where', 'id=872')
+#1 C:/laragon/www/hms/vendor/symfony/console/Input/ArgvInput.php(88): Symfony/Component/Console/Input/ArgvInput->parseLongOption('--where=id=872')
+#2 C:/laragon/www/hms/vendor/symfony/console/Input/ArgvInput.php(77): Symfony/Component/Console/Input/ArgvInput->parseToken('--where=id=872', true)
+#3 C:/laragon/www/hms/vendor/symfony/console/Input/Input.php(53): Symfony/Component/Console/Input/ArgvInput->parse()
+#4 C:/laragon/www/hms/vendor/symfony/console/Command/Command.php(295): Symfony/Component/Console/Input/Input->bind(Object(Symfony/Component/Console/Input/InputDefinition))
+#5 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Console/Command.php(180): Symfony/Component/Console/Command/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Illuminate/Console/OutputStyle))
+#6 C:/laragon/www/hms/vendor/symfony/console/Application.php(1117): Illuminate/Console/Command->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#7 C:/laragon/www/hms/vendor/symfony/console/Application.php(356): Symfony/Component/Console/Application->doRunCommand(Object(Illuminate/Database/Console/TableCommand), Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#8 C:/laragon/www/hms/vendor/symfony/console/Application.php(195): Symfony/Component/Console/Application->doRun(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#9 C:/laragon/www/hms/vendor/laravel/framework/src/Illuminate/Foundation/Console/Kernel.php(198): Symfony/Component/Console/Application->run(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#10 C:/laragon/www/hms/artisan(35): Illuminate/Foundation/Console/Kernel->handle(Object(Symfony/Component/Console/Input/ArgvInput), Object(Symfony/Component/Console/Output/ConsoleOutput))
+#11 {main}
+"} 
+[2026-08-13 19:47:35] local.DEBUG: billing.store.received {"billing_date":"2026-08-13","billing_time":"19:47:34"} 
+[2026-08-13 19:47:35] local.DEBUG: billing.store.items {"items":[{"id":175,"name":"CBC","category":"Pathology","unit_price":550,"quantity":1,"total_amount":550,"discount":0,"rugound":0,"net_amount":550,"room_no":null}]} 
+[2026-08-13 19:47:35] local.DEBUG: billing.store.items.normalized {"items":[{"id":175,"name":"CBC","category":"Pathology","unit_price":550,"quantity":1,"total_amount":550,"discount":0,"rugound":0,"net_amount":550,"room_no":null}]} 
+[2026-08-13 19:47:35] local.DEBUG: billing.store.item.snapshot {"item_id":175,"item_name":"CBC","category":"Pathology","commissionable":null,"commission_rate_snapshot":null} 

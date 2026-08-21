@@ -1,0 +1,8 @@
+[2026-08-09 15:40:22] testing.INFO: AppServiceProvider: enforced DB config at runtime {"db_host":"127.0.0.1","db_database":"hms_local","db_username":"root"} 
+[2026-08-09 15:41:13] testing.INFO: AppServiceProvider: enforced DB config at runtime {"db_host":"127.0.0.1","db_database":"hms_local","db_username":"root"} 
+[2026-08-09 15:59:02] production.INFO: AppServiceProvider: ensured APP_KEY is set at runtime  
+[2026-08-09 16:02:16] production.INFO: AppServiceProvider: ensured APP_KEY is set at runtime  
+[2026-08-09 16:04:45] production.INFO: AppServiceProvider: ensured APP_KEY is set at runtime  
+[2026-08-09 16:20:01] production.INFO: AppServiceProvider: ensured APP_KEY is set at runtime  
+[2026-08-09 22:07:57] local.INFO: AppServiceProvider: enforced DB config at runtime {"db_host":"127.0.0.1","db_database":"hms_local","db_username":"root"} 
+[2026-08-09 22:07:57] local.INFO: AppServiceProvider: enforced DB config at runtime {"db_host":"127.0.0.1","db_database":"hms_local","db_username":"root"} 

@@ -22,6 +22,10 @@ class BkashService
             return rtrim((string) config('bkash.production_base_url'), '/');
         }
 
+        if (filter_var(config('bkash.use_production', false), FILTER_VALIDATE_BOOLEAN) || app()->environment('production')) {
+            return rtrim((string) config('bkash.production_base_url', 'https://tokenized.pay.bka.sh/v1.2.0-beta'), '/');
+        }
+
         $base = rtrim((string) config('bkash.sandbox_base_url'), '/');
         $host = parse_url($base, PHP_URL_HOST) ?: '';
 
@@ -472,7 +476,6 @@ class BkashService
                     ->withHeaders(['X-App-Key' => (string) $appKey])
                     ->post($url, [
                         'mode' => '0011',
-                        'payerReference' => ' ',
                         'callbackURL' => url('/payment/bkash/callback'),
                         'amount' => (string) $payment->amount,
                         'currency' => 'BDT',

@@ -51,9 +51,35 @@ class BkashController extends Controller
         return $configured;
     }
 
+    protected function productionBaseUrl(): string
+    {
+        $configured = rtrim((string) config('bkash.production_base_url', 'https://tokenized.pay.bka.sh/v1.2.0-beta'), '/');
+        $host = parse_url($configured, PHP_URL_HOST) ?: '';
+
+        if ($configured === '' || $host === 'bka.sh' || $host === 'sandbox.bka.sh' || $host === 'tokenized.sandbox.bka.sh' || str_ends_with($configured, '/v2')) {
+            return self::SANDBOX_BASE_URL;
+        }
+
+        return $configured;
+    }
+
+    protected function activeBaseUrl(): string
+    {
+        $setting = $this->bkashSetting();
+        if ($setting && $setting->is_sandbox === false) {
+            return $this->productionBaseUrl();
+        }
+
+        if (filter_var(config('bkash.use_production', false), FILTER_VALIDATE_BOOLEAN) || app()->environment('production')) {
+            return $this->productionBaseUrl();
+        }
+
+        return $this->sandboxBaseUrl();
+    }
+
     protected function apiUrl(string $path): string
     {
-        return rtrim($this->sandboxBaseUrl(), '/') . '/' . ltrim($path, '/');
+        return rtrim($this->activeBaseUrl(), '/') . '/' . ltrim($path, '/');
     }
 
     /**
@@ -210,17 +236,26 @@ class BkashController extends Controller
         }
 
         $callbackUrl = $this->callbackUrl($callbackUrl);
+        // Only send a payerReference when an explicit merchant number is configured.
+        // Do NOT fall back to `username` because that causes the hosted checkout
+        // to pre-fill the payer field with internal identifiers.
+        $payerReference = $this->credential('merchant_number');
+
+        $payload = [
+            'mode' => '0011',
+            'callbackURL' => $callbackUrl,
+            'amount' => number_format((float) $payment->amount, 2, '.', ''),
+            'currency' => 'BDT',
+            'intent' => 'sale',
+            'merchantInvoiceNumber' => (string) $payment->id,
+        ];
+
+        if ($payerReference) {
+            $payload['payerReference'] = $payerReference;
+        }
 
         $response = $this->authorizedClient($token, $appKey)
-            ->post($this->apiUrl(ltrim(config('bkash.create_payment_endpoint'), '/')), [
-                'mode' => '0011',
-                'payerReference' => '01770618575',
-                'callbackURL' => $callbackUrl,
-                'amount' => number_format((float) $payment->amount, 2, '.', ''),
-                'currency' => 'BDT',
-                'intent' => 'sale',
-                'merchantInvoiceNumber' => (string) $payment->id,
-            ]);
+            ->post($this->apiUrl(ltrim(config('bkash.create_payment_endpoint'), '/')), $payload);
 
         $data = $response->json() ?? [];
         $statusCode = (string) data_get($data, 'statusCode', '');
@@ -358,13 +393,46 @@ class BkashController extends Controller
         return $sub;
     }
 
+    protected function isValidPendingPayment(?Payment $payment): bool
+    {
+        if (! $payment || $payment->provider !== 'bkash') {
+            return false;
+        }
+
+        // Only consider a payment valid for reuse if it is in 'pending' state
+        // (meaning createPayment returned a hosted checkout URL) and it has
+        // a provider payment id. Do not reuse 'initiated' records because a
+        // previously cancelled/abandoned checkout should start a fresh one.
+        if ($payment->status !== 'pending') {
+            return false;
+        }
+
+        if (empty($payment->provider_payment_id)) {
+            return false;
+        }
+
+        if ($payment->created_at && $payment->created_at->lt(now()->subMinutes(30))) {
+            return false;
+        }
+
+        return true;
+    }
+
     protected function isBkashPaymentSuccessful(array $data): bool
     {
-        $statusCode = data_get($data, 'statusCode');
-        $trxStatus = data_get($data, 'transactionStatus');
+        $statusCode = (string) data_get($data, 'statusCode');
+        $trxStatus = trim((string) (data_get($data, 'transactionStatus') ?: data_get($data, 'transaction_status')));
+        $statusMessage = trim((string) (data_get($data, 'statusMessage') ?: data_get($data, 'status_message')));
 
-        return $statusCode === '0000'
-            || in_array($trxStatus, ['Completed', 'Success', 'Successful'], true);
+        if ($trxStatus !== '') {
+            return in_array($trxStatus, ['Completed', 'Success', 'Successful', 'completed', 'success', 'successful'], true);
+        }
+
+        if ($statusCode === '0000' && $statusMessage !== '') {
+            return str_contains(strtolower($statusMessage), 'success');
+        }
+
+        return false;
     }
 
     public function initiate(Request $request)
@@ -471,6 +539,24 @@ class BkashController extends Controller
         $setting = BkashSetting::first();
         $period = $request->input('period', config('subscription.default_period', 'monthly'));
 
+        $pendingPaymentId = $request->session()->get('bkash_pending_payment_id');
+        if ($pendingPaymentId) {
+            $pendingPayment = Payment::find($pendingPaymentId);
+
+            if (! $this->isValidPendingPayment($pendingPayment)) {
+                $request->session()->forget('bkash_pending_payment_id');
+            } else {
+                $waitingRoute = Route::has('backend.payment.bkash.waiting')
+                    ? 'backend.payment.bkash.waiting'
+                    : (Route::has('payment.bkash.waiting') ? 'payment.bkash.waiting' : null);
+
+                if ($waitingRoute) {
+                    return redirect()->route($waitingRoute, ['payment' => $pendingPayment->id])
+                        ->with('successMessage', 'A pending subscription payment is already in progress. Please complete that payment before starting a new one.');
+                }
+            }
+        }
+
         if ($request->filled('amount')) {
             $amount = $request->input('amount');
         } else {
@@ -512,6 +598,8 @@ class BkashController extends Controller
             'status' => 'initiated',
             'metadata' => array_merge(['period' => $period], ['approval_token' => \Illuminate\Support\Str::random(40)]),
         ]);
+
+        $request->session()->put('bkash_pending_payment_id', $payment->id);
 
         try {
             $result = $this->createPayment($payment);
@@ -576,8 +664,36 @@ class BkashController extends Controller
             ?: $request->input('payment_id');
 
         $payment = $paymentId ? Payment::find($paymentId) : null;
-        if (! $payment) {
-            return redirect()->route($loginRoute)->with('errorMessage', 'No pending bKash payment found. Click Pay Monthly again.');
+        if (! $payment || ! $this->isValidPendingPayment($payment)) {
+            $request->session()->forget('bkash_pending_payment_id');
+            $message = 'No pending bKash payment found. Click Pay Monthly again.';
+
+            if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'ok' => false,
+                    'done' => false,
+                    'message' => $message,
+                    'redirect' => route($loginRoute),
+                ], 404);
+            }
+
+            return redirect()->route($loginRoute)->with('errorMessage', $message);
+        }
+
+        if ($payment->status === 'failed') {
+            $request->session()->forget('bkash_pending_payment_id');
+            $message = 'This payment was cancelled or failed. Please start a new payment.';
+
+            if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'ok' => false,
+                    'done' => false,
+                    'message' => $message,
+                    'redirect' => route($loginRoute),
+                ], 409);
+            }
+
+            return redirect()->route($loginRoute)->with('errorMessage', $message);
         }
 
         $response = $this->waitingPoll($request->merge(['confirm' => 1]), $payment);
@@ -586,13 +702,31 @@ class BkashController extends Controller
         if (! empty($data['done'])) {
             $request->session()->forget('bkash_pending_payment_id');
 
+            if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+                return response()->json([
+                    'ok' => true,
+                    'done' => true,
+                    'message' => $data['message'] ?? 'Payment successful. You can log in now.',
+                    'invoiceUrl' => $data['invoiceUrl'] ?? null,
+                    'redirect' => route($loginRoute),
+                ]);
+            }
+
             return redirect()->route($loginRoute)->with('successMessage', $data['message'] ?? 'Payment successful. You can log in now.');
         }
 
-        return redirect()->route($loginRoute)->with(
-            'errorMessage',
-            $data['message'] ?? 'Payment not confirmed yet. Finish wallet/OTP/PIN on bKash, then confirm again.'
-        );
+        $message = $data['message'] ?? 'Payment not confirmed yet. Finish wallet/OTP/PIN on bKash, then confirm again.';
+
+        if ($request->expectsJson() || $request->header('X-Requested-With') === 'XMLHttpRequest') {
+            return response()->json([
+                'ok' => false,
+                'done' => false,
+                'message' => $message,
+                'redirect' => route($loginRoute),
+            ], 409);
+        }
+
+        return redirect()->route($loginRoute)->with('errorMessage', $message);
     }
 
     /**
@@ -607,6 +741,11 @@ class BkashController extends Controller
 
         if ($payment->status === 'success') {
             return redirect()->route($loginRoute)->with('successMessage', 'Payment already completed. You can log in now.');
+        }
+
+        if ($payment->status === 'failed') {
+            session()->forget('bkash_pending_payment_id');
+            return redirect()->route($loginRoute)->with('errorMessage', 'This payment was cancelled or failed. Please start a new payment.');
         }
 
         $bkashUrl = data_get($payment->metadata, 'bkash_url');
@@ -636,6 +775,16 @@ class BkashController extends Controller
                     \Illuminate\Support\Facades\Route::has('backend.auth.login2') ? 'backend.auth.login2' : 'auth.login2'
                 ),
             ]);
+        }
+
+        if ($payment->status === 'failed') {
+            $request->session()->forget('bkash_pending_payment_id');
+            return response()->json([
+                'ok' => false,
+                'done' => false,
+                'message' => 'This payment was cancelled or failed. Please start a new payment.',
+                'redirect' => route(\Illuminate\Support\Facades\Route::has('backend.auth.login2') ? 'backend.auth.login2' : 'auth.login2'),
+            ], 409);
         }
 
         // Never auto-execute. Early execute invalidates the hosted checkout session.
@@ -681,21 +830,24 @@ class BkashController extends Controller
 
         $payment->status = 'success';
         $payment->provider_payment_id = data_get($raw, 'paymentID') ?: $paymentId;
+        $invoiceNumber = 'TOAMED-INV-' . str_pad((string) $payment->id, 6, '0', STR_PAD_LEFT);
         $payment->metadata = array_merge($payment->metadata ?? [], [
             'trx_id' => data_get($raw, 'trxID') ?: data_get($raw, 'trxId'),
             'bkash_response' => $raw,
+            'invoice_number' => $invoiceNumber,
         ]);
         $payment->save();
 
         $sub = $this->activateSubscription($payment, $payment->provider_payment_id);
+        $loginRoute = \Illuminate\Support\Facades\Route::has('backend.auth.login2') ? 'backend.auth.login2' : 'auth.login2';
 
         return response()->json([
             'ok' => true,
             'done' => true,
-            'message' => 'Payment successful. Subscription active until ' . $sub->expires_at->toDateString() . '.',
-            'redirect' => route(
-                \Illuminate\Support\Facades\Route::has('backend.auth.login2') ? 'backend.auth.login2' : 'auth.login2'
-            ),
+            'message' => 'Payment successful. You can log in now.',
+            'invoiceNumber' => $invoiceNumber,
+            'invoiceUrl' => route('backend.payment.bkash.invoice', ['payment' => $payment->id]),
+            'redirect' => route($loginRoute),
         ]);
     }
 
@@ -759,13 +911,42 @@ class BkashController extends Controller
             return redirect()->route('backend.auth.login2')->with('errorMessage', 'Payments are disabled by system configuration.');
         }
 
+        if ($payment->status === 'success') {
+            return redirect()->route('backend.auth.login2')->with('successMessage', 'Payment already completed. You can log in now.');
+        }
+
+        if ($payment->status === 'failed') {
+            return redirect()->route('backend.auth.login2')->with('errorMessage', 'This payment was cancelled or failed. Please start a new payment.');
+        }
+
         if (! in_array($payment->status, ['initiated', 'pending', null], true)) {
-            return redirect()->route('backend.auth.login2')->with('successMessage', 'This payment has already been processed.');
+            return redirect()->route('backend.auth.login2')->with('successMessage', 'Payment already completed. You can log in now.');
         }
 
         return view('payment.bkash.simulate-public', [
             'payment' => $payment,
             'loginRoute' => \Illuminate\Support\Facades\Route::has('backend.auth.login2') ? 'backend.auth.login2' : 'auth.login2',
+        ]);
+    }
+
+    public function paymentInvoice(Payment $payment)
+    {
+        $loginRoute = \Illuminate\Support\Facades\Route::has('backend.auth.login2')
+            ? 'backend.auth.login2'
+            : 'auth.login2';
+
+        $invoiceNumber = data_get($payment->metadata, 'invoice_number')
+            ?: 'TOAMED-INV-' . str_pad((string) $payment->id, 6, '0', STR_PAD_LEFT);
+
+        $meta = $payment->metadata ?? [];
+        $meta['invoice_number'] = $invoiceNumber;
+        $payment->metadata = $meta;
+        $payment->save();
+
+        return view('payment.bkash.invoice', [
+            'payment' => $payment,
+            'invoiceNumber' => $invoiceNumber,
+            'loginRoute' => $loginRoute,
         ]);
     }
 
@@ -780,19 +961,44 @@ class BkashController extends Controller
 
         $providerPaymentId = $request->input('paymentID') ?? $request->input('payment_id');
         $status = strtolower((string) $request->input('status', ''));
+        $pendingPaymentId = $request->session()->get('bkash_pending_payment_id');
+        $merchantInvoiceNumber = $request->input('merchantInvoiceNumber')
+            ?? $request->input('merchant_invoice_number')
+            ?? $request->input('merchantInvoice')
+            ?? null;
 
-        if (! $providerPaymentId) {
+        if (! $providerPaymentId && ! $merchantInvoiceNumber) {
             return redirect()->route($loginRoute)->with('errorMessage', 'Missing bKash payment ID.');
         }
 
-        $payment = Payment::where('provider_payment_id', $providerPaymentId)->first();
-        if (! $payment) {
-            $payment = Payment::find($request->input('merchantInvoiceNumber'));
+        $payment = null;
+
+        if ($providerPaymentId) {
+            $payment = Payment::where('provider_payment_id', $providerPaymentId)->first();
+        }
+
+        if (! $payment && $merchantInvoiceNumber) {
+            $payment = Payment::whereKey((int) $merchantInvoiceNumber)->first();
+        }
+
+        if (! $payment && $pendingPaymentId) {
+            $payment = Payment::find($pendingPaymentId);
+        }
+
+        if (! $payment && $providerPaymentId) {
+            $payment = Payment::where('id', $providerPaymentId)->first();
+        }
+
+        if (! $payment && $merchantInvoiceNumber) {
+            $payment = Payment::whereJsonContains('metadata->invoice_number', (string) $merchantInvoiceNumber)
+                ->first();
         }
 
         if (! $payment) {
             return redirect()->route($loginRoute)->with('errorMessage', 'Payment record not found.');
         }
+
+        $request->session()->put('bkash_pending_payment_id', $payment->id);
 
         if ($payment->status === 'success') {
             return redirect()->route($loginRoute)->with('successMessage', 'Payment already completed.');
@@ -802,6 +1008,7 @@ class BkashController extends Controller
             $payment->status = 'failed';
             $payment->metadata = array_merge($payment->metadata ?? [], ['bkash_callback' => $request->all()]);
             $payment->save();
+            $request->session()->forget('bkash_pending_payment_id');
 
             return redirect()->route($loginRoute)->with('errorMessage', 'bKash payment was not completed.');
         }

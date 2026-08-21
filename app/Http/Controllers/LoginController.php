@@ -7,6 +7,7 @@ use App\Http\Requests\Auth\LoginRequest;
 use App\Services\AdminService;
 use App\Services\ActivityLogService;
 use App\Traits\SystemTrait;
+use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\BkashSetting;
 use App\Support\DefaultDeveloperManager;
@@ -132,6 +133,18 @@ class LoginController extends Controller
         $bkashEnabled = $this->shouldShowSubscriptionPayment($setting);
         $showSubscriptionRenewal = $enforce && Subscription::tableExists() && ! $active;
 
+        $pendingPaymentId = session('bkash_pending_payment_id');
+        if ($pendingPaymentId) {
+            $pendingPayment = Payment::find($pendingPaymentId);
+            if (! $pendingPayment || $pendingPayment->provider !== 'bkash' || ! in_array($pendingPayment->status, ['initiated', 'pending'], true)) {
+                session()->forget('bkash_pending_payment_id');
+                $pendingPaymentId = null;
+            } elseif ($pendingPayment->created_at && $pendingPayment->created_at->lt(now()->subMinutes(30))) {
+                session()->forget('bkash_pending_payment_id');
+                $pendingPaymentId = null;
+            }
+        }
+
         return Inertia::render('Login', [
             'subscriptionEnforced' => $enforce,
             'subscriptionActive' => $active,
@@ -141,7 +154,7 @@ class LoginController extends Controller
             'bkashYearlyAmount' => config('subscription.yearly_amount', 0),
             'subscriptionDefaultPeriod' => config('subscription.default_period', 'monthly'),
             'isSandbox' => (bool) ($setting?->is_sandbox ?? true),
-            'pendingBkashPaymentId' => session('bkash_pending_payment_id'),
+            'pendingBkashPaymentId' => $pendingPaymentId,
             'successMessage' => session('successMessage'),
             'errorMessage' => session('errorMessage'),
             'warningMessage' => session('warningMessage'),

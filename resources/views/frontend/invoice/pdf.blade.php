@@ -474,21 +474,21 @@
         .due-badge {
             background-color: #ff4444;
             color: white;
-            padding: 4px 8px;
+            padding: 8px 16px;
             font-weight: bold;
             display: inline-block;
-            margin-bottom: 4px;
-            font-size: 16px;
+            margin-bottom: 8px;
+            font-size: 32px;
         }
 
         .paid-badge {
             background-color: #28a745;
             color: white;
-            padding: 4px 8px;
+            padding: 8px 16px;
             font-weight: bold;
             display: inline-block;
-            margin-bottom: 4px;
-            font-size: 16px;
+            margin-bottom: 8px;
+            font-size: 32px;
         }
 
         /* Totals table */
@@ -892,7 +892,9 @@
 
             .due-badge,
             .paid-badge {
-                font-size: 17px;
+                font-size: 34px;
+                padding: 8px 16px;
+                margin-bottom: 8px;
             }
 
             .amount-words {
@@ -906,11 +908,20 @@
 
             .footer-section {
                 height: {{ $__inv_footer_reserved_h }}px;
+                bottom: 0 !important;
+                overflow: visible !important;
             }
 
             .footer-image {
-                height: {{ $__inv_footer_h }}px;
-                max-height: {{ $__inv_footer_h }}px;
+                position: absolute !important;
+                height: auto !important;
+                max-height: none !important;
+                left: 0 !important;
+                right: 0 !important;
+                width: 100% !important;
+                bottom: 2mm !important;
+                object-fit: initial !important;
+                object-position: initial !important;
             }
 
             .footer-date-time {
@@ -1005,8 +1016,9 @@
 
             .due-badge,
             .paid-badge {
-                font-size: 11px !important;
-                padding: 1px 4px !important;
+                font-size: 22px !important;
+                padding: 4px 8px !important;
+                margin-bottom: 4px !important;
             }
 
             .amount-words {
@@ -1054,12 +1066,19 @@
             .footer-section {
                 height: {{ $__inv_footer_reserved_h }}px !important;
                 bottom: 0 !important;
+                overflow: visible !important;
             }
 
             .footer-image {
-                height: {{ $__inv_footer_h }}px !important;
-                max-height: {{ $__inv_footer_h }}px !important;
-                bottom: 0 !important;
+                position: absolute !important;
+                height: auto !important;
+                max-height: none !important;
+                left: 0 !important;
+                right: 0 !important;
+                width: 100% !important;
+                bottom: 2mm !important;
+                object-fit: initial !important;
+                object-position: initial !important;
             }
 
             .footer-content {
@@ -1226,7 +1245,7 @@
                             <td class="room-col">{{ data_get($item, 'room_no', '') }}</td>
                         @endif
                         <td class="qty-col">{{ (int) $item->quantity }}</td>
-                        <td class="price-col">{{ number_format($item->total_amount, 2) }}</td>
+                        <td class="price-col">{{ priceFormat($item->total_amount) }}</td>
                     </tr>
                     @endforeach
                 </tbody>
@@ -1283,7 +1302,7 @@ if ($portalPatientId > 0) {
                 'billing_id' => (int) ($billing->id ?? 0),
                 'exp' => now()->addDays(30)->timestamp,
             ];
-            $portalToken = encrypt(json_encode($portalTokenPayload));
+            $portalToken = \Illuminate\Support\Facades\Crypt::encryptString(json_encode($portalTokenPayload));
         }
     } catch (\Throwable $e) {
         // If encryption is unavailable, skip portal QR generation to keep invoice rendering stable.
@@ -1386,21 +1405,21 @@ if (request()->boolean('debug_invoice')) {
                 <tr>
                     <td class="label-col"><strong>Total Amount Tk.</strong></td>
                     <td class="amount-col">
-                        <strong>{{ number_format(($base_total ?? $total_amount ?? 0), 2) }}</strong>
+                        <strong>{{ priceFormat($base_total ?? $total_amount ?? 0) }}</strong>
                     </td>
                 </tr>
 
                 @if((float) ($medicineTotal ?? 0) > 0)
                 <tr>
                     <td class="label-col">Medicine Bill</td>
-                    <td class="amount-col">{{ number_format($medicineTotal, 2) }}</td>
+                    <td class="amount-col">{{ priceFormat($medicineTotal) }}</td>
                 </tr>
                 @endif
 
                 @if((isset($ipd_id) && (float) ($labTotal ?? 0) > 0))
                 <tr>
                     <td class="label-col">Laboratory Bill</td>
-                    <td class="amount-col">{{ number_format($labTotal, 2) }}</td>
+                    <td class="amount-col">{{ priceFormat($labTotal) }}</td>
                 </tr>
                 @endif
 
@@ -1409,6 +1428,12 @@ if (request()->boolean('debug_invoice')) {
                     // matches the billing page summary logic: VAT = total * vat_percent/100,
                     // Discount (percentage) = total * discount_percent/100.
                     $baseTotal = round((float) ($base_total ?? $total_amount ?? 0), 2);
+                    $discountableBase = collect($bill_items ?? [])->reject(function ($item) {
+                        $category = strtolower((string) (is_object($item) ? ($item->category ?? '') : ($item['category'] ?? '')));
+                        return $category === 'disposable';
+                    })->sum(function ($item) {
+                        return (float) (is_object($item) ? ($item->total_amount ?? $item->net_amount ?? 0) : ($item['total_amount'] ?? $item['net_amount'] ?? 0));
+                    });
                     $vatPercentLocal = round((float) ($vat_percentage ?? 0), 2);
                     $vatComputed = $vatPercentLocal > 0 ? round(($baseTotal * $vatPercentLocal) / 100, 2) : 0.00;
 
@@ -1416,7 +1441,7 @@ if (request()->boolean('debug_invoice')) {
 
                     if (strtolower((string) ($discount_type ?? 'flat')) === 'percentage') {
                         $discountPercentLocal = round((float) ($discount ?? 0), 2);
-                        $discountComputed = round(($baseTotal * $discountPercentLocal) / 100, 2);
+                        $discountComputed = round(($discountableBase * $discountPercentLocal) / 100, 2);
                     } else {
                         $discountPercentLocal = null;
                         $discountComputed = round((float) ($discount ?? 0), 2);
@@ -1429,11 +1454,11 @@ if (request()->boolean('debug_invoice')) {
                 @if ($vatComputed != 0)
                 <tr>
                     <td class="label-col">Vat Tk.</td>
-                    <td class="amount-col">{{ number_format($vatComputed, 2) }}</td>
+                    <td class="amount-col">{{ priceFormat($vatComputed) }}</td>
                 </tr>
                 <tr>
                     <td class="label-col"><strong>Total With VAT Tk.</strong></td>
-                    <td class="amount-col"><strong>{{ number_format($totalWithVat, 2) }}</strong></td>
+                    <td class="amount-col"><strong>{{ priceFormat($totalWithVat) }}</strong></td>
                 </tr>
                 @endif
 
@@ -1444,13 +1469,13 @@ if (request()->boolean('debug_invoice')) {
                             Discount ({{ number_format($discountPercentLocal, 2) }}%)
                         </td>
                         <td class="amount-col">
-                            {{ number_format($discountComputed, 2) }}
+                            {{ priceFormat($discountComputed) }}
                         </td>
                     </tr>
                     @else
                     <tr>
                         <td class="label-col">Discount Tk.</td>
-                        <td class="amount-col">{{ number_format($discountComputed, 2) }}</td>
+                        <td class="amount-col">{{ priceFormat($discountComputed) }}</td>
                     </tr>
                     @endif
                 @endif
@@ -1459,7 +1484,7 @@ if (request()->boolean('debug_invoice')) {
                 <tr>
                     <td class="label-col">Extra Discount Tk.</td>
                     <td class="amount-col">
-                        {{ number_format($extraDiscountAmount, 2) }}
+                        {{ priceFormat($extraDiscountAmount) }}
                     </td>
                 </tr>
                 @endif
@@ -1467,7 +1492,7 @@ if (request()->boolean('debug_invoice')) {
                 <tr>
                     <td class="label-col"><strong>Net Payable Tk.</strong></td>
                     <td class="amount-col">
-                        <strong>{{ number_format($netComputed,2) }}</strong>
+                        <strong>{{ priceFormat($netComputed) }}</strong>
                     </td>
                 </tr>
 
@@ -1485,7 +1510,7 @@ if (request()->boolean('debug_invoice')) {
                 <tr>
                     <td class="label-col">Paid (Invoice Time)</td>
                     <td class="amount-col">
-                        {{ number_format($invoicePaid,2) }}
+                        {{ priceFormat($invoicePaid) }}
                     </td>
                 </tr>
                 @endif
@@ -1500,7 +1525,7 @@ if (request()->boolean('debug_invoice')) {
                         {{ \Carbon\Carbon::parse($dc->collected_at)->format('d-M-Y h:i A') }} - Due Collect
                     </td>
                     <td class="amount-col" style="text-align:right;">
-                        {{ number_format($dc->collected_amount, 2) }}
+                        {{ priceFormat($dc->collected_amount) }}
                     </td>
                 </tr>
                 @endforeach
@@ -1509,7 +1534,7 @@ if (request()->boolean('debug_invoice')) {
                 <tr>
                     <td class="label-col"><strong>Total Paid Tk.</strong></td>
                     <td class="amount-col">
-                        <strong>{{ number_format($totalPaid,2) }}</strong>
+                        <strong>{{ priceFormat($totalPaid) }}</strong>
                     </td>
                 </tr>
                 @endif
@@ -1518,7 +1543,7 @@ if (request()->boolean('debug_invoice')) {
                 <tr>
                     <td class="label-col"><strong>Return Amount Tk.</strong></td>
                     <td class="amount-col">
-                        <strong>{{ number_format($returnAmountForView,2) }}</strong>
+                        <strong>{{ priceFormat($returnAmountForView) }}</strong>
                     </td>
                 </tr>
                 @endif
@@ -1527,7 +1552,7 @@ if (request()->boolean('debug_invoice')) {
                 <tr>
                     <td class="label-col"><strong>Due Tk.</strong></td>
                     <td class="amount-col">
-                        <strong>{{ number_format($unadjustedDue,2) }}</strong>
+                        <strong>{{ priceFormat($unadjustedDue) }}</strong>
                     </td>
                 </tr>
 
@@ -1536,7 +1561,7 @@ if (request()->boolean('debug_invoice')) {
                 <tr>
                     <td class="label-col"><strong>Due After Returns Tk.</strong></td>
                     <td class="amount-col">
-                        <strong>{{ number_format($finalDue,2) }}</strong>
+                        <strong>{{ priceFormat($finalDue) }}</strong>
                     </td>
                 </tr>
                 @endif

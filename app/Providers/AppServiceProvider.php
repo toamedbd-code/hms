@@ -191,6 +191,22 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot()
     {
+        // Prevent accidental destructive artisan commands from running
+        // on production environment. This checks common dangerous commands
+        // invoked from CLI and aborts unless ALLOW_DB_RESET=true is set.
+        if ($this->app->runningInConsole()) {
+            $cmd = $_SERVER['argv'][1] ?? null;
+            $dangerous = ['migrate:fresh', 'migrate:reset', 'migrate:refresh', 'db:wipe', 'migrate:rollback'];
+            if ($cmd && in_array($cmd, $dangerous, true) && app()->environment('production')) {
+                $allow = env('ALLOW_DB_RESET', 'false');
+                if (strtolower($allow) !== 'true') {
+                    // Inform the operator and abort to avoid data loss
+                    fwrite(STDERR, "Aborting destructive artisan command ($cmd) on production. Set ALLOW_DB_RESET=true to override.\n");
+                    exit(1);
+                }
+            }
+        }
+
         date_default_timezone_set((string) config('app.timezone', 'Asia/Dhaka'));
 
         // Ensure polymorphic morph map so `category` strings (stored in bill_items)

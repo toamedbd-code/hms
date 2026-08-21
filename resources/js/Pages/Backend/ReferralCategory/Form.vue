@@ -12,8 +12,6 @@ const props = defineProps(['referralcategory', 'id']);
 
 const form = useForm({
     name: props.referralcategory?.name ?? '',
-    ecg_commission: props.referralcategory?.ecg_commission ?? '',
-    ultrasound_commission: props.referralcategory?.ultrasound_commission ?? '',
 
     _method: props.referralcategory?.id ? 'put' : 'post',
 });
@@ -96,22 +94,6 @@ const goBack = () => {
                                 class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                 v-model="form.name" type="text" placeholder="Name" />
                             <InputError class="mt-2" :message="form.errors.name" />
-                        </div>
-
-                        <div class="col-span-1 md:col-span-1">
-                            <InputLabel for="ecg_commission" value="ECG (%)" />
-                            <input id="ecg_commission"
-                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
-                                v-model="form.ecg_commission" type="number" step="0.01" min="0" placeholder="ECG Commission" />
-                            <InputError class="mt-2" :message="form.errors.ecg_commission" />
-                        </div>
-
-                        <div class="col-span-1 md:col-span-1">
-                            <InputLabel for="ultrasound_commission" value="Ultrasound (%)" />
-                            <input id="ultrasound_commission"
-                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
-                                v-model="form.ultrasound_commission" type="number" step="0.01" min="0" placeholder="Ultrasound Commission" />
-                            <InputError class="mt-2" :message="form.errors.ultrasound_commission" />
                         </div>
 
                 </div>

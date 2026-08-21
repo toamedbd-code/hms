@@ -1833,7 +1833,12 @@ watch(() => summary.value.payableAmount, () => {
   calculateChangeAndDue();
 });
 
-watch([() => summary.value.discount, () => summary.value.discountType], () => {
+watch(() => summary.value.discountType, (newType, oldType) => {
+  convertDiscountType(newType, oldType);
+  updateSummary();
+});
+
+watch(() => summary.value.discount, () => {
   updateSummary();
 });
 
@@ -2723,6 +2728,13 @@ const isDisposableValue = (v) => {
   } catch (e) { return false; }
 };
 
+const isDisposableBillingItem = (item) => {
+  if (!item) return false;
+  if (item.is_disposable || isDisposableValue(item.category)) return true;
+  const name = String(item.name || '').toLowerCase();
+  return /dispos|tube|butterfly|needle/.test(name);
+};
+
 // Smart sorting helper for search results
 const smartSortSearchResults = (items, queryString, getDisplayText = (item) => item.name || '') => {
   if (!queryString || !queryString.trim()) return items;
@@ -2994,6 +3006,25 @@ const normalizeDiscountInputsByLimit = () => {
   }
 };
 
+const discountableItemsTotal = () => items.value.reduce(
+  (sum, item) => sum + (isDisposableBillingItem(item) ? 0 : Number(item.totalAmount || 0)),
+  0
+);
+
+const convertDiscountType = (newType, oldType) => {
+  if (!oldType || newType === oldType) return;
+
+  const discountableTotal = discountableItemsTotal();
+  const currentValue = Math.max(0, Number(summary.value.discount) || 0);
+  if (discountableTotal <= 0 || currentValue <= 0) return;
+
+  if (newType === 'percentage' && oldType === 'flat') {
+    summary.value.discount = parseFloat(((currentValue / discountableTotal) * 100).toFixed(4));
+  } else if (newType === 'flat' && oldType === 'percentage') {
+    summary.value.discount = parseFloat((discountableTotal * currentValue / 100).toFixed(2));
+  }
+};
+
 const totalWithVat = computed(() => {
   return parseFloat((summary.value.total + summary.value.vatAmount).toFixed(2));
 });
@@ -3009,22 +3040,35 @@ const updateSummary = () => {
     : 0;
 
   const amountToDiscount = totalWithVat.value;
+  const discountableTotal = items.value.reduce(
+    (sum, item) => sum + (isDisposableBillingItem(item) ? 0 : item.totalAmount),
+    0
+  );
   let discountAmount = 0;
 
   if (summary.value.discountType === "percentage") {
-    discountAmount = (amountToDiscount * summary.value.discount) / 100;
+    discountAmount = (discountableTotal * summary.value.discount) / 100;
   } else {
-    discountAmount = parseFloat(summary.value.discount) || 0;
+    discountAmount = Math.min(parseFloat(summary.value.discount) || 0, discountableTotal);
   }
 
   const totalDiscountAmount = discountAmount + parseFloat(summary.value.extraFlatDiscount || 0);
   const finalDiscountAmount = Math.min(totalDiscountAmount, amountToDiscount);
+  const eligibleItemCount = items.value.filter((item) => !isDisposableBillingItem(item)).length;
+  const equalFlatItemDiscount = eligibleItemCount > 0
+    ? Math.min(discountAmount, discountableTotal) / eligibleItemCount
+    : 0;
 
   items.value = items.value.map((item) => {
+    const itemDiscount = isDisposableBillingItem(item)
+      ? 0
+      : summary.value.discountType === "percentage"
+        ? (item.totalAmount * summary.value.discount) / 100
+        : equalFlatItemDiscount;
     return {
       ...item,
-      discount: 0,
-      netAmount: item.totalAmount,
+      discount: itemDiscount,
+      netAmount: item.totalAmount - itemDiscount,
     };
   });
 
@@ -3499,6 +3543,7 @@ const saveBill = (backendInvoice = false) => {
     ].filter(Boolean).join(' ');
   }
 
+  const submittedFlatDiscount = Math.max(0, Number(summary.value.discount) || 0);
   const formData = {
     is_new_patient: Boolean(isNewPatient.value),
     
@@ -3514,8 +3559,11 @@ const saveBill = (backendInvoice = false) => {
     items: itemsForBackend,
 
     total: summary.value.total,
-    discount: summary.value.discount || 0,
+    discount: summary.value.discountType === 'flat'
+      ? submittedFlatDiscount
+      : summary.value.discount || 0,
     discount_type: summary.value.discountType,
+    discount_allocation: summary.value.discountType === 'flat' ? 'equal' : 'proportional',
     extra_flat_discount: summary.value.extraFlatDiscount || 0,
     payable_amount: summary.value.payableAmount,
     paid_amt: paidAmount,
@@ -3913,14 +3961,8 @@ const resetAllForms = () => {
 const getDefaultDeliveryDateTime = (baseDate = new Date()) => {
   try {
     const now = baseDate instanceof Date ? new Date(baseDate) : new Date();
-    const currentHour = now.getHours();
-    const deliveryHour = currentHour + 6;
-    const deliveryDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), deliveryHour, 0, 0);
-
-    if (deliveryHour >= 24) {
-      deliveryDate.setDate(deliveryDate.getDate() + 1);
-      deliveryDate.setHours(deliveryHour - 24);
-    }
+    const deliveryDate = new Date(now);
+    deliveryDate.setHours(now.getHours() + 6, 0, 0, 0);
 
     return {
       date: format(deliveryDate, "yyyy-MM-dd'T'HH:mm"),
@@ -3945,6 +3987,25 @@ const setCurrentDeliveryDateTime = () => {
   } catch (e) { console.warn('[BillingPage] setCurrentDeliveryDateTime error', e); }
 };
 
+const syncDeliveryDateTimeFromBilling = () => {
+  if (deliveryDateTouched.value) return;
+
+  const billDate = String(billingDate.value || '').trim();
+  const billTime = String(billingTime.value || '').trim();
+  if (!billDate) return;
+
+  try {
+    const baseDate = billTime ? new Date(`${billDate}T${billTime}`) : new Date(`${billDate}T00:00:00`);
+    if (!isValid(baseDate)) return;
+
+    const defaultDelivery = getDefaultDeliveryDateTime(baseDate);
+    summary.value.deliveryDate = defaultDelivery.date;
+    summary.value.deliveryTime = defaultDelivery.time;
+  } catch (e) {
+    console.warn('[BillingPage] syncDeliveryDateTimeFromBilling error', e);
+  }
+};
+
 const startDeliveryLiveClock = () => {
   if (deliveryLiveTimer) return;
   deliveryLiveTimer = setInterval(() => { if (!deliveryDateTouched.value) setCurrentDeliveryDateTime(); }, 60 * 1000);
@@ -3967,17 +4028,11 @@ const handleDeliveryDateInput = () => {
   try { const parsed = new Date(summary.value.deliveryDate); if (isValid(parsed)) summary.value.deliveryTime = format(parsed, 'HH:mm'); } catch (e) {}
 };
 
-watch(billingDate, (newBillingDate) => {
+watch([billingDate, billingTime], ([newBillingDate, newBillingTime]) => {
   if (!newBillingDate || deliveryDateTouched.value) return;
+  if (!newBillingTime) return;
 
-  try {
-    const time = summary.value.deliveryTime || '19:00';
-    const parsed = new Date(`${newBillingDate}T${time}`);
-    if (isValid(parsed)) {
-      summary.value.deliveryDate = format(parsed, "yyyy-MM-dd'T'HH:mm");
-      summary.value.deliveryTime = format(parsed, 'HH:mm');
-    }
-  } catch (e) { /* ignore */ }
+  syncDeliveryDateTimeFromBilling();
 });
 
 const handlePatientSearchBlur = (event) => {

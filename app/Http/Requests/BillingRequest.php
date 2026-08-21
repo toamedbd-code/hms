@@ -53,6 +53,7 @@ class BillingRequest extends FormRequest
             'total' => 'required|numeric|min:0',
             'discount' => 'nullable|numeric|min:0',
             'discount_type' => 'required|in:percentage,flat',
+            'discount_allocation' => 'nullable|in:equal,proportional',
             'payable_amount' => 'required|numeric|min:0',
             'paid_amt' => 'required|numeric|min:0',
             'change_amt' => 'nullable|numeric',

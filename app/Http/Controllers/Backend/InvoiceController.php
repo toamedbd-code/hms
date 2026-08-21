@@ -202,6 +202,7 @@ class InvoiceController extends Controller
                     'item_name' => $first->item_name ?? ($first->description ?? 'Item'),
                     'quantity' => $quantity,
                     'total_amount' => $totalAmount,
+                    'room_no' => $first->room_no ?? $first->roomNo ?? '',
                     'category' => $first->category ?? '',
                 ];
             })->values();
@@ -242,7 +243,13 @@ class InvoiceController extends Controller
             ->where('billing_id', $billing->id)
             ->whereIn('status', ['approved', 'processed'])
             ->sum('total_amount');
-        $returnAmount = $this->resolveInvoiceReturnAmount($billing, $request, $productReturnAmount);
+        if ($request->exists('return_amount') || $request->exists('return_amt')) {
+            $returnAmount = $this->resolveInvoiceReturnAmount($billing, $request, $productReturnAmount);
+        } else {
+            $receivingAmount = (float) ($billing->receiving_amt ?? $billing->paid_amt ?? 0);
+            $correctedPayable = (float) ($totals['net_payable'] ?? $billing->payable_amount ?? 0);
+            $returnAmount = round($productReturnAmount + max(0, $receivingAmount - $correctedPayable), 2);
+        }
         $adjustedDue = max(0, (float) $totals['due'] - $returnAmount);
 
         // Respect global VAT enable/disable setting: if VAT is disabled in WebSetting,
@@ -504,7 +511,8 @@ class InvoiceController extends Controller
         // Billing (full invoice) totals
         if ($module === 'billing') {
             // Prefer authoritative bill items sum when available (use active items only)
-            $totalFromItems = (float) \App\Models\BillItem::where('billing_id', $billing->id)->sum('net_amount');
+            $billingItems = \App\Models\BillItem::where('billing_id', $billing->id)->get();
+            $totalFromItems = (float) $billingItems->sum('total_amount');
             $total = $totalFromItems > 0 ? $totalFromItems : (float) ($billing->total ?? 0);
 
             // When payable_amount exists on the billing, it represents the actual
@@ -513,20 +521,23 @@ class InvoiceController extends Controller
             $extraDiscount = max(0, (float) ($billing->extra_flat_discount ?? 0));
             $vatAmount = (float) ($billing->vat_amount ?? 0);
 
-            if ($billingPayableAmount > 0) {
+            if ($totalFromItems > 0) {
                 $discountPercent = $billing->discount_type === 'percentage'
                     ? (float) ($billing->discount ?? 0)
                     : null;
+                $discountBase = $billing->discount_type === 'percentage'
+                    ? (float) $billingItems
+                        ->reject(fn ($item) => $this->isDisposableInvoiceItem($item))
+                        ->sum('total_amount')
+                    : $total;
                 $discountAmount = $billing->discount_type === 'percentage'
-                    ? max(0, ($total * $discountPercent) / 100)
+                    ? max(0, ($discountBase * $discountPercent) / 100)
                     : max(0, (float) ($billing->discount ?? 0));
 
-                $netPayable = $billingPayableAmount;
-            } elseif ($totalFromItems > 0) {
-                // Bill items already include discounts; do not subtract billing->discount again.
-                $discountPercent = null;
-                $discountAmount = 0;
-                $netPayable = max(0, $total - $extraDiscount + $vatAmount);
+                // Round the discount before deriving the payable amount so the
+                // displayed discount, net payable, and due use the same currency basis.
+                $discountAmount = round($discountAmount, 2);
+                $netPayable = round(max(0, $total - $discountAmount - $extraDiscount + $vatAmount), 2);
             } else {
                 if ($billing->discount_type === 'percentage') {
                     $discountPercent = (float) ($billing->discount ?? 0);
@@ -571,7 +582,7 @@ class InvoiceController extends Controller
 
             // `return_amt` already exists on billing, so subtract it to compute net paid.
             $totalPaid = max(0, round($grossPaid - $billingReturnAmt, 2));
-            $computedDue = max(0, round($netPayable - $totalPaid, 2));
+            $computedDue = round(max(0, $netPayable - $totalPaid), 2);
 
             // For display: show the billing-level discount value for clarity
             $displayDiscount = $billing->discount_type === 'percentage'
@@ -645,6 +656,18 @@ class InvoiceController extends Controller
             'paid' => round($paid, 2),
             'due' => max(0, round($due, 2))
         ];
+    }
+
+    private function isDisposableInvoiceItem($item): bool
+    {
+        $category = strtolower((string) (is_array($item) ? ($item['category'] ?? '') : ($item->category ?? '')));
+        if ($category === 'disposable') {
+            return true;
+        }
+
+        $name = strtolower((string) (is_array($item) ? ($item['item_name'] ?? $item['name'] ?? '') : ($item->item_name ?? $item->name ?? '')));
+        return $category === 'pathology'
+            && (str_contains($name, 'disposable') || str_contains($name, 'tube') || str_contains($name, 'butterfly') || str_contains($name, 'needle'));
     }
 
     private function calculateFastOpenTotals($filteredItems, Billing $billing): array

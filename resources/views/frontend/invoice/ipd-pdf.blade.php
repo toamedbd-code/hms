@@ -141,14 +141,20 @@
         .payments-table td,
         .payments-table th,
         .items-table td,
-        .items-table th,
-        .totals-table td {
-            padding: 2px 6px;
-            vertical-align: top;
-            word-break: break-word;
-            overflow-wrap: break-word;
-        }
-
+            .due-badge {
+                background-color: #ff4444 !important;
+                border-color: #ff4444 !important;
+                padding: 8px 16px;
+                font-size: 32px;
+                margin-bottom: 8px;
+            }
+            .paid-badge {
+                background-color: #28a745 !important;
+                border-color: #28a745 !important;
+                padding: 8px 16px;
+                font-size: 32px;
+                margin-bottom: 8px;
+            }
         .label {
             font-weight: bold;
             width: 16%;
@@ -304,11 +310,11 @@
         .due-badge,
         .paid-badge {
             color: #ffffff !important;
-            padding: 4px 8px;
+            padding: 8px 16px;
             font-weight: bold;
             display: inline-block;
-            margin-bottom: 4px;
-            font-size: 16px;
+            margin-bottom: 8px;
+            font-size: 32px;
             border-radius: 2px;
             border: 1px solid transparent;
             -webkit-print-color-adjust: exact;
@@ -702,7 +708,7 @@
                     <table class="totals-table">
                         <tr>
                             <td class="label-col"><strong>Total Amount Tk.</strong></td>
-                            <td class="amount-col"><strong>{{ number_format((float) ($base_total ?? $total_amount ?? 0), 2) }}</strong></td>
+                            <td class="amount-col"><strong>{{ priceFormat($base_total ?? $total_amount ?? 0) }}</strong></td>
                         </tr>
                         @php
                             $baseTotal = round((float) ($base_total ?? $total_amount ?? 0), 2);
@@ -724,11 +730,11 @@
                         @if ($vatComputed != 0)
                         <tr>
                             <td class="label-col">Vat Tk.</td>
-                            <td class="amount-col">{{ number_format($vatComputed, 2) }}</td>
+                            <td class="amount-col">{{ priceFormat($vatComputed) }}</td>
                         </tr>
                         <tr>
                             <td class="label-col"><strong>Total With VAT Tk.</strong></td>
-                            <td class="amount-col"><strong>{{ number_format($totalWithVat, 2) }}</strong></td>
+                            <td class="amount-col"><strong>{{ priceFormat($totalWithVat) }}</strong></td>
                         </tr>
                         @endif
 
@@ -739,12 +745,12 @@
                                     Discount ({{ number_format($discountPercentLocal, 2) }}%)
                                 </td>
                                 <td class="amount-col">
-                                    {{ number_format($discountComputed, 2) }}</td>
+                                    {{ priceFormat($discountComputed) }}</td>
                             </tr>
                             @else
                             <tr>
                                 <td class="label-col">Discount Tk.</td>
-                                <td class="amount-col">{{ number_format($discountComputed, 2) }}</td>
+                                <td class="amount-col">{{ priceFormat($discountComputed) }}</td>
                             </tr>
                             @endif
                         @endif
@@ -752,12 +758,12 @@
                         @if ($extraDiscount != 0)
                         <tr>
                             <td class="label-col">Extra Discount Tk.</td>
-                            <td class="amount-col">{{ number_format($extraDiscount, 2) }}</td>
+                            <td class="amount-col">{{ priceFormat($extraDiscount) }}</td>
                         </tr>
                         @endif
                         <tr>
                             <td class="label-col"><strong>Net Payable Tk.</strong></td>
-                            <td class="amount-col"><strong>{{ number_format($netComputed, 2) }}</strong></td>
+                            <td class="amount-col"><strong>{{ priceFormat($netComputed) }}</strong></td>
                         </tr>
                         @php
                             $invoiceTimePaidAmount = round((float) ($invoice_time_paid_amount ?? 0), 2);
@@ -771,19 +777,19 @@
                         @if ($invoiceTimePaidAmount != 0)
                         <tr>
                             <td class="label-col">Paid (Invoice Time)</td>
-                            <td class="amount-col">{{ number_format($invoiceTimePaidAmount, 2) }}</td>
+                            <td class="amount-col">{{ priceFormat($invoiceTimePaidAmount) }}</td>
                         </tr>
                         @endif
                         @if ($totalPaidAmount != 0)
                         <tr>
                             <td class="label-col"><strong>Total Paid Tk.</strong></td>
-                            <td class="amount-col"><strong>{{ number_format($totalPaidAmount, 2) }}</strong></td>
+                            <td class="amount-col"><strong>{{ priceFormat($totalPaidAmount) }}</strong></td>
                         </tr>
                         @endif
                         @if ($showReturnIPD)
                         <tr>
                             <td class="label-col"><strong>Return Amount Tk.</strong></td>
-                            <td class="amount-col"><strong>{{ number_format($returnAmountValue, 2) }}</strong></td>
+                            <td class="amount-col"><strong>{{ priceFormat($returnAmountValue) }}</strong></td>
                         </tr>
                         @endif
                         @php
@@ -791,12 +797,12 @@
                         @endphp
                         <tr>
                             <td class="label-col"><strong>Due Tk.</strong></td>
-                            <td class="amount-col"><strong>{{ number_format($unadjustedDueIPD, 2) }}</strong></td>
+                            <td class="amount-col"><strong>{{ priceFormat($unadjustedDueIPD) }}</strong></td>
                         </tr>
                         @if(isset($adjusted_due) && round((float) $adjusted_due,2) !== round($unadjustedDueIPD,2))
                         <tr>
                             <td class="label-col"><strong>Due After Returns Tk.</strong></td>
-                            <td class="amount-col"><strong>{{ number_format((float) $adjusted_due, 2) }}</strong></td>
+                            <td class="amount-col"><strong>{{ priceFormat($adjusted_due) }}</strong></td>
                         </tr>
                         @endif
                     </table>
@@ -813,7 +819,7 @@
                             @foreach($dueCollectionsList as $dc)
                             <tr>
                                 <td>{{ $dc->created_at ? \Carbon\Carbon::parse($dc->created_at)->format('d-m-Y h:i A') : 'Due Collect' }}</td>
-                                <td>{{ number_format((float) ($dc->amount ?? 0), 2) }}</td>
+                                <td>{{ priceFormat($dc->amount ?? 0) }}</td>
                             </tr>
                             @endforeach
                         </tbody>
@@ -837,7 +843,7 @@
                 'phone' => $portalPhone,
                 'exp' => now()->addDays(30)->timestamp,
             ];
-            $portalToken = encrypt(json_encode($portalTokenPayload));
+            $portalToken = \Illuminate\Support\Facades\Crypt::encryptString(json_encode($portalTokenPayload));
         }
         $portalLoginUrl = $portalToken !== ''
             ? route('backend.patient.portal.login', ['token' => $portalToken])

@@ -16,6 +16,7 @@ use App\Models\Patient;
 use App\Models\Payment;
 use App\Models\Radiology;
 use App\Models\Referral;
+use App\Models\ReferralPerson;
 use App\Models\Test;
 use App\Models\OpdPrescription;
 use App\Models\IpdPrescription;
@@ -354,6 +355,24 @@ class BillingController extends Controller
         return null;
     }
 
+    private function isDisposableBillingItem(array $item): bool
+    {
+        $category = strtolower(trim((string) ($item['category'] ?? '')));
+        if ($category === 'disposable') {
+            return true;
+        }
+
+        if ($category !== 'pathology') {
+            return false;
+        }
+
+        $name = strtolower((string) ($item['name'] ?? ''));
+        return str_contains($name, 'disposable')
+            || str_contains($name, 'tube')
+            || str_contains($name, 'butterfly')
+            || str_contains($name, 'needle');
+    }
+
     private function dataFields(bool $includeIpdInvoice = false)
     {
         $fields = [
@@ -640,19 +659,23 @@ class BillingController extends Controller
     private function getBillingReferrers(): array
     {
         return Cache::remember('billing:referrers_active', 30, function () {
-            return Referral::whereNull('deleted_at')
+            return ReferralPerson::whereNull('deleted_at')
                 ->where('status', 'Active')
-                ->select('id', 'payee_id', 'date', 'total_commission_amount', 'total_bill_amount', 'status')
+                ->select('id', 'name', 'phone', 'standard_commission', 'pathology_commission', 'radiology_commission', 'pharmacy_commission', 'ecg_commission', 'ultrasound_commission', 'status')
                 ->orderBy('id', 'asc')
                 ->get()
-                ->map(function ($referral) {
+                ->map(function ($referrer) {
                     return [
-                        'id' => $referral->id,
-                        'payee_id' => $referral->payee_id,
-                        'date' => $referral->date,
-                        'total_commission_amount' => $referral->total_commission_amount,
-                        'total_bill_amount' => $referral->total_bill_amount,
-                        'status' => $referral->status,
+                        'id' => $referrer->id,
+                        'name' => $referrer->name,
+                        'phone' => $referrer->phone,
+                        'standard_commission' => $referrer->standard_commission,
+                        'pathology_commission' => $referrer->pathology_commission,
+                        'radiology_commission' => $referrer->radiology_commission,
+                        'pharmacy_commission' => $referrer->pharmacy_commission,
+                        'ecg_commission' => $referrer->ecg_commission,
+                        'ultrasound_commission' => $referrer->ultrasound_commission,
+                        'status' => $referrer->status,
                     ];
                 })
                 ->toArray();
@@ -891,9 +914,14 @@ class BillingController extends Controller
             // Hospitals may need separate bills for additional tests/services on the same day.
 
             $totalBillAmountBeforeDiscount = collect($data['items'])->sum('total_amount');
+            $discountableBillAmount = (($data['discount_type'] ?? 'percentage') === 'percentage')
+                ? collect($data['items'])
+                    ->reject(fn ($item) => $this->isDisposableBillingItem($item))
+                    ->sum('total_amount')
+                : $totalBillAmountBeforeDiscount;
             $totalDiscountAmount = 0;
             if (($data['discount_type'] ?? 'percentage') === 'percentage') {
-                $totalDiscountAmount = $totalBillAmountBeforeDiscount * (($data['discount'] ?? 0) / 100);
+                $totalDiscountAmount = $discountableBillAmount * (($data['discount'] ?? 0) / 100);
             } else {
                 $totalDiscountAmount = $data['discount'] ?? 0;
             }
@@ -1037,15 +1065,20 @@ class BillingController extends Controller
 
             // Rest of your store method remains the same...
             $totalBillAmountBeforeDiscount = collect($data['items'])->sum('total_amount');
+            $discountableBillAmount = ($data['discount_type'] === 'percentage')
+                ? collect($data['items'])
+                    ->reject(fn ($item) => $this->isDisposableBillingItem($item))
+                    ->sum('total_amount')
+                : $totalBillAmountBeforeDiscount;
             $totalDiscountAmount = 0;
 
             if ($data['discount_type'] === 'percentage') {
-                $totalDiscountAmount = $totalBillAmountBeforeDiscount * ($data['discount'] / 100);
+                $totalDiscountAmount = $discountableBillAmount * ($data['discount'] / 100);
             } else {
                 $totalDiscountAmount = $data['discount'];
             }
 
-            $discountFactor = ($totalBillAmountBeforeDiscount > 0) ? ($totalDiscountAmount / $totalBillAmountBeforeDiscount) : 0;
+            $discountFactor = ($discountableBillAmount > 0) ? ($totalDiscountAmount / $discountableBillAmount) : 0;
 
             if ($data['referrer_id']) {
                 $totalCommission = 0;
@@ -1104,7 +1137,11 @@ class BillingController extends Controller
             }
 
             foreach ($data['items'] as $item) {
-                $itemProportionalDiscount = $item['total_amount'] * $discountFactor;
+                $itemProportionalDiscount = ($data['discount_allocation'] ?? 'proportional') === 'equal'
+                    ? ($this->isDisposableBillingItem($item) ? 0 : (float) ($item['discount'] ?? 0))
+                    : (($data['discount_type'] === 'percentage' && $this->isDisposableBillingItem($item))
+                        ? 0
+                        : $item['total_amount'] * $discountFactor);
                 $itemNetAmount = $item['total_amount'] - $itemProportionalDiscount;
 
                 // snapshot item-level commission settings when available
@@ -2215,6 +2252,7 @@ class BillingController extends Controller
                     'discount' => $item->discount,
                     'rugound' => $item->rugound,
                     'net_amount' => $item->net_amount,
+                    'room_no' => $item->room_no,
                 ];
             })->toArray()
         ];
@@ -2429,12 +2467,21 @@ class BillingController extends Controller
 
             // Recompute totals for update path to calculate VAT
             $totalBillAmountBeforeDiscount = collect($data['items'])->sum('total_amount');
+            $discountableBillAmount = (($data['discount_type'] ?? '') === 'percentage')
+                ? collect($data['items'])
+                    ->reject(fn ($item) => $this->isDisposableBillingItem($item))
+                    ->sum('total_amount')
+                : $totalBillAmountBeforeDiscount;
             $totalDiscountAmount = 0;
             if (($data['discount_type'] ?? '') === 'percentage') {
-                $totalDiscountAmount = $totalBillAmountBeforeDiscount * (($data['discount'] ?? 0) / 100);
+                $totalDiscountAmount = $discountableBillAmount * (($data['discount'] ?? 0) / 100);
             } else {
                 $totalDiscountAmount = $data['discount'] ?? 0;
             }
+
+            $discountFactor = ($discountableBillAmount > 0)
+                ? ($totalDiscountAmount / $discountableBillAmount)
+                : 0;
 
             $vatPercentage = 0.0;
             $vatAmount = 0.0;
@@ -2497,6 +2544,16 @@ class BillingController extends Controller
                     }
 
                 $isRadiologyItem = in_array($catLower, ['radiology', 'ecg', 'ultrasound', 'xray', 'ultrasonogram', 'ultrasonography']);
+                $itemDiscount = ($data['discount_allocation'] ?? 'proportional') === 'equal'
+                    ? ($this->isDisposableBillingItem($item) ? 0 : (float) ($item['discount'] ?? 0))
+                    : (($data['discount_type'] ?? '') === 'percentage' && $this->isDisposableBillingItem($item)
+                        ? 0
+                        : (($data['discount_type'] ?? '') === 'percentage'
+                            ? ($item['total_amount'] * $discountFactor)
+                            : ($item['discount'] ?? 0)));
+                $itemNetAmount = ($data['discount_type'] ?? '') === 'percentage'
+                    ? ($item['total_amount'] - $itemDiscount)
+                    : ($item['net_amount'] ?? $item['total_amount']);
 
                 $newBillItemSnapshots[] = [
                     'id' => $item['id'],
@@ -2514,9 +2571,9 @@ class BillingController extends Controller
                     'unit_price' => $item['unit_price'],
                     'quantity' => $item['quantity'],
                     'total_amount' => $item['total_amount'],
-                    'discount' => $item['discount'] ?? 0,
+                    'discount' => $itemDiscount,
                     'rugound' => $item['rugound'] ?? 0,
-                    'net_amount' => $item['net_amount'],
+                    'net_amount' => $itemNetAmount,
                     'requires_sample' => ($catLower === 'pathology') && ! $isDisposable,
                     'sample_collected_at' => $isRadiologyItem ? ($billing->created_at ? Carbon::parse($billing->created_at)->toDateTimeString() : now()) : null,
                     'sample_collected_by' => $isRadiologyItem ? auth('admin')->id() : null,
@@ -3443,6 +3500,41 @@ class BillingController extends Controller
             $processedData['gender'] = $data['patient_gender'];
         } elseif (!empty($data['patient_id']) && (!$billing || $data['patient_id'] != $billing->patient_id)) {
             $patientId = $data['patient_id'];
+
+            $patient = Patient::find($patientId);
+            if ($patient) {
+                $updateData = [];
+
+                if (isset($data['patient_name']) && $data['patient_name'] != $patient->name) {
+                    $updateData['name'] = $data['patient_name'];
+                }
+                if (isset($data['patient_phone']) && $data['patient_phone'] != $patient->phone) {
+                    $updateData['phone'] = $data['patient_phone'];
+                    $processedData['patient_mobile'] = $data['patient_phone'];
+                }
+                if (isset($data['patient_mobile']) && $data['patient_mobile'] != $patient->phone) {
+                    $updateData['phone'] = $data['patient_mobile'];
+                    $processedData['patient_mobile'] = $data['patient_mobile'];
+                }
+                if (isset($data['patient_gender']) && $data['patient_gender'] != $patient->gender) {
+                    $updateData['gender'] = $data['patient_gender'];
+                    $processedData['gender'] = $data['patient_gender'];
+                }
+                if (isset($data['gender']) && $data['gender'] != $patient->gender) {
+                    $updateData['gender'] = $data['gender'];
+                    $processedData['gender'] = $data['gender'];
+                }
+                if (isset($data['dob']) && $data['dob'] != $patient->dob) {
+                    $updateData['dob'] = $data['dob'];
+                }
+                if (isset($data['patient_age']) && $data['patient_age'] != $patient->age) {
+                    $updateData['age'] = $data['patient_age'];
+                }
+
+                if (!empty($updateData)) {
+                    $patient->update($updateData);
+                }
+            }
         } elseif (!empty($data['patient_id']) && $billing && $data['patient_id'] == $billing->patient_id) {
             $patientId = $data['patient_id'];
 
@@ -3457,9 +3549,17 @@ class BillingController extends Controller
                     $updateData['phone'] = $data['patient_phone'];
                     $processedData['patient_mobile'] = $data['patient_phone'];
                 }
+                if (isset($data['patient_mobile']) && $data['patient_mobile'] != $patient->phone) {
+                    $updateData['phone'] = $data['patient_mobile'];
+                    $processedData['patient_mobile'] = $data['patient_mobile'];
+                }
                 if (isset($data['patient_gender']) && $data['patient_gender'] != $patient->gender) {
                     $updateData['gender'] = $data['patient_gender'];
                     $processedData['gender'] = $data['patient_gender'];
+                }
+                if (isset($data['gender']) && $data['gender'] != $patient->gender) {
+                    $updateData['gender'] = $data['gender'];
+                    $processedData['gender'] = $data['gender'];
                 }
                 if (isset($data['dob']) && $data['dob'] != $patient->dob) {
                     $updateData['dob'] = $data['dob'];

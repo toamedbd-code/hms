@@ -48,7 +48,7 @@ const needsRenewal = computed(
 const showPaymentGateway = computed(() => {
     const hasPricing = Number(props.bkashMonthlyAmount || 0) > 0 || Number(props.bkashYearlyAmount || 0) > 0;
     return Boolean(
-        props.pendingBkashPaymentId ||
+        (props.pendingBkashPaymentId && !props.subscriptionActive) ||
         props.showSubscriptionRenewal ||
         (props.bkashEnabled && hasPricing && !props.subscriptionActive)
     );
@@ -77,12 +77,16 @@ const paymentUrl = (period = null) => {
     }
 
     try {
-        if (typeof route === 'function') {
-            url = route('backend.payment.bkash.initiate.public', {
-                amount,
-                email: emailParam,
+        if (typeof window !== 'undefined' && window.location && window.location.origin) {
+            const baseUrl = `${window.location.origin}/payment/bkash/renew`;
+            const params = new URLSearchParams({
+                amount: String(amount),
                 period: p,
             });
+            if (emailParam) {
+                params.set('email', emailParam);
+            }
+            url = `${baseUrl}?${params.toString()}`;
         }
     } catch (e) {
         // keep hardcoded fallback URL
@@ -91,8 +95,54 @@ const paymentUrl = (period = null) => {
     return url;
 };
 
-const confirmPendingPayment = () => {
-    window.location.assign('/payment/bkash/confirm-pending');
+const openPaymentLink = (period = null) => {
+    const url = paymentUrl(period);
+
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    window.location.assign(url);
+};
+
+const confirmPendingPayment = async () => {
+    const paymentId = pendingPayment.value || props.pendingBkashPaymentId || null;
+    const confirmUrl = paymentId
+        ? `/payment/bkash/confirm-pending?payment_id=${encodeURIComponent(paymentId)}`
+        : '/payment/bkash/confirm-pending';
+
+    try {
+        const response = await fetch(confirmUrl, {
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'same-origin',
+        });
+
+        const data = await response.json();
+
+        if (!data || !data.ok) {
+            window.alert(data?.message || 'Payment confirmation failed. Finish payment on bKash, then try again.');
+            return;
+        }
+
+        if (data.invoiceUrl) {
+            const invoiceWindow = window.open(data.invoiceUrl, '_blank', 'noopener,noreferrer');
+            if (!invoiceWindow) {
+                window.alert('Invoice tab was blocked. Please allow popups and try again.');
+            }
+        }
+
+        if (data.redirect) {
+            window.location.assign(data.redirect);
+            return;
+        }
+
+        window.alert(data.message || 'Payment confirmed successfully.');
+    } catch (error) {
+        window.alert('Could not confirm payment yet. Finish route on bKash and try again.');
+    }
 };
 </script>
 
@@ -185,24 +235,22 @@ const confirmPendingPayment = () => {
                                 </div>
 
                                 <div class="grid gap-2" :class="yearlyAmount > 0 ? 'sm:grid-cols-2' : 'grid-cols-1'">
-                                    <a
+                                    <button
                                         v-if="monthlyAmount > 0"
-                                        :href="paymentUrl('monthly')"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
+                                        type="button"
+                                        @click="openPaymentLink('monthly')"
                                         class="inline-flex items-center justify-center rounded-xl bg-[#e2136e] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#c41060]"
                                     >
-                                        Pay Monthly — ৳{{ monthlyAmount }}
-                                    </a>
-                                    <a
-                                        v-if="yearlyAmount > 0"
-                                        :href="paymentUrl('yearly')"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
+                                        Pay Now = ৳{{ monthlyAmount }}
+                                    </button>
+                                    <button
+                                        v-if="false"
+                                        type="button"
+                                        @click="openPaymentLink('yearly')"
                                         class="inline-flex items-center justify-center rounded-xl border border-[#e2136e] bg-white px-4 py-2.5 text-sm font-semibold text-[#e2136e] transition hover:bg-[#fff0f5]"
                                     >
                                         Pay Yearly — ৳{{ yearlyAmount }}
-                                    </a>
+                                    </button>
                                 </div>
 
                                 <button
@@ -215,7 +263,6 @@ const confirmPendingPayment = () => {
                                 </button>
 
                                 <p v-if="isSandbox" class="text-[11px] leading-relaxed text-[#7a4a5c]">
-                                    Sandbox test: wallet <strong>01770618575</strong>, PIN <strong>12121</strong>, OTP <strong>123456</strong>
                                 </p>
                             </div>
                         </div>

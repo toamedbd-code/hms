@@ -186,7 +186,7 @@ function getStatusChangeIcon($status)
 }
 function priceFormat($amount)
 {
-    return number_format($amount, 2);
+    return number_format((float) ($amount ?? 0), 2, '.', ',');
 }
 
 function getDaysNumber()
@@ -417,7 +417,7 @@ function getSideMenus($user)
         return $result;
     }
 
-    return $normalizedMenus->filter(function ($menu) use ($routeExists) {
+    $fallbackMenus = $normalizedMenus->filter(function ($menu) use ($routeExists) {
         $route = trim((string) ($menu['route'] ?? ''));
         if ($route !== '' && $routeExists($route)) {
             return true;
@@ -425,6 +425,21 @@ function getSideMenus($user)
 
         return trim((string) ($menu['name'] ?? '')) !== '';
     })->values();
+
+    if ($fallbackMenus->isNotEmpty()) {
+        return $fallbackMenus;
+    }
+
+    return [
+        [
+            'id' => 0,
+            'name' => 'Dashboard',
+            'route' => 'backend.dashboard',
+            'permission_name' => 'dashboard',
+            'childrens' => [],
+            'status' => 'Active',
+        ],
+    ];
 }
 
 function web_setting_prefix(string $field, string $default = ''): string

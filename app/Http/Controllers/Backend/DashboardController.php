@@ -35,7 +35,7 @@ class DashboardController extends Controller
             'pendingIncome' => $can('dashboard-card-pending-income') || $can('dashboard'),
             'referralCommission' => $can('dashboard-card-referral-commission'),
             'netIncome' => $can('dashboard-card-net-income'),
-            'refunds' => $can('dashboard-card-refunds') || $can('dashboard'),
+            'refunds' => $can('dashboard-card-refunds'),
             'totalDiscountAmount' => $can('dashboard-card-total-discount'),
             'disposableIncome' => $can('dashboard-card-disposable-income'),
             'expiredMedicines' => $can('dashboard-card-expired-medicines'),
@@ -58,13 +58,17 @@ class DashboardController extends Controller
         $filter = $this->dashboardService->resolveDashboardFilter($filterType, $filterFrom, $filterTo);
         $dbRange = $filter['dbRange'];
         $dateRange = $filter['appRange'];
+        $pathologySummary = $this->dashboardService->getPathologyIncomeSummary($dbRange);
 
         $dashboardData = [
             'activeUsers'        => $this->dashboardService->countActiveUser(),
             'inActiveUsers'      => $this->dashboardService->countInActiveUser(),
 
             'pharmacyIncome'     => $this->dashboardService->countPharmacyIncome($dbRange, $dateRange),
-            'pathologyIncome'    => $this->dashboardService->countPathologyIncome($dbRange, $dateRange),
+            'pathologyIncome'    => $pathologySummary['net'],
+            'pathologyTotalAmount' => $pathologySummary['total'],
+            'pathologyDiscountAmount' => $pathologySummary['discount'],
+            'pathologyNetIncome' => $pathologySummary['net'],
             'radiologyIncome'    => $this->dashboardService->countRadiologyIncome($dbRange, $dateRange),
             'bloodBankIncome'    => $this->dashboardService->countBloodBankIncome($dbRange, $dateRange),
 

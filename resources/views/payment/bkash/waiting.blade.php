@@ -77,7 +77,6 @@
         </div>
         <div class="status" id="status">Opening bKash checkout…</div>
         <p class="hint">
-            Sandbox: wallet <strong>01770618575</strong>, PIN <strong>12121</strong>, OTP <strong>123456</strong>.
             If you see “Invalid Payment State”, go back to Login and start a <strong>new</strong> Pay Monthly.
         </p>
     </div>
@@ -89,13 +88,9 @@
         const statusEl = document.getElementById('status');
         const confirmBtn = document.getElementById('confirm-btn');
 
-        // Open hosted checkout immediately (no execute until Confirm).
-        const opened = window.open(bkashUrl, '_blank', 'noopener');
-        if (! opened) {
-            statusEl.textContent = 'Popup blocked. Click “Open bKash Payment”.';
-        } else {
-            statusEl.textContent = 'Finish payment in the bKash tab, then click Confirm Payment here.';
-        }
+        // Do not auto-spawn another checkout tab here. Let the user open the bKash page explicitly,
+        // then confirm from this waiting page.
+        statusEl.textContent = 'Click “Open bKash Payment” to launch the checkout page, then confirm here.';
 
         confirmBtn.addEventListener('click', async () => {
             confirmBtn.disabled = true;
@@ -108,7 +103,15 @@
                 const data = await res.json();
                 statusEl.textContent = data.message || 'Done';
                 if (data.done) {
-                    window.location.href = data.redirect || loginUrl;
+                    if (data.invoiceUrl) {
+                        const invoiceWindow = window.open(data.invoiceUrl, '_blank', 'noopener,noreferrer');
+                        if (! invoiceWindow) {
+                            statusEl.textContent = 'Invoice opened in a new tab was blocked. Please allow popups, then print from the invoice page.';
+                        }
+                    }
+                    window.setTimeout(() => {
+                        window.location.href = data.redirect || loginUrl;
+                    }, 250);
                     return;
                 }
             } catch (e) {

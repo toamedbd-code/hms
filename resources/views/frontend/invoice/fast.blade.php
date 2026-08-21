@@ -28,7 +28,17 @@
       body,html{background:white}
       .print-actions{display:none}
       .sheet{box-shadow:none;margin:0;padding:4mm}
-      @page{size:A4;margin:5mm}
+      @page{size:auto;margin:0}
+    }
+
+    @media print and (max-width: 148mm){
+      .sheet{width:148mm;min-height:210mm;padding:3mm}
+      table{font-size:10px}
+      th,td{padding:2px}
+      .header{margin-bottom:3px}
+      .meta{margin-bottom:3px;font-size:10px}
+      .totals{margin-top:3px}
+      .totals td{padding:2px}
     }
   </style>
 </head>
@@ -70,7 +80,7 @@
             <td class="right">{{ $i+1 }}</td>
             <td>{{ is_object($item) ? ($item->item_name ?? ($item['item_name'] ?? '')) : ($item['item_name'] ?? '') }}</td>
             <td class="right">{{ is_object($item) ? ($item->quantity ?? ($item['quantity'] ?? 1)) : ($item['quantity'] ?? 1) }}</td>
-            <td class="right">{{ number_format(is_object($item) ? ($item->net_amount ?? ($item['total_amount'] ?? 0)) : ($item['total_amount'] ?? 0), 2) }}</td>
+            <td class="right">{{ priceFormat(is_object($item) ? ($item->net_amount ?? ($item['total_amount'] ?? 0)) : ($item['total_amount'] ?? 0)) }}</td>
           </tr>
         @empty
           <tr><td colspan="4">No items</td></tr>
@@ -85,12 +95,18 @@
           <table style="width:100%">
             @php
               $baseTotal = round((float) ($base_total ?? $total_amount ?? 0), 2);
+                $discountableBase = collect($bill_items ?? [])->reject(function ($item) {
+                  $category = strtolower((string) (is_object($item) ? ($item->category ?? '') : ($item['category'] ?? '')));
+                  return $category === 'disposable';
+                })->sum(function ($item) {
+                  return (float) (is_object($item) ? ($item->total_amount ?? $item->net_amount ?? 0) : ($item['total_amount'] ?? $item['net_amount'] ?? 0));
+                });
               $vatPercentLocal = round((float) ($vat_percentage ?? 0), 2);
               $vatComputed = $vatPercentLocal > 0 ? round(($baseTotal * $vatPercentLocal) / 100, 2) : 0.00;
               $extraDiscount = round((float) ($extra_flat_discount ?? 0), 2);
               if (strtolower((string) ($discount_type ?? 'flat')) === 'percentage') {
                   $discountPercentLocal = round((float) ($discount ?? 0), 2);
-                  $discountComputed = round(($baseTotal * $discountPercentLocal) / 100, 2);
+                  $discountComputed = round(($discountableBase * $discountPercentLocal) / 100, 2);
               } else {
                   $discountPercentLocal = null;
                   $discountComputed = round((float) ($discount ?? 0), 2);
@@ -99,27 +115,27 @@
               $netComputed = round(max(0, $totalWithVat - $discountComputed - $extraDiscount), 2);
             @endphp
 
-            <tr><td>Subtotal</td><td class="right">{{ number_format($baseTotal,2) }}</td></tr>
+            <tr><td>Subtotal</td><td class="right">{{ priceFormat($baseTotal) }}</td></tr>
             @if($vatComputed != 0)
-            <tr><td>Vat</td><td class="right">{{ number_format($vatComputed,2) }}</td></tr>            <tr><td><strong>Total With VAT</strong></td><td class="right"><strong>{{ number_format($totalWithVat,2) }}</strong></td></tr>            @endif
+            <tr><td>Vat</td><td class="right">{{ priceFormat($vatComputed) }}</td></tr>            <tr><td><strong>Total With VAT</strong></td><td class="right"><strong>{{ priceFormat($totalWithVat) }}</strong></td></tr>            @endif
             @if($discountComputed != 0)
               @if($discountPercentLocal !== null)
-                <tr><td>Discount ({{ number_format($discountPercentLocal,2) }}%)</td><td class="right">{{ number_format($discountComputed,2) }}</td></tr>
+                <tr><td>Discount ({{ number_format($discountPercentLocal, 2) }}%)</td><td class="right">{{ priceFormat($discountComputed) }}</td></tr>
               @else
-                <tr><td>Discount</td><td class="right">{{ number_format($discountComputed,2) }}</td></tr>
+                <tr><td>Discount</td><td class="right">{{ priceFormat($discountComputed) }}</td></tr>
               @endif
             @endif
             @if($extraDiscount != 0)
-              <tr><td>Extra Discount</td><td class="right">{{ number_format($extraDiscount,2) }}</td></tr>
+              <tr><td>Extra Discount</td><td class="right">{{ priceFormat($extraDiscount) }}</td></tr>
             @endif
-            <tr><td><strong>Net Payable</strong></td><td class="right"><strong>{{ number_format($netComputed,2) }}</strong></td></tr>
-            <tr><td>Paid</td><td class="right">{{ number_format($paid ?? 0,2) }}</td></tr>
+            <tr><td><strong>Net Payable</strong></td><td class="right"><strong>{{ priceFormat($netComputed) }}</strong></td></tr>
+            <tr><td>Paid</td><td class="right">{{ priceFormat($paid ?? 0) }}</td></tr>
             @php
               $unadjustedDueFast = max(0, (float) ($net_payable ?? 0) - (float) ($paid ?? 0));
             @endphp
-            <tr><td>Due</td><td class="right">{{ number_format($unadjustedDueFast,2) }}</td></tr>
+            <tr><td>Due</td><td class="right">{{ priceFormat($unadjustedDueFast) }}</td></tr>
             @if(isset($adjusted_due) && round((float) $adjusted_due,2) !== round((float) $unadjustedDueFast,2))
-              <tr><td>Due After Returns</td><td class="right">{{ number_format($adjusted_due,2) }}</td></tr>
+              <tr><td>Due After Returns</td><td class="right">{{ priceFormat($adjusted_due) }}</td></tr>
             @endif
           </table>
         </td>

@@ -26,5 +26,6 @@ class BkashPublicInitiateFallbackTest extends TestCase
         $payment = Payment::latest('id')->first();
         $this->assertNotNull($payment);
         $this->assertStringContainsString('/payment/bkash/simulate-public/' . $payment->id, $response->getTargetUrl());
+        $response->assertSessionHas('bkash_pending_payment_id', $payment->id);
     }
 }

@@ -23,12 +23,11 @@ class PatientPortalController extends Controller
 {
     public function loginForm(Request $request)
     {
-        $this->ensurePortalEnabled();
-
         $prefillPhone = (string) $request->query('phone', '');
         $prefillPatientId = (string) $request->query('patient_id', '');
 
         $tokenPayload = $this->decodePortalToken((string) $request->query('token', ''));
+        $this->ensurePortalEnabled($request, $tokenPayload);
         if (!empty($tokenPayload)) {
             $prefillPhone = (string) ($tokenPayload['phone'] ?? $prefillPhone);
             $prefillPatientId = (string) ($tokenPayload['patient_id'] ?? $prefillPatientId);
@@ -45,13 +44,14 @@ class PatientPortalController extends Controller
 
     public function login(Request $request)
     {
-        $this->ensurePortalEnabled();
-
         $data = $request->validate([
             'phone' => 'required|string|max:30',
             'patient_id' => 'required|string|max:40',
             'token' => 'nullable|string',
         ]);
+
+        $tokenPayload = $this->decodePortalToken((string) ($data['token'] ?? ''));
+        $this->ensurePortalEnabled($request, $tokenPayload);
 
         $identifierRaw = trim((string) $data['patient_id']);
         $patient = null;
@@ -93,7 +93,6 @@ class PatientPortalController extends Controller
         $patientPhone = (string) ($patient->phone ?? '');
         $billingPhone = (string) ($billingFromIdentifier?->patient_mobile ?? '');
 
-        $tokenPayload = $this->decodePortalToken((string) ($data['token'] ?? ''));
         $tokenPhone = (string) ($tokenPayload['phone'] ?? '');
         $tokenPatientId = isset($tokenPayload['patient_id']) ? (int) $tokenPayload['patient_id'] : null;
 
@@ -107,6 +106,9 @@ class PatientPortalController extends Controller
         }
 
         Auth::guard('patient')->login($patient);
+        if (!empty($tokenPayload)) {
+            $request->session()->put('patient_portal_qr_access', true);
+        }
         $request->session()->regenerate();
 
         return redirect()->route('backend.patient.portal.dashboard');
@@ -114,7 +116,7 @@ class PatientPortalController extends Controller
 
     public function dashboard(Request $request)
     {
-        $this->ensurePortalEnabled();
+        $this->ensurePortalEnabled($request);
 
         /** @var Patient $patient */
         $patient = Auth::guard('patient')->user();
@@ -188,7 +190,7 @@ class PatientPortalController extends Controller
 
     public function paymentGateway(Request $request, ?int $billing = null)
     {
-        $this->ensurePortalEnabled();
+        $this->ensurePortalEnabled($request);
 
         /** @var Patient $patient */
         $patient = Auth::guard('patient')->user();
@@ -258,7 +260,7 @@ class PatientPortalController extends Controller
 
     public function paymentCallback(Request $request)
     {
-        $this->ensurePortalEnabled();
+        $this->ensurePortalEnabled($request);
 
         $callbackPayload = $this->extractGatewayCallbackPayload($request);
 
@@ -458,7 +460,7 @@ class PatientPortalController extends Controller
 
     public function downloadBillingReport(Request $request, int $billing)
     {
-        $this->ensurePortalEnabled();
+        $this->ensurePortalEnabled($request);
 
         /** @var Patient $patient */
         $patient = Auth::guard('patient')->user();
@@ -637,14 +639,17 @@ class PatientPortalController extends Controller
         return redirect()->route('backend.patient.portal.login');
     }
 
-    private function ensurePortalEnabled(): void
+    private function ensurePortalEnabled(Request $request, array $tokenPayload = []): void
     {
         $settings = get_cached_web_setting();
 
         $rawPatientPanel = $settings ? $settings->getRawOriginal('patient_panel') : null;
         $isExplicitlyDisabled = $rawPatientPanel !== null && (int) $rawPatientPanel === 0;
 
-        if ($isExplicitlyDisabled) {
+        $hasQrAccess = $request->session()->get('patient_portal_qr_access', false);
+        $hasValidQrToken = !empty($tokenPayload) && !empty($tokenPayload['patient_id']);
+
+        if ($isExplicitlyDisabled && !$hasQrAccess && !$hasValidQrToken) {
             abort(403, 'Patient portal is disabled by administrator.');
         }
     }

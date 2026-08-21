@@ -24,6 +24,8 @@ return [
         'https://tokenized.sandbox.bka.sh/v1.2.0-beta'
     ),
 
+    'use_production' => filter_var(env('BKASH_USE_PRODUCTION', false), FILTER_VALIDATE_BOOLEAN),
+
     'production_base_url' => env(
         'BKASH_PRODUCTION_BASE_URL',
         env('BKASH_API_URL', 'https://tokenized.pay.bka.sh/v1.2.0-beta')
@@ -40,6 +42,7 @@ return [
     'app_secret' => env('BKASH_APP_SECRET'),
     'username' => env('BKASH_USERNAME'),
     'password' => env('BKASH_PASSWORD'),
+    'merchant_number' => env('BKASH_MERCHANT_NUMBER', env('BKASH_USERNAME')),
 
     /*
     | Public HTTPS callback URL required by bKash (local .test hosts are rejected).

@@ -725,7 +725,7 @@ const form = useForm({
     sms_route: props.websetting?.sms_route ?? '',
     sms_is_unicode: Boolean(props.websetting?.sms_is_unicode),
     sms_additional_params: props.websetting?.sms_additional_params ?? '',
-    personal_bkash_number: props.websetting?.personal_bkash_number ?? '',
+    personal_bkash_number: '',
     personal_nagad_number: props.websetting?.personal_nagad_number ?? '',
     ipd_no_prefix: props.websetting?.ipd_no_prefix ?? 'IPDN',
     opd_no_prefix: props.websetting?.opd_no_prefix ?? 'OPDN',
@@ -1891,6 +1891,12 @@ onBeforeUnmount(() => {
                             <input id="website_testimonials_bn_json" v-model="form.website_testimonials_bn_json" type="hidden" />
                             <InputError class="mt-2" :message="form.errors.website_testimonials_bn_json" />
                         </div>
+                    </div>
+
+                    <div class="flex justify-end mt-6">
+                        <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md bg-green-600 px-6 py-3 text-base font-bold text-white shadow-sm transition hover:bg-green-700">
+                            Save CMS Setting
+                        </button>
                     </div>
                 </div>
 
