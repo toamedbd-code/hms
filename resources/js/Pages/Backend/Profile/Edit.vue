@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch } from 'vue';
-import { router, useForm, usePage } from '@inertiajs/vue3';
+import { router, useForm } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
@@ -19,7 +19,6 @@ const props = defineProps({
     },
 });
 
-const page = usePage();
 const photoPreview = ref(null);
 const photoInput = ref(null);
 const currentPhotoUrl = ref(props.adminData?.photo ?? null);
@@ -41,11 +40,6 @@ const passwordForm = useForm({
     password: '',
     password_confirmation: '',
 });
-
-const getStaffEditPasswordStorageKey = () => {
-    const adminId = page.props?.auth?.admin?.id ?? 'new';
-    return `admin-last-saved-password-${adminId}`;
-};
 
 const selectNewPhoto = () => {
     const file = photoInput.value?.files?.[0];
@@ -99,9 +93,6 @@ const updatePassword = () => {
     passwordForm.post(route('backend.profile.password.update'), {
         preserveScroll: true,
         onSuccess: (response) => {
-            if (typeof window !== 'undefined' && passwordForm.password) {
-                window.localStorage.setItem(getStaffEditPasswordStorageKey(), passwordForm.password);
-            }
             displayResponse(response);
         },
         onError: (errors) => {

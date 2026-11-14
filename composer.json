@@ -1,17 +1,17 @@
 {
     "name": "laravel/laravel",
-    "version": "2.1.1",
+    "version": "2.2.2",
     "type": "project",
     "description": "The Laravel Framework.",
     "keywords": ["framework", "laravel"],
     "license": "MIT",
     "require": {
-        "php": "^8.2",
+        "php": "^8.3",
         "barryvdh/laravel-dompdf": "^3.1",
         "doctrine/dbal": "^4.4",
-        "guzzlehttp/guzzle": "^7.2",
+        "guzzlehttp/guzzle": "^7.8.2",
         "inertiajs/inertia-laravel": "^3.0",
-        "laravel/framework": "^12.0",
+        "laravel/framework": "^13.0",
         "laravel/jetstream": "^5.5",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
@@ -22,7 +22,7 @@
         "tightenco/ziggy": "^2.0"
     },
     "require-dev": {
-        "barryvdh/laravel-debugbar": "4.4",
+        "barryvdh/laravel-debugbar": "^4.4",
         "fakerphp/faker": "^1.9.1",
         "laravel/pint": "^1.0",
         "laravel/sail": "^1.0.1",
@@ -73,6 +73,9 @@
         "optimize-autoloader": true,
         "preferred-install": "dist",
         "sort-packages": true,
+        "platform": {
+            "php": "8.3.0"
+        },
         "allow-plugins": {
             "pestphp/pest-plugin": true
         }

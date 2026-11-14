@@ -29,6 +29,10 @@ return [
     | to be allowed to remain idle before it expires. If you want them
     | to immediately expire on the browser closing, set that option.
     |
+    | Security: Sessions will auto-logout after 2 hours (120 minutes) of inactivity.
+    | This applies to all sessions regardless of "Remember Me" status.
+    | After logout, remember-me tokens last only 2 hours for quick re-login.
+    |
     */
 
     'lifetime' => env('SESSION_LIFETIME', 120),

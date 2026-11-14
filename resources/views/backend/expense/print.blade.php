@@ -4,59 +4,111 @@
     <meta charset="utf-8">
     <title>Expense Print</title>
     <style>
-        @page { margin: 0mm; size: A4; }
-        body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 30px; }
-        .card { max-width: 720px; margin: 0 auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; }
-        .title { font-size: 18px; font-weight: bold; margin-bottom: 12px; }
-        .row { margin-bottom: 10px; font-size: 14px; }
-        .label { color: #374151; font-weight: bold; margin-right: 6px; }
-        .value-wrap { display: inline-block; vertical-align: top; max-width: 520px; word-break: break-word; }
-        .signature { margin-top: 24px; display: flex; justify-content: flex-end; }
-        .signature-box { text-align: center; min-width: 180px; }
-        .signature-line { border-top: 1px solid #000; margin-top: 24px; }
-        .signature-label { font-size: 12px; margin-top: 4px; }
-        .print-time { margin-top: 16px; font-size: 12px; color: #6b7280; }
-
-        @media print and (min-width: 149mm) {
-            body { padding: 0; }
-            .card { max-width: none; border-radius: 0; padding: 14px 16px; }
+        @page { size: A4 portrait; margin: 8mm; }
+        * { box-sizing: border-box; }
+        html { background: #eee; }
+        body {
+            position: relative;
+            width: 210mm;
+            min-height: 297mm;
+            margin: 16px auto;
+            padding: 8mm;
+            color: #111827;
+            background: #fff;
+            font-family: Arial, sans-serif;
+            box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
         }
+        .card { width: 100%; margin: 0 auto; padding: 16px; }
+        .hospital-name { font-weight: 700; text-align: center; }
+        .hospital-address { margin-bottom: 4px; font-size: 10px; text-align: center; }
+        .title { margin: 0 0 8px; font-weight: 700; text-align: center; }
+        .print-date { margin: 0 0 28px; color: #4b5563; font-size: 12px; text-align: center; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; border: 1px solid #d1d5db; text-align: left; vertical-align: top; }
+        th { width: 34%; font-weight: 600; }
+        td { overflow-wrap: anywhere; }
+        .grand-total th, .grand-total td { border-top: 2px solid #111827; font-size: 18px; font-weight: 700; }
+        .grand-total td { text-align: right; white-space: nowrap; }
+        .signature { display: flex; justify-content: flex-end; margin-top: 48px; }
+        .signature-box { width: 190px; text-align: center; }
+        .signature-line { border-top: 1px solid #111827; padding-top: 6px; font-size: 12px; }
+        .print-time { margin-top: 22px; color: #4b5563; font-size: 11px; text-align: center; }
 
-        @media print and (max-width: 148mm), screen and (max-width: 148mm) {
-            body { font-size: 11px; padding: 0; }
-            .card { max-width: none; border-radius: 0; padding: 10px 10px; }
-            .title { font-size: 15px; }
-            .row { margin-bottom: 7px; font-size: 12px; }
-            .print-time { font-size: 10px; }
+        @media screen {
+            body.expense-print .footer-wrapper.institution-pad-footer {
+                position: absolute !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                left: 0 !important;
+            }
         }
 
         @media print {
-            body { background: #fff; padding: 0; }
-            .card { border: 0; box-shadow: none; }
+            html { background: #fff; }
+            body {
+                width: auto;
+                min-height: 0;
+                margin: 0;
+                padding: 0;
+                box-shadow: none;
+            }
+            .card { padding: 16px; break-inside: avoid; page-break-inside: avoid; }
+            table, tr { break-inside: avoid; page-break-inside: avoid; }
         }
     </style>
 </head>
-<body>
-    @includeIf('prints.partials._header')
+<body class="expense-print">
+    <main class="card">
+        @php
+            $institutionName = $websetting?->company_name ?? config('app.name', 'Hospital');
+            $institutionNameLength = max(1, \Illuminate\Support\Str::length($institutionName));
+            $institutionNameFontSize = max(13, min(24, (int) floor(720 / $institutionNameLength)));
+        @endphp
+        <div class="hospital-name" style="font-size: 24px;">{{ $institutionName }}</div>
+        <div class="hospital-address">{{ $websetting?->address ?? $websetting?->report_title ?? 'N/A' }}</div>
+        <h1 class="title" style="font-size: {{ $institutionNameFontSize }}px;">Expense Summary</h1>
+        <p class="print-date">Printed: {{ now()->format('d M, Y h:i A') }}</p>
 
-    <div class="card">
-        <div class="title">Expense Details</div>
-        <div class="row"><span class="label">Expense Head:</span>{{ $expense->expenseHead->name ?? 'N/A' }}</div>
-        <div class="row"><span class="label">Invoice Number:</span>{{ $expense->bill_number ?? 'N/A' }}</div>
-        <div class="row"><span class="label">Name:</span>{{ $expense->name ?? 'N/A' }}</div>
-        <div class="row"><span class="label">Amount:</span>৳{{ number_format((float) ($expense->amount ?? 0), 2) }}</div>
-        <div class="row"><span class="label">Date:</span>{{ !empty($expense->date) ? date('d M, Y', strtotime($expense->date)) : 'N/A' }}</div>
-        <div class="row"><span class="label">Description:</span><span class="value-wrap">{{ $expense->description ?? 'N/A' }}</span></div>
+        <table>
+            <tbody>
+                <tr>
+                    <th>Expense Head</th>
+                    <td>{{ $expense->expenseHead->name ?? 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>Department</th>
+                    <td>{{ $expense->department->name ?? 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>Invoice Number</th>
+                    <td>{{ $expense->bill_number ?? 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>Name</th>
+                    <td>{{ $expense->name ?? 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>Date</th>
+                    <td>{{ !empty($expense->date) ? date('d M, Y', strtotime($expense->date)) : 'N/A' }}</td>
+                </tr>
+                <tr>
+                    <th>Description</th>
+                    <td>{{ $expense->description ?: 'N/A' }}</td>
+                </tr>
+                <tr class="grand-total">
+                    <th>Total Expense</th>
+                    <td>৳ {{ number_format((float) ($expense->amount ?? 0), 2) }}</td>
+                </tr>
+            </tbody>
+        </table>
 
         <div class="signature">
             <div class="signature-box">
-                <div class="signature-line"></div>
-                <div class="signature-label">Received Signature</div>
+                <div class="signature-line">Received Signature</div>
             </div>
         </div>
+    </main>
 
-        <div class="print-time">Printed: {{ now()->format('d-M-Y h:i A') }}</div>
-    </div>
     @includeIf('prints.partials._footer')
 
     <script>

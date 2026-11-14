@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\Expense;
 use App\Models\Billing;
 use App\Models\BillItem;
 use App\Models\Pathology;
 use App\Models\PharmacyBill;
 use App\Models\Radiology;
+use App\Models\Referral;
 
 class BillingService
 {
@@ -103,6 +105,14 @@ class BillingService
 
         $billNumber = $dataInfo->bill_number ?? '';
 
+        if ($dataInfo) {
+            Referral::where('billing_id', $id)->delete();
+
+            if ($billNumber !== '') {
+                Expense::where('bill_number', $billNumber)->delete();
+            }
+        }
+
         $pathologyBill = $this->pathologyModel->where('bill_no', $billNumber)->first();
 
         if ($pathologyBill) {
@@ -138,6 +148,17 @@ class BillingService
     public function changeStatus($id, $status)
     {
         $dataInfo = $this->billingModel->findOrFail($id);
+
+        $normalizedStatus = strtolower((string) $status);
+        if (in_array($normalizedStatus, ['deleted', 'cancelled', 'canceled'], true)) {
+            $billNumber = $dataInfo->bill_number ?? '';
+            Referral::where('billing_id', $id)->delete();
+
+            if ($billNumber !== '') {
+                Expense::where('bill_number', $billNumber)->delete();
+            }
+        }
+
         $dataInfo->status = $status;
         $dataInfo->update();
         return $dataInfo;

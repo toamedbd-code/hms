@@ -4,6 +4,10 @@ namespace App\Services;
 
 use App\Models\PathologyMachineIntegrationLog;
 use App\Models\Pathology;
+use App\Models\BillItem;
+use App\Models\BillItemParameterResult;
+use App\Models\PathologyTestParameter;
+use App\Models\Test;
 use App\Models\WebSetting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -465,41 +469,13 @@ class PathologyMachineIntegrationService
                 continue;
             }
 
-            $tests = $this->decodeTests($pathology->tests);
-            if (empty($tests)) {
-                $tests = [];
+            $billItem = $this->findTargetBillItem($pathology, $result);
+            if (!$billItem || !$this->saveMachineParameterResult($billItem, $result)) {
+                $unmatchedCount++;
+                continue;
             }
 
-            $matched = false;
-            foreach ($tests as &$test) {
-                if (!$this->isMatchingTest($test, (string) ($result['test_code'] ?? ''))) {
-                    continue;
-                }
-
-                $test['machine_result_value'] = (string) ($result['result_value'] ?? '');
-                $test['machine_result_unit'] = (string) ($result['result_unit'] ?? '');
-                $test['machine_reference_range'] = (string) ($result['reference_range'] ?? '');
-                $test['report_date'] = $this->normalizeResultDate($result['result_time'] ?? '');
-                $test['result_source'] = 'machine';
-                $matched = true;
-            }
-            unset($test);
-
-            if (!$matched) {
-                $tests[] = [
-                    'test_name' => (string) ($result['test_code'] ?? 'Machine Result'),
-                    'test_short_name' => (string) ($result['test_code'] ?? ''),
-                    'machine_result_value' => (string) ($result['result_value'] ?? ''),
-                    'machine_result_unit' => (string) ($result['result_unit'] ?? ''),
-                    'machine_reference_range' => (string) ($result['reference_range'] ?? ''),
-                    'report_date' => $this->normalizeResultDate($result['result_time'] ?? ''),
-                    'result_source' => 'machine',
-                ];
-            }
-
-            $pathology->tests = json_encode($tests, JSON_UNESCAPED_UNICODE);
-            $pathology->date = $this->normalizeResultDate($result['result_time'] ?? '') ?: $pathology->date;
-            $pathology->save();
+            $this->updatePathologyTestResult($pathology, $result);
 
             $updatedPathologyIds[$pathology->id] = true;
         }
@@ -512,6 +488,27 @@ class PathologyMachineIntegrationService
 
     private function findTargetPathology(array $result): ?Pathology
     {
+        $sampleId = trim((string) ($result['sample_id'] ?? ''));
+        if ($sampleId !== '') {
+            $item = Pathology::query()
+                ->whereNull('deleted_at')
+                ->where('bill_no', $sampleId)
+                ->first();
+            if ($item) {
+                return $item;
+            }
+
+            $billItem = $this->findBillItemFromBarcode($sampleId);
+            if ($billItem && $billItem->billing) {
+                return Pathology::query()
+                    ->whereNull('deleted_at')
+                    ->where('bill_no', $billItem->billing->bill_number)
+                    ->first();
+            }
+
+            return null;
+        }
+
         $billNo = trim((string) ($result['bill_no'] ?? ''));
         $pathologyNo = trim((string) ($result['pathology_no'] ?? ''));
         $caseId = trim((string) ($result['case_id'] ?? ''));
@@ -539,15 +536,274 @@ class PathologyMachineIntegrationService
             }
         }
 
+        return null;
+    }
+
+    private function findTargetBillItem(Pathology $pathology, array $result): ?BillItem
+    {
         $sampleId = trim((string) ($result['sample_id'] ?? ''));
-        if ($sampleId !== '') {
-            $item = (clone $query)->where('bill_no', 'like', '%' . $sampleId . '%')->orderByDesc('id')->first();
-            if ($item) {
-                return $item;
+        $barcodeItem = $sampleId !== '' ? $this->findBillItemFromBarcode($sampleId) : null;
+        if ($barcodeItem && (string) $barcodeItem->billing?->bill_number === (string) $pathology->bill_no) {
+            return $barcodeItem;
+        }
+
+        $billItemIds = BillItem::query()
+            ->whereHas('billing', fn ($query) => $query->where('bill_number', $pathology->bill_no))
+            ->whereRaw('LOWER(category) = ?', ['pathology'])
+            ->pluck('id');
+
+        if ($billItemIds->isEmpty()) {
+            return null;
+        }
+
+        $code = trim((string) ($result['test_code'] ?? ''));
+        $matches = BillItem::query()
+            ->whereIn('id', $billItemIds)
+            ->get()
+            ->filter(fn (BillItem $item) => $this->resultBelongsToBillItem($item, $code));
+
+        return $matches->count() === 1 ? $matches->first() : null;
+    }
+
+    private function findBillItemFromBarcode(string $sampleId): ?BillItem
+    {
+        if (!preg_match('/^(.+)-(\d+)$/', $sampleId, $matches)) {
+            return null;
+        }
+
+        $item = BillItem::query()->with('billing')->find((int) $matches[2]);
+        if (!$item
+            || !$item->billing
+            || (string) $sampleId !== (string) $item->billing->bill_number . '-' . (string) $item->id
+            || strtolower(trim((string) $item->category)) !== 'pathology') {
+            return null;
+        }
+
+        return $item;
+    }
+
+    private function resultBelongsToBillItem(BillItem $item, string $testCode): bool
+    {
+        if ($testCode === '') {
+            return false;
+        }
+
+        $test = Test::query()->find($item->item_id);
+        $testCodes = [
+            $test?->test_short_name,
+            $test?->test_name,
+            $item->item_name,
+            (string) $item->item_id,
+        ];
+
+        foreach ($testCodes as $candidate) {
+            if ($this->normalizeMachineCode((string) $candidate) === $this->normalizeMachineCode($testCode)) {
+                return true;
             }
         }
 
-        return null;
+        $parameterCodes = array_unique([
+            $this->normalizeMachineCode($testCode),
+            $this->normalizeMachineCode($this->mappedMachineCode($testCode)),
+        ]);
+        return PathologyTestParameter::query()
+            ->where('pathology_test_id', $item->item_id)
+            ->with('testParameter:id,name')
+            ->get()
+            ->contains(fn (PathologyTestParameter $parameter) =>
+                array_intersect($parameterCodes, [
+                    $this->normalizeMachineCode((string) $parameter->name),
+                    $this->normalizeMachineCode((string) $parameter->testParameter?->name),
+                    $this->normalizeMachineCode((string) $parameter->id),
+                ]) !== []
+            ) || (
+                $this->supportsGeneratedHematologyParameters($item)
+                && in_array($this->normalizeMachineCode($this->mappedMachineCode($testCode)), $this->generatedParameterCodes(), true)
+            );
+    }
+
+    private function saveMachineParameterResult(BillItem $item, array $result): bool
+    {
+        $testCode = trim((string) ($result['test_code'] ?? ''));
+        if ($testCode === '') {
+            return false;
+        }
+
+        $mappedCode = $this->mappedMachineCode($testCode);
+        $normalizedCodes = array_unique([
+            $this->normalizeMachineCode($testCode),
+            $this->normalizeMachineCode($mappedCode),
+        ]);
+        $parameter = PathologyTestParameter::query()
+            ->where('pathology_test_id', $item->item_id)
+            ->with(['testParameter:id,name', 'pathologyUnit:id,name'])
+            ->get()
+            ->first(fn (PathologyTestParameter $candidate) => array_intersect($normalizedCodes, [
+                $this->normalizeMachineCode((string) $candidate->name),
+                $this->normalizeMachineCode((string) $candidate->testParameter?->name),
+                $this->normalizeMachineCode((string) $candidate->id),
+            ]) !== []
+            );
+
+        $normalizedMappedCode = $this->normalizeMachineCode($mappedCode);
+        $parameterName = trim((string) ($parameter?->name ?: $parameter?->testParameter?->name ?: $mappedCode));
+        if (!$parameter && (!$this->supportsGeneratedHematologyParameters($item)
+            || !in_array($normalizedMappedCode, $this->generatedParameterCodes(), true))) {
+            return false;
+        }
+
+        $resultData = [
+            'value' => (string) ($result['result_value'] ?? ''),
+            'unit' => trim((string) ($result['result_unit'] ?? '')) ?: ($parameter?->pathologyUnit?->name ?? null),
+        ];
+
+        if ($parameter) {
+            BillItemParameterResult::query()->updateOrCreate(
+                [
+                    'bill_item_id' => $item->id,
+                    'pathology_test_parameter_id' => $parameter->id,
+                ],
+                $resultData + ['name' => $parameterName]
+            );
+        } else {
+            $storedResult = BillItemParameterResult::query()
+                ->where('bill_item_id', $item->id)
+                ->whereNull('pathology_test_parameter_id')
+                ->where('name', $parameterName)
+                ->first();
+
+            if ($storedResult) {
+                $storedResult->update($resultData);
+            } else {
+                BillItemParameterResult::query()->create($resultData + [
+                    'bill_item_id' => $item->id,
+                    'pathology_test_parameter_id' => null,
+                    'name' => $parameterName,
+                ]);
+            }
+        }
+
+        return true;
+    }
+
+    private function mappedMachineCode(string $code): string
+    {
+        $mapping = Arr::get($this->resolvePathologyOptions(), 'mapping.test_code_aliases_json', []);
+        if ($mapping === []) {
+            $mapping = Arr::get($this->resolvePathologyOptions(), 'mapping.test_code_aliases', []);
+        }
+        if (is_string($mapping)) {
+            $decoded = json_decode($mapping, true);
+            $mapping = is_array($decoded) ? $decoded : [];
+        }
+
+        $normalizedCode = $this->normalizeAnalyzerCode($code);
+        if (is_array($mapping)) {
+            foreach ($mapping as $machineCode => $parameterName) {
+                if ($this->normalizeAnalyzerCode((string) $machineCode) === $normalizedCode && is_string($parameterName)) {
+                    return trim($parameterName);
+                }
+            }
+        }
+
+        $aliases = [
+            'LYM#' => 'Absolute Lymphocytes',
+            'MID#' => 'MID Count',
+            'GRA#' => 'Absolute Neutrophils',
+            'LYM%' => 'Lymphocytes',
+            'MID%' => 'MID%',
+            'MON%' => 'Monocytes',
+            'GRA%' => 'Neutrophils',
+            'EOS%' => 'Eosinophils',
+            'EOS_COUNT' => 'Total Cir. Eosinophils',
+            'ATYPICALCELL' => 'Atypical Cells',
+            'MYELOCYTE' => 'Myelocytes',
+            'hgb' => 'Hemoglobin',
+            'hb' => 'Hemoglobin',
+            'wbc' => 'Total WBC Count',
+            'twbc' => 'Total WBC Count',
+            'tcl' => 'Total WBC Count',
+            'rbc' => 'Total RBC Count',
+            'trbc' => 'Total RBC Count',
+            'plt' => 'Platelet Count',
+            'platelets' => 'Platelet Count',
+            'hct' => 'HCT/PCV',
+            'pcv' => 'HCT/PCV',
+        ];
+
+        foreach ($aliases as $machineCode => $parameterName) {
+            if ($this->normalizeAnalyzerCode($machineCode) === $normalizedCode) {
+                return $parameterName;
+            }
+        }
+
+        return $code;
+    }
+
+    private function normalizeAnalyzerCode(string $code): string
+    {
+        return strtoupper((string) preg_replace('/\s+/', '', trim($code)));
+    }
+
+    private function normalizeMachineCode(string $code): string
+    {
+        return strtolower((string) preg_replace('/[^a-z0-9]+/i', '', trim($code)));
+    }
+
+    private function generatedParameterCodes(): array
+    {
+        return array_map(
+            fn (string $code) => $this->normalizeMachineCode($code),
+            [
+                'Hemoglobin', 'ESR', 'Total WBC Count', 'Neutrophils', 'Lymphocytes',
+                'Monocytes', 'Eosinophils', 'Basophils', 'Total Cir. Eosinophils',
+                'Total RBC Count', 'HCT/PCV', 'MCV', 'MCH', 'MCHC', 'RDW-CV',
+                'RDW-SD', 'Platelet Count', 'MPV', 'PDW', 'P-LCR', 'PCT',
+                'Absolute Lymphocytes', 'MID Count', 'Absolute Neutrophils', 'MID%',
+                'Atypical Cells', 'Myelocytes',
+            ]
+        );
+    }
+
+    private function supportsGeneratedHematologyParameters(BillItem $item): bool
+    {
+        $test = Test::query()->find($item->item_id);
+        $testName = strtolower(trim(
+            (string) ($item->item_name ?? '') . ' '
+            . (string) ($test?->test_name ?? '') . ' '
+            . (string) ($test?->test_short_name ?? '')
+        ));
+
+        return str_contains($testName, 'cbc')
+            || str_contains($testName, 'complete blood count')
+            || str_contains($testName, 'hematology')
+            || str_contains($testName, 'haematology');
+    }
+
+    private function updatePathologyTestResult(Pathology $pathology, array $result): void
+    {
+        $tests = $this->decodeTests($pathology->tests);
+        $matched = false;
+
+        foreach ($tests as &$test) {
+            if (!$this->isMatchingTest($test, (string) ($result['test_code'] ?? ''))) {
+                continue;
+            }
+
+            $test['machine_result_value'] = (string) ($result['result_value'] ?? '');
+            $test['machine_result_unit'] = (string) ($result['result_unit'] ?? '');
+            $test['machine_reference_range'] = (string) ($result['reference_range'] ?? '');
+            $test['report_date'] = $this->normalizeResultDate($result['result_time'] ?? '');
+            $test['result_source'] = 'machine';
+            $matched = true;
+        }
+        unset($test);
+
+        if ($matched) {
+            $pathology->tests = json_encode($tests, JSON_UNESCAPED_UNICODE);
+            $pathology->date = $this->normalizeResultDate($result['result_time'] ?? '') ?: $pathology->date;
+            $pathology->save();
+        }
     }
 
     private function decodeTests(mixed $value): array

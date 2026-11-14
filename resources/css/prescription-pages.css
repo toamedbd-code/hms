@@ -1,0 +1,94 @@
+.prescription-workspace {
+    border: 1px solid var(--app-theme-border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--app-theme-muted-surface) 72%, white);
+}
+
+.prescription-workspace > div:first-child {
+    color: #0f172a;
+}
+
+.prescription-workspace h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.prescription-form-panel {
+    border-color: var(--app-theme-border) !important;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--app-theme-muted-surface) 38%, white);
+}
+
+.prescription-form-panel label {
+    margin-bottom: 6px;
+    color: #334155;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.prescription-form-panel input:not([type="file"]):not(td input),
+.prescription-form-panel select:not(td select),
+.prescription-form-panel textarea:not(td textarea) {
+    min-height: 42px;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    background-color: #fff;
+    padding: 9px 12px;
+    color: #111827;
+    font-size: 15px;
+}
+
+.prescription-form-panel textarea:not(td textarea) {
+    min-height: 42px;
+    line-height: 1.4;
+}
+
+.prescription-form-panel input[type="file"] {
+    min-height: 42px;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    background-color: #fff;
+    padding: 7px 10px;
+    color: #111827;
+    font-size: 14px;
+}
+
+.prescription-form-panel input:focus,
+.prescription-form-panel select:focus,
+.prescription-form-panel textarea:focus {
+    border-color: var(--app-theme-primary);
+    outline: 2px solid color-mix(in srgb, var(--app-theme-primary) 18%, transparent);
+    outline-offset: 1px;
+}
+
+.prescription-form-panel table th {
+    background-color: color-mix(in srgb, var(--app-theme-soft) 42%, white);
+    color: #334155;
+}
+
+.dark .prescription-workspace {
+    background: #0f172a;
+}
+
+.dark .prescription-workspace > div:first-child,
+.dark .prescription-form-panel label {
+    color: #e2e8f0;
+}
+
+.dark .prescription-form-panel {
+    background: #111827;
+}
+
+.dark .prescription-form-panel input:not([type="file"]):not(td input),
+.dark .prescription-form-panel select:not(td select),
+.dark .prescription-form-panel textarea:not(td textarea),
+.dark .prescription-form-panel input[type="file"] {
+    border-color: #334155;
+    background-color: #111827;
+    color: #e2e8f0;
+}
+
+.dark .prescription-form-panel table th {
+    background-color: #1e293b;
+    color: #e2e8f0;
+}

@@ -19,6 +19,7 @@ class MedicineInventory extends Authenticatable
 
     protected $casts = [
         'expiry_date' => 'date',
+        'standard_prescription_verified' => 'boolean',
     ];
 
     protected static function boot()

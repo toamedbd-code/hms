@@ -25,7 +25,7 @@ class WebSettingSeeder extends Seeder
     {
         return [
             [
-                'company_name' => 'Toamed Hospital',
+                'company_name' => 'ToaMed',
                 'company_short_name' => 'TM',
                 'phone' => '+1-234-567-8901',
                 'logo' => 'assets/toamed.png',

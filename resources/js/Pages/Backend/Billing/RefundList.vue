@@ -6,6 +6,7 @@ import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { router, usePage } from '@inertiajs/vue3';
 import { successMessage } from '@/responseMessage.js';
+import { createOfflineRequestId, saveOfflineBillingRequest } from '@/offlineBillingQueue.js';
 
 let props = defineProps({
   filters: Object,
@@ -68,13 +69,38 @@ const submitRefund = async () => {
 
   isSubmittingRefund.value = true;
   errorMessage.value = '';
+  const requestId = createOfflineRequestId();
+  const url = route('backend.refunds.process');
+  const data = {
+    billing_id: refundForm.value.billingId,
+    refund_amount: amount,
+    payment_method: refundForm.value.paymentMethod,
+    note: refundForm.value.note,
+  };
+  const queueRefundOffline = async () => {
+    await saveOfflineBillingRequest({
+      id: requestId,
+      adminId: page.props.auth?.admin?.id,
+      url,
+      method: 'POST',
+      data,
+      routeName: 'backend.refunds.process',
+      label: 'Refund',
+    });
+    showRefundModal.value = false;
+    successMessage('Refund request saved on this device. It will sync when internet returns; refund is not confirmed yet.');
+  };
 
   try {
-    await axios.post(route('backend.refunds.process'), {
-      billing_id: refundForm.value.billingId,
-      refund_amount: amount,
-      payment_method: refundForm.value.paymentMethod,
-      note: refundForm.value.note,
+    if (!navigator.onLine) {
+      await queueRefundOffline();
+      return;
+    }
+    await axios.post(url, data, {
+      headers: {
+        'X-Offline-Request-Id': requestId,
+        'X-Offline-Admin-Id': String(page.props.auth?.admin?.id ?? ''),
+      },
     });
 
     showRefundModal.value = false;
@@ -87,6 +113,15 @@ const submitRefund = async () => {
     }
     router.reload({ only: ['datas'] });
   } catch (error) {
+    if (!error?.response) {
+      try {
+        await queueRefundOffline();
+        return;
+      } catch (queueError) {
+        errorMessage.value = queueError instanceof Error ? queueError.message : 'Refund could not be saved offline.';
+        return;
+      }
+    }
     errorMessage.value = error?.response?.data?.message || 'Refund processing failed. Please try again.';
   } finally {
     isSubmittingRefund.value = false;
@@ -97,6 +132,15 @@ const handleAction = (actionName, actionId) => {
   if (actionName !== 'refund') return;
   openRefundModal(actionId);
 };
+
+const goBack = () => {
+  if (typeof window !== 'undefined' && window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+
+  router.visit(route('backend.dashboard'));
+};
 </script>
 
 <template>
@@ -106,6 +150,13 @@ const handleAction = (actionName, actionId) => {
         <div>
           <h1 class="p-4 text-xl font-bold dark:text-white">{{ $page.props.pageTitle }}</h1>
         </div>
+        <button
+          type="button"
+          @click="goBack"
+          class="mr-4 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+        >
+          Back
+        </button>
       </div>
 
       <div class="flex justify-between w-full p-2 py-3 space-x-2 text-gray-700 rounded-md bg-slate-300 shadow-gray-800/50 dark:bg-gray-700 dark:text-gray-200">

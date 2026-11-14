@@ -16,6 +16,8 @@ const props = defineProps({
     pathologytest: { type: Object, default: () => ({}) },
     id: { type: [String, Number, null], default: null },
     testCategories: { type: Array, default: () => [] },
+    categoryTypeOptions: { type: Array, default: () => [] },
+    mainCategories: { type: Array, default: () => [] },
     charges: { type: Array, default: () => [] },
     pathologyUnits: { type: Array, default: () => [] },
     testParameters: { type: Array, default: () => [] },
@@ -35,6 +37,7 @@ const pageTitle = computed(() => (page && page.props && page.props.pageTitle) ? 
 
 // Modal state
 const showCategoryModal = ref(false);
+const showItemCategoryModal = ref(false);
 const showChargeModal = ref(false);
 const showParameterModal = ref(false);
 
@@ -58,6 +61,7 @@ const handleGlobalParameterCreated = (e) => {
 };
 
 onMounted(() => {
+    document.addEventListener('click', closeCategoryDropdowns);
     window.addEventListener('parameter-created', handleGlobalParameterCreated);
     window.addEventListener('testParameters-updated', () => {
         console.log('testParameters-updated event received — reloading testParameters');
@@ -73,8 +77,14 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+    document.removeEventListener('click', closeCategoryDropdowns);
     window.removeEventListener('parameter-created', handleGlobalParameterCreated);
 });
+
+const initialDiscountPercentage = Number(props.pathologytest?.discount_percentage ?? 0);
+const initialDiscountLocked = Boolean(props.pathologytest?.discount_rate_locked);
+// Locked at 0% means this item must never take bill percentage discount.
+const initialDiscountOff = initialDiscountLocked && initialDiscountPercentage <= 0;
 
 const form = useForm({
     category_type: props.pathologytest?.category_type ?? '',
@@ -82,6 +92,7 @@ const form = useForm({
     test_short_name: props.pathologytest?.test_short_name ?? '',
     test_type: props.pathologytest?.test_type ?? '',
     test_category_id: props.pathologytest?.test_category_id ?? '',
+    main_category_id: props.pathologytest?.main_category_id ?? '',
     test_sub_category_id: props.pathologytest?.test_sub_category_id ?? '',
     method: props.pathologytest?.method ?? '',
     room_no: props.pathologytest?.room_no ?? '',
@@ -91,6 +102,9 @@ const form = useForm({
     standard_charge: props.pathologytest?.standard_charge ?? '',
     amount: props.pathologytest?.amount ?? '',
     referral_percentage: props.pathologytest?.referral_percentage ?? '',
+    discount_percentage: initialDiscountOff ? 0 : (props.pathologytest?.discount_percentage ?? ''),
+    discount_off: initialDiscountOff,
+    discount_rate_locked: initialDiscountLocked,
 
     parameters: props.pathologytest?.parameters ?? [{
         test_parameter_id: '',
@@ -103,11 +117,147 @@ const form = useForm({
     _method: props.pathologytest?.id ? 'put' : 'post',
 });
 
-// Computed property to get main categories (no parent_id)
-const mainCategories = computed(() => {
-    if (!categories.value) return [];
-    return categories.value.filter(category => !category.parent_id);
+watch(() => form.discount_off, (off) => {
+    if (off) {
+        form.discount_percentage = 0;
+        form.discount_rate_locked = true;
+        return;
+    }
+
+    form.discount_rate_locked = false;
 });
+
+// Main categories are report headings, while category_type remains the service module.
+const mainCategories = computed(() => {
+    return props.mainCategories || [];
+});
+
+const categoryTypeOptions = computed(() => {
+    return props.categoryTypeOptions;
+});
+
+const categoryTypeSearch = ref('');
+const showCategoryTypeOptions = ref(false);
+const highlightedCategoryTypeIndex = ref(0);
+
+const selectedCategoryTypeName = computed(() => form.category_type || '');
+
+const filteredCategoryTypes = computed(() => {
+    const search = categoryTypeSearch.value.trim().toLowerCase();
+    if (!search) return categoryTypeOptions.value;
+
+    return categoryTypeOptions.value.filter(category => String(category || '').toLowerCase().includes(search));
+});
+
+const openCategoryTypeSearch = () => {
+    categoryTypeSearch.value = '';
+    highlightedCategoryTypeIndex.value = 0;
+    showMainCategoryOptions.value = false;
+    showCategoryTypeOptions.value = true;
+};
+
+const openMainCategorySearch = () => {
+    mainCategorySearch.value = '';
+    highlightedMainCategoryIndex.value = 0;
+    showCategoryTypeOptions.value = false;
+    showMainCategoryOptions.value = true;
+};
+
+const selectCategoryType = (category) => {
+    form.category_type = category;
+    categoryTypeSearch.value = '';
+    showCategoryTypeOptions.value = false;
+};
+
+const handleCategoryTypeInput = (event) => {
+    const value = event.target.value;
+    categoryTypeSearch.value = value;
+    if (!value.trim()) {
+        form.category_type = '';
+    }
+    highlightedCategoryTypeIndex.value = 0;
+    showMainCategoryOptions.value = false;
+    showCategoryTypeOptions.value = true;
+};
+
+const handleCategoryTypeEnter = (event) => {
+    event.preventDefault();
+    const category = filteredCategoryTypes.value[highlightedCategoryTypeIndex.value] || filteredCategoryTypes.value[0];
+    if (category) selectCategoryType(category);
+};
+
+const clearCategoryTypeSearch = () => {
+    categoryTypeSearch.value = '';
+    form.category_type = '';
+    showCategoryTypeOptions.value = false;
+};
+
+const mainCategorySearch = ref('');
+const showMainCategoryOptions = ref(false);
+const highlightedMainCategoryIndex = ref(0);
+
+const selectedMainCategoryName = computed(() => {
+    const selected = mainCategories.value.find(category => String(category.id) === String(form.main_category_id));
+    return selected?.name || '';
+});
+
+const filteredMainCategories = computed(() => {
+    const search = mainCategorySearch.value.trim().toLowerCase();
+    if (!search) return mainCategories.value;
+
+    return mainCategories.value.filter(category => String(category.name || '').toLowerCase().includes(search));
+});
+
+const selectMainCategory = (category) => {
+    form.main_category_id = category.id;
+    mainCategorySearch.value = '';
+    showMainCategoryOptions.value = false;
+};
+
+const handleMainCategoryInput = (event) => {
+    const value = event.target.value;
+    mainCategorySearch.value = value;
+    if (!value.trim()) {
+        form.main_category_id = '';
+    }
+    highlightedMainCategoryIndex.value = 0;
+    showCategoryTypeOptions.value = false;
+    showMainCategoryOptions.value = true;
+};
+
+const handleMainCategoryEnter = (event) => {
+    event.preventDefault();
+    const category = filteredMainCategories.value[highlightedMainCategoryIndex.value] || filteredMainCategories.value[0];
+    if (category) selectMainCategory(category);
+};
+
+const clearMainCategorySearch = () => {
+    mainCategorySearch.value = '';
+    form.main_category_id = '';
+    showMainCategoryOptions.value = false;
+};
+
+const closeCategoryDropdowns = (event) => {
+    const clickedCategoryType = event?.target?.closest?.('#category_type');
+    const clickedMainCategory = event?.target?.closest?.('#main_category_id');
+
+    if (clickedCategoryType) {
+        mainCategorySearch.value = '';
+        showMainCategoryOptions.value = false;
+        return;
+    }
+
+    if (clickedMainCategory) {
+        categoryTypeSearch.value = '';
+        showCategoryTypeOptions.value = false;
+        return;
+    }
+
+    categoryTypeSearch.value = '';
+    showCategoryTypeOptions.value = false;
+    mainCategorySearch.value = '';
+    showMainCategoryOptions.value = false;
+};
 
 // Computed property to get ALL recursive subcategories based on selected category
 const availableSubCategories = computed(() => {
@@ -190,7 +340,7 @@ const selectedChargeCategoryId = computed(() => {
 
 const showItemParameters = computed(() => {
     const categoryType = (form.category_type || '').toString().trim().toLowerCase();
-    return categoryType === 'pathology' || categoryType === 'radiology';
+    return categoryType === 'pathology';
 });
 
 const itemParametersTitle = computed(() => {
@@ -263,13 +413,40 @@ const closeCategoryModal = () => {
     showCategoryModal.value = false;
 };
 
+const openItemCategoryModal = () => {
+    showItemCategoryModal.value = true;
+};
+
+const closeItemCategoryModal = () => {
+    showItemCategoryModal.value = false;
+};
+
 const handleCategoryCreated = (newCategory) => {
     router.reload({
-        only: ['testCategories'],
+        only: ['mainCategories'],
         preserveState: true,
         preserveScroll: true,
         onSuccess: (page) => {
-            categories.value = page.props.testCategories || [];
+            const createdName = String(newCategory?.name || '').trim().toLowerCase();
+            const category = (page.props.mainCategories || []).find(item => (
+                String(item.name || '').trim().toLowerCase() === createdName
+            ));
+            if (category) form.main_category_id = category.id;
+        }
+    });
+};
+
+const handleItemCategoryCreated = (newCategory) => {
+    router.reload({
+        only: ['testCategories', 'categoryTypeOptions'],
+        preserveState: true,
+        preserveScroll: true,
+        onSuccess: (page) => {
+            categories.value = [...(page.props.testCategories || [])];
+            const createdName = String(newCategory?.name || '').trim();
+            if (createdName) {
+                form.category_type = createdName;
+            }
         }
     });
 };
@@ -559,23 +736,36 @@ const submit = () => {
         ? route('backend.itemcharge.update', props.id)
         : route('backend.itemcharge.store');
 
-    form.transform(data => ({
-        ...data,
-        remember: '',
-        isDirty: false,
-    })).post(routeName, {
+    form.transform(data => {
+        const discountOff = Boolean(data.discount_off);
+        const discountPercentage = discountOff
+            ? 0
+            : Math.min(100, Math.max(0, Number(data.discount_percentage ?? 0)));
+
+        return {
+            ...data,
+            discount_percentage: discountPercentage,
+            discount_rate_locked: discountOff,
+            remember: '',
+            isDirty: false,
+        };
+    }).post(routeName, {
         onSuccess: async (response) => {
             // reset form when created (not editing)
             if (!props.id) form.reset();
             displayResponse(response);
-            // IPD auto-add disabled: previously this code would auto-post the created
-            // item as a hospital charge to an IPD when `ipd_id` was present in the
-            // URL or props. Disabled to prevent unintended automatic additions.
 
-            // Emit created event when embedded so parent can react (close modal / refresh)
+            // Keep embedded modal flow inside the current billing page instead of
+            // jumping to a standalone item page.
+            if (props.embedded) {
+                emit('created', response);
+                return;
+            }
+
+            // Regular standalone form behavior.
             try {
-                if (props.embedded) {
-                    emit('created', response);
+                if (!props.id) {
+                    router.visit(route('backend.itemcharge.index'));
                 }
             } catch (e) {}
         },
@@ -586,15 +776,19 @@ const submit = () => {
 };
 
     const goToTestList = () => {
-    router.visit(route('backend.itemcharge.index'));
+        if (props.embedded) {
+            emit('created', { embedded_close: true });
+            return;
+        }
+        router.visit(route('backend.itemcharge.index'));
 };
 
 const goBack = () => {
-    if (window.history.length > 1) {
-        window.history.back();
-        return;
-    }
-    router.visit(route('backend.itemcharge.index'));
+        if (props.embedded) {
+            emit('created', { embedded_close: true });
+            return;
+        }
+        router.visit(route('backend.itemcharge.index'));
 };
 
 </script>
@@ -608,7 +802,7 @@ const goBack = () => {
                     <h1 class="p-4 text-xl font-bold dark:text-white">{{ pageTitle }}</h1>
                 </div>
 
-                <div class="p-2 py-2 flex items-center space-x-2">
+                <div v-if="!props.embedded" class="p-2 py-2 flex items-center space-x-2">
                     <div class="flex items-center space-x-3">
                         <button @click="goBack"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gray-500 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gray-600">
@@ -641,20 +835,34 @@ const goBack = () => {
                     <!-- Category Type -->
                     <div class="col-span-1 md:col-span-1">
                         <InputLabel for="category_type" value="Category Type" />
-                        <select id="category_type" v-model="form.category_type"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
-                            <option value="">-- Select Type --</option>
-                            <option value="Appointment">Appointment</option>
-                            <option value="OPD">OPD</option>
-                            <option value="IPD">IPD</option>
-                            <option value="Pathology">Pathology</option>
-                            <option value="Radiology">Radiology</option>
-                            <option value="ECG">ECG</option>
-                            <option value="Ultrasound">Ultrasound</option>
-                            <option value="Disposable">Disposable</option>
-                            <option value="Blood Bank">Blood Bank</option>
-                            <option value="Ambulance">Ambulance</option>
-                        </select>
+                        <div class="flex items-center space-x-2">
+                            <div class="relative flex-1">
+                                <input id="category_type" :value="categoryTypeSearch || selectedCategoryTypeName"
+                                    @focus="openCategoryTypeSearch" @input="handleCategoryTypeInput" @keydown.enter="handleCategoryTypeEnter"
+                                    @keydown.esc="clearCategoryTypeSearch" type="text" autocomplete="off"
+                                    placeholder="Select Type" class="form-input w-full" />
+                                <div v-if="showCategoryTypeOptions"
+                                    class="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-slate-300 bg-white shadow-lg dark:border-slate-600 dark:bg-slate-700">
+                                    <button v-for="category in filteredCategoryTypes" :key="category" type="button"
+                                        @mousedown.prevent="selectCategoryType(category)"
+                                        @mouseenter="highlightedCategoryTypeIndex = filteredCategoryTypes.indexOf(category)"
+                                        :class="['block w-full px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-600 dark:text-slate-100',
+                                            { 'dropdown-option-highlight': filteredCategoryTypes.indexOf(category) === highlightedCategoryTypeIndex }]">
+                                        {{ category }}
+                                    </button>
+                                    <div v-if="filteredCategoryTypes.length === 0" class="px-3 py-2 text-sm text-slate-500 dark:text-slate-300">
+                                        No Category Types found.
+                                    </div>
+                                </div>
+                            </div>
+                            <button v-if="canCreateCategory" type="button" @click.prevent.stop="openItemCategoryModal"
+                                class="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200"
+                                title="Item Category Add" aria-label="Item Category Add">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                </svg>
+                            </button>
+                        </div>
                         <InputError class="mt-2" :message="form.errors.category_type" />
                     </div>
 
@@ -672,27 +880,34 @@ const goBack = () => {
                         <InputError :message="form.errors.test_short_name" />
                     </div>
 
-                    <!-- Item Type -->
-                    <div>
-                        <InputLabel for="test_type" value="Item Type" />
-                        <input id="test_type" v-model="form.test_type" type="text" class="form-input" />
-                        <InputError :message="form.errors.test_type" />
-                    </div>
-
-                    <!-- Main Category with Add Button -->
+                    <!-- Main Category with add popup -->
                     <div class="relative">
-                        <InputLabel for="test_category_id" value="Main Category" />
+                        <InputLabel for="main_category_id" value="Main Category" />
                         <div class="flex items-center space-x-2">
-                            <select id="test_category_id" v-model="form.test_category_id" class="form-input flex-1">
-                                <option value="">Select Main Category</option>
-                                <option v-for="cat in mainCategories" :key="cat.id" :value="cat.id">
-                                    {{ cat.name }}
-                                </option>
-                            </select>
+                            <div class="relative flex-1">
+                                <input id="main_category_id" :value="mainCategorySearch || selectedMainCategoryName"
+                                    @focus="openMainCategorySearch" @input="handleMainCategoryInput" @keydown.enter="handleMainCategoryEnter"
+                                    @keydown.esc="clearMainCategorySearch" type="text" autocomplete="off"
+                                    placeholder="Select Main Category" class="form-input w-full" />
+                                <div v-if="showMainCategoryOptions"
+                                    class="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-slate-300 bg-white shadow-lg dark:border-slate-600 dark:bg-slate-700">
+                                    <button v-for="category in filteredMainCategories" :key="category.id" type="button"
+                                        @mousedown.prevent="selectMainCategory(category)"
+                                        @mouseenter="highlightedMainCategoryIndex = filteredMainCategories.indexOf(category)"
+                                        :class="['block w-full px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-600 dark:text-slate-100',
+                                            { 'dropdown-option-highlight': filteredMainCategories.indexOf(category) === highlightedMainCategoryIndex }]">
+                                        {{ category.name }}
+                                    </button>
+                                    <div v-if="filteredMainCategories.length === 0" class="px-3 py-2 text-sm text-slate-500 dark:text-slate-300">
+                                        No Main Categories found.
+                                    </div>
+                                </div>
+                            </div>
                             <div class="flex items-center space-x-2">
-                                <button v-if="canCreateCategory" type="button" @click="openCategoryModal"
+                                <button v-if="canCreateCategory" type="button" @click.prevent.stop="openCategoryModal"
                                     class="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200"
-                                    title="Add New Category">
+                                    title="Main Category Add"
+                                    aria-label="Main Category Add">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
                                         stroke-width="2">
                                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6">
@@ -703,13 +918,14 @@ const goBack = () => {
                                 <!-- Edit/Delete buttons removed per request -->
                             </div>
                         </div>
-                        <InputError :message="form.errors.test_category_id" />
+                        <InputError :message="form.errors.main_category_id" />
 
                         <!-- Debug info for categories -->
                         <small v-if="!mainCategories?.length" class="text-red-500">
-                            No categories available. Check if testCategories prop is passed correctly.
+                            No Main Categories available.
                         </small>
                     </div>
+
 
                     <!-- Sub Category (Shows when main category is selected and has subcategories) -->
                     <div v-if="showSubCategoryField">
@@ -723,13 +939,6 @@ const goBack = () => {
                         <InputError :message="form.errors.test_sub_category_id" />
                     </div>
 
-                    <!-- Method -->
-                    <div>
-                        <InputLabel for="method" value="Method" />
-                        <input id="method" v-model="form.method" type="text" class="form-input" />
-                        <InputError :message="form.errors.method" />
-                    </div>
-
                     <!-- Room No -->
                     <div>
                         <InputLabel for="room_no" value="Room No" />
@@ -739,41 +948,51 @@ const goBack = () => {
 
                     <!-- Charge Selection removed as requested -->
 
-                    <!-- Charge Name (Auto-populated but editable) -->
-                    <div>
-                        <InputLabel for="charge_name" value="Charge Name" />
-                        <div class="flex items-center space-x-2">
-                            <input id="charge_name" v-model="form.charge_name" type="text" class="form-input flex-1" />
-                        </div>
-                        <InputError :message="form.errors.charge_name" />
-                    </div>
-
                     <!-- Tax (Auto-populated but editable) -->
                     <div>
                         <InputLabel for="tax" value="Tax %" />
-                        <input id="tax" v-model="form.tax" type="text" class="form-input" />
+                        <input id="tax" v-model="form.tax" type="text" @focus="$event.target.select()" class="form-input" />
                         <InputError :message="form.errors.tax" />
                     </div>
 
                     <!-- Standard Charge (Auto-populated but editable) -->
                     <div>
                         <InputLabel for="standard_charge" value="Standard Charge" />
-                        <input id="standard_charge" v-model="form.standard_charge" type="number" step="0.01" class="form-input" />
+                        <input id="standard_charge" v-model="form.standard_charge" type="number" step="0.01"
+                            @focus="$event.target.select()" class="form-input" />
                         <InputError :message="form.errors.standard_charge" />
                     </div>
 
-                    <!-- Amount (Auto-populated but editable) -->
+                    <!-- Amount is calculated from standard charge and tax. -->
                     <div>
                         <InputLabel for="amount" value="Total Amount" />
-                        <input id="amount" v-model="form.amount" type="number" step="0.01" class="form-input" />
+                        <input id="amount" v-model="form.amount" type="number" step="0.01" readonly
+                            class="form-input cursor-not-allowed bg-gray-100 dark:bg-gray-600" />
                         <InputError :message="form.errors.amount" />
                     </div>
 
                     <!-- Referral Percentage -->
                     <div>
                         <InputLabel for="referral_percentage" value="Referral Percentage (%)" />
-                        <input id="referral_percentage" v-model="form.referral_percentage" type="number" step="0.01" min="0" max="100" class="form-input" />
+                        <input id="referral_percentage" v-model="form.referral_percentage" type="number" step="0.01" min="0" max="100"
+                            @focus="$event.target.select()" class="form-input" />
                         <InputError :message="form.errors.referral_percentage" />
+                    </div>
+                    <div>
+                        <InputLabel for="discount_percentage" value="Item Discount (%)" />
+                        <div class="flex items-center gap-3">
+                            <input id="discount_percentage" v-model="form.discount_percentage" type="number"
+                                step="0.01" min="0" max="100" @focus="$event.target.select()"
+                                class="form-input flex-1" :disabled="form.discount_off" />
+                            <label for="discount_off"
+                                class="inline-flex items-center gap-2 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300 cursor-pointer select-none">
+                                <input id="discount_off" v-model="form.discount_off" type="checkbox"
+                                    class="rounded border-gray-300 text-indigo-600 shadow-sm focus:ring-indigo-500" />
+                                Discount Off
+                            </label>
+                        </div>
+                        <InputError :message="form.errors.discount_percentage" />
+                        <InputError :message="form.errors.discount_rate_locked" />
                     </div>
                 </div>
 
@@ -821,9 +1040,7 @@ const goBack = () => {
                         <div>
                             <InputLabel :for="`unit_${index}`" value="Unit" />
                             <select :id="`unit_${index}`" v-model="form.parameters[index].pathology_unit_id"
-                                class="form-input"
-                                :class="{ 'bg-gray-100 dark:bg-gray-600': form.parameters[index].test_parameter_id }"
-                                :disabled="!!form.parameters[index].test_parameter_id">
+                                class="form-input">
                                 <option value="">Select Unit</option>
                                 <option v-for="unit in props.pathologyUnits" :key="unit.id" :value="unit.id">
                                     {{ unit.name }}
@@ -887,8 +1104,13 @@ const goBack = () => {
         </div>
 
         <!-- Category Modal -->
-        <CategoryModal :is-open="showCategoryModal" :categories="categories" @close="closeCategoryModal"
-            @category-created="handleCategoryCreated" />
+        <CategoryModal :is-open="showCategoryModal" :categories="mainCategories" :is-main-category="true"
+            :return-to="route('backend.itemcharge.create')"
+            @close="closeCategoryModal" @category-created="handleCategoryCreated" />
+
+        <CategoryModal :is-open="showItemCategoryModal" :categories="categories" :is-main-category="false"
+            :return-to="route('backend.itemcharge.create')"
+            @close="closeItemCategoryModal" @category-created="handleItemCategoryCreated" />
 
         <HospitalChargeModal :isOpen="showChargeModal" :charge="null" :chargeTypes="props.chargeTypes || []"
             :chargeCategories="props.chargeCategories || []" :chargeUnits="props.chargeUnits || []"
@@ -905,7 +1127,14 @@ const goBack = () => {
 </template>
 
 <style scoped>
+@reference "../../../../css/app.css";
+
 .form-input {
     @apply block w-full p-2 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600;
+}
+
+.dropdown-option-highlight {
+    background-color: #2563eb !important;
+    color: #ffffff !important;
 }
 </style>

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\BillItem;
 use App\Models\Billing;
 use App\Models\WebSetting;
+use App\Models\TestCategory;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Milon\Barcode\DNS1D;
@@ -69,6 +70,7 @@ class SampleCollectionController extends Controller
         return Inertia::render('Backend/SampleCollection/Index', [
             'pageTitle' => 'Sample Collection',
             'datas' => $datas,
+            'allowedCategories' => $allowedCategories,
             'filters' => [
                 'search' => $search,
             ],
@@ -146,8 +148,9 @@ class SampleCollectionController extends Controller
 
         $dns1d = new DNS1D();
 
-        $barcodes = $items->map(function ($item) use ($dns1d, $billing, $scale, $height) {
-            $code = ($billing->bill_number ?? 'BILL') . '-' . $item->id;
+        $sampleId = trim((string) $billing->bill_number);
+        $barcodes = $items->map(function ($item) use ($dns1d, $sampleId, $scale, $height) {
+            $code = $sampleId;
             $barcode = 'data:image/png;base64,' . $dns1d->getBarcodePNG($code, 'C128', $scale, $height);
 
             return [
@@ -166,16 +169,25 @@ class SampleCollectionController extends Controller
 
     private function resolveDepartmentCategories(): array
     {
+        $dynamicCategories = TestCategory::query()
+            ->whereNull('parent_id')
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->pluck('name')
+            ->map(fn ($name) => trim((string) $name))
+            ->filter()
+            ->all();
+
         $departmentName = strtolower(trim((string) data_get(auth('admin')->user(), 'details.department.name', '')));
         $designationName = strtolower(trim((string) data_get(auth('admin')->user(), 'details.designation.name', '')));
         $scopeText = trim($departmentName . ' ' . $designationName);
 
         if (str_contains($scopeText, 'pathology') || str_contains($scopeText, 'patholog')) {
-            return ['Pathology'];
+            return $this->dynamicCategoriesMatching(['pathology', 'micro', 'biology'], ['Pathology']);
         }
 
         if (str_contains($scopeText, 'radiology') || str_contains($scopeText, 'radiolog')) {
-            return ['Radiology'];
+            return $this->dynamicCategoriesMatching(['radiology', 'radiolog', 'xray', 'x-ray'], ['Radiology']);
         }
 
         if (
@@ -183,13 +195,34 @@ class SampleCollectionController extends Controller
             || str_contains($scopeText, 'ultrasonography')
             || str_contains($scopeText, 'usg')
         ) {
-            return ['Ultrasonogram', 'Ultrasonography'];
+            return $this->dynamicCategoriesMatching(['ultrasound', 'ultrasonogram', 'ultrasonography'], ['Ultrasonogram', 'Ultrasonography']);
         }
 
         if (str_contains($scopeText, 'ecg') || str_contains($scopeText, 'e.c.g')) {
-            return ['ECG'];
+            return $this->dynamicCategoriesMatching(['ecg', 'echo'], ['ECG']);
         }
 
-        return ['Pathology', 'Radiology', 'Ultrasonogram', 'Ultrasonography', 'ECG'];
+        return array_values(array_unique(array_merge(
+            ['Pathology', 'Radiology', 'Ultrasonogram', 'Ultrasonography', 'ECG'],
+            $dynamicCategories
+        ), SORT_STRING));
+    }
+
+    private function dynamicCategoriesMatching(array $keywords, array $fallback): array
+    {
+        $categories = TestCategory::query()
+            ->whereNull('parent_id')
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->pluck('name')
+            ->map(fn ($name) => trim((string) $name))
+            ->filter()
+            ->filter(function ($name) use ($keywords) {
+                $normalized = strtolower($name);
+                return collect($keywords)->contains(fn ($keyword) => str_contains($normalized, $keyword));
+            })
+            ->all();
+
+        return array_values(array_unique(array_merge($fallback, $categories), SORT_STRING));
     }
 }

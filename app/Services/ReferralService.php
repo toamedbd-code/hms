@@ -23,7 +23,7 @@ class ReferralService
     public function list()
     {
         return $this->referralModel->whereNull('referrals.deleted_at')
-            ->with(['payee:id,name,phone', 'billing:id,bill_number,invoice_number,patient_mobile'])
+            ->with(['payee:id,name,phone', 'billing:id,bill_number,invoice_number,patient_mobile,commission_total'])
             ->join('referralpeople', 'referrals.payee_id', '=', 'referralpeople.id')
             ->select('referrals.*')
             ->orderByRaw('LOWER(referralpeople.name) ASC')
@@ -103,11 +103,12 @@ public function update(array $data, $id)
 
     public function recordCommissionPayment($id, $paymentType, $amount = null)
     {
-        $referral = $this->referralModel->findOrFail($id);
+        $referral = $this->referralModel->with('billing')->findOrFail($id);
+        $referral->updateCommission();
 
-        $totalCommission = (float) $referral->total_commission_amount;
-        $currentPaid = (float) $referral->paid_amount;
-        $pending = max(0, $totalCommission - $currentPaid);
+        $totalCommission = round((float) $referral->total_commission_amount, 2);
+        $currentPaid = round((float) $referral->paid_amount, 2);
+        $pending = round(max(0, $totalCommission - $currentPaid), 2);
 
         if ($pending <= 0) {
             return $referral;
@@ -116,13 +117,14 @@ public function update(array $data, $id)
         if ($paymentType === 'paid') {
             $appliedAmount = $pending;
         } else {
-            $amount = max(0, (float) $amount);
+            $amount = round(max(0, (float) $amount), 2);
             if ($amount <= 0) {
                 return $referral;
             }
             $appliedAmount = min($amount, $pending);
         }
-        $newPaid = $currentPaid + $appliedAmount;
+        $appliedAmount = round($appliedAmount, 2);
+        $newPaid = round($currentPaid + $appliedAmount, 2);
 
         if ($newPaid >= $totalCommission) {
             $paidStatus = 'Paid';
@@ -149,6 +151,7 @@ public function update(array $data, $id)
             ->where('payee_id', $payeeId)
             ->whereNull('deleted_at')
             ->where('status', 'Active')
+            ->with('billing')
             ->orderBy('date')
             ->get();
 
@@ -156,9 +159,13 @@ public function update(array $data, $id)
             return null;
         }
 
-        $totalCommission = (float) $referrals->sum('total_commission_amount');
-        $totalPaid = (float) $referrals->sum('paid_amount');
-        $pending = max(0, $totalCommission - $totalPaid);
+        foreach ($referrals as $referral) {
+            $referral->updateCommission();
+        }
+
+        $totalCommission = round((float) $referrals->sum('total_commission_amount'), 2);
+        $totalPaid = round((float) $referrals->sum('paid_amount'), 2);
+        $pending = round(max(0, $totalCommission - $totalPaid), 2);
 
         if ($pending <= 0) {
             return $referrals;
@@ -167,11 +174,11 @@ public function update(array $data, $id)
         if ($paymentType === 'paid') {
             $amountToApply = $pending;
         } else {
-            $amount = max(0, (float) $amount);
+            $amount = round(max(0, (float) $amount), 2);
             if ($amount <= 0) {
                 return $referrals;
             }
-            $amountToApply = min($amount, $pending);
+            $amountToApply = round(min($amount, $pending), 2);
         }
 
         foreach ($referrals as $referral) {
@@ -179,13 +186,14 @@ public function update(array $data, $id)
                 break;
             }
 
-            $refPending = max(0, (float) $referral->total_commission_amount - (float) $referral->paid_amount);
+            $refPending = round(max(0, (float) $referral->total_commission_amount - (float) $referral->paid_amount), 2);
             if ($refPending <= 0) {
                 continue;
             }
 
             $apply = min($amountToApply, $refPending);
-            $newPaid = (float) $referral->paid_amount + $apply;
+            $apply = round($apply, 2);
+            $newPaid = round((float) $referral->paid_amount + $apply, 2);
 
             if ($newPaid >= (float) $referral->total_commission_amount) {
                 $paidStatus = 'Paid';
@@ -203,7 +211,7 @@ public function update(array $data, $id)
 
             $this->updateCommissionExpense($referral);
 
-            $amountToApply -= $apply;
+            $amountToApply = round($amountToApply - $apply, 2);
         }
 
         return $referrals;
@@ -211,7 +219,7 @@ public function update(array $data, $id)
 
     private function updateCommissionExpense(Referral $referral)
     {
-        $commissionAmount = (float) $referral->paid_amount;
+        $commissionAmount = round((float) $referral->paid_amount, 2);
         if ($commissionAmount <= 0) {
             Log::info('Referral commission expense skipped (zero amount)', [
                 'referral_id' => $referral->id,

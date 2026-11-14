@@ -61,6 +61,7 @@ class SidebarPermissionStabilitySeeder extends Seeder
         }
 
         $this->ensurePermission('billing', null, 2);
+        $this->ensurePermission('billing-add', null, 2);
         $this->ensurePermission('cash-counter', 'billing', 8);
         Menu::query()
             ->where('route', 'backend.cash-counter.index')
@@ -85,7 +86,7 @@ class SidebarPermissionStabilitySeeder extends Seeder
         }
 
         $billingMenu->parent_id = null;
-        $billingMenu->name = 'Billing';
+        $billingMenu->name = 'Module Billing';
         $billingMenu->icon = 'billing';
         $billingMenu->route = 'backend.billing.Page';
         $billingMenu->description = null;
@@ -96,6 +97,12 @@ class SidebarPermissionStabilitySeeder extends Seeder
             $billingMenu->sorting = 1;
         }
         $billingMenu->save();
+
+        Menu::query()
+            ->where('route', 'backend.billing.view')
+            ->where('status', 'Active')
+            ->whereNull('deleted_at')
+            ->update(['name' => 'Billing', 'icon' => 'credit-card', 'permission_name' => 'billing-add', 'parent_id' => null]);
 
         Menu::query()
             ->where('route', 'backend.cash-counter.index')
@@ -141,7 +148,7 @@ class SidebarPermissionStabilitySeeder extends Seeder
             );
             $this->ensureAccountManagementMenu(
                 $accountParent,
-                'Profit & Loss',
+                'Profit Management',
                 'trending-up',
                 'backend.accounts.profit-loss',
                 'profit-loss'
@@ -333,8 +340,20 @@ class SidebarPermissionStabilitySeeder extends Seeder
                 }
 
                 $basePermission = $permissionByName[$baseName];
-                $targetParentId = $basePermission->id;
                 $targetSorting = (int) ($basePermission->sorting ?? 1);
+                if (
+                    $baseName === 'billing'
+                    && in_array($name, ['billing-create', 'billing-edit', 'billing-delete'], true)
+                    && isset($permissionByName['billing-add'])
+                ) {
+                    $basePermission = $permissionByName['billing-add'];
+                    $targetSorting = [
+                        'billing-create' => 2,
+                        'billing-edit' => 3,
+                        'billing-delete' => 4,
+                    ][$name];
+                }
+                $targetParentId = $basePermission->id;
 
                 $needsUpdate = ((int) ($permission->parent_id ?? 0) !== (int) $targetParentId)
                     || ((int) ($permission->sorting ?? 0) !== $targetSorting);
@@ -379,11 +398,14 @@ class SidebarPermissionStabilitySeeder extends Seeder
             ['websetting-add', 'sms-setting'],
             ['websetting-add', 'other-setting'],
             ['websetting-add', 'b-kash-settings'],
+            ['websetting-add', 'report-settings'],
             ['activity-log-view', 'activity-logs'],
             ['activity-log-view', 'activity-logs-print'],
             ['supplier-payment-list', 'vendor-payment-list'],
             ['report-management', 'report-summary'],
             ['billing', 'cash-counter'],
+            ['item-charge', 'charge-list'],
+            ['hospital-test', 'charge-list'],
             ['test-list', 'itemcharge-list'],
             ['test-list-create', 'itemcharge-list-create'],
             ['test-list-edit', 'itemcharge-list-edit'],

@@ -10,13 +10,6 @@ class IpdPatient extends Authenticatable
 {
     use Notifiable, HasFactory;
 
-    // Add consultantDoctor relationship for compatibility with ReportController
-    public function consultantDoctor()
-    {
-        return $this->belongsTo(Admin::class, 'consultant_doctor_id', 'id');
-    }
-    use Notifiable, HasFactory;
-
     protected $table = 'ipdpatients';
 
     protected $guarded = [];
@@ -24,13 +17,19 @@ class IpdPatient extends Authenticatable
     protected static function boot()
     {
         parent::boot();
-        static::saving(function ($model) {
+        static::creating(function ($model) {
             $model->created_at = date('Y-m-d H:i:s');
         });
 
         static::updating(function ($model) {
             $model->updated_at = date('Y-m-d H:i:s');
         });
+    }
+
+    // Add consultantDoctor relationship for compatibility with ReportController
+    public function consultantDoctor()
+    {
+        return $this->belongsTo(Admin::class, 'consultant_doctor_id', 'id');
     }
 
     public function patient()

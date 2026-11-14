@@ -1,16 +1,21 @@
 import './bootstrap';
 import '../css/app.css';
+import '../css/prescription-pages.css';
 import FeatherIcon from './Components/FeatherIcon.vue';
 import eventBus from './eventBus.js';
+import { successMessage, errorMessage } from './responseMessage.js';
+import { installOfflineBillingSupport } from './offlineBillingQueue.js';
 
 
 import { createApp, h } from 'vue';
 import { createInertiaApp } from '@inertiajs/vue3';
 // dynamic import resolver (avoid laravel-vite-plugin dependency)
-import { ZiggyVue } from 'ziggy-js';
+import { ZiggyVue, route as ziggyRoute } from 'ziggy-js';
+import { Ziggy } from './ziggy.js';
 
 const appName = import.meta.env.VITE_APP_NAME || 'ToaMed';
 let runtimeAppName = appName;
+let runtimePageTitle = '';
 const pages = import.meta.glob('./Pages/**/*.vue');
 
 const resolveInitialInertiaPage = (appElement) => {
@@ -33,14 +38,14 @@ const resolveInitialInertiaPage = (appElement) => {
 };
 
 const themeTokens = {
-    default: { primary: '#64748b', soft: '#f1f5f9', contrast: '#334155', surface: '#ffffff' },
-    red: { primary: '#dc2626', soft: '#fecaca', contrast: '#7f1d1d', surface: '#fff1f2' },
-    blue: { primary: '#1d4ed8', soft: '#bfdbfe', contrast: '#1e3a8a', surface: '#eff6ff' },
-    gray: { primary: '#475569', soft: '#cbd5e1', contrast: '#1e293b', surface: '#f8fafc' },
-    emerald: { primary: '#059669', soft: '#a7f3d0', contrast: '#065f46', surface: '#ecfdf5' },
-    amber: { primary: '#d97706', soft: '#fde68a', contrast: '#92400e', surface: '#fffbeb' },
-    rose: { primary: '#e11d48', soft: '#fecdd3', contrast: '#9f1239', surface: '#fff1f2' },
-    indigo: { primary: '#4f46e5', soft: '#c7d2fe', contrast: '#3730a3', surface: '#eef2ff' },
+    default: { primary: '#059669', soft: '#dcfce7', contrast: '#166534', surface: '#fbfffc', navbarSurface: '#bbf7d0' },
+    red: { primary: '#dc2626', soft: '#fecaca', contrast: '#7f1d1d', surface: '#fff1f2', navbarSurface: '#fee2e2' },
+    blue: { primary: '#1d4ed8', soft: '#bfdbfe', contrast: '#1e3a8a', surface: '#eff6ff', navbarSurface: '#dbeafe' },
+    gray: { primary: '#475569', soft: '#cbd5e1', contrast: '#1e293b', surface: '#f8fafc', navbarSurface: '#e2e8f0' },
+    emerald: { primary: '#059669', soft: '#a7f3d0', contrast: '#065f46', surface: '#ecfdf5', navbarSurface: '#d1fae5' },
+    amber: { primary: '#d97706', soft: '#fde68a', contrast: '#92400e', surface: '#fffbeb', navbarSurface: '#fef3c7' },
+    rose: { primary: '#e11d48', soft: '#fecdd3', contrast: '#9f1239', surface: '#fff1f2', navbarSurface: '#ffe4e6' },
+    indigo: { primary: '#4f46e5', soft: '#c7d2fe', contrast: '#3730a3', surface: '#eef2ff', navbarSurface: '#e0e7ff' },
 };
 
 const hexToRgb = (hex) => {
@@ -75,10 +80,15 @@ const setTheme = (themeName) => {
     const tokens = themeTokens[name];
     const root = document.documentElement;
 
+    if (root.classList.contains(`theme-${name}`)) {
+        return;
+    }
+
     root.style.setProperty('--app-theme-primary', tokens.primary);
     root.style.setProperty('--app-theme-soft', tokens.soft);
     root.style.setProperty('--app-theme-contrast', tokens.contrast);
     root.style.setProperty('--app-theme-surface', tokens.surface);
+    root.style.setProperty('--app-theme-navbar-surface', tokens.navbarSurface);
     root.style.setProperty('--app-theme-primary-rgb', hexToRgb(tokens.primary));
 
     Object.keys(themeTokens).forEach((key) => root.classList.remove(`theme-${key}`));
@@ -555,8 +565,9 @@ const applyRuntimeBranding = (pageProps) => {
 
     const runtimeName = resolveRuntimeAppName(effectiveBranding ?? null);
     runtimeAppName = runtimeName;
+    runtimePageTitle = typeof pageProps?.pageTitle === 'string' ? pageProps.pageTitle : '';
 
-    updateDocumentTitle(runtimeName, pageProps?.pageTitle ?? '');
+    updateDocumentTitle(runtimeName, runtimePageTitle);
     setTheme(effectiveBranding?.current_theme ?? 'default');
     setFavicon(effectiveBranding ?? { icon: effectiveBranding?.favicon, logo: effectiveBranding?.logo, updated_at: effectiveBranding?.updated_at });
 };
@@ -586,7 +597,7 @@ const applyLastBrandingPayload = (payload) => {
         // ignore storage write errors
     }
 
-    updateDocumentTitle(resolveRuntimeAppName(normalizedPayload));
+    updateDocumentTitle(resolveRuntimeAppName(normalizedPayload), runtimePageTitle);
     setTheme(normalizedPayload?.current_theme ?? 'default');
     setFavicon(normalizedPayload);
 
@@ -612,6 +623,29 @@ window.addEventListener('storage', (event) => {
     }
 });
 
+// Global cursor loading indicator on every Inertia navigation
+document.addEventListener('inertia:start', () => {
+    document.body.classList.add('inertia-loading');
+    document.body.style.cursor = 'progress';
+});
+document.addEventListener('inertia:finish', () => {
+    document.body.classList.remove('inertia-loading');
+    document.body.style.cursor = '';
+});
+
+// Track whether a per-form onSuccess already showed a toast this navigation
+// so the global handler can skip it and avoid duplicates.
+let _toastShownForNavigation = false;
+let _navigationKey = null;
+
+document.addEventListener('inertia:before', (event) => {
+    _navigationKey = Date.now();
+    _toastShownForNavigation = false;
+});
+
+// Expose a helper so per-form onSuccess callbacks can signal "toast shown"
+window.__inertiaMarkToastShown = () => { _toastShownForNavigation = true; };
+
 document.addEventListener('inertia:success', (event) => {
     const page = event?.detail?.page;
     try {
@@ -625,6 +659,19 @@ document.addEventListener('inertia:success', (event) => {
 
     const pageProps = page?.props;
     applyRuntimeBranding(pageProps);
+
+    // Show flash toasts globally if no per-form handler already did it
+    if (!_toastShownForNavigation) {
+        const flash = pageProps?.flash ?? {};
+        if (flash.successMessage) {
+            successMessage(flash.successMessage);
+            _toastShownForNavigation = true;
+        }
+        if (flash.errorMessage) {
+            errorMessage(flash.errorMessage);
+            _toastShownForNavigation = true;
+        }
+    }
 });
 
 createInertiaApp({
@@ -658,14 +705,28 @@ createInertiaApp({
             // ignore
         }
 
+        const ziggyLocation = props?.initialPage?.props?.ziggy?.location;
+        const location = new URL(ziggyLocation || window.location.href);
+        const ziggyConfig = {
+            ...Ziggy,
+            url: location.origin,
+            location,
+        };
+        if (typeof window !== 'undefined') {
+            window.route = (name, params = {}, absolute = undefined) => (
+                ziggyRoute(name, params, absolute, ziggyConfig)
+            );
+        }
+
         applyRuntimeBranding(props?.initialPage?.props);
 
         const instance = createApp({ render: () => h(App, props) })
             .use(plugin)
-            .use(ZiggyVue)
+            .use(ZiggyVue, ziggyConfig)
             .component('FeatherIcon', FeatherIcon);
 
         const mounted = instance.mount(el);
+        installOfflineBillingSupport(props?.initialPage?.props?.auth?.admin?.id);
 
         // Monkey-patch global `route()` to try sensible fallbacks when Ziggy
         // throws "route ... is not in the route list" due to naming prefixes
@@ -721,6 +782,9 @@ createInertiaApp({
 
         return mounted;
     },
-    // Disable Inertia/NProgress top progress bar — user requested no reload bar
-    progress: false,
+    progress: {
+        delay: 200,
+        color: '#0f766e',
+        showSpinner: false,
+    },
 });

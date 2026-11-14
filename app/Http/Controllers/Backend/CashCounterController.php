@@ -7,19 +7,23 @@ use App\Models\Admin;
 use App\Models\AdminDetail;
 use App\Models\CashCounterSession;
 use App\Services\CashCounterService;
+use App\Services\CashCounterLedgerService;
 use App\Support\DefaultDeveloperManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class CashCounterController extends Controller
 {
-    public function __construct(protected CashCounterService $cashCounterService)
-    {
+    public function __construct(
+        protected CashCounterService $cashCounterService,
+        protected CashCounterLedgerService $cashCounterLedgerService
+    ) {
+        $this->middleware('AdminAuth');
         $this->middleware('auth:admin');
-        $this->middleware('permission:cash-counter');
+        $this->middleware('permission:cash-counter')->except(['quickStart', 'quickClose', 'handoverPrint']);
+        $this->middleware('permission:cash-counter|billing|billing-create')->only(['quickStart', 'quickClose', 'handoverPrint']);
     }
 
     public function index(Request $request): Response
@@ -57,12 +61,21 @@ class CashCounterController extends Controller
             'opening_note' => 'nullable|string',
         ]);
 
-        $adminId = (int) auth()->guard('admin')->id();
-        $data['user_name'] = (string) (auth('admin')->user()?->name ?? 'Unknown');
-        $data['counter_name'] = $this->resolveCounterNameForAdmin($adminId, (string) ($data['counter_name'] ?? 'Billing Counter'));
+        $admin = $this->resolveAdminActor();
+        if (!$admin) {
+            return redirect()->back()->with('errorMessage', 'Unable to resolve logged-in admin user.');
+        }
 
+        $existingOpenSession = $this->cashCounterService->findOpenSessionForAdmin($admin['id'], $admin['name']);
+        if ($existingOpenSession) {
+            return redirect()->route('backend.cash-counter.index', ['session_id' => $existingOpenSession->id])
+                ->with('successMessage', 'Your counter session is already open.');
+        }
+
+        $data['user_name'] = $admin['name'];
+        $data['counter_name'] = $this->resolveCounterNameForAdmin($admin['id'], (string) ($data['counter_name'] ?? 'Billing Counter'));
         $data['opened_at'] = now();
-        $data['created_by'] = $adminId;
+        $data['created_by'] = $admin['id'];
 
         $session = $this->cashCounterService->startSession($data);
 
@@ -72,31 +85,12 @@ class CashCounterController extends Controller
 
     public function quickStart(Request $request): RedirectResponse
     {
-        $requestUser = $request->user();
-        $adminId = (int) ($requestUser?->id ?? 0);
-        $fallbackAdmin = $adminId > 0 ? Admin::query()->select('id', 'first_name', 'last_name')->find($adminId) : null;
-        $fallbackName = trim((string) (($fallbackAdmin?->first_name ?? '') . ' ' . ($fallbackAdmin?->last_name ?? '')));
-        $adminName = (string) ($requestUser?->name ?? ($fallbackName !== '' ? $fallbackName : 'Unknown'));
-
-        if ($adminId <= 0) {
+        $admin = $this->resolveAdminActor();
+        if (!$admin) {
             return redirect()->back()->with('errorMessage', 'Unable to resolve logged-in admin user.');
         }
 
-        $existingOpenSession = CashCounterSession::query()
-            ->whereRaw('LOWER(status) = ?', ['open'])
-            ->where(function ($query) use ($adminId, $adminName) {
-                $query->where('created_by', $adminId);
-
-                if ($adminName !== '') {
-                    $query->orWhere(function ($subQuery) use ($adminName) {
-                        $subQuery->whereNull('created_by')
-                            ->where('user_name', $adminName);
-                    });
-                }
-            })
-            ->latest('opened_at')
-            ->first();
-
+        $existingOpenSession = $this->cashCounterService->findOpenSessionForAdmin($admin['id'], $admin['name']);
         if ($existingOpenSession) {
             return redirect()->back()->with('successMessage', 'Your counter session is already open.');
         }
@@ -109,13 +103,13 @@ class CashCounterController extends Controller
         ]);
 
         $session = $this->cashCounterService->startSession([
-            'counter_name' => $this->resolveCounterNameForAdmin($adminId, (string) ($validated['counter_name'] ?? 'Billing Counter')),
-            'user_name' => $adminName,
+            'counter_name' => $this->resolveCounterNameForAdmin($admin['id'], (string) ($validated['counter_name'] ?? 'Billing Counter')),
+            'user_name' => $admin['name'],
             'shift_name' => $validated['shift_name'] ?? 'General',
             'opening_amount' => (float) ($validated['opening_amount'] ?? 0),
             'opening_note' => $validated['opening_note'] ?? 'Started from Billing page',
             'opened_at' => now(),
-            'created_by' => $adminId,
+            'created_by' => $admin['id'],
         ]);
 
         return redirect()
@@ -131,70 +125,35 @@ class CashCounterController extends Controller
             'note' => 'nullable|string',
         ]);
 
-        $requestUser = $request->user();
-        $adminId = (int) ($requestUser?->id ?? 0);
-        $fallbackAdmin = $adminId > 0 ? Admin::query()->select('id', 'first_name', 'last_name')->find($adminId) : null;
-        $fallbackName = trim((string) (($fallbackAdmin?->first_name ?? '') . ' ' . ($fallbackAdmin?->last_name ?? '')));
-        $adminName = (string) ($requestUser?->name ?? $fallbackName);
-
-        if ($adminId <= 0) {
+        $admin = $this->resolveAdminActor();
+        if (!$admin) {
             return redirect()->back()->with('errorMessage', 'Unable to resolve logged-in admin user.');
         }
 
-        $openSession = null;
-        $requestedSessionId = (int) ($validated['session_id'] ?? 0);
-
-        if ($requestedSessionId > 0) {
-            $openSession = CashCounterSession::query()
-                ->where('id', $requestedSessionId)
-                ->whereRaw('LOWER(status) = ?', ['open'])
-                ->first();
-        }
-
-        if (!$openSession) {
-            $openSession = CashCounterSession::query()
-                ->whereRaw('LOWER(status) = ?', ['open'])
-                ->where(function ($query) use ($adminId, $adminName) {
-                    $query->where('created_by', $adminId);
-
-                    if ($adminName !== '') {
-                        $query->orWhere(function ($subQuery) use ($adminName) {
-                            $subQuery->whereNull('created_by')
-                                ->where('user_name', $adminName);
-                        });
-                    }
-                })
-                ->latest('opened_at')
-                ->first();
-        }
-
-        if (!$openSession) {
-            try {
-                Log::info('cash-counter.quick-close.auto-start', [
-                    'admin_id' => $adminId,
-                    'admin_name' => $adminName,
-                    'requested_session_id' => $requestedSessionId,
-                ]);
-            } catch (\Throwable $e) {
-                // ignore logging failures
-            }
-
-            $openSession = $this->cashCounterService->startSession([
-                'counter_name' => $this->resolveCounterNameForAdmin($adminId, 'Billing Counter'),
-                'user_name' => $adminName !== '' ? $adminName : 'Unknown',
-                'shift_name' => 'General',
-                'opening_amount' => 0,
-                'opening_note' => 'Auto-started from close request',
-                'opened_at' => now()->startOfDay(),
-                'created_by' => $adminId,
-            ]);
-        }
-
-        $closedSession = $this->cashCounterService->closeSession(
-            (int) $openSession->id,
-            (float) $validated['closing_amount'],
-            $validated['note'] ?? 'Closed from Billing page'
+        $openSession = $this->resolveOwnedOpenSession(
+            $admin,
+            (int) ($validated['session_id'] ?? 0)
         );
+
+        if (!$openSession) {
+            return redirect()->back()->with('errorMessage', 'No open counter session found. Please Counter Start first.');
+        }
+
+        try {
+            $closedSession = $this->cashCounterService->closeSession(
+                (int) $openSession->id,
+                (float) $validated['closing_amount'],
+                $validated['note'] ?? 'Closed from Billing page'
+            );
+        } catch (\RuntimeException $e) {
+            return redirect()->back()->with('errorMessage', $e->getMessage());
+        }
+
+        try {
+            $this->cashCounterLedgerService->postCloseAdjustment($closedSession);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         $printUrl = route('backend.cash-counter.handover-print', ['sessionId' => $closedSession->id]);
 
@@ -238,7 +197,7 @@ class CashCounterController extends Controller
                 ->with('successMessage', 'Cash handover recorded.');
     }
 
-            public function close(Request $request): RedirectResponse
+    public function close(Request $request): RedirectResponse
     {
         $data = $request->validate([
             'session_id' => 'required|exists:cash_counter_sessions,id',
@@ -246,7 +205,33 @@ class CashCounterController extends Controller
             'note' => 'nullable|string',
         ]);
 
-        $closedSession = $this->cashCounterService->closeSession((int) $data['session_id'], (float) $data['closing_amount'], $data['note'] ?? null);
+        $admin = $this->resolveAdminActor();
+        if (!$admin) {
+            return redirect()->back()->with('errorMessage', 'Unable to resolve logged-in admin user.');
+        }
+
+        $openSession = $this->resolveOwnedOpenSession($admin, (int) $data['session_id']);
+        if (!$openSession) {
+            return redirect()->route('backend.cash-counter.index')
+                ->with('errorMessage', 'No open counter session found for your login.');
+        }
+
+        try {
+            $closedSession = $this->cashCounterService->closeSession(
+                (int) $openSession->id,
+                (float) $data['closing_amount'],
+                $data['note'] ?? null
+            );
+        } catch (\RuntimeException $e) {
+            return redirect()->route('backend.cash-counter.index')
+                ->with('errorMessage', $e->getMessage());
+        }
+
+        try {
+            $this->cashCounterLedgerService->postCloseAdjustment($closedSession);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         $printUrl = route('backend.cash-counter.handover-print', ['sessionId' => $closedSession->id]);
 
@@ -264,6 +249,47 @@ class CashCounterController extends Controller
         $summary = $this->cashCounterService->getHandoverPrintSummary($sessionId, $actorAdminId, $includeAllUsers);
 
         return view('backend.cash_counter.handover_print', $summary);
+    }
+
+    protected function resolveAdminActor(): ?array
+    {
+        $admin = auth('admin')->user();
+        $adminId = (int) ($admin?->id ?? 0);
+        if ($adminId <= 0) {
+            return null;
+        }
+
+        $adminName = trim((string) ($admin?->name ?? ''));
+        if ($adminName === '') {
+            $fallbackAdmin = Admin::query()->select('id', 'first_name', 'last_name')->find($adminId);
+            $adminName = trim((string) (($fallbackAdmin?->first_name ?? '') . ' ' . ($fallbackAdmin?->last_name ?? '')));
+        }
+
+        return [
+            'id' => $adminId,
+            'name' => $adminName !== '' ? $adminName : 'Unknown',
+        ];
+    }
+
+    protected function resolveOwnedOpenSession(array $admin, int $requestedSessionId = 0): ?CashCounterSession
+    {
+        if ($requestedSessionId > 0) {
+            $session = CashCounterSession::query()
+                ->where('id', $requestedSessionId)
+                ->whereRaw('LOWER(status) = ?', ['open'])
+                ->first();
+
+            if ($session && ((int) ($session->created_by ?? 0) === $admin['id'] || empty($session->created_by))) {
+                if (empty($session->created_by)) {
+                    $session->created_by = $admin['id'];
+                    $session->save();
+                }
+
+                return $session;
+            }
+        }
+
+        return $this->cashCounterService->findOpenSessionForAdmin($admin['id'], $admin['name']);
     }
 
     protected function resolveCounterNameForAdmin(int $adminId, string $fallback = 'Billing Counter'): string

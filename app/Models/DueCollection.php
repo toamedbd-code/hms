@@ -16,6 +16,7 @@ class DueCollection extends Model
      */
     protected $fillable = [
         'billing_id',
+        'pharmacy_bill_id',
         'collected_amount',
         'collected_at',
         'payment_method',

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ActivityLog extends Model
@@ -24,6 +25,23 @@ class ActivityLog extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime'
     ];
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope('exclude_developer_activity', function (Builder $query) {
+            $query->whereDoesntHave('admin', function (Builder $adminQuery) {
+                $adminQuery->where(function (Builder $roleQuery) {
+                    $roleQuery
+                        ->whereHas('role', function (Builder $role) {
+                            $role->whereRaw('LOWER(name) = ?', ['developer']);
+                        })
+                        ->orWhereHas('roles', function (Builder $role) {
+                            $role->whereRaw('LOWER(name) = ?', ['developer']);
+                        });
+                    });
+            });
+        });
+    }
 
     /**
      * Get the admin user who performed the activity

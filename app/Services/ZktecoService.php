@@ -26,14 +26,14 @@ class ZktecoService
      */
     public function fetchFromDevice(AttendanceDevice $device): array
     {
-        $host = $device->identifier;
+        [$host, $port] = $this->resolveDeviceConnection($device);
 
         try {
             if (!class_exists(ZKTeco::class)) {
                 throw new Exception('Rats\\Zkteco ZKTeco class not found. Run: composer require rats/zkteco');
             }
 
-            $zk = new ZKTeco($host, $this->port);
+            $zk = new ZKTeco($host, $port);
             // connect to device
             $zk->connect();
 
@@ -128,6 +128,17 @@ class ZktecoService
 
         // insertOrIgnore returns number of rows affected in newer Laravel versions; for safety, return count of rows attempted
         return is_int($inserted) ? $inserted : count($rows);
+    }
+
+    protected function resolveDeviceConnection(AttendanceDevice $device): array
+    {
+        $meta = is_array($device->meta) ? $device->meta : [];
+        $ip = trim((string) ($meta['ip'] ?? ''));
+        $port = (int) ($meta['port'] ?? 0);
+        $identifier = trim((string) $device->identifier);
+        $host = filter_var($ip, FILTER_VALIDATE_IP) ? $ip : $identifier;
+
+        return [$host, $port > 0 ? $port : $this->port];
     }
 
     protected function normalizeType($type, $rawRow = [])

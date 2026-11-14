@@ -37,29 +37,15 @@
     $hdr = trim((string) ($headerImage ?? $header_image ?? $headerSrc ?? ''));
     $headerTitle = trim((string) ($headerTitle ?? $header_title ?? config('app.name', 'TOAMED HOSPITAL')));
     $headerSubtitle = trim((string) ($headerSubtitle ?? $header_subtitle ?? ''));
+    $invoiceDesign = $invoiceDesign ?? null;
     $headerHeight = (int) ($headerHeight ?? $header_height ?? $reportHeaderHeight ?? ($invoiceDesign?->header_height ?? 0));
     $footerHeight = (int) ($footerHeight ?? $footer_height ?? $reportFooterHeight ?? ($invoiceDesign?->footer_height ?? 0));
 
-    $resolvedInvoiceDesign = null;
-    if ($allowInvoiceDesignFallback && ($hdr === '' || $headerHeight <= 0 || $footerHeight <= 0) && class_exists(\App\Models\InvoiceDesign::class)) {
-        $resolvedInvoiceDesign = \App\Models\InvoiceDesign::query()
-            ->where('status', 'Active')
-            ->whereRaw('LOWER(TRIM(module)) = ?', ['billing'])
-            ->first();
+    $resolvedInvoiceDesign = $invoiceDesign;
+    if ($allowInvoiceDesignFallback && !$resolvedInvoiceDesign && class_exists(\App\Models\InvoiceDesign::class)) {
+        $designModule = strtolower(trim((string) ($module ?? 'billing')));
+        $resolvedInvoiceDesign = \App\Models\InvoiceDesign::resolveForModule($designModule !== '' ? $designModule : 'billing');
 
-        if (!$resolvedInvoiceDesign) {
-            $resolvedInvoiceDesign = \App\Models\InvoiceDesign::query()
-                ->where('status', 'Active')
-                ->whereNull('module')
-                ->first();
-        }
-
-        if (!$resolvedInvoiceDesign) {
-            $resolvedInvoiceDesign = \App\Models\InvoiceDesign::query()
-                ->where('status', 'Active')
-                ->orderByDesc('id')
-                ->first();
-        }
     }
 
     if ($hdr === '' && $resolvedInvoiceDesign) {
@@ -74,14 +60,41 @@
         $footerHeight = (int) ($resolvedInvoiceDesign?->footer_height ?? 70);
     }
 
+    $fullPagePad = '';
+    $fullPagePadContentOffset = 0;
+    $renderFullPagePadAsBackground = (bool) ($renderFullPagePadAsBackground ?? false);
+    if (($resolvedInvoiceDesign?->active_pad_type ?? 'header') === 'institution' && ($invoiceDesign !== null || isset($module))) {
+        $fullPagePad = (string) ($fullPagePadImage ?? $resolvedInvoiceDesign?->full_page_pad_url ?? '');
+        $fullPagePadContentOffset = max(0, min(100, (int) ($resolvedInvoiceDesign?->full_page_pad_content_offset ?? 0)));
+        if ($fullPagePad !== '') {
+            $headerHeight = 0;
+            $hdr = '';
+        }
+    }
+
     if (!$showHeaderFooter) {
         $headerHeight = 0;
         $hdr = '';
+        $fullPagePad = '';
     }
 @endphp
 
 <style>
     :root { --report-header-height: {{ $headerHeight }}px; --report-footer-height: {{ $footerHeight }}px; }
+
+    .print-full-page-institution-pad {
+        position: fixed;
+        inset: 0 auto auto 0;
+        width: 100vw;
+        height: 100vh;
+        object-fit: fill;
+        z-index: -1;
+        pointer-events: none;
+    }
+
+    .print-full-page-pad-content-offset {
+        height: {{ $fullPagePadContentOffset }}mm;
+    }
 
     .print-shared-header {
         width: 100%;
@@ -132,6 +145,11 @@
         color: #475569;
     }
 </style>
+
+@if ($fullPagePad !== '' && !$renderFullPagePadAsBackground)
+    <img src="{{ $fullPagePad }}" alt="" aria-hidden="true" class="print-full-page-institution-pad">
+    <div class="print-full-page-pad-content-offset"></div>
+@endif
 
 <div class="print-shared-header header-section">
     @if (!empty($hdr))

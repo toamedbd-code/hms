@@ -6,6 +6,7 @@ import QRCode from 'qrcode';
 const props = defineProps({
   pageTitle: { type: String, default: 'GRN Receive Slip' },
   grn: { type: Object, required: true },
+  timezone: { type: String, default: 'Asia/Dhaka' },
 });
 
 const printableEl = ref(null);
@@ -54,7 +55,14 @@ const formatDateTime = (value) => {
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
+    timeZone: props.timezone,
   });
+};
+
+const formatDate = (value) => {
+  if (!value) return '-';
+  const [year, month, day] = String(value).slice(0, 10).split('-');
+  return year && month && day ? `${day}/${month}/${year}` : String(value);
 };
 
 const downloadPdf = async () => {
@@ -110,7 +118,8 @@ onMounted(() => {
 
       <div class="grid grid-cols-2 gap-2 text-sm mb-4">
         <p><strong>GRN No:</strong> {{ grn.grn_no }}</p>
-        <p><strong>Date:</strong> {{ formatDateTime(grn.receive_date) }}</p>
+        <p><strong>Received At:</strong> {{ formatDateTime(grn.created_at) }}</p>
+        <p><strong>Delivery Date:</strong> {{ formatDate(grn.receive_date) }}</p>
         <p><strong>Supplier:</strong> {{ grn.supplier_name || '-' }}</p>
         <p><strong>Invoice:</strong> {{ grn.invoice_no || '-' }}</p>
       </div>
@@ -119,6 +128,7 @@ onMounted(() => {
         <thead class="bg-gray-50">
           <tr>
             <th class="px-3 py-2 border">Item</th>
+            <th class="px-3 py-2 border">Batch / Expiry / Asset</th>
             <th class="px-3 py-2 border">Qty</th>
             <th class="px-3 py-2 border">Unit Cost</th>
             <th class="px-3 py-2 border">Line Total</th>
@@ -127,6 +137,11 @@ onMounted(() => {
         <tbody>
           <tr v-for="line in grn.items" :key="line.id">
             <td class="px-3 py-2 border">{{ line.store_item?.item_name || '-' }}</td>
+            <td class="px-3 py-2 border">
+              {{ line.batch_no || '-' }}
+              <div v-if="line.expiry_date" class="text-xs">Exp: {{ String(line.expiry_date).slice(0, 10) }}</div>
+              <div v-if="line.serial_number || line.asset_tag" class="text-xs">{{ line.serial_number || '' }} {{ line.asset_tag || '' }}</div>
+            </td>
             <td class="px-3 py-2 border text-center">{{ Number(line.quantity).toFixed(2) }}</td>
             <td class="px-3 py-2 border text-right">{{ Number(line.unit_cost).toFixed(2) }}</td>
             <td class="px-3 py-2 border text-right">{{ Number(line.line_total).toFixed(2) }}</td>

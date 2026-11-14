@@ -112,14 +112,8 @@ class PermissionSeeder extends Seeder
             case 'pathology-list':
                 $this->createPathologyPermissions($menu);
                 break;
-            case 'ecg-list':
-                $this->createEcgPermissions($menu);
-                break;
             case 'radiology-list':
                 $this->createRadiologyPermissions($menu);
-                break;
-            case 'ultrasound-list':
-                $this->createUltrasoundPermissions($menu);
                 break;
             case 'pharmacy-bill-list':
                 $this->createPharmacyBillPermissions($menu);
@@ -246,6 +240,27 @@ class PermissionSeeder extends Seeder
             'billing-delete',
             'billing-due-collect',
         ];
+        $billingPermissionChildren = [
+            'billing-invoice' => 1,
+            'billing-create' => 2,
+            'billing-edit' => 3,
+            'billing-delete' => 4,
+            'billing-due-collect' => 5,
+        ];
+        $billingModulePermissions = [
+            'billing-module-billing' => 1,
+            'billing-module-appointment' => 2,
+            'billing-module-opd' => 3,
+            'billing-module-ipd' => 4,
+            'billing-module-pathology' => 5,
+            'billing-module-radiology' => 6,
+            'billing-module-pharmacy' => 7,
+            'billing-module-ambulance' => 8,
+            'billing-module-blood-issue' => 9,
+            'billing-module-bed-management' => 10,
+            'billing-module-billing-report' => 11,
+            'billing-module-prescription' => 12,
+        ];
 
         $billingPermission = Permission::where('name', 'billing')->first();
 
@@ -253,6 +268,39 @@ class PermissionSeeder extends Seeder
             foreach ($billingPermissions as $permissionName) {
                 $this->createPermissionIfNotExists($permissionName, $billingPermission->id);
             }
+
+            $billingMenuPermission = Permission::query()->firstOrCreate(
+                ['name' => 'billing-add', 'guard_name' => 'admin'],
+                ['parent_id' => null, 'sorting' => 2]
+            );
+            $billingMenuPermission->parent_id = null;
+            $billingMenuPermission->sorting = (int) (Menu::query()
+                ->whereNull('parent_id')
+                ->where('permission_name', 'billing-add')
+                ->value('sorting') ?? 2);
+            $billingMenuPermission->save();
+
+            foreach ($billingPermissionChildren as $permissionName => $sorting) {
+                Permission::query()
+                    ->where('name', $permissionName)
+                    ->where('guard_name', 'admin')
+                    ->update([
+                        'parent_id' => $billingMenuPermission->id,
+                        'sorting' => $sorting,
+                    ]);
+            }
+
+            foreach ($billingModulePermissions as $permissionName => $sorting) {
+                $this->createPermissionIfNotExists($permissionName, $billingPermission->id);
+                Permission::query()
+                    ->where('name', $permissionName)
+                    ->where('guard_name', 'admin')
+                    ->update([
+                        'parent_id' => $billingPermission->id,
+                        'sorting' => $sorting,
+                    ]);
+            }
+
         }
     }
 
@@ -468,6 +516,7 @@ class PermissionSeeder extends Seeder
     {
         $permissions = [
             'dashboard-card-opd-income',
+            'dashboard-card-doctor-visit-appointment',
             'dashboard-card-ipd-income',
             'dashboard-card-pharmacy-income',
             'dashboard-card-pathology-income',
@@ -481,10 +530,12 @@ class PermissionSeeder extends Seeder
             'dashboard-card-pending-income',
             'dashboard-card-referral-commission',
             'dashboard-card-net-income',
+            'dashboard-card-total-income',
             'dashboard-card-refunds',
             'dashboard-card-total-discount',
             'dashboard-card-expired-medicines',
             'dashboard-card-expiring-medicines',
+            'dashboard-card-product-returns',
         ];
 
         $basePermission = Permission::where('name', 'dashboard')->first();

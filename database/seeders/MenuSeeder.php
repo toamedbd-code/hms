@@ -17,11 +17,23 @@ class MenuSeeder extends Seeder
         foreach ($this->datas() as $value) {
             $this->createMenu($value);
         }
+
+        $pharmacyMenuIds = Menu::query()
+            ->where('name', 'Pharmacy Management')
+            ->pluck('id');
+
+        if ($pharmacyMenuIds->isNotEmpty()) {
+            Menu::query()
+                ->where('name', 'Pharmacy Report')
+                ->whereIn('parent_id', $pharmacyMenuIds)
+                ->update(['status' => 'Inactive']);
+        }
     }
 
     private function createMenu($data, $parent_id = null)
     {
         $values = [
+            'name' => $data['name'],
             'icon' => $data['icon'] ?? null,
             'route' => $data['route'] ?? null,
             'description' => $data['description'] ?? null,
@@ -31,27 +43,43 @@ class MenuSeeder extends Seeder
             'deleted_at' => $data['deleted_at'] ?? null,
         ];
 
-        // If a route is provided, prefer using the route as the unique attribute
-        // to avoid creating duplicate menu rows for the same named route.
+        $menu = null;
+
         if (!empty($data['route'])) {
-            $attributes = ['route' => $data['route']];
-            $menu = Menu::updateOrCreate($attributes, array_merge($values, [
-                'name' => $data['name'],
+            $menu = Menu::query()
+                ->where('parent_id', $parent_id)
+                ->where('route', $data['route'])
+                ->first();
+
+            if (!$menu && $data['route'] === 'backend.pharmacy.profit-loss.report') {
+                $menu = Menu::query()
+                    ->where('route', $data['route'])
+                    ->first();
+            }
+        }
+
+        if (!$menu && !empty($data['name'])) {
+            $menu = Menu::query()
+                ->where('parent_id', $parent_id)
+                ->where('name', $data['name'])
+                ->first();
+        }
+
+        if (!$menu && !empty($data['permission_name'])) {
+            $menu = Menu::query()
+                ->where('parent_id', $parent_id)
+                ->where('permission_name', $data['permission_name'])
+                ->first();
+        }
+
+        if ($menu) {
+            $menu->fill($values);
+            $menu->parent_id = $parent_id;
+            $menu->save();
+        } else {
+            $menu = Menu::query()->create(array_merge($values, [
                 'parent_id' => $parent_id,
             ]));
-
-            // Ensure parent is set to the expected parent if needed.
-            if ($parent_id && $menu->parent_id !== $parent_id) {
-                $menu->parent_id = $parent_id;
-                $menu->save();
-            }
-        } else {
-            $attributes = [
-                'name' => $data['name'],
-                'parent_id' => $parent_id,
-            ];
-
-            $menu = Menu::updateOrCreate($attributes, $values);
         }
 
         if (isset($data['children']) && is_array($data['children'])) {
@@ -76,48 +104,6 @@ class MenuSeeder extends Seeder
                 'status' => 'Active',
             ],
 
-            [
-                'name' => 'ECG',
-                'icon' => 'heart-pulse',
-                'route' => null,
-                'description' => null,
-                'sorting' => 1,
-                'permission_name' => 'ecg-management',
-                'status' => 'Active',
-                'children' => [
-                    [
-                        'name' => 'ECG List',
-                        'icon' => 'list',
-                        'route' => 'backend.itemcharge.index',
-                        'description' => null,
-                        'sorting' => 1,
-                        'permission_name' => 'ecg-list',
-                        'status' => 'Active',
-                    ],
-                ],
-            ],
-
-            [
-                'name' => 'Ultrasound',
-                'icon' => 'camera',
-                'route' => null,
-                'description' => null,
-                'sorting' => 1,
-                'permission_name' => 'ultrasound-management',
-                // hide top-level ultrasound menu so reporting child appears under Reports
-                'status' => 'Inactive',
-                'children' => [
-                    [
-                        'name' => 'Ultrasound List',
-                        'icon' => 'list',
-                        'route' => 'backend.itemcharge.index',
-                        'description' => null,
-                        'sorting' => 1,
-                        'permission_name' => 'ultrasound-list',
-                        'status' => 'Active',
-                    ],
-                ],
-            ],
             // [
             //     'name' => 'Module Make',
             //     'icon' => 'slack',
@@ -128,12 +114,21 @@ class MenuSeeder extends Seeder
             //     'status' => 'Active',
             // ],
             [
-                'name' => 'Billing',
+                'name' => 'Module Billing',
                 'icon' => 'billing',
                 'route' => 'backend.billing.Page',
                 'description' => null,
                 'sorting' => 1,
                 'permission_name' => 'billing',
+                'status' => 'Active',
+            ],
+            [
+                'name' => 'Billing',
+                'icon' => 'credit-card',
+                'route' => 'backend.billing.view',
+                'description' => null,
+                'sorting' => 2,
+                'permission_name' => 'billing-add',
                 'status' => 'Active',
             ],
             [
@@ -191,7 +186,7 @@ class MenuSeeder extends Seeder
                         'status' => 'Active',
                     ],
                     [
-                        'name' => 'Profit & Loss',
+                        'name' => 'Profit Management',
                         'icon' => 'trending-up',
                         'route' => 'backend.accounts.profit-loss',
                         'description' => null,
@@ -233,6 +228,15 @@ class MenuSeeder extends Seeder
                         'description' => null,
                         'sorting' => 1,
                         'permission_name' => 'exchange-rate-list',
+                        'status' => 'Active',
+                    ],
+                    [
+                        'name' => 'Bank Reconciliation',
+                        'icon' => 'credit-card',
+                        'route' => 'backend.accounts.bank-reconciliation.index',
+                        'description' => null,
+                        'sorting' => 1,
+                        'permission_name' => 'bank-reconciliation',
                         'status' => 'Active',
                     ],
                     [
@@ -1363,6 +1367,15 @@ class MenuSeeder extends Seeder
                         'permission_name' => 'test-category-list',
                         'status' => 'Active',
                     ],
+                    [
+                        'name' => 'Main Category',
+                        'icon' => 'list',
+                        'route' => 'backend.maincategory.index',
+                        'description' => null,
+                        'sorting' => 2,
+                        'permission_name' => 'main-category-list',
+                        'status' => 'Active',
+                    ],
                     // [
                     //     'name' => 'Test Unit Add',
                     //     'icon' => 'plus-circle',
@@ -1583,28 +1596,15 @@ class MenuSeeder extends Seeder
                         'permission_name' => 'stock-report-list',
                         'status' => 'Active',
                     ],
-                ],
-            ],
-
-            [
-                'name' => 'InvoiceDesign Manage',
-                'icon' => 'invoice-design',
-                'route' => 'backend.invoicedesign.index',
-                'description' => null,
-                'sorting' => 1,
-                'permission_name' => 'invoicedesign-management',
-                'status' => 'Active',
-                'children' => [
-                    // [
-                    //     'name' => 'InvoiceDesign Add',
-                    //     'icon' => 'plus-circle',
-                    //     'route' => 'backend.invoicedesign.create',
-                    //     'description' => null,
-                    //     'sorting' => 1,
-                    //     'permission_name' => 'invoicedesign-add',
-                    //     'status' => 'Active',
-                    // ],
-
+                    [
+                        'name' => 'Profit & Loss Report',
+                        'icon' => 'list',
+                        'route' => 'backend.pharmacy.profit-loss.report',
+                        'description' => null,
+                        'sorting' => 2,
+                        'permission_name' => 'stock-report-list',
+                        'status' => 'Active',
+                    ],
                 ],
             ],
 

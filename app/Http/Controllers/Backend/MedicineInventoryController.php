@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Backend;
 
 use App\Models\MedicineInventory;
+use App\Support\DefaultDeveloperManager;
 use Illuminate\Support\Facades\Validator;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\MedicineInventoryRequest;
@@ -10,6 +11,7 @@ use App\Models\MedicineCategory;
 use App\Models\MedicineSupplier;
 use App\Services\MedicineCategoryService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use App\Services\MedicineInventoryService;
 use App\Services\MedicineSupplierService;
@@ -67,6 +69,7 @@ class MedicineInventoryController extends Controller
                     'numOfData' => request()->get('numOfData', 10),
                     'expiry_filter' => request()->get('expiry_filter', 'all'),
                 ],
+                'isDeveloper' => fn() => DefaultDeveloperManager::isDeveloper(auth('admin')->user()),
             ]
         );
     }
@@ -108,7 +111,16 @@ class MedicineInventoryController extends Controller
             ->unique('medicine_name')
             ->keyBy('medicine_name');
 
-        $results = $medicineNames->map(function ($name) use ($opdDefaultsByMedicine, $ipdDefaultsByMedicine) {
+        $genericNamesByMedicine = MedicineInventory::query()
+            ->whereIn('medicine_name', $medicineNames)
+            ->whereNotNull('generic_name')
+            ->where('generic_name', '!=', '')
+            ->orderByDesc('id')
+            ->get(['medicine_name', 'generic_name'])
+            ->unique(fn ($medicine) => mb_strtolower(trim((string) $medicine->medicine_name)))
+            ->keyBy(fn ($medicine) => mb_strtolower(trim((string) $medicine->medicine_name)));
+
+        $results = $medicineNames->map(function ($name) use ($opdDefaultsByMedicine, $ipdDefaultsByMedicine, $genericNamesByMedicine) {
             $opdDefaults = $opdDefaultsByMedicine->get($name);
             $ipdDefaults = $ipdDefaultsByMedicine->get($name);
 
@@ -125,6 +137,7 @@ class MedicineInventoryController extends Controller
 
             return [
                 'name' => $name,
+                'generic_name' => (string) ($genericNamesByMedicine->get(mb_strtolower(trim((string) $name)))?->generic_name ?? ''),
                 'dose' => $defaults?->dose ?? '',
                 'duration' => $defaults?->duration ?? '',
                 'frequency' => $defaults?->frequency ?? '',
@@ -187,6 +200,7 @@ class MedicineInventoryController extends Controller
             $customData->index = $index + 1;
             $customData->supplier_id = $data?->supplier?->name ?? '';
             $customData->medicine_category_id = $data?->category?->name ?? '';
+            $customData->generic_name = e((string) ($data->generic_name ?? ''));
             $customData->medicine_name = $data->medicine_name;
             $customData->medicine_unit_purchase_price = $data->medicine_unit_purchase_price;
             $customData->medicine_unit_selling_price = $data->medicine_unit_selling_price;
@@ -256,6 +270,7 @@ class MedicineInventoryController extends Controller
             ['fieldName' => 'index', 'class' => 'text-center'],
             ['fieldName' => 'supplier_id', 'class' => 'text-center'],
             ['fieldName' => 'medicine_category_id', 'class' => 'text-center'],
+            ['fieldName' => 'generic_name', 'class' => 'text-center'],
             ['fieldName' => 'medicine_name', 'class' => 'text-center'],
             ['fieldName' => 'medicine_unit_purchase_price', 'class' => 'text-center'],
             ['fieldName' => 'medicine_unit_selling_price', 'class' => 'text-center'],
@@ -274,6 +289,7 @@ class MedicineInventoryController extends Controller
             'Sl/No',
             'Supplier Name',
             'Category',
+            'Generic Name',
             'Name',
             'Unit Purchase Price',
             'Unit Selling Price',
@@ -329,6 +345,7 @@ class MedicineInventoryController extends Controller
                         'supplier_id' => $data['supplier_id'],
                         'medicine_category_id' => $data['medicine_category_id'],
                         'medicine_name' => $medicineData['medicine_name'],
+                        'generic_name' => $medicineData['generic_name'] ?? null,
                         'medicine_unit_purchase_price' => $medicineData['medicine_unit_purchase_price'],
                         'medicine_unit_selling_price' => $medicineData['medicine_unit_selling_price'],
                         'medicine_total_purchase_price' => $medicineData['medicine_total_purchase_price'],
@@ -336,6 +353,11 @@ class MedicineInventoryController extends Controller
                         'medicine_quantity' => $medicineData['medicine_quantity'],
                         'expiry_date' => $medicineData['expiry_date'] ?? null,
                         'remarks' => $medicineData['remarks'] ?? null,
+                        'standard_dose' => $medicineData['standard_dose'] ?? null,
+                        'standard_frequency' => $medicineData['standard_frequency'] ?? null,
+                        'standard_duration' => $medicineData['standard_duration'] ?? null,
+                        'standard_instructions' => $medicineData['standard_instructions'] ?? null,
+                        'standard_prescription_verified' => $medicineData['standard_prescription_verified'] ?? false,
                         'status' => 'Active'
                     ];
 
@@ -372,13 +394,21 @@ class MedicineInventoryController extends Controller
                     'supplier_id' => $data['supplier_id'],
                     'medicine_category_id' => $data['medicine_category_id'],
                     'medicine_name' => $data['medicine_name'],
+                    'generic_name' => $data['generic_name'] ?? null,
                     'medicine_unit_purchase_price' => $data['medicine_unit_purchase_price'],
                     'medicine_unit_selling_price' => $data['medicine_unit_selling_price'],
-                    'medicine_total_purchase_price' => $data['medicine_total_purchase_price'],
-                    'medicine_total_selling_price' => $data['medicine_total_selling_price'],
+                    'medicine_total_purchase_price' => $data['medicine_total_purchase_price']
+                        ?? $data['medicine_unit_purchase_price'] * $data['medicine_quantity'],
+                    'medicine_total_selling_price' => $data['medicine_total_selling_price']
+                        ?? $data['medicine_unit_selling_price'] * $data['medicine_quantity'],
                     'medicine_quantity' => $data['medicine_quantity'],
                     'expiry_date' => $data['expiry_date'] ?? null,
                     'remarks' => $data['remarks'] ?? null,
+                    'standard_dose' => $data['standard_dose'] ?? null,
+                    'standard_frequency' => $data['standard_frequency'] ?? null,
+                    'standard_duration' => $data['standard_duration'] ?? null,
+                    'standard_instructions' => $data['standard_instructions'] ?? null,
+                    'standard_prescription_verified' => $data['standard_prescription_verified'] ?? false,
                     'status' => 'Active'
                 ];
 
@@ -592,6 +622,7 @@ class MedicineInventoryController extends Controller
                 'supplier',
                 'category',
                 'medicine_name',
+                'generic_name',
                 'unit_purchase_price',
                 'unit_selling_price',
                 'quantity',
@@ -599,8 +630,8 @@ class MedicineInventoryController extends Controller
             ];
 
             $rows = [
-                [$defaultSupplierName, $firstCategoryName, 'Paracetamol 500mg', '1.50', '2.00', '120', '2027-12-31'],
-                [$defaultSupplierName, $secondCategoryName, 'Omeprazole 20mg', '3.20', '4.50', '80', '2027-10-15'],
+                [$defaultSupplierName, $firstCategoryName, 'Paracetamol 500mg', 'Paracetamol', '1.50', '2.00', '120', '2027-12-31'],
+                [$defaultSupplierName, $secondCategoryName, 'Omeprazole 20mg', 'Omeprazole', '3.20', '4.50', '80', '2027-10-15'],
             ];
 
             $handle = fopen('php://temp', 'r+');
@@ -628,6 +659,52 @@ class MedicineInventoryController extends Controller
         }
     }
 
+    public function exportCsv(Request $request)
+    {
+        abort_unless(DefaultDeveloperManager::isDeveloper($request->user('admin')), 403);
+
+        $headers = [
+            'supplier',
+            'category',
+            'medicine_name',
+            'generic_name',
+            'unit_purchase_price',
+            'unit_selling_price',
+            'quantity',
+            'expiry_date',
+            'status',
+        ];
+
+        return response()->streamDownload(function () use ($headers) {
+            $output = fopen('php://output', 'wb');
+            fputcsv($output, $headers);
+
+            MedicineInventory::query()
+                ->with(['supplier', 'category'])
+                ->whereNull('deleted_at')
+                ->orderBy('id')
+                ->chunk(500, function ($medicines) use ($output) {
+                    foreach ($medicines as $medicine) {
+                        fputcsv($output, [
+                            $medicine->supplier?->name,
+                            $medicine->category?->name,
+                            $medicine->medicine_name,
+                            $medicine->generic_name,
+                            $medicine->medicine_unit_purchase_price,
+                            $medicine->medicine_unit_selling_price,
+                            $medicine->medicine_quantity,
+                            $medicine->expiry_date ? date('Y-m-d', strtotime((string) $medicine->expiry_date)) : '',
+                            $medicine->status,
+                        ]);
+                    }
+                });
+
+            fclose($output);
+        }, 'medicine_inventory.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
     public function importCsv(Request $request)
     {
         $request->validate([
@@ -635,8 +712,11 @@ class MedicineInventoryController extends Controller
             'medicine_category_id' => 'nullable|exists:medicinecategories,id',
             'csv_file' => 'required|file|mimes:csv,txt|max:102400',
             'skip_duplicates' => 'nullable|boolean',
+            'import_id' => 'required|uuid',
         ]);
 
+        $importId = (string) $request->input('import_id');
+        $progressKey = $this->medicineImportProgressKey($importId);
         $file = $request->file('csv_file');
         if (!$file) {
             return response()->json([
@@ -674,7 +754,7 @@ class MedicineInventoryController extends Controller
             fclose($handle);
             return response()->json([
                 'status' => false,
-                'message' => 'Invalid CSV header. Required: supplier, category, medicine_name, unit_purchase_price, unit_selling_price, quantity (optional: expiry_date).',
+                'message' => 'Invalid CSV header. Required: supplier, category, medicine_name, unit_purchase_price, unit_selling_price, quantity (optional: generic_name, expiry_date).',
             ], 422);
         }
 
@@ -695,11 +775,35 @@ class MedicineInventoryController extends Controller
         $supplierCache = [];
         $categoryCache = [];
         $seenCsvSignatures = [];
+        $existingMedicineNames = [];
+        $pendingInserts = [];
+        $fileSize = max(1, (int) $file->getSize());
+        $lastProgressRow = 0;
+        $this->writeMedicineImportProgress($progressKey, [
+            'status' => 'processing',
+            'progress' => 0,
+            'imported' => 0,
+            'skipped' => 0,
+            'failed' => 0,
+            'message' => 'Importing medicines...',
+        ]);
 
         try {
             $line = 1;
             while (($row = fgetcsv($handle)) !== false) {
                 $line++;
+                if ($line - $lastProgressRow >= 250) {
+                    $lastProgressRow = $line;
+                    $this->writeMedicineImportProgress($progressKey, [
+                        'status' => 'processing',
+                        'progress' => min(99, (int) floor((ftell($handle) / $fileSize) * 100)),
+                        'imported' => $imported + count($pendingInserts),
+                        'skipped' => $skipped,
+                        'failed' => $failed,
+                        'message' => 'Importing medicines...',
+                    ]);
+                }
+
                 $normalizedRow = array_pad($row, count($header), null);
                 $data = array_combine($normalizedHeader, $normalizedRow);
 
@@ -707,10 +811,15 @@ class MedicineInventoryController extends Controller
                 $categoryName = trim((string) ($data['category'] ?? ''));
 
                 $medicineName = trim((string) ($data['medicine_name'] ?? ''));
+                $genericName = trim((string) ($data['generic_name'] ?? ''));
                 $purchasePrice = trim((string) ($data['unit_purchase_price'] ?? ''));
                 $sellingPrice = trim((string) ($data['unit_selling_price'] ?? ''));
                 $quantity = trim((string) ($data['quantity'] ?? ''));
                 $expiryDate = trim((string) ($data['expiry_date'] ?? ''));
+                $status = trim((string) ($data['status'] ?? 'Active'));
+                if (!in_array($status, ['Active', 'Inactive', 'Deleted'], true)) {
+                    $status = 'Active';
+                }
 
                 // Ignore fully blank lines in CSV.
                 if ($supplierName === '' && $categoryName === '' && $medicineName === '' && $purchasePrice === '' && $sellingPrice === '' && $quantity === '') {
@@ -728,7 +837,7 @@ class MedicineInventoryController extends Controller
                     }
 
                     if (!$supplier) {
-                        $errors[] = "Line {$line}: supplier '{$supplierName}' could not be resolved.";
+                        $this->appendMedicineImportError($errors, "Line {$line}: supplier '{$supplierName}' could not be resolved.");
                         $failed++;
                         continue;
                     }
@@ -751,7 +860,7 @@ class MedicineInventoryController extends Controller
                     }
 
                     if (!$category) {
-                        $errors[] = "Line {$line}: category '{$categoryName}' could not be resolved.";
+                        $this->appendMedicineImportError($errors, "Line {$line}: category '{$categoryName}' could not be resolved.");
                         $failed++;
                         continue;
                     }
@@ -764,13 +873,13 @@ class MedicineInventoryController extends Controller
                 }
 
                 if (!$supplierId || !$categoryId) {
-                    $errors[] = "Line {$line}: supplier and category are required in CSV (or set default supplier/category).";
+                    $this->appendMedicineImportError($errors, "Line {$line}: supplier and category are required in CSV (or set default supplier/category).");
                     $failed++;
                     continue;
                 }
 
                 if ($medicineName === '' || !is_numeric($purchasePrice) || !is_numeric($sellingPrice) || !is_numeric($quantity)) {
-                    $errors[] = "Line {$line}: invalid data format.";
+                    $this->appendMedicineImportError($errors, "Line {$line}: invalid data format.");
                     $failed++;
                     continue;
                 }
@@ -780,13 +889,13 @@ class MedicineInventoryController extends Controller
                 $sellingValue = (float) $sellingPrice;
 
                 if ($quantityValue < 0 || $purchaseValue < 0 || $sellingValue < 0) {
-                    $errors[] = "Line {$line}: negative values are not allowed.";
+                    $this->appendMedicineImportError($errors, "Line {$line}: negative values are not allowed.");
                     $failed++;
                     continue;
                 }
 
                 if ($expiryDate !== '' && !strtotime($expiryDate)) {
-                    $errors[] = "Line {$line}: invalid expiry_date format. Use YYYY-MM-DD.";
+                    $this->appendMedicineImportError($errors, "Line {$line}: invalid expiry_date format. Use YYYY-MM-DD.");
                     $failed++;
                     continue;
                 }
@@ -800,7 +909,19 @@ class MedicineInventoryController extends Controller
                 }
                 $seenCsvSignatures[$signature] = true;
 
-                $duplicateExists = $this->medicineExistsForSupplierCategoryName($supplierId, $categoryId, $medicineName);
+                $pairKey = $supplierId . '|' . $categoryId;
+                if (!array_key_exists($pairKey, $existingMedicineNames)) {
+                    $existingMedicineNames[$pairKey] = [];
+                    MedicineInventory::query()
+                        ->where('supplier_id', $supplierId)
+                        ->where('medicine_category_id', $categoryId)
+                        ->pluck('medicine_name')
+                        ->each(function ($existingName) use (&$existingMedicineNames, $pairKey) {
+                            $existingMedicineNames[$pairKey][$this->normalizeLookupValue((string) $existingName)] = true;
+                        });
+                }
+
+                $duplicateExists = isset($existingMedicineNames[$pairKey][$normalizedMedicine]);
 
                 if ($duplicateExists) {
                     if ($skipDuplicates) {
@@ -808,32 +929,47 @@ class MedicineInventoryController extends Controller
                         continue;
                     }
 
-                    $errors[] = "Line {$line}: '{$medicineName}' already exists.";
+                    $this->appendMedicineImportError($errors, "Line {$line}: '{$medicineName}' already exists.");
                     $failed++;
                     continue;
                 }
 
-                MedicineInventory::create([
+                $timestamp = now()->toDateTimeString();
+                $pendingInserts[] = [
                     'supplier_id' => $supplierId,
                     'medicine_category_id' => $categoryId,
                     'medicine_name' => $medicineName,
+                    'generic_name' => $genericName !== '' ? $genericName : null,
                     'medicine_unit_purchase_price' => $purchaseValue,
                     'medicine_unit_selling_price' => $sellingValue,
                     'medicine_quantity' => $quantityValue,
                     'expiry_date' => $expiryDate !== '' ? date('Y-m-d', strtotime($expiryDate)) : null,
                     'medicine_total_purchase_price' => $purchaseValue * $quantityValue,
                     'medicine_total_selling_price' => $sellingValue * $quantityValue,
-                    'status' => 'Active',
-                ]);
+                    'status' => $status,
+                    'created_at' => $timestamp,
+                    'updated_at' => $timestamp,
+                ];
+                $existingMedicineNames[$pairKey][$normalizedMedicine] = true;
 
-                $imported++;
+                if (count($pendingInserts) >= 500) {
+                    DB::table('medicineinventories')->insert($pendingInserts);
+                    $imported += count($pendingInserts);
+                    $pendingInserts = [];
+                }
+
+            }
+
+            if ($pendingInserts !== []) {
+                DB::table('medicineinventories')->insert($pendingInserts);
+                $imported += count($pendingInserts);
             }
             fclose($handle);
 
-            $status = $imported > 0;
+            $status = $imported > 0 || ($failed === 0 && $skipped > 0);
             $errorPreview = array_slice($errors, 0, 200);
 
-            return response()->json([
+            $result = [
                 'status' => $status,
                 'message' => "Imported {$imported} medicine(s) successfully."
                     . ($skipped > 0 ? " Skipped {$skipped} duplicate row(s)." : '')
@@ -846,8 +982,22 @@ class MedicineInventoryController extends Controller
                 'created_suppliers' => $createdSuppliers,
                 'created_categories' => $createdCategories,
                 'errors' => $errorPreview,
+            ];
+            $this->writeMedicineImportProgress($progressKey, [
+                'status' => $status ? 'completed' : 'failed',
+                'progress' => 100,
+                'imported' => $imported,
+                'skipped' => $skipped,
+                'failed' => $failed,
+                'message' => $result['message'],
+                'result' => $result,
             ]);
+
+            return response()->json($result);
         } catch (\Throwable $e) {
+            $progressPercent = is_resource($handle)
+                ? min(99, (int) floor((ftell($handle) / $fileSize) * 100))
+                : 0;
             if (is_resource($handle)) {
                 fclose($handle);
             }
@@ -863,10 +1013,50 @@ class MedicineInventoryController extends Controller
                 'csv_file' => $file?->getClientOriginalName(),
             ]);
 
+            $this->writeMedicineImportProgress($progressKey, [
+                'status' => 'failed',
+                'progress' => $progressPercent,
+                'imported' => $imported ?? 0,
+                'skipped' => $skipped ?? 0,
+                'failed' => $failed ?? 0,
+                'message' => 'CSV import failed due to server error.',
+            ]);
+
             return response()->json([
                 'status' => false,
                 'message' => 'CSV import failed due to server error.',
             ], 500);
+        }
+    }
+
+    public function importCsvProgress(string $importId)
+    {
+        abort_unless(Str::isUuid($importId), 404);
+
+        return response()->json(Cache::get($this->medicineImportProgressKey($importId), [
+            'status' => 'waiting',
+            'progress' => 0,
+            'imported' => 0,
+            'skipped' => 0,
+            'failed' => 0,
+            'message' => 'Waiting for the server to start the import...',
+        ]));
+    }
+
+    private function medicineImportProgressKey(string $importId): string
+    {
+        return 'medicine_csv_import:' . auth('admin')->id() . ':' . $importId;
+    }
+
+    private function writeMedicineImportProgress(string $key, array $progress): void
+    {
+        Cache::put($key, $progress, now()->addHours(2));
+    }
+
+    private function appendMedicineImportError(array &$errors, string $message): void
+    {
+        if (count($errors) < 200) {
+            $errors[] = $message;
         }
     }
 

@@ -289,18 +289,6 @@ function getSideMenus($user)
         return [];
     }
 
-    try {
-        $user = $user->fresh(['roles.permissions', 'permissions']);
-    } catch (\Throwable $e) {
-        // ignore and continue with provided user
-    }
-
-    try {
-        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
-    } catch (\Throwable $e) {
-        // ignore cache refresh failures
-    }
-
     $grantedPermissions = collect();
     try {
         $grantedPermissions = $user->getAllPermissions()
@@ -344,6 +332,16 @@ function getSideMenus($user)
             }
         }
 
+        $candidateNames = collect($candidates)
+            ->map(fn ($candidate) => strtolower($candidate));
+
+        foreach (\Illuminate\Support\Facades\Route::getRoutes() as $route) {
+            $routeName = $route->getName();
+            if ($routeName && $candidateNames->contains(strtolower($routeName))) {
+                return true;
+            }
+        }
+
         return false;
     };
 
@@ -375,14 +373,47 @@ function getSideMenus($user)
 
     $hasAnyPermission = $grantedPermissions->isNotEmpty();
 
-    $result = $normalizedMenus->map(function ($menu) use ($hasMenuPermission, $hasAnyPermission, $routeExists) {
+    $isDeveloper = \App\Support\DefaultDeveloperManager::isDeveloper($user);
+
+    $normalizedMenus = $normalizedMenus->unique(function ($menu) {
+        $name = strtolower(trim((string) ($menu['name'] ?? '')));
+        $route = strtolower(trim((string) ($menu['route'] ?? '')));
+        $permission = strtolower(trim((string) ($menu['permission_name'] ?? '')));
+
+        if ($name !== '') {
+            return 'n:' . $name;
+        }
+        if ($route !== '') {
+            return 'r:' . $route;
+        }
+
+        return 'p:' . $permission;
+    })->values();
+
+    $result = $normalizedMenus->map(function ($menu) use ($hasMenuPermission, $hasAnyPermission, $routeExists, $isDeveloper) {
         $menuArray = is_array($menu) ? $menu : (array) $menu;
         $children = collect($menuArray['childrens'] ?? []);
         $menuPermissionName = strtolower(trim((string) ($menuArray['permission_name'] ?? $menuArray['permission'] ?? '')));
         $hasParentPermission = $menuPermissionName !== '' && $hasAnyPermission && $hasMenuPermission($menuPermissionName);
 
-        $filteredChildren = $children->filter(function ($child) use ($hasMenuPermission, $hasAnyPermission, $hasParentPermission, $routeExists) {
+        $filteredChildren = $children->reject(function ($child) {
+            $route = trim((string) ($child['route'] ?? ''));
+            $name = strtolower(trim((string) ($child['name'] ?? '')));
+
+            return ($route === 'backend.websetting.create' && $name === 'cms setting')
+                || $route === 'backend.sitepurchase.index';
+        })->unique(function ($child) {
+            $name = strtolower(trim((string) ($child['name'] ?? '')));
+            $route = strtolower(trim((string) ($child['route'] ?? '')));
+
+            return $name !== '' ? 'n:' . $name : 'r:' . $route;
+        })->filter(function ($child) use ($hasMenuPermission, $hasAnyPermission, $hasParentPermission, $routeExists, $isDeveloper) {
             $permissionName = strtolower(trim((string) ($child['permission_name'] ?? $child['permission'] ?? '')));
+            $route = trim((string) ($child['route'] ?? ''));
+
+            if (in_array($route, ['backend.settings.payment.bkash', 'settings.payment.bkash'], true) && !$isDeveloper) {
+                return false;
+            }
 
             if ($permissionName !== '' && $hasAnyPermission && !$hasMenuPermission($permissionName)) {
                 return false;
@@ -392,7 +423,6 @@ function getSideMenus($user)
                 return false;
             }
 
-            $route = trim((string) ($child['route'] ?? ''));
             if ($route === '') {
                 return false;
             }
@@ -413,6 +443,8 @@ function getSideMenus($user)
         return $menuArray;
     })->filter()->values();
 
+    $result = filterAddonModuleMenus($result, $user, $isDeveloper);
+
     if ($result->isNotEmpty()) {
         return $result;
     }
@@ -427,7 +459,7 @@ function getSideMenus($user)
     })->values();
 
     if ($fallbackMenus->isNotEmpty()) {
-        return $fallbackMenus;
+        return filterAddonModuleMenus($fallbackMenus, $user, $isDeveloper);
     }
 
     return [
@@ -440,6 +472,175 @@ function getSideMenus($user)
             'status' => 'Active',
         ],
     ];
+}
+
+function addon_module_slugs(): array
+{
+    return ['pharmacy', 'prescription'];
+}
+
+function user_assigned_module_slugs($user)
+{
+    if (!$user || !method_exists($user, 'modules')) {
+        return collect();
+    }
+
+    try {
+        return $user->modules()
+            ->pluck('slug')
+            ->map(fn ($slug) => strtolower(trim((string) $slug)))
+            ->filter()
+            ->unique()
+            ->values();
+    } catch (\Throwable $e) {
+        return collect();
+    }
+}
+
+function user_has_module($user, string $slug): bool
+{
+    $slug = strtolower(trim($slug));
+    if ($slug === '') {
+        return true;
+    }
+
+    if (\App\Support\DefaultDeveloperManager::isDeveloper($user)) {
+        return true;
+    }
+
+    $assigned = user_assigned_module_slugs($user);
+    if ($assigned->isEmpty()) {
+        return true;
+    }
+
+    return $assigned->contains($slug);
+}
+
+function user_is_pharmacy_only($user): bool
+{
+    return user_dashboard_department_slug($user) === 'pharmacy';
+}
+
+function user_dashboard_department_slug($user): ?string
+{
+    if (!$user) {
+        return null;
+    }
+
+    if (\App\Support\DefaultDeveloperManager::isDeveloper($user)) {
+        return null;
+    }
+
+    $roleNames = method_exists($user, 'getRoleNames')
+        ? $user->getRoleNames()->map(fn ($name) => strtolower(trim((string) $name)))
+        : collect();
+
+    if ($roleNames->intersect(['admin', 'administration', 'super-admin', 'super admin', 'super_admin', 'developer'])->isNotEmpty()) {
+        return null;
+    }
+
+    $departmentName = strtolower(trim((string) ($user->details?->department?->name ?? '')));
+    foreach (['pharmacy', 'pathology', 'radiology'] as $department) {
+        if (str_contains($departmentName, $department)) {
+            return $department;
+        }
+    }
+
+    foreach ($roleNames as $roleName) {
+        if (str_contains($roleName, 'pharmacy') || str_contains($roleName, 'pharmacist')) {
+            return 'pharmacy';
+        }
+        if (str_contains($roleName, 'pathology') || str_contains($roleName, 'pathologist')) {
+            return 'pathology';
+        }
+        if (str_contains($roleName, 'radiology') || str_contains($roleName, 'radiologist')) {
+            return 'radiology';
+        }
+    }
+
+    $assignedModules = user_assigned_module_slugs($user);
+    if ($assignedModules->isNotEmpty()) {
+        if ($assignedModules->contains('pharmacy')
+            && $assignedModules->diff(['pharmacy', 'prescription'])->isEmpty()) {
+            return 'pharmacy';
+        }
+    }
+
+    return null;
+}
+
+function menu_module_slug($menu): string
+{
+    $menuArray = is_array($menu) ? $menu : (array) $menu;
+    $slug = strtolower(trim((string) ($menuArray['module_slug'] ?? '')));
+    if ($slug !== '') {
+        return $slug;
+    }
+
+    $haystack = strtolower(trim(implode(' ', array_filter([
+        (string) ($menuArray['route'] ?? ''),
+        (string) ($menuArray['permission_name'] ?? $menuArray['permission'] ?? ''),
+        (string) ($menuArray['name'] ?? ''),
+    ]))));
+
+    if ($haystack === '') {
+        return '';
+    }
+
+    if (str_contains($haystack, 'prescription')) {
+        return 'prescription';
+    }
+
+    if (
+        str_contains($haystack, 'pharmacy')
+        || str_contains($haystack, 'medicine')
+        || str_contains($haystack, 'supplierpayment')
+        || str_contains($haystack, 'productreturn')
+        || str_contains($haystack, 'supplier-payment')
+        || str_contains($haystack, 'product-return')
+    ) {
+        return 'pharmacy';
+    }
+
+    return '';
+}
+
+function filterAddonModuleMenus($menus, $user, bool $isDeveloper = false)
+{
+    $menus = collect($menus);
+    if ($isDeveloper || $menus->isEmpty()) {
+        return $menus->values();
+    }
+
+    $assigned = user_assigned_module_slugs($user);
+    if ($assigned->isEmpty()) {
+        return $menus->values();
+    }
+
+    $addonSlugs = addon_module_slugs();
+
+    return $menus->map(function ($menu) use ($assigned, $addonSlugs) {
+        $menuArray = is_array($menu) ? $menu : (array) $menu;
+        $slug = menu_module_slug($menuArray);
+
+        if (in_array($slug, $addonSlugs, true) && !$assigned->contains($slug)) {
+            return null;
+        }
+
+        $children = collect($menuArray['childrens'] ?? [])
+            ->filter(function ($child) use ($assigned, $addonSlugs, $slug) {
+                $childSlug = menu_module_slug($child) ?: $slug;
+                if (in_array($childSlug, $addonSlugs, true) && !$assigned->contains($childSlug)) {
+                    return false;
+                }
+                return true;
+            })
+            ->values()
+            ->all();
+
+        $menuArray['childrens'] = $children;
+        return $menuArray;
+    })->filter()->values();
 }
 
 function web_setting_prefix(string $field, string $default = ''): string
@@ -475,19 +676,19 @@ function get_cached_web_setting(bool $refresh = false): ?WebSetting
 {
     $cacheKey = web_setting_cache_key();
 
-    try {
-        if (!app('db')->connection()->getSchemaBuilder()->hasTable('web_settings')) {
-            return null;
-        }
-    } catch (\Throwable $exception) {
-        return null;
-    }
-
     if ($refresh) {
         Cache::forget($cacheKey);
     }
 
     return Cache::remember($cacheKey, web_setting_cache_ttl_seconds(), function () {
+        try {
+            if (!app('db')->connection()->getSchemaBuilder()->hasTable('web_settings')) {
+                return null;
+            }
+        } catch (\Throwable $exception) {
+            return null;
+        }
+
         $setting = WebSetting::query()
             ->where('status', 'Active')
             ->orderByDesc('id')

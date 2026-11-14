@@ -42,6 +42,15 @@ class BillingServiceTest extends TestCase
             $table->decimal('paid_amt', 15, 2)->default(0);
             $table->decimal('return_amt', 15, 2)->default(0);
             $table->decimal('extra_flat_discount', 15, 2)->default(0);
+            $table->string('payment_status')->nullable();
+            $table->string('status')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+        });
+
+        DB::connection('sqlite')->getSchemaBuilder()->create('pharmacybills', function ($table) {
+            $table->id();
+            $table->string('pharmacy_no')->unique();
             $table->timestamps();
             $table->softDeletes();
         });
@@ -103,5 +112,27 @@ class BillingServiceTest extends TestCase
         $resolvedCreatedAt = $controller->resolveCreatedAtForTest($existingCreatedAt, []);
 
         $this->assertSame('2024-01-01 10:00:00', $resolvedCreatedAt);
+    }
+
+    public function test_pharmacy_number_generation_skips_soft_deleted_numbers(): void
+    {
+        $year = date('Y');
+        $deletedPharmacyBill = PharmacyBill::create([
+            'pharmacy_no' => 'PHAB' . $year . '0001',
+        ]);
+        $deletedPharmacyBill->delete();
+
+        $controller = new class extends BillingController {
+            public function __construct()
+            {
+            }
+
+            public function nextPharmacyNumberForTest(): string
+            {
+                return $this->generatePharmacyNumber();
+            }
+        };
+
+        $this->assertSame('PHAB' . $year . '0002', $controller->nextPharmacyNumberForTest());
     }
 }

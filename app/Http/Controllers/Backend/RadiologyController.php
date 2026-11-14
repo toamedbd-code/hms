@@ -280,6 +280,9 @@ class RadiologyController extends Controller
                     ->back()
                     ->with('errorMessage', $message);
             }
+        } catch (\Illuminate\Validation\ValidationException $err) {
+            DB::rollBack();
+            throw $err;
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'RadiologyController', 'store', substr($err->getMessage(), 0, 1000));
@@ -436,6 +439,9 @@ class RadiologyController extends Controller
                 ->back()
                 ->with('successMessage', $message)
                 ->with('billId', $billing->id);
+        } catch (\Illuminate\Validation\ValidationException $err) {
+            DB::rollBack();
+            throw $err;
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'RadiologyController', 'update', substr($err->getMessage(), 0, 1000));
@@ -618,6 +624,7 @@ class RadiologyController extends Controller
 
             // Update bill items if tests exist
             if (isset($data['tests']) && !empty($data['tests'])) {
+                app(\App\Services\ReagentConsumptionService::class)->restoreForBilling((int) $billing->id);
                 BillItem::where('billing_id', $billing->id)->delete();
                 $this->createBillItems($billing, $data['tests']);
             }
@@ -667,7 +674,7 @@ class RadiologyController extends Controller
             $testInfo = Test::find($test['testId']);
 
             if ($testInfo) {
-                BillItem::create([
+                $billItem = BillItem::create([
                     'billing_id' => $billing->id,
                     'item_id' => $test['testId'],
                     'item_name' => $testInfo->test_name,
@@ -683,6 +690,8 @@ class RadiologyController extends Controller
                     'commission_rate' => $testInfo->commission_rate ?? null,
                     'status' => 'Active'
                 ]);
+
+                app(\App\Services\ReagentConsumptionService::class)->consumeForBillItem($billItem);
             }
         }
     }

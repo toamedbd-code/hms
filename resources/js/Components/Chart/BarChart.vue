@@ -30,59 +30,37 @@ export default {
                 if (typeof obj[snake] !== 'undefined' && obj[snake] !== null) return Number(obj[snake] || 0);
                 return 0;
             };
-
-            try {
-                // eslint-disable-next-line no-console
-                // removed console.debug to reduce console noise
-            } catch (e) {}
+            const incomeItems = Array.isArray(this.dashboardData.chartIncomeItems)
+                ? this.dashboardData.chartIncomeItems
+                : [
+                    { name: 'OPD Income', amount: get(this.dashboardData, 'opdIncome') },
+                    { name: 'IPD Income', amount: get(this.dashboardData, 'ipdIncome') },
+                    { name: 'Pharmacy Income', amount: get(this.dashboardData, 'pharmacyIncome') },
+                    { name: 'Disposable Income', amount: get(this.dashboardData, 'disposableIncome') },
+                    { name: 'Pathology Income', amount: get(this.dashboardData, 'pathologyIncome') },
+                    { name: 'Radiology Income', amount: get(this.dashboardData, 'radiologyIncome') }
+                ];
+            const palette = ['#10B981', '#3B82F6', '#8B5CF6', '#A78BFA', '#F59E0B', '#EF4444', '#06B6D4', '#84CC16'];
+            const supplementaryItems = Array.isArray(this.dashboardData.chartSupplementaryItems)
+                ? this.dashboardData.chartSupplementaryItems
+                : [];
+            const labels = [
+                ...incomeItems.map((item) => item.name),
+                ...supplementaryItems.map((item) => item.name)
+            ];
+            const data = [
+                ...incomeItems.map((item) => Number(item.amount) || 0),
+                ...supplementaryItems.map((item) => Number(item.amount) || 0)
+            ];
 
             return {
-                labels: [
-                    'OPD Income',
-                    'IPD Income', 
-                    'Pharmacy Income',
-                    'Disposable Income',
-                    'Pathology Income',
-                    'Radiology Income',
-                    'Pending Income',
-                    'Expense',
-                    'Final Income'
-                ],
+                labels,
                 datasets: [{
                     label: 'Amount (Tk.)',
-                    backgroundColor: [
-                        '#10B981', // Green
-                        '#3B82F6', // Blue
-                        '#8B5CF6', // Purple
-                        '#A78BFA', // Disposable - lavender
-                        '#F59E0B', // Yellow
-                        '#EF4444', // Red
-                        '#6B7280',  // Gray
-                        '#0F172A',  // Slate
-                        '#22C55E'   // Green
-                    ],
-                    borderColor: [
-                        '#059669',
-                        '#2563EB',
-                        '#7C3AED',
-                        '#D97706',
-                        '#DC2626',
-                        '#4B5563',
-                        '#0F172A',
-                        '#16A34A'
-                    ],
+                    backgroundColor: labels.map((_, index) => palette[index % palette.length]),
+                    borderColor: labels.map((_, index) => palette[index % palette.length]),
                     borderWidth: 1,
-                    data: [
-                        get(this.dashboardData, 'opdIncome'),
-                        get(this.dashboardData, 'ipdIncome'),
-                        get(this.dashboardData, 'pharmacyIncome'),
-                        get(this.dashboardData, 'disposableIncome'),
-                        get(this.dashboardData, 'pathologyIncome'),
-                        get(this.dashboardData, 'radiologyIncome'),
-                        get(this.dashboardData, 'pendingIncome'),
-                        get(this.dashboardData, 'expenses'),
-                        get(this.dashboardData, 'netIncome')
-                    ]
+                    data
                 }]
             }
         },
@@ -129,7 +107,13 @@ export default {
                     },
                     x: {
                         ticks: {
-                            color: textColor
+                            color: textColor,
+                            font: {
+                                size: 9
+                            },
+                            autoSkip: false,
+                            maxRotation: 60,
+                            minRotation: 60
                         },
                         title: {
                             display: true,

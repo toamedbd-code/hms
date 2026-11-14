@@ -97,7 +97,7 @@
               $baseTotal = round((float) ($base_total ?? $total_amount ?? 0), 2);
                 $discountableBase = collect($bill_items ?? [])->reject(function ($item) {
                   $category = strtolower((string) (is_object($item) ? ($item->category ?? '') : ($item['category'] ?? '')));
-                  return $category === 'disposable';
+                  return $category === 'disposable' || (bool) (is_object($item) ? ($item->discount_exempt ?? false) : ($item['discount_exempt'] ?? false));
                 })->sum(function ($item) {
                   return (float) (is_object($item) ? ($item->total_amount ?? $item->net_amount ?? 0) : ($item['total_amount'] ?? $item['net_amount'] ?? 0));
                 });
@@ -106,11 +106,16 @@
               $extraDiscount = round((float) ($extra_flat_discount ?? 0), 2);
               if (strtolower((string) ($discount_type ?? 'flat')) === 'percentage') {
                   $discountPercentLocal = round((float) ($discount ?? 0), 2);
-                  $discountComputed = round(($discountableBase * $discountPercentLocal) / 100, 2);
+                  $discountComputed = round((float) collect($bill_items ?? [])->sum(function ($item) {
+                    return (float) (is_object($item) ? ($item->discount ?? 0) : ($item['discount'] ?? 0));
+                  }), 2);
               } else {
                   $discountPercentLocal = null;
                   $discountComputed = round((float) ($discount ?? 0), 2);
               }
+              $appliedDiscountPercent = $discountableBase > 0
+                ? round(($discountComputed / $discountableBase) * 100, 2)
+                : 0;
               $totalWithVat = round($baseTotal + $vatComputed, 2);
               $netComputed = round(max(0, $totalWithVat - $discountComputed - $extraDiscount), 2);
             @endphp
@@ -119,11 +124,7 @@
             @if($vatComputed != 0)
             <tr><td>Vat</td><td class="right">{{ priceFormat($vatComputed) }}</td></tr>            <tr><td><strong>Total With VAT</strong></td><td class="right"><strong>{{ priceFormat($totalWithVat) }}</strong></td></tr>            @endif
             @if($discountComputed != 0)
-              @if($discountPercentLocal !== null)
-                <tr><td>Discount ({{ number_format($discountPercentLocal, 2) }}%)</td><td class="right">{{ priceFormat($discountComputed) }}</td></tr>
-              @else
-                <tr><td>Discount</td><td class="right">{{ priceFormat($discountComputed) }}</td></tr>
-              @endif
+              <tr><td>{{ $discountPercentLocal !== null ? 'Discount (' . number_format($appliedDiscountPercent, 2) . '%)' : 'Flat Discount' }}</td><td class="right">{{ priceFormat($discountComputed) }}</td></tr>
             @endif
             @if($extraDiscount != 0)
               <tr><td>Extra Discount</td><td class="right">{{ priceFormat($extraDiscount) }}</td></tr>

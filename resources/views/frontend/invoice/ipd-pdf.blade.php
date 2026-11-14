@@ -12,7 +12,41 @@
         @php
             $__inv_header_h = (int) ($header_height ?? 115);
             $__inv_footer_h = (int) ($footer_height ?? 70);
+            $__invoiceDesign = $invoiceDesign ?? null;
+            $__fullPagePadImage = $fullPagePadImage ?? '';
+            $__invoiceFullPagePad = ($__invoiceDesign?->active_pad_type ?? 'header') === 'institution'
+                && $__fullPagePadImage !== ''
+                && (bool) ($showHeaderFooter ?? true);
+            $__invoicePadContentOffset = max(0, min(100, (int) ($__invoiceDesign?->full_page_pad_content_offset ?? 0)));
         @endphp
+        @if($__invoiceFullPagePad)
+        body.with-institution-pad .print-shared-header,
+        body.with-institution-pad .footer-wrapper,
+        body.with-institution-pad .footer-placeholder,
+        body.with-institution-pad .print-full-page-institution-pad {
+            display: none !important;
+        }
+
+        body.with-institution-pad .content-section {
+            position: relative;
+            z-index: 1;
+            padding-top: {{ $__invoicePadContentOffset }}mm !important;
+            padding-bottom: 0 !important;
+        }
+
+        .invoice-institution-pad {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            max-width: none;
+            object-fit: fill;
+            z-index: 0;
+            pointer-events: none;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        @endif
         body {
             font-family: Arial, sans-serif;
             font-size: 14px;
@@ -137,24 +171,11 @@
             table-layout: fixed;
         }
 
-        .info-table td,
-        .payments-table td,
-        .payments-table th,
-        .items-table td,
-            .due-badge {
-                background-color: #ff4444 !important;
-                border-color: #ff4444 !important;
-                padding: 8px 16px;
-                font-size: 32px;
-                margin-bottom: 8px;
-            }
-            .paid-badge {
-                background-color: #28a745 !important;
-                border-color: #28a745 !important;
-                padding: 8px 16px;
-                font-size: 32px;
-                margin-bottom: 8px;
-            }
+        .info-table td {
+            padding: 4px 3px;
+            vertical-align: top;
+        }
+
         .label {
             font-weight: bold;
             width: 16%;
@@ -171,6 +192,12 @@
             width: 32%;
             padding-right: 6px;
             min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .refd-value {
+            white-space: pre-line;
+            overflow-wrap: anywhere;
         }
 
         .section-title {
@@ -458,8 +485,7 @@
         
         @media print {
             body {
-                padding-top: 120px;
-                padding-bottom: 120px;
+                padding: 0;
             }
 
             .header-image,
@@ -512,12 +538,24 @@
                 color: #ffffff !important;
                 box-shadow: none !important;
             }
+
+            .content-section.content-section {
+                padding-bottom: 0 !important;
+            }
+
+            .content-section + .footer-placeholder {
+                display: none !important;
+                height: 0 !important;
+            }
         }
     </style>
 </head>
 
-<body>
-    @include('prints.partials._header')
+<body class="{{ $__invoiceFullPagePad ? 'with-institution-pad' : '' }}">
+    @if($__invoiceFullPagePad)
+        <img src="{{ $__fullPagePadImage }}" alt="" aria-hidden="true" class="invoice-institution-pad">
+    @endif
+    @include('prints.partials._header', ['renderFullPagePadAsBackground' => $__invoiceFullPagePad])
 
     <div class="content-section">
         @php
@@ -582,8 +620,7 @@
                     <td class="label">Phone</td><td class="colon">:</td><td class="value">{{ $billing_info['phone'] ?? ($patient?->phone ?? ($patient?->mobile ?? '')) }}</td>
                 </tr>
                 <tr>
-                    <td class="label">Refd. By</td><td class="colon">:</td><td class="value">{{ $billing_info['refd_by'] ?? ($doctor?->name ?? '') }}</td>
-                    <td class="label"></td><td class="colon"></td><td class="value"></td>
+                    <td class="label">Refd. By</td><td class="colon">:</td><td class="value refd-value" colspan="4">{{ $billing_info['refd_by'] ?? ($doctor?->name ?? '') }}</td>
                 </tr>
             </table>
         @endif
@@ -610,8 +647,7 @@
                 <td class="label">Discharge</td><td class="colon">:</td><td class="value">{{ $discharge ?? ($ipdpatient?->discharged_at ? \Carbon\Carbon::parse($ipdpatient->discharged_at)->format('d-m-Y h:i A') : 'N/A') }}</td>
             </tr>
             <tr>
-                <td class="label">Refd. By</td><td class="colon">:</td><td class="value">{{ $consultant ?? ($doctorName ?? ($doctor?->name ?? 'N/A')) }}</td>
-                <td class="label"></td><td class="colon"></td><td class="value"></td>
+                <td class="label">Refd. By</td><td class="colon">:</td><td class="value refd-value" colspan="4">{{ $consultant ?? ($doctorName ?? ($doctor?->name ?? 'N/A')) }}</td>
             </tr>
             {{-- duplicate billing-style patient block removed to keep IPD info single-source --}}
         </table>
@@ -888,6 +924,123 @@
     </script>
     @endif
     @include('prints.partials._footer')
+    @include('prints.partials._responsive_invoice_print')
+    <style>
+        .footer-content-area {
+            color: #000 !important;
+            box-sizing: border-box !important;
+            width: auto !important;
+            padding: 4px 5mm 4px 5mm !important;
+            justify-content: space-between !important;
+            text-align: left !important;
+        }
+
+        .footer-content-row {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            gap: 12px !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            box-sizing: border-box !important;
+            white-space: nowrap !important;
+        }
+
+        .footer-content-main {
+            display: block !important;
+            flex: 1 1 auto !important;
+            max-width: none !important;
+            min-width: 0 !important;
+            padding: 0 4mm 0 0 !important;
+            color: #000 !important;
+            text-align: left !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            font-size: 10px !important;
+        }
+
+        .footer-printed-at {
+            display: block !important;
+            flex: 0 0 auto !important;
+            width: max-content !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            color: #000 !important;
+            text-align: right !important;
+            white-space: nowrap !important;
+            transform: none !important;
+            font-size: 10px !important;
+        }
+
+        @media print {
+            .footer-content-area.above {
+                bottom: calc(var(--report-footer-height) - 5mm) !important;
+                padding: 4px 5mm 4px 5mm !important;
+            }
+
+            .footer-content-area.above .footer-content-row {
+                gap: 12px !important;
+                padding-right: 0 !important;
+            }
+
+            .footer-content-area.above .footer-content-main {
+                max-width: none !important;
+                padding-right: 4mm !important;
+                font-size: 10px !important;
+            }
+
+            .footer-content-area.above .footer-printed-at {
+                flex: 0 0 auto !important;
+                width: max-content !important;
+                max-width: none !important;
+                margin-left: 0 !important;
+                padding-right: 0 !important;
+                transform: none !important;
+                font-size: 10px !important;
+            }
+        }
+
+        body.with-institution-pad .footer-wrapper {
+            display: block !important;
+            position: fixed !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100% !important;
+            height: var(--report-footer-height) !important;
+            overflow: visible !important;
+            z-index: 9999 !important;
+            pointer-events: none !important;
+        }
+
+        body.with-institution-pad .footer-image-area {
+            position: absolute !important;
+            inset: 0 !important;
+            height: 100% !important;
+            overflow: visible !important;
+        }
+
+        body.with-institution-pad .footer-image-area > .footer-image,
+        body.with-institution-pad .footer-image-area > .footer-placeholder {
+            display: none !important;
+        }
+
+        body.with-institution-pad .footer-content-area {
+            position: absolute !important;
+            left: 0 !important;
+            right: 0 !important;
+            top: auto !important;
+            bottom: 12mm !important;
+            width: auto !important;
+            box-sizing: border-box !important;
+            padding: 0 5mm 0 5mm !important;
+            z-index: 100000 !important;
+            pointer-events: auto !important;
+        }
+    </style>
 </body>
 
 </html>

@@ -25,6 +25,8 @@ class ReferralPersonRequest extends FormRequest
             'ambulance_commission' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'apply_to_all' => 'sometimes|boolean',
             'use_item_referral' => 'sometimes|boolean',
+            'category_commissions' => 'nullable|array',
+            'category_commissions.*' => 'nullable|numeric|min:0|max:100',
         ];
 
         switch ($this->method()) {

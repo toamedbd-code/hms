@@ -2,16 +2,40 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
+import axios from 'axios';
 import eventBus from '@/eventBus.js';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
+import {
+    disableOfflineBillingWithPassword,
+    enableOfflineBillingWithPassword,
+    getOfflineBillingEncryptionStatus,
+    prepareOfflineBillingPage,
+} from '@/offlineBillingQueue.js';
 
-const props = defineProps(['websetting', 'id', 'activeSection', 'activeModule', 'singleSectionMode', 'availableTemplates', 'bookingDoctors', 'sidebarMenus']);
+const props = defineProps(['websetting', 'id', 'activeSection', 'activeModule', 'singleSectionMode', 'availableTemplates', 'bookingDoctors', 'sidebarMenus', 'itemCategories', 'labManagementEnabled', 'isDeveloper']);
 const bookingDoctors = props.bookingDoctors ?? [];
 const bookingPanelOpen = ref(false);
+const labManagementEnabled = ref(Boolean(props.labManagementEnabled ?? true));
+const savingLabManagement = ref(false);
+const savingPharmacySettings = ref(false);
 const page = usePage();
+const offlineBillingAdminId = computed(() => Number(page.props?.auth?.admin?.id || 0));
+const offlineBillingSetupLoading = ref(false);
+const offlineBillingSetupSaving = ref(false);
+const offlineBillingEncryptionConfigured = ref(false);
+const offlineBillingPassphraseProtected = ref(false);
+const offlineBillingControlPasswordConfigured = ref(false);
+const offlineBillingEnabled = ref(true);
+const offlineBillingUnlocked = ref(false);
+const offlineBillingPassphrase = ref('');
+const offlineBillingPassphraseConfirmation = ref('');
+const offlineBillingSetupError = ref('');
+const offlineAppInstallAvailable = ref(typeof window !== 'undefined' && Boolean(window.__hmsInstallPrompt));
+const offlineAppInstallError = ref('');
+const isOfflineBillingSecureContext = typeof window !== 'undefined' && window.isSecureContext;
 const vatStorageKey = 'backend.websetting.lastVatSettings';
 const currentWebSetting = computed(() => {
     const propsValue = page?.props ?? {};
@@ -44,10 +68,100 @@ const getWebSettingValue = (key, fallback = '') => {
 
     return sourceValue ?? fallback;
 };
+
+const setLabManagement = (managed) => {
+    if (savingLabManagement.value || labManagementEnabled.value === managed) {
+        return;
+    }
+    savingLabManagement.value = true;
+    router.post(route('backend.websetting.lab-management'), { managed }, {
+        preserveScroll: true,
+        onSuccess: () => { labManagementEnabled.value = managed; },
+        onFinish: () => { savingLabManagement.value = false; },
+    });
+};
+
+const refreshOfflineBillingSetup = async () => {
+    if (!props.isDeveloper || !offlineBillingAdminId.value) return;
+
+    offlineBillingSetupLoading.value = true;
+    try {
+        const status = await getOfflineBillingEncryptionStatus(offlineBillingAdminId.value);
+        offlineBillingEncryptionConfigured.value = status.configured;
+        offlineBillingPassphraseProtected.value = status.passphraseProtected;
+        offlineBillingControlPasswordConfigured.value = status.controlPasswordConfigured;
+        offlineBillingEnabled.value = status.enabled;
+        offlineBillingUnlocked.value = status.unlocked;
+    } catch (error) {
+        offlineBillingSetupError.value = error instanceof Error
+            ? error.message
+            : 'Could not read offline billing setup.';
+    } finally {
+        offlineBillingSetupLoading.value = false;
+    }
+};
+
+const submitOfflineBillingSetup = async () => {
+    offlineBillingSetupError.value = '';
+
+    if (!offlineBillingControlPasswordConfigured.value
+        && offlineBillingPassphrase.value !== offlineBillingPassphraseConfirmation.value) {
+        offlineBillingSetupError.value = 'The passwords do not match.';
+        return;
+    }
+
+    offlineBillingSetupSaving.value = true;
+    try {
+        if (offlineBillingEnabled.value && offlineBillingControlPasswordConfigured.value) {
+            await disableOfflineBillingWithPassword(offlineBillingAdminId.value, offlineBillingPassphrase.value);
+        } else {
+            await enableOfflineBillingWithPassword(
+                offlineBillingAdminId.value,
+                offlineBillingPassphrase.value,
+                offlineBillingPassphraseConfirmation.value
+            );
+            await prepareOfflineBillingPage(offlineBillingAdminId.value, page.props.offlineInvoiceDesign || {});
+        }
+        await refreshOfflineBillingSetup();
+        offlineBillingPassphrase.value = '';
+        offlineBillingPassphraseConfirmation.value = '';
+    } catch (error) {
+        offlineBillingSetupError.value = error instanceof Error
+            ? error.message
+            : 'Could not enable encrypted offline billing.';
+    } finally {
+        offlineBillingSetupSaving.value = false;
+    }
+};
+
+const installOfflineBillingApp = async () => {
+    offlineAppInstallError.value = '';
+    try {
+        if (!window.__hmsInstallPrompt) {
+            offlineAppInstallError.value = 'Use your browser menu and choose “Install app” or “Add to Home screen”.';
+            return;
+        }
+        await window.installHmsOfflineApp?.();
+    } catch (error) {
+        offlineAppInstallError.value = error instanceof Error
+            ? error.message
+            : 'Could not start app installation.';
+    }
+};
+
+const handleOfflineAppInstallAvailable = () => {
+    offlineAppInstallAvailable.value = true;
+};
+
+const handleOfflineAppInstallComplete = () => {
+    offlineAppInstallAvailable.value = false;
+};
+
 const sidebarMenus = ref(props.sidebarMenus ?? []);
 const searchQuery = ref('');
 const settingsSections = [
     { key: 'general', label: 'General Setting', hint: 'Hospital profile, logo, language, currency' },
+    { key: 'pharmacy', label: 'Pharmacy Setting', hint: 'Pharmacy invoice VAT and Mushak registration' },
     { key: 'cms', label: 'CMS Setting', hint: 'Website hero, about, doctors and CTA content' },
     { key: 'prefix', label: 'Prefix Setting', hint: 'All document and bill numbering prefixes' },
     { key: 'sms', label: 'SMS Setting', hint: 'Gateway credentials and Bulk SMS access' },
@@ -124,6 +238,10 @@ const visibleSettingsSections = computed(() => {
         }
 
         if (section.key === 'general') {
+            return canManageGeneralSettings;
+        }
+
+        if (section.key === 'pharmacy') {
             return canManageGeneralSettings;
         }
 
@@ -252,6 +370,11 @@ const parseDeviceOptions = (rawOptions) => {
         : '/api/pathology/machine/webhook';
 
     const defaults = {
+        billing_discount_cap_by_category_enabled: false,
+        billing_category_discount_caps: {},
+        billing_room_no_by_category_enabled: false,
+        billing_category_room_numbers: {},
+        pharmacy_tax_number_enabled: true,
         modules: {
             fingerprint: true,
             face_attendance: true,
@@ -319,6 +442,16 @@ const parseDeviceOptions = (rawOptions) => {
                 api_url: '',
                 device_identifier: '',
             },
+            biochemistry: {
+                enabled: false,
+                vendor: '',
+                model: '',
+                protocol: 'hl7_mllp',
+                host: '',
+                port: '2575',
+                api_url: '',
+                device_identifier: '',
+            },
             ultrasound: {
                 enabled: false,
                 vendor: '',
@@ -327,6 +460,22 @@ const parseDeviceOptions = (rawOptions) => {
                 host: '',
                 port: '104',
                 ae_title: 'HMS',
+                accession_key: 'accession_no',
+            },
+            xray: {
+                enabled: false,
+                vendor: '',
+                model: '',
+                protocol: 'dicom_mwl',
+                host: '',
+                port: '104',
+                ae_title: '',
+                worklist_host: '',
+                worklist_port: '104',
+                worklist_ae_title: 'HMS',
+                pacs_host: '',
+                pacs_port: '104',
+                pacs_ae_title: '',
                 accession_key: 'accession_no',
             },
             security: {
@@ -342,6 +491,7 @@ const parseDeviceOptions = (rawOptions) => {
                 result_unit_key: 'unit',
                 reference_range_key: 'reference_range',
                 result_time_key: 'result_time',
+                test_code_aliases_json: '{}',
             },
         },
     };
@@ -394,9 +544,17 @@ const parseDeviceOptions = (rawOptions) => {
                     ...defaults.pathology.hematology,
                     ...(parsed?.pathology?.hematology ?? {}),
                 },
+                biochemistry: {
+                    ...defaults.pathology.biochemistry,
+                    ...(parsed?.pathology?.biochemistry ?? {}),
+                },
                 ultrasound: {
                     ...defaults.pathology.ultrasound,
                     ...(parsed?.pathology?.ultrasound ?? {}),
+                },
+                xray: {
+                    ...defaults.pathology.xray,
+                    ...(parsed?.pathology?.xray ?? {}),
                 },
                 security: {
                     ...defaults.pathology.security,
@@ -414,6 +572,46 @@ const parseDeviceOptions = (rawOptions) => {
 };
 
 const deviceOptions = ref(parseDeviceOptions(props.websetting?.attendance_device_options));
+const itemCategoryNames = computed(() => (props.itemCategories ?? [])
+    .map((category) => String(category?.name ?? '').trim())
+    .filter(Boolean));
+const categoryDiscountOptions = computed(() => itemCategoryNames.value);
+
+const ensureCategoryDiscountCaps = () => {
+    if (!deviceOptions.value || typeof deviceOptions.value !== 'object') {
+        deviceOptions.value = {
+            billing_discount_cap_by_category_enabled: false,
+            billing_category_discount_caps: {},
+            billing_room_no_by_category_enabled: false,
+            billing_category_room_numbers: {},
+            pharmacy_tax_number_enabled: true,
+        };
+    }
+
+    if (!deviceOptions.value.billing_category_discount_caps || typeof deviceOptions.value.billing_category_discount_caps !== 'object') {
+        deviceOptions.value.billing_category_discount_caps = {};
+    }
+    if (!deviceOptions.value.billing_category_room_numbers || typeof deviceOptions.value.billing_category_room_numbers !== 'object') {
+        deviceOptions.value.billing_category_room_numbers = {};
+    }
+
+    itemCategoryNames.value.forEach((category) => {
+        const existingKey = Object.keys(deviceOptions.value.billing_category_discount_caps)
+            .find((key) => key.toLowerCase() === category.toLowerCase());
+
+        if (!existingKey) {
+            deviceOptions.value.billing_category_discount_caps[category] = 10;
+        }
+
+        const existingRoomKey = Object.keys(deviceOptions.value.billing_category_room_numbers)
+            .find((key) => key.toLowerCase() === category.toLowerCase());
+        if (!existingRoomKey) {
+            deviceOptions.value.billing_category_room_numbers[category] = '';
+        }
+    });
+
+};
+
 const moduleSections = reactive({
     attendance: true,
     pathology: false,
@@ -701,6 +899,7 @@ const form = useForm({
     currency_symbol: props.websetting?.currency_symbol ?? 'Tk.',
     vat_enabled: Boolean(currentWebSetting.value?.vat_enabled ?? props.websetting?.vat_enabled ?? false),
     vat_percent: currentWebSetting.value?.vat_percent ?? props.websetting?.vat_percent ?? 0.00,
+    pharmacy_tax_number: props.websetting?.pharmacy_tax_number ?? '',
     credit_limit: props.websetting?.credit_limit ?? 10000,
     max_billing_discount_percent: props.websetting?.max_billing_discount_percent ?? 100,
     low_stock_threshold: props.websetting?.low_stock_threshold ?? 10,
@@ -709,6 +908,8 @@ const form = useForm({
     mobile_app_primary_color_code: props.websetting?.mobile_app_primary_color_code ?? '444444',
     mobile_app_secondary_color_code: props.websetting?.mobile_app_secondary_color_code ?? 'ffffff',
     mobile_app_logo: null,
+    pwa_app_name: props.websetting?.pwa_app_name ?? 'HMS Smart Solution',
+    pwa_app_icon: null,
     doctor_restriction_mode: Boolean(props.websetting?.doctor_restriction_mode),
     superadmin_visibility: Boolean(props.websetting?.superadmin_visibility),
     patient_panel: Boolean(props.websetting?.patient_panel),
@@ -779,6 +980,7 @@ const form = useForm({
     logoPreview: props.websetting?.logo ?? currentWebSetting.value?.logo ?? '',
     iconPreview: props.websetting?.icon ?? currentWebSetting.value?.icon ?? '',
     mobileAppLogoPreview: getWebSettingValue('mobile_app_logo', ''),
+    pwaAppIconPreview: getWebSettingValue('pwa_app_icon', ''),
     _method: 'post',
 });
 
@@ -1078,6 +1280,7 @@ watch(() => form.address, (newAddress) => {
 });
 
 watch(deviceOptions, (newOptions) => {
+    ensureCategoryDiscountCaps();
     form.attendance_device_options = JSON.stringify(newOptions);
 }, { deep: true });
 
@@ -1117,19 +1320,102 @@ const handleMobileLogoChange = (event) => {
     setFilePreview(event.target.files?.[0], 'mobileAppLogoPreview', 'mobile_app_logo');
 };
 
+const handlePwaIconChange = (event) => {
+    setFilePreview(event.target.files?.[0], 'pwaAppIconPreview', 'pwa_app_icon');
+};
+
+const settingsFieldsBySection = {
+    general: [
+        'company_name', 'company_short_name', 'hospital_code', 'address', 'phone', 'email',
+        'logo', 'icon', 'language', 'date_format', 'time_zone', 'currency', 'currency_symbol',
+        'vat_enabled', 'vat_percent', 'credit_limit', 'max_billing_discount_percent',
+        'low_stock_threshold', 'time_format', 'mobile_app_api_url',
+        'mobile_app_primary_color_code', 'mobile_app_secondary_color_code', 'mobile_app_logo',
+        'pwa_app_name', 'pwa_app_icon', 'login_banner', 'login_title', 'login_subtitle',
+        'report_title', 'attendance_device_options',
+    ],
+    cms: [
+        'website_hero_title', 'website_hero_subtitle', 'website_about_text',
+        'website_emergency_phone', 'website_enabled', 'website_cta_text',
+        'website_featured_doctors_json', 'website_featured_doctor_images',
+        'website_services_json', 'website_facilities_json',
+        'website_testimonials_en_json', 'website_testimonials_bn_json', 'website_template',
+    ],
+    prefix: [
+        'ipd_no_prefix', 'opd_no_prefix', 'ipd_prescription_prefix', 'opd_prescription_prefix',
+        'appointment_prefix', 'pharmacy_bill_prefix', 'billing_bill_prefix',
+        'operation_reference_no_prefix', 'blood_bank_bill_prefix', 'ambulance_call_bill_prefix',
+        'radiology_bill_prefix', 'pathology_bill_prefix', 'opd_checkup_id_prefix',
+        'pharmacy_purchase_no_prefix', 'transaction_id_prefix',
+        'birth_record_reference_no_prefix', 'death_record_reference_no_prefix', 'report_title',
+    ],
+    sms: [
+        'sms_enabled', 'sms_api_url', 'sms_api_key', 'sms_sender_id', 'sms_route',
+        'sms_is_unicode', 'sms_additional_params', 'personal_bkash_number', 'personal_nagad_number',
+    ],
+    module: [
+        'attendance_device_enabled', 'attendance_device_type', 'attendance_device_identifier',
+        'attendance_device_ip', 'attendance_device_port', 'attendance_device_secret',
+        'attendance_device_options',
+    ],
+    other: [
+        'doctor_restriction_mode', 'superadmin_visibility', 'patient_panel',
+        'opd_invoice_header_footer', 'ipd_invoice_header_footer',
+        'opd_prescription_header_footer', 'ipd_prescription_header_footer',
+        'scan_type', 'current_theme',
+    ],
+    sidebar: ['sidebar_menu_order'],
+};
+
 const submit = () => {
-    form.transform((data) => ({
-        ...data,
-        activeSection: activeSettingsSection.value,
-        report_title: data.address,
-        attendance_device_options: JSON.stringify(deviceOptions.value),
-        sidebar_menu_order: sidebarMenus.value.map((menu) => menu.id),
-    })).post(route('backend.websetting.store'), {
+    if (form.processing) {
+        return;
+    }
+
+    const section = activeSettingsSection.value;
+    const sectionFields = settingsFieldsBySection[section] ?? [];
+
+    form.transform((data) => {
+        const payload = Object.fromEntries(
+            sectionFields
+                .filter((field) => Object.prototype.hasOwnProperty.call(data, field))
+                .map((field) => [field, data[field]])
+        );
+
+        payload.activeSection = section;
+
+        if (section === 'general') {
+            payload.report_title = data.address;
+            payload.attendance_device_options = JSON.stringify(deviceOptions.value);
+        }
+
+        if (section === 'prefix') {
+            payload.report_title = data.address;
+        }
+
+        if (section === 'module') {
+            payload.attendance_device_ip = (data.attendance_device_ip || '').trim() || null;
+            payload.attendance_device_identifier = (data.attendance_device_identifier || '').trim() || null;
+            payload.attendance_device_port = (data.attendance_device_port || '').trim() || null;
+            payload.attendance_device_secret = (data.attendance_device_secret || '').trim() || undefined;
+            payload.attendance_device_options = JSON.stringify(deviceOptions.value);
+        }
+
+        if (section === 'sidebar') {
+            payload.sidebar_menu_order = sidebarMenus.value.map((menu) => menu.id);
+        }
+
+        return payload;
+    }).post(route('backend.websetting.store'), {
         preserveState: true,
         preserveScroll: true,
         replace: true,
         onSuccess: (response) => {
             displayResponse(response);
+
+            if (activeSettingsSection.value === 'sidebar') {
+                router.reload({ only: ['auth'], preserveScroll: true });
+            }
 
             try {
                 const latestWebSetting = response?.props?.websetting ?? page.props?.websetting ?? props.websetting ?? null;
@@ -1177,7 +1463,46 @@ const submit = () => {
         onError: (errorObject) => {
             displayWarning(errorObject);
         },
+        onFinish: () => {
+            form.transform((data) => data);
+        },
     });
+};
+
+const submitPharmacySettings = async () => {
+    if (savingPharmacySettings.value) {
+        return;
+    }
+
+    savingPharmacySettings.value = true;
+    form.clearErrors('pharmacy_tax_number');
+
+    try {
+        const response = await axios.post(route('backend.websetting.store'), {
+            activeSection: 'pharmacy',
+            pharmacy_tax_number: form.pharmacy_tax_number,
+        }, {
+            headers: { Accept: 'application/json' },
+        });
+
+        displayResponse(response.data);
+    } catch (error) {
+        const responseData = error?.response?.data;
+        if (responseData?.errors && typeof responseData.errors === 'object') {
+            const validationErrors = Object.fromEntries(
+                Object.entries(responseData.errors).map(([field, messages]) => {
+                    const message = Array.isArray(messages) ? messages[0] : messages;
+                    form.setError(field, message);
+                    return [field, message];
+                })
+            );
+            displayWarning(validationErrors);
+        } else {
+            displayResponse(responseData ?? { errorMessage: 'Pharmacy settings could not be saved.' });
+        }
+    } finally {
+        savingPharmacySettings.value = false;
+    }
 };
 
 const initialTheme = props.websetting?.current_theme ?? 'default';
@@ -1241,9 +1566,18 @@ watch(allowedSectionKeys, () => {
 onMounted(() => {
     applyLiveThemePreview(form.current_theme);
     applyModuleSelectionFromQuery();
+    if (props.isDeveloper) {
+        window.addEventListener('offline-billing:install-available', handleOfflineAppInstallAvailable);
+        window.addEventListener('offline-billing:install-complete', handleOfflineAppInstallComplete);
+        refreshOfflineBillingSetup();
+    }
 });
 
 onBeforeUnmount(() => {
+    if (typeof window !== 'undefined') {
+        window.removeEventListener('offline-billing:install-available', handleOfflineAppInstallAvailable);
+        window.removeEventListener('offline-billing:install-complete', handleOfflineAppInstallComplete);
+    }
     if (typeof window !== 'undefined' && sectionToastTimer) {
         window.clearTimeout(sectionToastTimer);
     }
@@ -1311,7 +1645,7 @@ onBeforeUnmount(() => {
                             <p class="mt-1 text-xs text-sky-700">{{ getSectionMeta(activeSettingsSection).hint }}</p>
                         </div>
 
-                <div v-show="activeSettingsSection === 'general'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'general'" class="border rounded-md p-4">
                     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
                         <div>
                             <InputLabel for="company_name" value="Hospital Name *" />
@@ -1378,14 +1712,14 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'general'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'general'" class="border rounded-md p-4">
                     <h2 class="text-lg font-semibold mb-4">Logos</h2>
                     <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                         <div>
                             <InputLabel for="logo" value="Hospital Logo *" />
                             <img v-if="form.logoPreview || getWebSettingValue('logo', '')" :src="form.logoPreview || getWebSettingValue('logo', '')" alt="Hospital Logo" class="mb-2 h-20 object-contain" />
                             <input id="logo" type="file" accept="image/*" @change="handleLogoChange"
-                                class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                class="block w-full rounded-md border-slate-300 p-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-green-600 file:px-3 file:py-1.5 file:font-medium file:text-white hover:file:bg-green-700" />
                             <InputError class="mt-2" :message="form.errors.logo" />
                         </div>
 
@@ -1393,7 +1727,7 @@ onBeforeUnmount(() => {
                             <InputLabel for="icon" value="Hospital Small Logo *" />
                             <img v-if="form.iconPreview || getWebSettingValue('icon', '')" :src="form.iconPreview || getWebSettingValue('icon', '')" alt="Hospital Small Logo" class="mb-2 h-20 object-contain" />
                             <input id="icon" type="file" accept="image/*,.ico" @change="handleIconChange"
-                                class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                class="block w-full rounded-md border-slate-300 p-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-green-600 file:px-3 file:py-1.5 file:font-medium file:text-white hover:file:bg-green-700" />
                             <InputError class="mt-2" :message="form.errors.icon" />
                         </div>
 
@@ -1401,13 +1735,13 @@ onBeforeUnmount(() => {
                             <InputLabel for="mobile_app_logo" value="Mobile App Logo" />
                             <img v-if="form.mobileAppLogoPreview || getWebSettingValue('mobile_app_logo', '')" :src="form.mobileAppLogoPreview || getWebSettingValue('mobile_app_logo', '')" alt="Mobile App Logo" class="mb-2 h-20 object-contain" />
                             <input id="mobile_app_logo" type="file" accept="image/*" @change="handleMobileLogoChange"
-                                class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                class="block w-full rounded-md border-slate-300 p-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-green-600 file:px-3 file:py-1.5 file:font-medium file:text-white hover:file:bg-green-700" />
                             <InputError class="mt-2" :message="form.errors.mobile_app_logo" />
                         </div>
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'general'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'general'" class="border rounded-md p-4">
                     <h2 class="text-lg font-semibold mb-4">Language</h2>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                         <div>
@@ -1422,7 +1756,7 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'general'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'general'" class="border rounded-md p-4">
                     <h2 class="text-lg font-semibold mb-4">Date Time</h2>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
                         <div>
@@ -1451,7 +1785,7 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'general'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'general'" class="border rounded-md p-4">
                     <h2 class="text-lg font-semibold mb-4">Currency</h2>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-5">
                         <div>
@@ -1504,10 +1838,87 @@ onBeforeUnmount(() => {
                                 class="block w-full p-2 text-sm rounded-md border-slate-300" />
                             <InputError class="mt-2" :message="form.errors.low_stock_threshold" />
                         </div>
+
+                        <div class="md:col-span-5">
+                            <div class="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                                <input
+                                    id="billing_discount_cap_by_category_enabled"
+                                    v-model="deviceOptions.billing_discount_cap_by_category_enabled"
+                                    type="checkbox"
+                                    class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                <label for="billing_discount_cap_by_category_enabled" class="text-sm font-medium text-slate-700">
+                                    Enable category-wise billing discount cap
+                                </label>
+                            </div>
+                        </div>
+
+                        <div v-if="deviceOptions.billing_discount_cap_by_category_enabled" class="md:col-span-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+                            <div v-for="category in categoryDiscountOptions" :key="category" class="rounded-md border border-slate-200 bg-white p-2">
+                                <label :for="`category-discount-${category}`" class="mb-1 block min-w-0 text-xs font-semibold uppercase tracking-wide text-slate-600">{{ category }}</label>
+                                <div class="flex items-center gap-2">
+                                    <input
+                                        :id="`category-discount-${category}`"
+                                        v-model.number="deviceOptions.billing_category_discount_caps[category]"
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="0.01"
+                                        class="block w-full rounded-md border-slate-300 p-2 text-sm"
+                                    />
+                                    <span class="text-xs text-slate-500">%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="md:col-span-5">
+                            <div class="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                                <input
+                                    id="billing_room_no_by_category_enabled"
+                                    v-model="deviceOptions.billing_room_no_by_category_enabled"
+                                    type="checkbox"
+                                    class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                <label for="billing_room_no_by_category_enabled" class="text-sm font-medium text-slate-700">
+                                    Enable category-wise room number
+                                </label>
+                            </div>
+                        </div>
+
+                        <div v-if="deviceOptions.billing_room_no_by_category_enabled" class="md:col-span-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+                            <div v-for="category in categoryDiscountOptions" :key="category" class="rounded-md border border-slate-200 bg-white p-2">
+                                <label :for="`category-room-${category}`" class="mb-1 block min-w-0 text-xs font-semibold uppercase tracking-wide text-slate-600">{{ category }} Room No.</label>
+                                <input
+                                    :id="`category-room-${category}`"
+                                    v-model="deviceOptions.billing_category_room_numbers[category]"
+                                    type="text"
+                                    maxlength="50"
+                                    class="block w-full rounded-md border-slate-300 p-2 text-sm"
+                                />
+                            </div>
+                        </div>
+
+                        <div class="md:col-span-5">
+                            <div class="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                                <input
+                                    id="pharmacy_tax_number_enabled"
+                                    v-model="deviceOptions.pharmacy_tax_number_enabled"
+                                    type="checkbox"
+                                    class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                <label for="pharmacy_tax_number_enabled" class="text-sm font-medium text-slate-700">
+                                    Show VAT / Mushak number on Pharmacy bills
+                                </label>
+                            </div>
+                            <p class="mt-1 text-xs text-slate-500">
+                                The number is managed in Pharmacy Settings and appears only on Pharmacy invoices.
+                            </p>
+                        </div>
+
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'general'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'general'" class="border rounded-md p-4">
                     <h2 class="text-lg font-semibold mb-4">Mobile App (Android App Purchase Code already registered)</h2>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
                         <div>
@@ -1533,15 +1944,135 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'general'" class="rounded-md border border-slate-200 bg-slate-50 p-4">
+                <div v-if="props.isDeveloper && activeSettingsSection === 'general'" class="border rounded-md p-4">
+                    <h2 class="text-lg font-semibold mb-1">Installed App Branding</h2>
+                    <p class="mb-4 text-sm text-slate-600">These settings control the installable web app name and icon on Android, desktop, and other supported devices.</p>
+                    <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div>
+                            <InputLabel for="pwa_app_name" value="App Name" />
+                            <input id="pwa_app_name" v-model="form.pwa_app_name" type="text" maxlength="255"
+                                class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                            <InputError class="mt-2" :message="form.errors.pwa_app_name" />
+                        </div>
+                        <div>
+                            <InputLabel for="pwa_app_icon" value="App Install Icon (PNG, JPG, WEBP)" />
+                            <img v-if="form.pwaAppIconPreview || getWebSettingValue('pwa_app_icon', '')"
+                                :src="form.pwaAppIconPreview || getWebSettingValue('pwa_app_icon', '')"
+                                alt="Installable App Icon" class="mb-2 h-20 w-20 rounded-lg object-contain" />
+                            <input id="pwa_app_icon" type="file" accept="image/png,image/jpeg,image/webp"
+                                @change="handlePwaIconChange"
+                                class="block w-full rounded-md border-slate-300 p-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-green-600 file:px-3 file:py-1.5 file:font-medium file:text-white hover:file:bg-green-700" />
+                            <InputError class="mt-2" :message="form.errors.pwa_app_icon" />
+                        </div>
+                    </div>
+                </div>
+
+                <section v-if="props.isDeveloper && activeSettingsSection === 'general'"
+                    class="mb-5 rounded-md border border-emerald-200 bg-emerald-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+                    <h2 class="text-lg font-semibold text-emerald-950 dark:text-emerald-200">Offline Billing Setup</h2>
+                    <p class="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                        Offline billing is optional. Install the app and enable encrypted offline billing only on browsers that need to create bills without internet. Regular online billing does not require this setup.
+                    </p>
+
+                    <div class="mt-4 flex flex-wrap items-center gap-3">
+                        <button v-if="offlineAppInstallAvailable" type="button" @click="installOfflineBillingApp"
+                            class="rounded-md bg-emerald-700 px-4 py-2 font-semibold text-white hover:bg-emerald-800">
+                            Install app on this device
+                        </button>
+                        <p v-else class="text-sm text-slate-600 dark:text-slate-300">
+                            To install, use the browser menu and choose “Install app” or “Add to Home screen”.
+                        </p>
+                        <span v-if="offlineBillingSetupLoading" class="text-sm text-slate-600 dark:text-slate-300">Checking offline setup…</span>
+                        <span v-else-if="offlineBillingUnlocked" class="text-sm font-semibold text-emerald-800 dark:text-emerald-300">
+                            Encrypted offline billing is ready on this browser.
+                        </span>
+                        <span v-else-if="!offlineBillingEnabled && offlineBillingEncryptionConfigured"
+                            class="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                            Offline billing is deactivated on this browser. Your saved bills and encryption key are preserved.
+                        </span>
+                    </div>
+
+                    <p v-if="offlineAppInstallError" class="mt-2 text-sm text-amber-800 dark:text-amber-200">{{ offlineAppInstallError }}</p>
+
+                    <form v-if="!offlineBillingSetupLoading"
+                        class="mt-4 grid max-w-lg gap-2 rounded-md border border-emerald-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800"
+                        @submit.prevent="submitOfflineBillingSetup">
+                        <p class="text-sm text-slate-700 dark:text-slate-200">
+                            {{ offlineBillingControlPasswordConfigured
+                                ? `Enter the offline billing password to ${offlineBillingEnabled ? 'deactivate' : 'enable'} billing on this browser.`
+                                : offlineBillingPassphraseProtected
+                                    ? 'Enter the existing offline passphrase to enable billing and use it as the password for future enable/disable actions.'
+                                    : offlineBillingEncryptionConfigured
+                                        ? 'Set a password to control offline billing on this browser. Existing device-key data will be preserved.'
+                                        : 'Create a password of at least 12 characters to enable encrypted offline billing on this browser.' }}
+                        </p>
+                        <label class="text-sm font-medium text-slate-800 dark:text-slate-100" for="settings-offline-billing-passphrase">
+                            {{ offlineBillingControlPasswordConfigured
+                                ? 'Offline billing password'
+                                : offlineBillingPassphraseProtected ? 'Existing offline passphrase' : 'New offline billing password' }}
+                        </label>
+                        <input id="settings-offline-billing-passphrase" v-model="offlineBillingPassphrase"
+                            type="password" :autocomplete="offlineBillingControlPasswordConfigured ? 'current-password' : 'new-password'"
+                            minlength="12" required class="rounded border-slate-300 text-sm" />
+                        <template v-if="!offlineBillingControlPasswordConfigured">
+                            <label class="text-sm font-medium text-slate-800 dark:text-slate-100" for="settings-offline-billing-passphrase-confirm">Confirm password</label>
+                            <input id="settings-offline-billing-passphrase-confirm"
+                                v-model="offlineBillingPassphraseConfirmation" type="password"
+                                autocomplete="new-password" minlength="12" required
+                                class="rounded border-slate-300 text-sm" />
+                        </template>
+                        <p v-if="offlineBillingEncryptionConfigured && !offlineBillingPassphraseProtected"
+                            class="text-xs text-amber-800 dark:text-amber-200">
+                            This password protects the enable/disable control. Existing device-only offline data remains encrypted with its saved browser key and is not re-encrypted with this password.
+                        </p>
+                        <p v-if="offlineBillingSetupError" class="text-sm text-red-700 dark:text-red-300">{{ offlineBillingSetupError }}</p>
+                        <button type="submit" :disabled="offlineBillingSetupSaving || !isOfflineBillingSecureContext"
+                            class="w-fit rounded-md bg-teal-700 px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                            {{ offlineBillingSetupSaving
+                                ? (offlineBillingEnabled && offlineBillingControlPasswordConfigured ? 'Deactivating…' : 'Enabling…')
+                                : !offlineBillingControlPasswordConfigured
+                                    ? 'Set password & enable offline billing'
+                                    : offlineBillingEnabled ? 'Deactivate offline billing' : 'Enable offline billing' }}
+                        </button>
+                        <p v-if="!isOfflineBillingSecureContext" class="text-xs text-red-700 dark:text-red-300">
+                            HTTPS or localhost is required for encrypted offline billing.
+                        </p>
+                    </form>
+                </section>
+
+                <div v-if="activeSettingsSection === 'general'" class="rounded-md border border-slate-200 bg-slate-50 p-4">
                     <div class="flex justify-end">
-                        <button type="button" @click.prevent="submit" class="inline-flex items-center rounded-md bg-green-600 px-6 py-3 text-base font-bold text-white shadow-sm transition hover:bg-green-700">
-                            Save General Setting
+                        <button type="button" @click.prevent="submit" :disabled="form.processing"
+                            class="inline-flex items-center rounded-md bg-green-600 px-6 py-3 text-base font-bold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60">
+                            {{ form.processing ? 'Saving...' : 'Save General Setting' }}
                         </button>
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'cms'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'pharmacy'" class="border rounded-md p-4">
+                    <div class="max-w-xl">
+                        <InputLabel for="pharmacy_tax_number" value="VAT / Mushak Registration Number" />
+                        <input id="pharmacy_tax_number" v-model="form.pharmacy_tax_number" type="text"
+                            maxlength="100" placeholder="Enter pharmacy VAT / Mushak number"
+                            class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                        <InputError class="mt-2" :message="form.errors.pharmacy_tax_number" />
+                        <p class="mt-2 text-xs text-slate-500">
+                            This number is printed below Pharmacy Money Receipts.
+                        </p>
+                    </div>
+                    <div class="mt-4 flex justify-end">
+                        <button
+                            type="button"
+                            @click.prevent="submitPharmacySettings"
+                            :disabled="savingPharmacySettings"
+                            class="inline-flex items-center rounded-md bg-green-600 px-6 py-3 text-base font-bold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            {{ savingPharmacySettings ? 'Saving...' : 'Save Pharmacy Settings' }}
+                        </button>
+                    </div>
+                </div>
+
+                <div v-if="activeSettingsSection === 'cms'" class="border rounded-md p-4">
                     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
                         <div>
                             <h2 class="text-lg font-semibold">Website Content (Dynamic CMS)</h2>
@@ -1723,7 +2254,7 @@ onBeforeUnmount(() => {
                                                     <input v-model="doctor.image_url" type="text" placeholder="Existing image URL"
                                                         class="block w-full rounded border-slate-300 p-1 text-xs md:text-sm" />
                                                     <input type="file" accept="image/*" @change="handleFeaturedDoctorImageChange(index, $event)"
-                                                        class="block w-full rounded border-slate-300 p-1 text-xs md:text-sm" />
+                                                        class="block w-full rounded border-slate-300 p-1 text-xs md:text-sm file:mr-2 file:rounded file:border-0 file:bg-green-600 file:px-2 file:py-1 file:font-medium file:text-white hover:file:bg-green-700" />
                                                 </div>
                                             </td>
                                             <td class="border border-slate-200 p-1 text-center">
@@ -1900,7 +2431,7 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'sidebar'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'sidebar'" class="border rounded-md p-4">
                     <div class="grid gap-4 sm:grid-cols-[auto_1fr] items-center mb-4">
                         <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                             <div class="font-semibold text-slate-800">Manual position</div>
@@ -1971,7 +2502,7 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'prefix'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'prefix'" class="border rounded-md p-4">
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
                         <div>
                             <InputLabel for="ipd_no_prefix" value="IPD No" />
@@ -2100,10 +2631,39 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'other'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'other'" class="border rounded-md p-4">
                     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
                         <h2 class="text-lg font-semibold">Other Setting</h2>
                     </div>
+                    <section class="mb-5 rounded-md border border-emerald-200 bg-emerald-50 p-4">
+                        <h3 class="text-base font-semibold text-emerald-900">Lab Management Mode</h3>
+                        <p class="mt-1 text-sm text-emerald-800">
+                            Managed mode checks and consumes Lab inventory. Unmanaged mode allows Lab bills and result verification without stock limits. Lab payments remain synchronized with Accounts and Reports in both modes.
+                        </p>
+                        <div class="mt-3 flex flex-wrap items-center gap-3">
+                            <button
+                                type="button"
+                                :disabled="savingLabManagement || labManagementEnabled"
+                                class="rounded px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                                :class="labManagementEnabled ? 'bg-emerald-700' : 'bg-slate-500 hover:bg-slate-600'"
+                                @click="setLabManagement(true)"
+                            >
+                                {{ savingLabManagement && labManagementEnabled ? 'Saving...' : 'Manage Lab' }}
+                            </button>
+                            <button
+                                type="button"
+                                :disabled="savingLabManagement || !labManagementEnabled"
+                                class="rounded px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                                :class="!labManagementEnabled ? 'bg-amber-600' : 'bg-slate-500 hover:bg-slate-600'"
+                                @click="setLabManagement(false)"
+                            >
+                                {{ savingLabManagement && !labManagementEnabled ? 'Saving...' : 'Unmanage Lab' }}
+                            </button>
+                            <span class="text-sm font-medium" :class="labManagementEnabled ? 'text-emerald-800' : 'text-amber-800'">
+                                Current mode: {{ labManagementEnabled ? 'Managed' : 'Unmanaged' }}
+                            </span>
+                        </div>
+                    </section>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
                         <div>
                             <InputLabel for="doctor_restriction_mode" value="Doctor Restriction Mode" />
@@ -2185,7 +2745,7 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'sms'" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'sms'" class="border rounded-md p-4">
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                         <div>
                             <InputLabel for="sms_enabled" value="Enable SMS Gateway" />
@@ -2254,7 +2814,7 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <div v-show="activeSettingsSection === 'module' || lockedModuleSection" class="border rounded-md p-4">
+                <div v-if="activeSettingsSection === 'module' || lockedModuleSection" class="border rounded-md p-4">
                     <div class="mb-4 flex flex-wrap items-start gap-3">
                         <div v-if="!isModuleSectionLocked" class="grid grid-cols-1 gap-2 md:grid-cols-3">
                         <button
@@ -2433,6 +2993,59 @@ onBeforeUnmount(() => {
                             </div>
                         </div>
 
+                        <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-blue-200 bg-blue-50">
+                            <h3 class="text-sm font-semibold text-blue-800 mb-2">Fully Automated Biochemistry Analyzer</h3>
+                            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                                <div>
+                                    <InputLabel for="biochemistry_enabled" value="Enable Analyzer" />
+                                    <select id="biochemistry_enabled" v-model="deviceOptions.pathology.biochemistry.enabled"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300">
+                                        <option :value="true">Enabled</option>
+                                        <option :value="false">Disabled</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <InputLabel for="biochemistry_vendor" value="Vendor" />
+                                    <input id="biochemistry_vendor" v-model="deviceOptions.pathology.biochemistry.vendor" type="text" placeholder="Mindray / Roche / Abbott"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="biochemistry_model" value="Model" />
+                                    <input id="biochemistry_model" v-model="deviceOptions.pathology.biochemistry.model" type="text" placeholder="Analyzer model"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="biochemistry_protocol" value="Protocol" />
+                                    <select id="biochemistry_protocol" v-model="deviceOptions.pathology.biochemistry.protocol"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300">
+                                        <option value="hl7_mllp">HL7 MLLP</option>
+                                        <option value="astm_tcp">ASTM TCP</option>
+                                        <option value="rest_api">REST API</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <InputLabel for="biochemistry_host" value="Host/IP" />
+                                    <input id="biochemistry_host" v-model="deviceOptions.pathology.biochemistry.host" type="text" placeholder="192.168.1.26"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="biochemistry_port" value="Port" />
+                                    <input id="biochemistry_port" v-model="deviceOptions.pathology.biochemistry.port" type="text" placeholder="2575"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="biochemistry_api_url" value="API URL (if REST)" />
+                                    <input id="biochemistry_api_url" v-model="deviceOptions.pathology.biochemistry.api_url" type="text" placeholder="https://analyzer.local/api/results"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="biochemistry_device_identifier" value="Device Identifier" />
+                                    <input id="biochemistry_device_identifier" v-model="deviceOptions.pathology.biochemistry.device_identifier" type="text" placeholder="biochem-01"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                            </div>
+                        </div>
+
                         <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-lime-200 bg-lime-50">
                             <h3 class="text-sm font-semibold text-lime-800 mb-2">Ultrasound Integration</h3>
                             <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
@@ -2484,6 +3097,92 @@ onBeforeUnmount(() => {
                                         class="block w-full p-2 text-sm rounded-md border-slate-300" />
                                 </div>
                             </div>
+                        </div>
+
+                        <div v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-orange-200 bg-orange-50">
+                            <h3 class="text-sm font-semibold text-orange-800 mb-2">X-Ray Integration</h3>
+                            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                                <div>
+                                    <InputLabel for="xray_enabled" value="Enable X-Ray" />
+                                    <select id="xray_enabled" v-model="deviceOptions.pathology.xray.enabled"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300">
+                                        <option :value="true">Enabled</option>
+                                        <option :value="false">Disabled</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_vendor" value="Vendor" />
+                                    <input id="xray_vendor" v-model="deviceOptions.pathology.xray.vendor" type="text" placeholder="GE / Siemens / Philips"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_model" value="Model" />
+                                    <input id="xray_model" v-model="deviceOptions.pathology.xray.model" type="text" placeholder="Modality model"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_protocol" value="Protocol" />
+                                    <select id="xray_protocol" v-model="deviceOptions.pathology.xray.protocol"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300">
+                                        <option value="dicom_mwl">DICOM Modality Worklist</option>
+                                        <option value="hl7_orm_oru">HL7 ORM/ORU</option>
+                                        <option value="rest_api">REST API</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_host" value="Modality Host/IP" />
+                                    <input id="xray_host" v-model="deviceOptions.pathology.xray.host" type="text" placeholder="192.168.1.40"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_port" value="Port" />
+                                    <input id="xray_port" v-model="deviceOptions.pathology.xray.port" type="text" placeholder="104"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_ae_title" value="Modality AE Title" />
+                                    <input id="xray_ae_title" v-model="deviceOptions.pathology.xray.ae_title" type="text" placeholder="XRAY_01"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_worklist_ae_title" value="Worklist Server AE Title" />
+                                    <input id="xray_worklist_ae_title" v-model="deviceOptions.pathology.xray.worklist_ae_title" type="text" placeholder="HMS"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_worklist_host" value="Worklist Server Host/IP" />
+                                    <input id="xray_worklist_host" v-model="deviceOptions.pathology.xray.worklist_host" type="text" placeholder="192.168.1.10"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_worklist_port" value="Worklist Server Port" />
+                                    <input id="xray_worklist_port" v-model="deviceOptions.pathology.xray.worklist_port" type="text" placeholder="104"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_pacs_host" value="PACS Host/IP" />
+                                    <input id="xray_pacs_host" v-model="deviceOptions.pathology.xray.pacs_host" type="text" placeholder="192.168.1.11"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_pacs_port" value="PACS Port" />
+                                    <input id="xray_pacs_port" v-model="deviceOptions.pathology.xray.pacs_port" type="text" placeholder="104"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_pacs_ae_title" value="PACS AE Title" />
+                                    <input id="xray_pacs_ae_title" v-model="deviceOptions.pathology.xray.pacs_ae_title" type="text" placeholder="PACS"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                                <div>
+                                    <InputLabel for="xray_accession_key" value="Accession Number Key" />
+                                    <input id="xray_accession_key" v-model="deviceOptions.pathology.xray.accession_key" type="text" placeholder="accession_no"
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300" />
+                                </div>
+                            </div>
+                            <p class="mt-2 text-xs text-orange-700">
+                                These settings are saved for connection setup. DICOM Worklist/PACS requires a compatible DICOM gateway/server, and the device must use matching network and AE Title values.
+                            </p>
                         </div>
 
                         <form @submit.prevent v-show="moduleSections.pathology" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-amber-200 bg-amber-50">
@@ -2542,14 +3241,23 @@ onBeforeUnmount(() => {
                                     <input id="mapping_result_time_key" v-model="deviceOptions.pathology.mapping.result_time_key" type="text"
                                         class="block w-full p-2 text-sm rounded-md border-slate-300" />
                                 </div>
+                                <div class="md:col-span-2 lg:col-span-4">
+                                    <InputLabel for="mapping_test_code_aliases" value="Analyzer Test Code Mapping (JSON)" />
+                                    <textarea id="mapping_test_code_aliases" v-model="deviceOptions.pathology.mapping.test_code_aliases_json" rows="2"
+                                        placeholder='{"WBC":"Total WBC Count","HGB":"Hemoglobin"}'
+                                        class="block w-full p-2 text-sm rounded-md border-slate-300"></textarea>
+                                    <p class="mt-1 text-xs text-amber-700">
+                                        Use this when the analyzer code differs from the lab parameter name. Sample barcode must be returned unchanged as the sample ID/accession number.
+                                    </p>
+                                </div>
                             </div>
                             <p class="mt-2 text-xs text-amber-700">
-                                Recommended: Hematology-তে HL7/ASTM, Ultrasound-এ DICOM MWL ব্যবহার করুন। এগুলো worldwide widely adopted এবং vendor compatible।
+                                Recommended: Hematology ও Biochemistry-তে HL7/ASTM, X-ray ও Ultrasound-এ DICOM MWL ব্যবহার করুন।
                             </p>
                         </form>
 
                         <div v-show="moduleSections.attendance">
-                            <InputLabel for="attendance_device_enabled" value="Enable Device" />
+                            <InputLabel for="attendance_device_enabled" value="Enable Device Integration" />
                             <select id="attendance_device_enabled" v-model="form.attendance_device_enabled"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300">
                                 <option :value="false">Disabled</option>
@@ -2568,33 +3276,37 @@ onBeforeUnmount(() => {
                         </div>
 
                         <div v-show="moduleSections.attendance">
-                            <InputLabel for="attendance_device_identifier" value="Identifier (optional)" />
+                            <InputLabel for="attendance_device_identifier" value="Device Identifier (serial or ID)" />
                             <input id="attendance_device_identifier" v-model="form.attendance_device_identifier" type="text"
+                                placeholder="Same ID the device sends in webhook"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300" />
                         </div>
 
                         <div v-show="moduleSections.attendance">
-                            <InputLabel for="attendance_device_ip" value="Device IP (optional)" />
+                            <InputLabel for="attendance_device_ip" value="Device IP (for pull sync)" />
                             <input id="attendance_device_ip" v-model="form.attendance_device_ip" type="text"
+                                placeholder="192.168.1.50"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300" />
                         </div>
 
                         <div v-show="moduleSections.attendance">
-                            <InputLabel for="attendance_device_port" value="Device Port (optional)" />
+                            <InputLabel for="attendance_device_port" value="Device Port (for pull sync)" />
                             <input id="attendance_device_port" v-model="form.attendance_device_port" type="text"
+                                placeholder="4370"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300" />
                         </div>
 
-                        <form @submit.prevent v-show="moduleSections.attendance">
+                        <div v-show="moduleSections.attendance">
                             <InputLabel for="attendance_device_secret" value="Device Secret (optional)" />
                             <input id="attendance_device_secret" v-model="form.attendance_device_secret" type="password"
+                                placeholder="Leave blank to keep the current secret"
                                 class="block w-full p-2 text-sm rounded-md border-slate-300" />
-                        </form>
+                        </div>
 
                         <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-sky-200 bg-sky-50">
                             <h3 class="text-sm font-semibold text-sky-800 mb-2">Device Integration Modules</h3>
                             <p class="text-xs text-sky-700 mb-3">
-                                ডিভাইস থেকে attendance sync হলে কোন কোন মডিউলে data ব্যবহার হবে তা নির্বাচন করুন।
+                                Choose which modules should use data when attendance is synced from a device.
                             </p>
                             <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 text-sm">
                                 <label class="flex items-center gap-2">
@@ -2623,7 +3335,7 @@ onBeforeUnmount(() => {
                         <div v-show="moduleSections.payroll" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-violet-200 bg-violet-50">
                             <h3 class="text-sm font-semibold text-violet-800 mb-2">Payroll Module Settings (Salary Sheet Default)</h3>
                             <p class="text-xs text-violet-700 mb-3">
-                                Face attendance + duty roster payroll calculation এর default setting এখানে দিন। Salary Sheet page এই মানগুলো auto load হবে।
+                                Set the default payroll rules used with face attendance and duty roster. The salary sheet page loads these values automatically.
                             </p>
 
                             <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
@@ -2718,7 +3430,7 @@ onBeforeUnmount(() => {
                                             type="checkbox"
                                             class="rounded border-slate-300"
                                         />
-                                        Manual Off: short late salary কাটবে না
+                                        Waive short late (no salary deduction)
                                     </label>
                                 </div>
                             </div>
@@ -2772,7 +3484,7 @@ onBeforeUnmount(() => {
                         <div v-show="moduleSections.attendance" class="md:col-span-2 lg:col-span-3 p-3 rounded-md border border-emerald-200 bg-emerald-50">
                             <h3 class="text-sm font-semibold text-emerald-800 mb-2">ZKTeco + Webhook Integration</h3>
                             <p class="text-xs text-emerald-700 mb-3">
-                                ZKTeco device থেকে webhook push করার জন্য এই ফিল্ডগুলো কনফিগার করুন।
+                                Configure these fields so the ZKTeco device can push attendance through webhook.
                             </p>
                             <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
                                 <div>
@@ -2805,7 +3517,7 @@ onBeforeUnmount(() => {
                                     <input id="webhook_endpoint_url" v-model="deviceOptions.webhook.endpoint_url" type="text"
                                         class="block w-full p-2 text-sm rounded-md border-slate-300" />
                                     <p class="mt-1 text-xs text-slate-600">
-                                        ডিভাইসে এই URL সেট করুন। Example payload keys: device_id, employee_code, type, timestamp.
+                                        Set this URL on the device. Example payload keys: device_id, employee_code, type, timestamp.
                                     </p>
                                 </div>
 

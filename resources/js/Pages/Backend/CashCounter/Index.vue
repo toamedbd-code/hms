@@ -84,7 +84,7 @@ const closeSession = () => {
         return;
     }
 
-    const printWindow = window.open('', '_blank');
+    const printWindow = window.open(window.location.href, '_blank');
 
     router.post(route('backend.cash-counter.close'), {
         session_id: selectedSessionId.value,
@@ -99,7 +99,7 @@ const closeSession = () => {
             }
 
             if (printWindow && !printWindow.closed) {
-                printWindow.location.href = printUrl;
+                printWindow.location.replace(printUrl);
                 try { printWindow.focus(); } catch (e) {}
             } else {
                 window.open(printUrl, '_blank');
@@ -189,7 +189,8 @@ const printCurrentSessionSummary = () => {
                         <input v-model="counter.shift_name" class="w-full border rounded p-2 mb-2" placeholder="Shift" />
                         <input v-model.number="counter.opening_amount" type="number" class="w-full border rounded p-2 mb-2" placeholder="Opening amount" />
                         <textarea v-model="counter.opening_note" class="w-full border rounded p-2 mb-2" placeholder="Opening note"></textarea>
-                        <button class="bg-blue-600 text-white px-3 py-2 rounded" @click="startSession">Start Session</button>
+                        <button :disabled="sessions.length > 0" class="bg-blue-600 text-white px-3 py-2 rounded disabled:opacity-50" @click="startSession">Start Session</button>
+                        <p v-if="sessions.length" class="mt-2 text-xs text-slate-500">An open session already exists. Close it before starting another.</p>
                     </div>
 
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">

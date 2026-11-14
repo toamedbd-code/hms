@@ -5,6 +5,7 @@ import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { router, usePage } from '@inertiajs/vue3';
 import { useModalSubmissionGuard } from '@/Composables/useModalSubmissionGuard';
+import { createOfflineRequestId, saveOfflineBillingRequest } from '@/offlineBillingQueue.js';
 
 let props = defineProps({
     filters: Object,
@@ -85,18 +86,77 @@ const submitDueCollect = () => {
     const routeName = dueForm.value.rowType === 'opd'
         ? 'backend.opd.due.collect.store'
         : 'backend.due.collect.store';
+    const requestId = createOfflineRequestId();
+    const url = route(routeName, dueForm.value.rowId);
+    const payload = {
+        amount,
+        submission_token: ensureSubmissionToken(),
+    };
+    const invoiceRoute = dueForm.value.rowType === 'opd'
+        ? 'backend.download.opd.bill'
+        : 'backend.download.invoice';
+    const invoiceParams = dueForm.value.rowType === 'opd'
+        ? { id: dueForm.value.rowId, module: 'opd', auto_print: 0 }
+        : { id: dueForm.value.rowId, module: 'billing', fast_open: 1, auto_print: 0 };
+    const printWindow = navigator.onLine
+        ? window.open(route(invoiceRoute, invoiceParams), '_blank')
+        : null;
+    if (printWindow) printWindow.opener = null;
+    const closePrintWindow = () => {
+        if (printWindow && !printWindow.closed) printWindow.close();
+    };
+    const openCollectedInvoice = () => {
+        if (!printWindow || printWindow.closed) return;
+        printWindow.location.replace(route(invoiceRoute, { ...invoiceParams, auto_print: 1 }));
+    };
+    const queueDueCollection = async () => {
+        await saveOfflineBillingRequest({
+            id: requestId,
+            adminId: page.props.auth?.admin?.id,
+            url,
+            method: 'POST',
+            data: payload,
+            routeName,
+            label: 'Due collection',
+        });
+        showDueModal.value = false;
+        resetSubmissionToken();
+        closePrintWindow();
+        if (typeof window?.toast === 'function') {
+            window.toast('Due collection saved on this device. It will sync when internet returns; it is not confirmed yet.', { type: 'success' });
+        }
+    };
 
     beginSubmission();
 
-    router.post(route(routeName, dueForm.value.rowId), {
-        amount,
-        submission_token: ensureSubmissionToken(),
-    }, {
+    if (!navigator.onLine) {
+        queueDueCollection()
+            .catch((error) => {
+                alert(error instanceof Error ? error.message : 'Due collection could not be saved offline.');
+            })
+            .finally(() => endSubmission());
+        return;
+    }
+
+    router.post(url, payload, {
         preserveScroll: true,
         onSuccess: () => {
-            closeDueModal();
+            showDueModal.value = false;
+            resetSubmissionToken();
+            openCollectedInvoice();
             router.reload({ only: ['datas'] });
         },
+        headers: {
+            'X-Offline-Request-Id': requestId,
+            'X-Offline-Admin-Id': String(page.props.auth?.admin?.id ?? ''),
+        },
+        onNetworkError: () => {
+            closePrintWindow();
+            queueDueCollection().catch((error) => {
+                alert(error instanceof Error ? error.message : 'Due collection could not be saved offline.');
+            });
+        },
+        onError: () => closePrintWindow(),
         onFinish: () => {
             endSubmission();
         }
@@ -190,7 +250,7 @@ const handleAction = (actionName, actionId) => {
             </div>
 
             <div class="w-full my-3 overflow-x-auto">
-                <BaseTable @action="handleAction" />
+                <BaseTable class="min-w-[1200px]" @action="handleAction" />
             </div>
             <Pagination />
         </div>

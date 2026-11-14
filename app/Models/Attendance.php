@@ -13,7 +13,6 @@ class Attendance extends Model
     protected $guarded = [];
 
     protected $casts = [
-        'date' => 'date',
         'recorded_at' => 'datetime',
         'recorded_out' => 'datetime',
         'meta' => 'array',

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
 use App\Models\BillItem;
+use App\Models\BillItemParameterResult;
 use App\Models\Billing;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -13,9 +14,9 @@ class ReportDeliveryController extends Controller
     public function __construct()
     {
         $this->middleware('auth:admin');
-        // Allow users with general report-delivery permission OR department-specific
-        // reporting permissions (pathology, ultrasound, xray) to access delivery actions.
-        $this->middleware('permission:report-delivery|pathology-reporting|ultrasound-reporting|xray-reporting');
+        // Allow users with general report-delivery permission OR reporting permission
+        // OR department-specific reporting permissions (pathology, ultrasound, xray) to access delivery actions.
+        $this->middleware('permission:reporting|report-delivery|pathology-reporting|ultrasound-reporting|xray-reporting');
     }
 
     /**
@@ -57,15 +58,12 @@ class ReportDeliveryController extends Controller
             return back()->with('error', 'Cannot deliver reports for IPD invoices.');
         }
 
-        $allowedCategories = ['Pathology', 'Radiology'];
-
         if ((float) ($billing->due_amount ?? 0) > 0) {
             return back()->with('error', 'Cannot deliver reports while due amount exists.');
         }
 
-        BillItem::query()
+        $updated = BillItem::query()
             ->where('billing_id', $billing->id)
-            ->whereIn('category', $allowedCategories)
             ->whereNotNull('reported_at')
             ->whereNull('delivered_at')
             ->update([
@@ -73,7 +71,9 @@ class ReportDeliveryController extends Controller
                 'delivered_by' => auth('admin')->id(),
             ]);
 
-        return back()->with('success', 'Reports marked as delivered.');
+        return back()->with('success', $updated > 0
+            ? "Reports marked as delivered ({$updated} item(s))."
+            : 'No pending reports to deliver.');
     }
 
     public function index(Request $request)
@@ -139,7 +139,8 @@ class ReportDeliveryController extends Controller
                 'patient',
                 'billItems' => function ($q) use ($allowedCategories) {
                     $q->whereIn('category', $allowedCategories)
-                        ->with(['collectedBy', 'reportedBy', 'deliveredBy']);
+                        ->with(['collectedBy', 'reportedBy', 'deliveredBy'])
+                        ->withCount('parameterResults');
                 },
             ])
             ->orderByDesc('id')
@@ -152,6 +153,7 @@ class ReportDeliveryController extends Controller
             'filters' => [
                 'search' => $search,
                 'status' => $status,
+                'numOfData' => (int) $request->input('numOfData', 10),
             ],
         ]);
     }
@@ -170,17 +172,68 @@ class ReportDeliveryController extends Controller
         return back()->with('success', 'Report marked as sent.');
     }
 
-    public function deliver(BillItem $billItem)
+    public function deliver(Request $request, BillItem $billItem)
     {
+        $billItem->loadMissing('billing');
+
         // Prevent delivering individual report for IPD-generated bill items
         if (str_starts_with((string) ($billItem->billing->case_number ?? ''), 'IPD-')) {
-            return back()->with('error', 'Cannot deliver report for IPD invoice item.');
+            return $this->deliveryError($request, 'Cannot deliver report for IPD invoice item.', 422);
+        }
+
+        if ((float) ($billItem->billing->due_amount ?? 0) > 0) {
+            return $this->deliveryError($request, 'Cannot deliver report while due amount exists.', 422);
+        }
+
+        if (!in_array($billItem->category, ['Pathology', 'Radiology'], true)) {
+            return $this->deliveryError($request, 'This report cannot be marked as delivered here.', 422);
+        }
+
+        $hasSavedReportResult = trim(str_replace(
+            '[[FULL_PAGE]]',
+            '',
+            strip_tags((string) ($billItem->report_note ?? ''))
+        )) !== ''
+            || trim((string) ($billItem->report_range ?? '')) !== ''
+            || trim((string) ($billItem->report_file ?? '')) !== ''
+            || BillItemParameterResult::query()->where('bill_item_id', $billItem->id)->exists();
+
+        if (empty($billItem->reported_at) || !$hasSavedReportResult) {
+            return $this->deliveryError($request, 'Cannot deliver a report before its result is saved.', 422);
+        }
+
+        $hasUnreportedItem = BillItem::query()
+            ->where('billing_id', $billItem->billing_id)
+            ->whereIn('category', ['Pathology', 'Radiology'])
+            ->where('requires_sample', true)
+            ->whereNull('reported_at')
+            ->exists();
+
+        if ($hasUnreportedItem) {
+            return $this->deliveryError($request, 'Cannot deliver reports while this bill is still processing.', 422);
+        }
+
+        if ($billItem->delivered_at) {
+            return $request->expectsJson()
+                ? response()->json(['delivered_at' => $billItem->delivered_at])
+                : back()->with('success', 'Report is already marked as delivered.');
         }
 
         $billItem->delivered_at = now();
         $billItem->delivered_by = auth('admin')->id();
         $billItem->save();
 
+        if ($request->expectsJson()) {
+            return response()->json(['delivered_at' => $billItem->delivered_at]);
+        }
+
         return back()->with('success', 'Report marked as delivered.');
+    }
+
+    private function deliveryError(Request $request, string $message, int $status)
+    {
+        return $request->expectsJson()
+            ? response()->json(['message' => $message], $status)
+            : back()->with('error', $message);
     }
 }

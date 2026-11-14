@@ -505,7 +505,7 @@ const unpaidCellClass = (row) =>
       <div class="flex flex-wrap items-center justify-between gap-3 p-4 bg-gray-100 rounded">
         <div>
           <h1 class="text-xl font-bold text-gray-800">{{ pageTitle }}</h1>
-          <p class="text-sm text-gray-600">Human Resource + Payroll based monthly salary sheet</p>
+          <p class="text-sm text-gray-600">Monthly salary sheet from attendance, duty roster, and leave</p>
         </div>
         <div class="flex flex-wrap items-center gap-2 print:hidden">
           <input
@@ -587,10 +587,10 @@ const unpaidCellClass = (row) =>
 
       <div class="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 print:hidden">
         <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-emerald-600 text-white mr-2">Auto Synced</span>
-        Salary computation is fed by auto-updated attendance IN/OUT with roster and leave integration.
+        Salary is calculated from auto-updated in/out times, duty roster, and leave.
         <div class="mt-2 text-emerald-800">
-          Short late waiver: <span class="font-semibold">{{ waiveShortLate ? 'ON' : 'OFF' }}</span>
-          <span v-if="waiveShortLate"> ({{ shortLateLimitMinutes }} min পর্যন্ত late-এ salary কাটবে না)</span>
+          Short late waiver: <span class="font-semibold">{{ waiveShortLate ? 'On' : 'Off' }}</span>
+          <span v-if="waiveShortLate"> (no salary deduction for late up to {{ shortLateLimitMinutes }} minutes)</span>
         </div>
       </div>
 
@@ -661,7 +661,7 @@ const unpaidCellClass = (row) =>
             type="checkbox"
             class="w-4 h-4"
           />
-          <span class="font-semibold">Manual Off: 10-15 min late salary কাটবে না</span>
+          <span class="font-semibold">Waive short late (no salary deduction)</span>
         </label>
         <div class="flex items-end">
           <button

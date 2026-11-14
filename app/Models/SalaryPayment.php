@@ -10,7 +10,7 @@ class SalaryPayment extends Model
     use HasFactory;
 
     protected $fillable = [
-        'staff_id', 'month', 'amount', 'payment_method', 'note', 'paid_at', 'admin_id', 'status', 'is_advance'
+        'staff_id', 'month', 'amount', 'payment_method', 'note', 'paid_at', 'admin_id', 'status', 'is_advance', 'ledger_transaction_id'
     ];
 
     protected $casts = [

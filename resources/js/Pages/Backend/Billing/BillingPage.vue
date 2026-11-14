@@ -1,30 +1,68 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
-import { router, useForm, usePage } from "@inertiajs/vue3";
+import { progress, router, useForm, usePage } from "@inertiajs/vue3";
 import axios from 'axios';
 import InputLabel from "@/Components/InputLabel.vue";
 import { Head } from "@inertiajs/vue3";
 import PatientModal from "@/Components/PatientModal.vue";
+import Modal from "@/Components/Modal.vue";
+import PathologyForm from "@/Pages/Backend/PathologyTest/Form.vue";
 import { displayResponse, displayWarning, successMessage } from "@/responseMessage.js";
 import { debounce } from 'lodash';
+import QRCode from 'qrcode';
 import { parse, format, isValid, differenceInYears, differenceInMonths, differenceInDays, subYears, subMonths, subDays } from 'date-fns';
+import {
+  createOfflineRequestId,
+  formatOfflineBillReference,
+  clearOfflineBillingDraft,
+  deleteOfflineBillingRequest,
+  getOfflineBillingDraft,
+  getOfflineBillingEncryptionStatus,
+  getOfflineInvoiceDesignAssets,
+  getOfflineBillingRequests,
+  isOfflineBillingUnlocked,
+  prepareOfflineBillingPage,
+  saveOfflineBillingRequest,
+  saveOfflineBillingDraft,
+  syncOfflineBillingRequests,
+} from '@/offlineBillingQueue.js';
 
 // Silence console output for this module to avoid noisy logs during billing UI
 const console = { log: () => {}, warn: () => {}, error: () => {} };
 
 const props = defineProps({
   pageTitle: String,
+  prescriptionSearchValue: {
+    type: String,
+    default: '',
+  },
   pathologyAndRadiologyTests: {
     type: Array,
     default: () => [],
+  },
+  reagentTestAvailability: {
+    type: Object,
+    default: () => ({}),
   },
   hospitalCharges: {
     type: Array,
     default: () => [],
   },
-  medicineInventories: {
+  departmentStoreItems: {
     type: Array,
     default: () => [],
+  },
+  billingCatalogLoaded: {
+    type: Boolean,
+    default: false,
+  },
+  isPharmacyDepartment: {
+    type: Boolean,
+    default: false,
+  },
+  canAccessPharmacyBillList: {
+    type: Boolean,
+    default: false,
   },
   doctors: {
     type: Array,
@@ -55,12 +93,650 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  testCategories: {
+    type: Array,
+    default: () => [],
+  },
+  categoryTypeOptions: {
+    type: Array,
+    default: () => [],
+  },
+  mainCategories: {
+    type: Array,
+    default: () => [],
+  },
+  pathologyUnits: {
+    type: Array,
+    default: () => [],
+  },
+  testParameters: {
+    type: Array,
+    default: () => [],
+  },
+  chargeTypes: {
+    type: Array,
+    default: () => [],
+  },
+  chargeCategories: {
+    type: Array,
+    default: () => [],
+  },
+  chargeUnits: {
+    type: Array,
+    default: () => [],
+  },
+  taxCategories: {
+    type: Array,
+    default: () => [],
+  },
 });
 
+const reagentAvailabilityForTest = (testId) => {
+  const availability = props.reagentTestAvailability?.[String(testId)];
+  return availability?.configured && availability.remaining_tests !== null
+    ? Math.max(0, Number(availability.remaining_tests) || 0)
+    : null;
+};
+const reagentStockItemsForTest = (testId) => (
+  props.reagentTestAvailability?.[String(testId)]?.stock_items ?? []
+);
+const reagentCountUnitForCategory = (category, quantity) => {
+  const normalized = String(category || '').toLowerCase().replace(/[^a-z]/g, '').replace(/test$/, '');
+
+  if (['ultrasound', 'ultrasonogram', 'ultrasonography', 'usg'].includes(normalized)) return 'Paper';
+  if (['radiology', 'xray', 'imaging'].includes(normalized)) return 'Film';
+  return Number(quantity) === 1 ? 'Test' : 'Tests';
+};
+const reagentFilmSummaryForTest = (testId, testCategory) => {
+  const availability = props.reagentTestAvailability?.[String(testId)];
+  if (!availability?.film_category || Number(availability.film_usage_quantity) <= 0) return null;
+
+  const category = availability.film_category;
+  const quantityUsed = items.value
+    .filter((item) => item.type === 'test' && item.reagentFilmCategory?.key === category.key)
+    .reduce((total, item) => total + (Number(item.quantity) || 0), 0);
+  const available = Number(category.available_quantity) || 0;
+
+  return {
+    unit: reagentCountUnitForCategory(testCategory, quantityUsed),
+    remaining: Math.max(0, available - quantityUsed),
+  };
+};
+const formatStockQuantity = (quantity) => Number(quantity ?? 0).toLocaleString(undefined, {
+  maximumFractionDigits: 2,
+});
+const isReagentTrackedTestCategory = (category) => {
+  const normalized = String(category || '').toLowerCase().replace(/[^a-z]/g, '').replace(/test$/, '');
+  return ['pathology', 'radiology', 'imaging', 'ecg', 'ultrasound', 'xray', 'ultrasonogram', 'ultrasonography'].includes(normalized);
+};
+const isPharmacyBillingItem = (item) => (
+  item?.type === 'medicine'
+  || [item?.category, ...(item?.normalizedCategories || [])]
+    .some((category) => ['medicine', 'pharmacy'].includes(normalizeForMatch(category)))
+);
+const canShowBillingItem = (item) => (
+  props.isPharmacyDepartment ? isPharmacyBillingItem(item) : !isPharmacyBillingItem(item)
+);
+
 const page = usePage();
+const requestedBillingDraftId = typeof window !== 'undefined'
+  ? new URLSearchParams(window.location.search).get('billing_draft')
+  : null;
+const billingDraftId = requestedBillingDraftId
+  && /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(requestedBillingDraftId)
+  ? requestedBillingDraftId
+  : null;
 const unitCompanyName = computed(() => (page.props.websetting ?? page.props.webSetting)?.company_name || 'ToaMed.');
+const offlineInvoiceDesign = computed(() => page.props.offlineInvoiceDesign || {});
+const isOfflineBillingDeveloper = computed(() => Boolean(page.props.auth?.admin?.is_developer));
+const offlineAdminId = computed(() => Number(page.props.auth?.admin?.id || 0));
+const isBrowserOnline = ref(typeof navigator === 'undefined' || navigator.onLine);
+const offlineBillingRequests = ref([]);
+const offlineBillingStorageError = ref('');
+const offlineBillingCapabilityMessage = ref('');
+const offlineBillingUnlocked = ref(false);
+const pendingOfflineBillingRequests = computed(() => offlineBillingRequests.value.filter((item) => (
+  item.status === 'queued' || item.status === 'syncing'
+)));
+const isOfflineBillingSyncing = computed(() => pendingOfflineBillingRequests.value.some(
+  (entry) => entry.status === 'syncing'
+));
+const reviewOfflineBillingRequests = computed(() => offlineBillingRequests.value.filter((item) => item.status === 'needs_review'));
+let billingSessionHeartbeatTimer = null;
+let billingSessionHeartbeatPromise = null;
+
+const refreshBillingSession = () => {
+  if (!navigator.onLine) return Promise.resolve(null);
+  if (billingSessionHeartbeatPromise) return billingSessionHeartbeatPromise;
+
+  billingSessionHeartbeatPromise = (async () => {
+    try {
+      const response = await fetch(route('backend.session.heartbeat'), {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+
+      if (response.status === 401 || response.redirected) {
+        window.location.assign(response.url || route('backend.auth.login2'));
+        return false;
+      }
+      if (!response.ok) return null;
+
+      const payload = await response.json();
+      const csrfToken = String(payload?.csrf_token || '');
+      if (!csrfToken) return null;
+      document.querySelector('meta[name="csrf-token"]')?.setAttribute('content', csrfToken);
+      return true;
+    } catch (error) {
+      console.warn('Billing session heartbeat failed; attempting to use the current session.', error);
+      return null;
+    } finally {
+      billingSessionHeartbeatPromise = null;
+    }
+  })();
+
+  return billingSessionHeartbeatPromise;
+};
+
+const refreshBillingSessionWhenVisible = () => {
+  if (document.visibilityState === 'visible') refreshBillingSession();
+};
+
+const refreshOfflineBillingRequests = async () => {
+  if (!offlineAdminId.value) return;
+  try {
+    offlineBillingUnlocked.value = isOfflineBillingUnlocked(offlineAdminId.value);
+    offlineBillingRequests.value = await getOfflineBillingRequests(offlineAdminId.value);
+    offlineBillingStorageError.value = '';
+  } catch (error) {
+    offlineBillingStorageError.value = error instanceof Error ? error.message : 'Offline billing queue could not be read.';
+  }
+};
+
+const syncOfflineBillingQueue = async () => {
+  isBrowserOnline.value = navigator.onLine;
+  if (!isBrowserOnline.value || !offlineBillingUnlocked.value) return;
+  try {
+    await syncOfflineBillingRequests(
+      offlineAdminId.value,
+      document.querySelector('meta[name="csrf-token"]')?.content ?? ''
+    );
+  } finally {
+    await refreshOfflineBillingRequests();
+  }
+};
+
+const sendBillingRequestWithSessionRefresh = async (requestConfig) => {
+  const send = () => axios({
+    ...requestConfig,
+    headers: {
+      ...requestConfig.headers,
+      'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+    },
+  });
+
+  try {
+    return await send();
+  } catch (error) {
+    if (error?.response?.status === 401) {
+      window.location.assign(route('backend.auth.login2'));
+      return null;
+    }
+    if (error?.response?.status !== 419) throw error;
+
+    const refreshed = await refreshBillingSession();
+    if (refreshed === false) return null;
+    if (!refreshed) throw error;
+    return send();
+  }
+};
+
+const removeReviewedOfflineRequest = async (requestId) => {
+  try {
+    await deleteOfflineBillingRequest(requestId);
+    await refreshOfflineBillingRequests();
+    if (navigator.onLine) syncOfflineBillingQueue();
+  } catch (error) {
+    offlineBillingStorageError.value = error instanceof Error ? error.message : 'Could not dismiss this request.';
+  }
+};
+
+const handleBrowserOnline = () => {
+  isBrowserOnline.value = true;
+  syncOfflineBillingQueue();
+};
+const handleBrowserOffline = () => {
+  isBrowserOnline.value = false;
+};
+const handleOfflineQueueChanged = () => refreshOfflineBillingRequests();
+const handleOfflineSupportSetupFailed = (event) => {
+  offlineBillingCapabilityMessage.value = event.detail?.message || 'Offline support could not be prepared.';
+};
+const handleOfflineUnlocked = async () => {
+  offlineBillingUnlocked.value = true;
+  const restoredDraft = await restoreOfflineBillingDraft();
+  if (!restoredDraft) await restoreLegacyBillingItemsDraft();
+  await nextTick();
+  await prepareOfflineBillingPage(offlineAdminId.value, offlineInvoiceDesign.value);
+  const draftSaved = await persistOfflineBillDraftDebounced.flush();
+  if (draftSaved) {
+    try {
+      sessionStorage.removeItem(billingDraftStorageKey);
+    } catch (error) {
+      offlineBillingStorageError.value = error instanceof Error
+        ? error.message
+        : 'The old billing draft could not be removed from temporary browser storage.';
+    }
+  }
+  await refreshOfflineBillingRequests();
+  if (navigator.onLine) syncOfflineBillingQueue();
+};
+const handleOfflineLocked = () => {
+  offlineBillingUnlocked.value = false;
+  offlineBillingRequests.value = offlineBillingRequests.value.map((entry) => ({
+    id: entry.id,
+    status: entry.status,
+    createdAt: entry.createdAt,
+    label: 'Locked offline request',
+    lastError: '',
+  }));
+};
+const handleOfflineDataLocked = () => {
+  handleOfflineLocked();
+};
+const refreshOfflineEncryptionStatus = async () => {
+  if (!offlineAdminId.value) return;
+  try {
+    const status = await getOfflineBillingEncryptionStatus(offlineAdminId.value);
+    offlineBillingUnlocked.value = status.unlocked;
+    if (status.unlocked && navigator.onLine) {
+      await prepareOfflineBillingPage(offlineAdminId.value, offlineInvoiceDesign.value);
+    }
+  } catch (error) {
+    offlineBillingStorageError.value = error instanceof Error ? error.message : 'Could not read encryption settings.';
+  }
+};
+
+const escapeReceiptText = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}[character]));
+
+const createOfflineBarcodeSvg = (value) => {
+  const patterns = [
+    '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213',
+    '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132',
+    '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211',
+    '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313',
+    '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331',
+    '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111',
+    '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214',
+    '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111',
+    '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141',
+    '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141',
+    '114131', '311141', '411131', '211412', '211214', '211232', '233111',
+  ];
+  const values = Array.from(String(value), (character) => character.charCodeAt(0) - 32);
+  if (values.some((code) => code < 0 || code > 95)) return '';
+  const checksum = values.reduce((sum, code, index) => sum + code * (index + 1), 104) % 103;
+  const encoded = [patterns[104], ...values.map((code) => patterns[code]), patterns[checksum], patterns[106]];
+  let x = 0;
+  const bars = encoded.map((pattern) => Array.from(pattern, (width, index) => {
+    const rect = index % 2 === 0
+      ? `<div style="background-color:#000;width:${width}px;height:30px;position:absolute;left:${x}px;top:0">&nbsp;</div>`
+      : '';
+    x += Number(width);
+    return rect;
+  }).join('')).join('');
+  const stopBar = `<div style="background-color:#000;width:1px;height:30px;position:absolute;left:${x}px;top:0">&nbsp;</div>`;
+  x += 1;
+  const scaleX = (100 / x).toFixed(6);
+  return `<div class="barcode-image" role="img" aria-label="Offline bill reference barcode" style="font-size:0;position:relative;overflow:hidden;width:100px;height:21px"><div style="position:absolute;left:0;top:0;width:${x}px;height:30px;transform:scale(${scaleX},0.7);transform-origin:top left">${bars}${stopBar}</div></div>`;
+};
+
+const amountInWords = (amount) => {
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+    'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const convertHundreds = (value) => {
+    let result = '';
+    if (value >= 100) {
+      result += `${ones[Math.floor(value / 100)]} Hundred `;
+      value %= 100;
+    }
+    if (value >= 20) {
+      result += tens[Math.floor(value / 10)];
+      value %= 10;
+      if (value) result += ` ${ones[value]}`;
+    } else if (value) {
+      result += ones[value];
+    }
+    return result.trim();
+  };
+  let value = Math.max(0, Math.floor(Number(amount) || 0));
+  const parts = [];
+  if (value >= 100000) {
+    parts.push(`${convertHundreds(Math.floor(value / 100000))} Lakh`);
+    value %= 100000;
+  }
+  if (value >= 1000) {
+    parts.push(`${convertHundreds(Math.floor(value / 1000))} Thousand`);
+    value %= 1000;
+  }
+  if (value) parts.push(convertHundreds(value));
+  return `In Words: ${parts.join(' ') || 'Zero'} Only`;
+};
+
+const printOfflineProvisionalReceipt = async (receiptWindow, requestId, data) => {
+  if (!receiptWindow || receiptWindow.closed) return;
+  const invoiceDesign = offlineInvoiceDesign.value;
+  const designAssets = await getOfflineInvoiceDesignAssets(invoiceDesign);
+  const money = (value) => (Number(value) || 0).toFixed(2);
+  const total = Number(data.total) || 0;
+  const vat = Number(data.vat_amount) || 0;
+  const extraDiscount = Number(data.extra_flat_discount) || 0;
+  const payable = Number(data.payable_amount) || 0;
+  const paid = Number(data.paid_amt) || 0;
+  const discount = Math.max(0, total + vat - extraDiscount - payable);
+  const discountLabel = String(data.discount_type || '').toLowerCase() === 'percentage'
+    ? `Discount (${total > 0 ? ((discount / total) * 100).toFixed(2) : '0.00'}%)`
+    : 'Flat Discount';
+  const invoiceDateTime = [data.billing_date, data.billing_time].filter(Boolean).join(' ')
+    || new Date().toLocaleString();
+  const due = Math.max(0, Number(data.due_amount ?? payable - paid) || 0);
+  const patientPhone = data.patient_phone || data.patient_mobile || 'N/A';
+  const patientAge = data.patient_age || 'N/A';
+  const patientGender = data.patient_gender || data.gender || 'N/A';
+  const referrer = data.doctor_name || 'N/A';
+  const preparedBy = page.props.auth?.admin?.name || '';
+  const configuredHeaderHeight = Math.max(0, Number(invoiceDesign.header_height) || 115);
+  const footerHeight = Math.max(0, Number(invoiceDesign.footer_height) || 70);
+  const footerContentOffset = Math.min(50, Math.max(-50, Number(invoiceDesign.footer_content_offset) || 0));
+  const footerContentPosition = ['above', 'below'].includes(String(invoiceDesign.footer_content_position || '').toLowerCase())
+    ? String(invoiceDesign.footer_content_position).toLowerCase()
+    : 'above';
+  const fullPagePadOffset = Math.min(100, Math.max(0, Number(invoiceDesign.full_page_pad_content_offset) || 0));
+  const headerImage = designAssets.header_image;
+  const footerImage = designAssets.footer_image;
+  const fullPagePadImage = invoiceDesign.active_pad_type === 'institution'
+    ? designAssets.full_page_pad_image
+    : '';
+  const headerHeight = fullPagePadImage ? 0 : configuredHeaderHeight;
+  const footerContent = String(invoiceDesign.footer_content || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/রুম\s*(নং|নম্বর|নাম্বার)\s*/gu, 'রুম নং ')
+    .replace(/প্যা\s*থা?\s*ল\s*জ[ীি]?/gu, 'প্যাথলজি')
+    .replace(/[،٬﹐，]/g, ',')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(', ')
+    .replace(/[,.;:!?।॥]+$/u, '');
+  const footerDateParts = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: true, timeZone: 'Asia/Dhaka',
+  }).formatToParts(new Date());
+  const footerPart = (type) => footerDateParts.find((part) => part.type === type)?.value || '';
+  const printedAt = `${footerPart('day')} ${footerPart('month')}, ${footerPart('year')} ${footerPart('hour')}:${footerPart('minute')}:${footerPart('second')} ${footerPart('dayPeriod').toLowerCase()}`;
+  const footerFallbackLine = String(
+    invoiceDesign.footer_fallback_line || 'Powered By: www.toamedit.com Support: 01919-592638'
+  );
+  const footerHtml = `<footer class="invoice-footer">
+        <div class="footer-image-area">
+          ${footerImage ? `<img class="footer-image" src="${escapeReceiptText(footerImage)}" alt="" onerror="this.style.display='none'">` : ''}
+          ${footerContent ? `<div class="footer-content-area ${footerContentPosition}"><div class="footer-content">${escapeReceiptText(footerContent)}</div></div>` : ''}
+        </div>
+        <div class="footer-meta-row"><span>${escapeReceiptText(footerFallbackLine)}</span>
+          <span>Printing Date &amp; Time: ${escapeReceiptText(printedAt)}</span></div>
+      </footer>`;
+  const headerHtml = headerImage
+    ? `<img class="header-image" src="${escapeReceiptText(headerImage)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.visibility='hidden'"><div class="header-placeholder"></div>`
+    : '<div class="header-placeholder"></div>';
+  const items = data.items || [];
+  const hasRoomNo = items.some((item) => String(item.room_no || '').trim() !== '');
+  const medicineTotal = items
+    .filter((item) => String(item.category || '').trim().toLowerCase() === 'medicine')
+    .reduce((sum, item) => sum + (Number(item.total_amount) || 0), 0);
+  const lines = (data.items || []).map((item, index) => `
+    <tr>
+      <td class="center">${index + 1}</td>
+      <td class="test-col">${escapeReceiptText(item.name || item.item_name || 'Item')}</td>
+      ${hasRoomNo ? `<td class="center">${escapeReceiptText(item.room_no || '')}</td>` : ''}
+      <td class="center">${escapeReceiptText(item.quantity || 1)}</td>
+      <td class="right">${money(item.total_amount ?? item.net_amount)}</td>
+    </tr>
+  `).join('');
+  const patientName = data.patient_name || 'Walk-in Patient';
+  const barcodeValue = formatOfflineBillReference(requestId);
+  const barcode = createOfflineBarcodeSvg(barcodeValue);
+  const offlineQrCode = await QRCode.toDataURL(barcodeValue, {
+    errorCorrectionLevel: 'M',
+    margin: 1,
+    width: 160,
+  });
+  const formatInvoiceDate = (value, time = '', includeSeconds = true) => {
+    const rawDate = String(value || '').trim();
+    const match = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    const timeMatch = String(time || '').match(/^(\d{2}):(\d{2})(?::(\d{2}))?/);
+    const date = match
+      ? new Date(Date.UTC(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+        Number(match[4] ?? timeMatch?.[1] ?? 0),
+        Number(match[5] ?? timeMatch?.[2] ?? 0),
+        Number(match[6] ?? timeMatch?.[3] ?? 0),
+      ))
+      : new Date(rawDate);
+    if (Number.isNaN(date.getTime())) return rawDate;
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: includeSeconds ? '2-digit' : undefined,
+      hour12: true, timeZone: match ? 'UTC' : 'Asia/Dhaka',
+    }).formatToParts(date);
+    const part = (type) => parts.find((entry) => entry.type === type)?.value || '';
+    const timeParts = [part('hour'), part('minute')];
+    if (includeSeconds) timeParts.push(part('second'));
+    const dateTimeSeparator = includeSeconds ? ' ' : ', ';
+    return `${part('day')}-${part('month')}-${part('year')}${dateTimeSeparator}${timeParts.join(':')} ${part('dayPeriod').toUpperCase()}`;
+  };
+  const rawInvoiceDateTime = data.billing_date && data.billing_time
+    ? `${data.billing_date}T${data.billing_time}`
+    : invoiceDateTime;
+  const displayInvoiceDateTime = formatInvoiceDate(rawInvoiceDateTime, '', true);
+  const deliveryDate = data.delivery_date
+    ? `Delivery Date &amp; Time: ${escapeReceiptText(formatInvoiceDate(data.delivery_date, data.delivery_time, false))}`
+    : '';
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Hospital Management System - Billing Invoice</title>
+    <style>
+      *{box-sizing:border-box}body{margin:0;padding:14px;font:17px/1.3 Arial,sans-serif;color:#111}
+      .sheet{width:100%;border:1px solid #dadada;padding:10px}.header-wrap{height:${headerHeight}px;width:100%;
+        text-align:center;margin:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+      .header-placeholder{width:100%;height:100%;visibility:hidden}.header-image{width:100%;height:100%;object-fit:cover}
+      .content-section{padding:0 5mm ${footerHeight + 6}px;${fullPagePadImage ? `padding-top:${(fullPagePadOffset * 0.75).toFixed(2)}mm` : ''}}
+      .invoice-footer{position:fixed;bottom:0;left:0;right:0;height:${footerHeight + 28}px;text-align:center;pointer-events:none;z-index:9999}
+      .footer-image-area{position:absolute;left:0;right:0;bottom:0;height:${footerHeight}px;overflow:visible}
+      .footer-image{position:absolute;bottom:0;left:0;width:100%;height:${footerHeight}px;object-fit:contain;object-position:bottom center;z-index:0}
+      .footer-content-area{position:absolute;left:0;right:0;z-index:2;transform:translateY(${-footerContentOffset}mm);
+        display:flex;align-items:center;justify-content:center;padding:4px 6mm;white-space:nowrap;overflow:hidden}
+      .footer-content-area.above{bottom:calc(${footerHeight}px - 5mm);justify-content:space-between}
+      .footer-content-area.below{bottom:${Math.round(footerHeight * 0.08)}px}
+      .footer-content{position:relative;z-index:1;width:100%;margin:0 auto;text-align:center;line-height:1.2;
+        font-size:${Math.min(72, Math.max(6, Number(invoiceDesign.footer_font_size) || 14))}px}
+      .footer-meta-row{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;justify-content:space-between;
+        gap:12px;padding:0 4mm;transform:translateY(${-footerContentOffset}mm);font-size:9px;line-height:1.15}
+      .invoice-institution-pad{position:fixed;inset:0;width:100%;height:100%;object-fit:fill;z-index:-1}
+      .title-wrap{width:100%;border-collapse:collapse;margin-bottom:12px}.title-wrap td{vertical-align:top}
+      .barcode-cell-left{width:20%;text-align:left}.barcode-cell-right{width:20%;text-align:right}
+      .title-cell-center{width:60%;text-align:center}.barcode-image{display:block}
+      .receipt-title{font-size:20px;font-weight:bold;font-family:Verdana,Geneva,Tahoma,sans-serif;letter-spacing:2px}
+      .meta{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:10px;font-size:inherit}
+      .meta td{padding:2px 6px;vertical-align:top}.meta .label{box-sizing:border-box;font-weight:bold;width:18%;white-space:nowrap;padding-right:0}
+      .meta .colon{box-sizing:border-box;width:2%;padding-left:0;padding-right:0;text-align:center;vertical-align:top}
+      .meta .value{box-sizing:border-box;width:30%;padding-left:6px;padding-right:6px;overflow-wrap:anywhere}
+      .meta .bill-reference-text{display:block;max-width:100%;overflow:hidden;font:inherit;white-space:nowrap;letter-spacing:normal}
+      .items-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:inherit;border:1px solid #bdbdbd}
+      .items-table th{border:1px solid #b8b8b8;padding:5px 3px;text-align:left;font-weight:bold;background:#f2f2f2}
+      .items-table td{border:1px solid #c4c4c4;padding:4px;vertical-align:top}
+      .items-table .sl-col{width:10%;text-align:center}.items-table .test-col{width:45%}.items-table .room-col{width:12%;text-align:center}
+      .items-table .qty-col{width:10%;text-align:center}.items-table .price-col{width:15%;text-align:right}
+      .items-table thead{display:table-header-group}.items-table tr{break-inside:avoid;page-break-inside:avoid}
+      .center{text-align:center}.right{text-align:right}.delivery-date{margin:8px 0;font-weight:bold}
+      .portal-qr{margin-top:8px;display:inline-block;text-align:left}.portal-qr img{width:92px;height:92px;background:#fff;image-rendering:pixelated}
+      .summary-wrap{width:100%;margin-top:12px;border-collapse:collapse}.summary-wrap td{width:50%;padding:0;vertical-align:top;border:0}
+      .summary-left{padding-right:15px!important}.summary-right{padding-left:15px!important}
+      .status-badge{display:inline-block;background:${due > 0 ? '#ff4444' : '#28a745'};color:#fff;font-weight:bold;
+        padding:8px 16px;margin-bottom:8px;font-size:32px}.thanks{margin:8px 0}.prepared-by{margin-top:8px}
+      .totals{width:100%;border-collapse:collapse;font-size:inherit}.totals td{border-bottom:1px solid #c3c3c3;padding:2px 4px}
+      .totals td:first-child{width:60%}.totals td:last-child{text-align:right;width:40%}
+      .amount-words{padding-top:4px;text-align:center;font-weight:bold;font-size:16px;line-height:1.2}
+      .reference{font-size:inherit;color:#333;margin-top:5px}
+      @media screen{body{background:#f5f7fa}.sheet{background:#fff;max-width:900px;margin:12px auto;
+        box-shadow:0 2px 8px #00000014}}
+      @page{size:auto;margin:5mm}
+      @media print{body{margin:0!important;padding:0!important;font-size:17px!important;
+        -webkit-print-color-adjust:exact;print-color-adjust:exact}
+        .sheet{width:100%;border:0;padding:0}
+        .header-wrap{height:${headerHeight}px}.content-section{padding:0 5mm ${footerHeight + 6}px;
+          ${fullPagePadImage ? `padding-top:${(fullPagePadOffset * 0.75).toFixed(2)}mm` : ''}}
+        .invoice-institution-pad{position:fixed}
+      }
+      @media print and (max-height:8.3in) and (max-width:5.8in){
+        body{font-size:11px!important;margin:0!important;padding:0!important}
+        .receipt-title{font-size:12px!important}.header-wrap{height:${headerHeight}px!important;margin:0!important}
+        .header-image{object-fit:fill!important}
+        .content-section{padding:0 5mm!important;padding-bottom:${Math.max(24, footerHeight + 2)}px!important}
+        ${fullPagePadImage ? `.sheet.with-institution-pad .content-section{padding-top:${(fullPagePadOffset * 0.75).toFixed(2)}mm!important}` : ''}
+        .items-table,.totals{font-size:11px!important}.items-table{margin:8px 0!important}
+        .items-table th{padding:1px 2px!important;background:#f4f4f4!important}
+        .items-table td{padding:2px!important;line-height:1.15!important}
+        .title-wrap{margin-bottom:4px!important}.status-badge{font-size:22px!important;padding:4px 8px!important;margin-bottom:4px!important}
+        .portal-qr img{width:52px!important;height:52px!important}
+        .amount-words{font-size:11px!important;margin-top:1px!important;padding-top:1px!important;line-height:1.1!important}
+        .delivery-date{margin:2px 0!important;font-size:11px!important}.summary-wrap{margin-top:2px!important}
+        .summary-wrap td{padding:0!important}.thanks{margin:2px 0!important}.prepared-by{margin-top:2px!important;font-size:11px!important}
+        .totals td{padding:1px 2px!important}.invoice-footer{height:${footerHeight + 28}px!important}
+        .footer-image-area,.footer-image{height:${footerHeight}px!important}
+        .footer-content{font-size:clamp(6px,1.5vw,${Math.min(12, Math.max(6, Number(invoiceDesign.footer_font_size) || 14))}px)!important}
+        .footer-meta-row{font-size:clamp(6px,1.2vw,9px)!important}
+        .footer-meta-row{font-size:clamp(6px,1.5vw,9px)!important}
+      }
+    </style></head><body>
+    ${fullPagePadImage ? `<img class="invoice-institution-pad" src="${escapeReceiptText(fullPagePadImage)}" alt="" onerror="this.style.display='none'">` : ''}
+    <main class="sheet${fullPagePadImage ? ' with-institution-pad' : ''}" role="document">
+      <div class="header-wrap">${headerHtml}</div>
+      <div class="content-section">
+      <table class="title-wrap"><tr><td class="barcode-cell-left">${barcode}</td>
+        <td class="title-cell-center"><div class="receipt-title">MONEY RECEIPT</div></td>
+        <td class="barcode-cell-right">${barcode}</td></tr></table>
+      <table class="meta">
+        <tr>
+          <td class="label">Bill No</td><td class="colon">:</td><td class="value bill-reference"><span class="bill-reference-text">${escapeReceiptText(barcodeValue)}</span></td>
+          <td class="label">Date &amp; Time</td><td class="colon">:</td><td class="value">${escapeReceiptText(displayInvoiceDateTime)}</td>
+        </tr>
+        <tr>
+          <td class="label">Patient Name</td><td class="colon">:</td><td class="value">${escapeReceiptText(patientName)}</td>
+          <td class="label">Age</td><td class="colon">:</td><td class="value">${escapeReceiptText(patientAge)}</td>
+        </tr>
+        <tr>
+          <td class="label">Gender</td><td class="colon">:</td><td class="value">${escapeReceiptText(patientGender)}</td>
+          <td class="label">Phone</td><td class="colon">:</td><td class="value">${escapeReceiptText(patientPhone)}</td>
+        </tr>
+        <tr>
+          <td class="label">Refd. By</td><td class="colon">:</td><td class="value" colspan="4">${escapeReceiptText(referrer)}</td>
+        </tr>
+      </table>
+      <table class="items-table">
+        <thead><tr><th class="center" style="width:10%">SL</th><th class="test-col">Item Name</th>
+          ${hasRoomNo ? '<th class="room-col">Room No</th>' : ''}
+          <th class="qty-col">Qty</th><th class="price-col">Price (Tk.)</th></tr></thead>
+        <tbody>${lines || `<tr><td class="center">-</td><td>No items found</td>${hasRoomNo ? '<td></td>' : ''}<td class="center">-</td><td class="right">0.00</td></tr>`}</tbody>
+      </table>
+      ${!props.isPharmacyDepartment && deliveryDate ? `<div class="delivery-date">${deliveryDate}</div>` : ''}
+      <table class="summary-wrap"><tr>
+        <td class="summary-left"><div class="due-section">
+          ${data.remarks ? `<div class="reference"><strong>Remarks:</strong> ${escapeReceiptText(data.remarks)}</div>` : ''}
+          <div class="status-badge">${due > 0 ? 'DUE' : 'PAID'}</div><div class="thanks">Thank You</div></div>
+          <div class="prepared-by"><strong>Prepared By:</strong> ${escapeReceiptText(preparedBy)}</div>
+          <div class="portal-qr"><img src="${offlineQrCode}" alt="Offline bill reference QR"></div></td>
+        <td class="summary-right"><table class="totals">
+          <tr><td><strong>Total Amount Tk.</strong></td><td><strong>${money(total)}</strong></td></tr>
+          ${medicineTotal > 0 ? `<tr><td>Medicine Bill</td><td>${money(medicineTotal)}</td></tr>` : ''}
+          ${vat !== 0 ? `<tr><td>Vat Tk.</td><td>${money(vat)}</td></tr>
+            <tr><td><strong>Total With VAT Tk.</strong></td><td><strong>${money(total + vat)}</strong></td></tr>` : ''}
+          ${discount > 0 ? `<tr><td>${escapeReceiptText(discountLabel)}</td><td>${money(discount)}</td></tr>` : ''}
+          ${extraDiscount > 0 ? `<tr><td>Extra Discount Tk.</td><td>${money(extraDiscount)}</td></tr>` : ''}
+          <tr><td><strong>Net Payable Tk.</strong></td><td><strong>${money(payable)}</strong></td></tr>
+          ${paid > 0 ? `<tr><td>Paid (Invoice Time)</td><td>${money(paid)}</td></tr>` : ''}
+          ${paid > 0 ? `<tr><td>Total Paid Tk.</td><td>${money(paid)}</td></tr>` : ''}
+          ${Number(data.return_amt) > 0 ? `<tr><td>Return Amount Tk.</td><td>${money(data.return_amt)}</td></tr>` : ''}
+          <tr><td><strong>Due Tk.</strong></td><td><strong>${money(due)}</strong></td></tr>
+        </table></td>
+      </tr><tr><td colspan="2" class="amount-words">${escapeReceiptText(amountInWords(payable))}</td></tr></table>
+      </div>
+    </main>
+    ${footerHtml}
+    <script>
+      (() => {
+        let printStarted = false;
+        let closeStarted = false;
+        const closeAfterPrint = () => {
+          if (closeStarted) return;
+          closeStarted = true;
+          setTimeout(() => {
+            try { window.open('', '_self'); } catch (error) {}
+            try { window.close(); } catch (error) {}
+          }, 150);
+        };
+        const startPrint = () => {
+          if (printStarted) return;
+          printStarted = true;
+          try { window.focus(); } catch (error) {}
+          try { window.print(); } catch (error) { closeAfterPrint(); }
+        };
+        window.addEventListener('afterprint', closeAfterPrint, { once: true });
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+          setTimeout(startPrint, 600);
+          setTimeout(startPrint, 1400);
+        } else {
+          window.addEventListener('load', () => {
+            setTimeout(startPrint, 600);
+            setTimeout(startPrint, 1400);
+          }, { once: true });
+        }
+      })();
+    </scr${'ipt'}>
+    </body></html>`;
+  receiptWindow.document.open();
+  receiptWindow.document.write(body);
+  receiptWindow.document.close();
+};
+const showPharmacyProductReturn = computed(() => (
+  props.isPharmacyDepartment
+  || normalizeForMatch(props.authInfo?.department?.name).includes('pharmacy')
+));
 const hasOpenCashCounterSession = computed(() => String(page.props?.cashCounterInfo?.session?.status || '').toLowerCase() === 'open');
 const activeCashCounterSessionId = computed(() => Number(page.props?.cashCounterInfo?.session?.id || 0) || null);
+const cashCounterExpectedAmount = computed(() => {
+  const raw = Number(
+    page.props?.cashCounterInfo?.drawer_expected_amount
+    ?? page.props?.cashCounterInfo?.expected_amount
+    ?? 0
+  );
+  return Number.isFinite(raw) ? raw : 0;
+});
 const cashCounterStartBusy = ref(false);
 const showCounterStartModal = ref(false);
 const counterStartForm = ref({
@@ -80,12 +756,165 @@ const maxBillingDiscountPercent = computed(() => {
   if (!Number.isFinite(raw)) return 100;
   return Math.min(100, Math.max(0, raw));
 });
+
+const maxAllowedFlatDiscountAmount = computed(() => {
+  const total = Number(summary.value.total) || 0;
+  const vatAmount = billingVatEnabled.value && billingVatPercent.value > 0
+    ? (total * billingVatPercent.value) / 100
+    : 0;
+  const totalWithVat = total + vatAmount;
+  const globalLimit = (totalWithVat * Number(maxBillingDiscountPercent.value || 0)) / 100;
+  const itemDiscountCap = items.value.reduce((sum, item) => {
+    if (isDisposableBillingItem(item) || isDiscountExemptBillingItem(item)) {
+      return sum;
+    }
+
+    const itemTotal = Number(item.totalAmount || 0);
+    if (itemTotal <= 0) return sum;
+
+    const itemPercent = Math.min(100, Math.max(0, Number(item.discountPercentage || 0)));
+    const isLocked = Boolean(item.discountRateLocked || item.discount_rate_locked);
+    if (isLocked && itemPercent <= 0) {
+      return sum;
+    }
+    const categoryCap = resolveCategoryDiscountCap(item.category);
+    const effectivePercent = isLocked
+      ? itemPercent
+      : itemPercent > 0
+        ? itemPercent
+        : (categoryDiscountCapEnabled.value && categoryCap !== null ? categoryCap : maxBillingDiscountPercent.value);
+
+    return sum + (itemTotal * effectivePercent) / 100;
+  }, 0);
+
+  if (!categoryDiscountCapEnabled.value) {
+    return Math.max(0, Math.min(globalLimit, itemDiscountCap));
+  }
+
+  const categoryLimit = items.value.reduce((sum, item) => {
+    if (isDisposableBillingItem(item)) {
+      return sum;
+    }
+
+    const categoryCap = resolveCategoryDiscountCap(item.category);
+    if (categoryCap === null) {
+      return sum;
+    }
+
+    return sum + Math.min(Number(item.totalAmount || 0), (Number(item.totalAmount || 0) * categoryCap) / 100);
+  }, 0);
+
+  return Math.max(0, Math.min(globalLimit, categoryLimit || globalLimit, itemDiscountCap));
+});
+
+const effectiveBillingDiscountPercentLimit = computed(() => {
+  const globalCap = Number(maxBillingDiscountPercent.value) || 0;
+
+  if (!categoryDiscountCapEnabled.value) {
+    return globalCap;
+  }
+
+  const eligibleItems = items.value.filter(
+    (item) => !isDisposableBillingItem(item) && !isDiscountExemptBillingItem(item)
+  );
+
+  if (!eligibleItems.length) {
+    return globalCap;
+  }
+
+  let weightedTotal = 0;
+  let totalWeight = 0;
+
+  eligibleItems.forEach((item) => {
+    const categoryCap = resolveCategoryDiscountCap(item.category);
+    if (categoryCap === null || !Number.isFinite(categoryCap)) {
+      return;
+    }
+
+    const itemWeight = Number(item.totalAmount || 0);
+    if (itemWeight <= 0) {
+      return;
+    }
+
+    weightedTotal += categoryCap * itemWeight;
+    totalWeight += itemWeight;
+  });
+
+  if (totalWeight <= 0) {
+    return globalCap;
+  }
+
+  const weightedAverageCap = weightedTotal / totalWeight;
+  return Math.max(0, Math.min(globalCap, weightedAverageCap));
+});
+
+const categoryDiscountCapConfig = computed(() => {
+  const source = websetting.value?.attendance_device_options ?? {};
+  const caps = source?.billing_category_discount_caps ?? {};
+  return caps && typeof caps === 'object' ? caps : {};
+});
+const categoryDiscountCapEnabled = computed(() => Boolean(
+  websetting.value?.attendance_device_options?.billing_discount_cap_by_category_enabled
+  ?? false
+));
+const categoryRoomNumberConfig = computed(() => {
+  const source = websetting.value?.attendance_device_options ?? {};
+  const roomNumbers = source?.billing_category_room_numbers ?? {};
+  return roomNumbers && typeof roomNumbers === 'object' ? roomNumbers : {};
+});
+const categoryRoomNumberEnabled = computed(() => Boolean(
+  websetting.value?.attendance_device_options?.billing_room_no_by_category_enabled
+  ?? false
+));
+const resolveCategoryRoomNumber = (category, fallback = '') => {
+  const rawCategory = String(category ?? '').trim();
+  if (!rawCategory || !categoryRoomNumberEnabled.value) {
+    return fallback;
+  }
+
+  const roomNumbers = categoryRoomNumberConfig.value;
+  const matchingKey = Object.keys(roomNumbers).find((key) => key.toLowerCase() === rawCategory.toLowerCase());
+  const configuredRoomNumber = matchingKey ? String(roomNumbers[matchingKey] ?? '').trim() : '';
+  return configuredRoomNumber || fallback;
+};
+const resolveCategoryDiscountCap = (category) => {
+  const rawCategory = String(category ?? '').trim();
+  if (!rawCategory || !categoryDiscountCapEnabled.value) {
+    return null;
+  }
+
+  const caps = categoryDiscountCapConfig.value || {};
+  const directValue = caps[rawCategory];
+  if (directValue !== undefined && directValue !== null && directValue !== '') {
+    const parsed = Number(directValue);
+    if (Number.isFinite(parsed)) {
+      return Math.min(100, Math.max(0, parsed));
+    }
+  }
+
+  const equivalentKey = Object.keys(caps).find((key) => key.toLowerCase() === rawCategory.toLowerCase());
+  if (!equivalentKey) {
+    return null;
+  }
+
+  const parsed = Number(caps[equivalentKey]);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.min(100, Math.max(0, parsed));
+};
 const billingVatEnabled = computed(() => Boolean(websetting.value?.vat_enabled ?? false));
 const billingVatPercent = computed(() => {
   const raw = Number(websetting.value?.vat_percent ?? 0);
   return Number.isFinite(raw) ? Math.max(0, raw) : 0;
 });
 const totalNetIncomeValue = computed(() => {
+  if (props.isPharmacyDepartment) {
+    const pharmacyIncome = Number(page.props?.dashboardPharmacyIncome ?? 0);
+    return Number.isFinite(pharmacyIncome) ? pharmacyIncome : 0;
+  }
+
   const raw = Number(
     page.props?.dashboardNetIncome
     ?? page.props?.cashCounterInfo?.expected_amount
@@ -108,7 +937,7 @@ const formattedTotalNetIncome = computed(() => {
 
 const openNetIncomeReport = () => {
   try {
-    const url = route('backend.report.index');
+    const url = route(props.isPharmacyDepartment ? 'backend.pharmacy.profit-loss.report' : 'backend.report.index');
     if (url) {
       window.open(url, '_blank');
       return;
@@ -121,6 +950,8 @@ const openNetIncomeReport = () => {
 
 const goBack = () => {
   if (window.history.length > 1) {
+    progress.start();
+    window.setTimeout(() => progress.finish(), 800);
     window.history.back();
     return;
   }
@@ -130,7 +961,7 @@ const goBack = () => {
 const reloadNetIncomeValue = () => {
   try {
     router.reload({
-      only: ['dashboardNetIncome'],
+      only: ['dashboardNetIncome', 'dashboardPharmacyIncome', 'reagentTestAvailability'],
       preserveState: true,
       preserveScroll: true,
     });
@@ -143,12 +974,14 @@ const handleDashboardStorageRefresh = (event) => {
   if (event?.key === 'dashboard:refresh') reloadNetIncomeValue();
 };
 
-// Close invoice/edit tabs when preview signals completion via localStorage
+// Invoice preview windows close themselves after printing/canceling. The billing
+// page must stay open, so do not close this tab when the invoice window emits the
+// same storage event.
 const handleCloseInvoiceTabsStorage = (event) => {
   try {
     if (event?.key === 'billing:close_invoice_tabs') {
-      // Attempt to close this window if it was opened by script
-      try { window.close(); } catch (e) { /* ignore */ }
+      // Intentional no-op: the invoice tab closes itself, and the billing page must
+      // remain open for the user to continue editing or creating another bill.
     }
   } catch (e) { /* ignore */ }
 };
@@ -194,6 +1027,58 @@ const showReferrerDropdown = ref(false);
 const filteredReferrers = ref([]);
 const highlightedRefIndex = ref(0);
 const referrerJustSelected = ref(false);
+const normalizeReferrerMatchText = (value) => String(value ?? '')
+  .toLowerCase()
+  .replace(/^(dr|doctor|prof|professor)\.?\s*/g, '')
+  .replace(/\b(mbbs|mbs|bcs|fcps|frcs|ms|md|mds|mph|mphil|mr|mrs|miss|phd)\b/gi, '')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+const referrerTextMatchesSelection = (inputValue, referrer) => {
+  if (!referrer) return false;
+  const rawInput = String(inputValue ?? '').trim();
+  if (!rawInput) return false;
+
+  const targetCandidates = [referrer.name, referrer.phone].filter(Boolean);
+  return targetCandidates.some((candidate) => {
+    const normalizedInput = normalizeReferrerMatchText(rawInput);
+    const normalizedCandidate = normalizeReferrerMatchText(candidate);
+
+    if (!normalizedInput || !normalizedCandidate) {
+      return false;
+    }
+
+    return normalizedInput === normalizedCandidate
+      || normalizedInput.startsWith(normalizedCandidate)
+      || normalizedCandidate.startsWith(normalizedInput);
+  });
+};
+const resolveSelectedReferrer = () => {
+  if (!commission.value.referrer_id) return null;
+  return (props.referrers || []).find((referrer) => String(referrer.id) === String(commission.value.referrer_id)) || null;
+};
+const syncReferrerSelectionState = () => {
+  const selectedReferrer = resolveSelectedReferrer();
+
+  if (!selectedReferrer) {
+    if (commission.value.referrer_id) {
+      commission.value.referrer_id = '';
+      referrerSearch.value = '';
+    }
+    commission.value.commissionRate = 0;
+    commission.value.slider = 0;
+    resetCommissionDetails();
+    updateCommission();
+    return;
+  }
+
+  const nextDisplayName = String(selectedReferrer.name || '').trim();
+  if (nextDisplayName && !referrerTextMatchesSelection(referrerSearch.value, selectedReferrer)) {
+    referrerSearch.value = nextDisplayName;
+  }
+
+  updateCommissionRate(selectedReferrer);
+};
 const commissionSliderRef = ref(null);
 const savePrintButtonRef = ref(null);
 const submitOnNextReferrerEnter = ref(false);
@@ -206,6 +1091,7 @@ const ageDaysInput = ref(null);
 const dobInput = ref(null);
 const updatingFrom = ref(null);
 const isEditMode = ref(false);
+const isInitializingEditMode = ref(false);
 
 const doctorSearchQuery = ref("");
 const doctorSelectedIndex = ref(-1);
@@ -237,6 +1123,7 @@ const itemForm = ref({
   unitPrice: 0,
   quantity: 1.0,
   totalAmount: 0.0,
+  discountExempt: false,
 });
 
 // Remember last non-empty category to guard against accidental clears
@@ -253,7 +1140,7 @@ const patientForm = ref({
   cardNumber: "",
 });
 
-const summary = ref({
+const createDefaultSummaryState = (overrides = {}) => ({
   total: 0,
   discount: 0,
   discountType: "flat",
@@ -269,7 +1156,10 @@ const summary = ref({
   deliveryDate: "",
   deliveryTime: "",
   remarks: "",
+  ...overrides,
 });
+
+const summary = ref(createDefaultSummaryState());
 
 const billingDate = ref("");
 const billingTime = ref("");
@@ -301,6 +1191,8 @@ const billingLiveDisplay = computed(() => {
   }
 });
 const prescriptionSearchId = ref('');
+const prescriptionIpdPatientId = ref(null);
+const prescriptionIpdPrescriptionId = ref(null);
 const prescriptionSearchLoading = ref(false);
 const prescriptionSuggestions = ref([]);
 const prescriptionSuggestionLoading = ref(false);
@@ -321,10 +1213,194 @@ const commission = ref({
 });
 
 const items = ref([]);
+const reagentStockAlerts = computed(() => {
+  const selectedTests = new Map();
+
+  for (const item of items.value) {
+    if (!isReagentTrackedTestCategory(item.category)) continue;
+    const available = reagentAvailabilityForTest(item.id);
+    if (available === null) continue;
+
+    const key = `${String(item.category).toLowerCase()}:${item.id}`;
+    const current = selectedTests.get(key) || {
+      id: item.id,
+      name: item.name,
+      available,
+      quantity: 0,
+    };
+    current.quantity += Number(item.quantity) || 0;
+    selectedTests.set(key, current);
+  }
+
+  return [...selectedTests.values()]
+    .map((test) => ({
+      ...test,
+      remaining: Math.max(0, test.available - test.quantity),
+    }))
+    .filter((test) => test.remaining < 20);
+});
+const billingDraftStorageKey = 'billing-page-draft-items';
+let persistOfflineBillDraftDebounced;
+
+const clearBillingItemsDraft = () => {
+  try {
+    sessionStorage.removeItem(billingDraftStorageKey);
+  } catch (error) {
+    offlineBillingStorageError.value = error instanceof Error
+      ? error.message
+      : 'The old temporary billing draft could not be removed.';
+  }
+  if (offlineBillingUnlocked.value) {
+    clearOfflineBillingDraft(offlineAdminId.value, billingDraftId).catch((error) => {
+      offlineBillingStorageError.value = error instanceof Error ? error.message : 'The encrypted draft could not be cleared.';
+    });
+  }
+};
+
+const restoreOfflineBillingDraft = async () => {
+  if (props.id || !offlineAdminId.value || !offlineBillingUnlocked.value) return false;
+  try {
+    const draft = await getOfflineBillingDraft(offlineAdminId.value, billingDraftId);
+    if (!draft) return false;
+    if (draft?.version !== 1 || !Array.isArray(draft.items)) return false;
+
+    items.value = draft.items;
+    if (draft.patientForm && typeof draft.patientForm === 'object') {
+      patientForm.value = { ...patientForm.value, ...draft.patientForm };
+    }
+    if (draft.newPatientForm && typeof draft.newPatientForm === 'object') {
+      newPatientForm.value = { ...newPatientForm.value, ...draft.newPatientForm };
+    }
+    if (draft.summary && typeof draft.summary === 'object') {
+      summary.value = createDefaultSummaryState(draft.summary);
+    }
+    if (draft.commission && typeof draft.commission === 'object') {
+      commission.value = { ...commission.value, ...draft.commission };
+    }
+
+    patientSearchQuery.value = String(draft.patientSearchQuery || '');
+    doctorSearchQuery.value = String(draft.doctorSearchQuery || '');
+    referrerSearch.value = String(draft.referrerSearch || '');
+    isNewPatient.value = Boolean(draft.isNewPatient);
+    ageYears.value = String(draft.ageYears || '');
+    ageMonths.value = String(draft.ageMonths || '');
+    ageDays.value = String(draft.ageDays || '');
+    billingDate.value = String(draft.billingDate || '');
+    billingTime.value = String(draft.billingTime || '');
+    billingDateTouched.value = Boolean(draft.billingDateTouched);
+    deliveryDateTouched.value = Boolean(draft.deliveryDateTouched);
+    prescriptionSearchId.value = String(draft.prescriptionSearchId || '');
+    prescriptionIpdPatientId.value = draft.prescriptionIpdPatientId || null;
+    prescriptionIpdPrescriptionId.value = draft.prescriptionIpdPrescriptionId || null;
+
+    nextTick(() => updateSummary());
+    return true;
+  } catch (error) {
+    offlineBillingStorageError.value = error instanceof Error ? error.message : 'The encrypted billing draft could not be restored.';
+    return false;
+  }
+};
+
+const restoreLegacyBillingItemsDraft = async () => {
+  if (props.id || billingDraftId || !offlineAdminId.value || !offlineBillingUnlocked.value) return false;
+
+  try {
+    const savedItems = sessionStorage.getItem(billingDraftStorageKey);
+    if (!savedItems) return false;
+
+    const parsedItems = JSON.parse(savedItems);
+    if (!Array.isArray(parsedItems) || parsedItems.length === 0) return false;
+
+    items.value = parsedItems;
+    await nextTick();
+    const saved = await persistOfflineBillDraftDebounced.flush();
+    if (!saved) {
+      throw new Error('The previous billing draft could not be encrypted.');
+    }
+    sessionStorage.removeItem(billingDraftStorageKey);
+    nextTick(() => updateSummary());
+    return true;
+  } catch (error) {
+    offlineBillingStorageError.value = error instanceof Error
+      ? error.message
+      : 'The previous billing draft could not be migrated to encrypted storage.';
+    return false;
+  }
+};
+
+persistOfflineBillDraftDebounced = debounce(() => {
+  if (props.id || !offlineAdminId.value || !offlineBillingUnlocked.value) return;
+
+  const hasDraftContent = items.value.length > 0
+    || Boolean(patientForm.value.patient_id || patientForm.value.patientMobile)
+    || Boolean(newPatientForm.value.name || newPatientForm.value.phone)
+    || Boolean(patientSearchQuery.value || doctorSearchQuery.value || referrerSearch.value)
+    || Boolean(summary.value.discount || summary.value.extraFlatDiscount || summary.value.paidAmt || summary.value.remarks)
+    || Boolean(prescriptionIpdPatientId.value);
+
+  if (!hasDraftContent) {
+    return clearOfflineBillingDraft(offlineAdminId.value, billingDraftId).then(() => true).catch((error) => {
+      offlineBillingStorageError.value = error instanceof Error ? error.message : 'The old billing draft could not be cleared.';
+      return false;
+    });
+  }
+
+  return saveOfflineBillingDraft(offlineAdminId.value, {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      items: items.value,
+      patientForm: patientForm.value,
+      newPatientForm: newPatientForm.value,
+      patientSearchQuery: patientSearchQuery.value,
+      doctorSearchQuery: doctorSearchQuery.value,
+      referrerSearch: referrerSearch.value,
+      isNewPatient: isNewPatient.value,
+      summary: summary.value,
+      commission: commission.value,
+      ageYears: ageYears.value,
+      ageMonths: ageMonths.value,
+      ageDays: ageDays.value,
+      billingDate: billingDate.value,
+      billingTime: billingTime.value,
+      billingDateTouched: billingDateTouched.value,
+      deliveryDateTouched: deliveryDateTouched.value,
+      prescriptionSearchId: prescriptionSearchId.value,
+      prescriptionIpdPatientId: prescriptionIpdPatientId.value,
+      prescriptionIpdPrescriptionId: prescriptionIpdPrescriptionId.value,
+    }, billingDraftId).catch((error) => {
+    offlineBillingStorageError.value = error instanceof Error ? error.message : 'The billing draft could not be saved on this device.';
+    return false;
+  });
+}, 250);
+const flushOfflineBillingDraft = () => persistOfflineBillDraftDebounced?.flush();
+
+watch(() => ({
+  items: items.value,
+  patientForm: patientForm.value,
+  newPatientForm: newPatientForm.value,
+  patientSearchQuery: patientSearchQuery.value,
+  doctorSearchQuery: doctorSearchQuery.value,
+  referrerSearch: referrerSearch.value,
+  isNewPatient: isNewPatient.value,
+  summary: summary.value,
+  commission: commission.value,
+  ageYears: ageYears.value,
+  ageMonths: ageMonths.value,
+  ageDays: ageDays.value,
+  billingDate: billingDate.value,
+  billingTime: billingTime.value,
+  billingDateTouched: billingDateTouched.value,
+  deliveryDateTouched: deliveryDateTouched.value,
+  prescriptionSearchId: prescriptionSearchId.value,
+  prescriptionIpdPatientId: prescriptionIpdPatientId.value,
+  prescriptionIpdPrescriptionId: prescriptionIpdPrescriptionId.value,
+}), () => persistOfflineBillDraftDebounced(), { deep: true });
+
+onMounted(() => {
+  window.addEventListener('pagehide', flushOfflineBillingDraft);
+});
 
 // Track attempts to reload server props per category to avoid reload loops
-const attemptedPropsReload = ref({});
-
 const commissionDetails = ref({
   hasPathologyCommission: false,
   hasRadiologyCommission: false,
@@ -338,8 +1414,15 @@ const commissionDetails = ref({
 
 const itemNameInput = ref(null);
 const quantityInput = ref(null);
+const editingQuantityIndex = ref(null);
+const editedQuantity = ref('');
+const showItemChargeModal = ref(false);
 const selectedItemRef = ref(null);
 const searchQuery = ref("");
+const medicineSearchResults = ref([]);
+const medicineSearchLoading = ref(false);
+const medicineSearchError = ref(false);
+let medicineSearchController = null;
 const selectedIndex = ref(-1);
 const quickSearchDebounceMs = 100;
 
@@ -394,6 +1477,11 @@ const reloadReferrers = () => {
 };
 
 const openCounterStartModal = () => {
+  if (hasOpenCashCounterSession.value) {
+    displayWarning({ message: 'কাউন্টার ইতিমধ্যে ওপেন আছে।' });
+    return;
+  }
+
   cashCounterStartBusy.value = false;
   counterStartForm.value.openingAmount = '';
   counterStartForm.value.note = 'Carry forward from previous shift';
@@ -410,7 +1498,7 @@ const startCounterFromBilling = () => {
 
   const openingAmount = Number(counterStartForm.value.openingAmount || 0);
   if (!Number.isFinite(openingAmount) || openingAmount < 0) {
-    displayWarning('সঠিক opening amount দিন।');
+    displayWarning({ message: 'সঠিক opening amount দিন।' });
     return;
   }
 
@@ -422,8 +1510,14 @@ const startCounterFromBilling = () => {
   }, {
     preserveScroll: true,
     preserveState: true,
-    onSuccess: () => {
+    onSuccess: (responsePage) => {
+      const flash = responsePage?.props?.flash || {};
+      if (flash.errorMessage) {
+        displayResponse(responsePage);
+        return;
+      }
       showCounterStartModal.value = false;
+      displayResponse(responsePage);
     },
     onError: (errors) => {
       const firstError = (() => {
@@ -434,7 +1528,7 @@ const startCounterFromBilling = () => {
           return 'Counter start ব্যর্থ হয়েছে। আবার চেষ্টা করুন।';
         }
       })();
-      displayWarning(firstError);
+      displayWarning({ message: firstError });
     },
     onFinish: () => {
       cashCounterStartBusy.value = false;
@@ -443,6 +1537,11 @@ const startCounterFromBilling = () => {
 };
 
 const openCounterCloseModal = () => {
+  if (!hasOpenCashCounterSession.value) {
+    displayWarning({ message: 'কোনো ওপেন কাউন্টার নেই। আগে Counter Start করুন।' });
+    return;
+  }
+
   cashCounterCloseBusy.value = false;
   counterCloseForm.value.closingAmount = '';
   counterCloseForm.value.note = 'Closed from Billing page quick action';
@@ -459,22 +1558,12 @@ const closeCounterFromBilling = () => {
 
   const closingAmount = Number(counterCloseForm.value.closingAmount || 0);
   if (!Number.isFinite(closingAmount) || closingAmount < 0) {
-    displayWarning('সঠিক closing amount দিন।');
+    displayWarning({ message: 'সঠিক closing amount দিন।' });
     return;
   }
 
   cashCounterCloseBusy.value = true;
-  const printWindow = window.open('', '_blank');
-  if (printWindow && !printWindow.closed) {
-    try {
-      printWindow.document.open();
-      printWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Preparing Report...</title></head><body></body></html>');
-      printWindow.document.close();
-      try { printWindow.focus(); } catch (e) {}
-    } catch (e) {
-      // ignore popup document write issues
-    }
-  }
+  const printWindow = window.open(window.location.href, '_blank');
 
   try {
     const closeUrl = route('backend.cash-counter.quick-close');
@@ -491,38 +1580,23 @@ const closeCounterFromBilling = () => {
         const backendErrorMessage = String(flash?.errorMessage || '').trim();
         if (backendErrorMessage) {
           showCounterCloseModal.value = true;
-          displayWarning(backendErrorMessage);
-          if (printWindow && !printWindow.closed) {
-            try {
-              printWindow.document.open();
-              printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Close Failed</title></head><body style="font-family:Segoe UI,Arial,sans-serif;padding:16px">${backendErrorMessage}</body></html>`);
-              printWindow.document.close();
-            } catch (e) {
-              // ignore
-            }
-          }
+          displayWarning({ message: backendErrorMessage });
+          if (printWindow && !printWindow.closed) printWindow.close();
           return;
         }
 
         showCounterCloseModal.value = false;
+        displayResponse(responsePage);
 
         const printUrl = responsePage?.props?.flash?.cashCounterPrintUrl || cashCounterPrintUrl.value || '';
         if (!printUrl) {
-          if (printWindow && !printWindow.closed) {
-            try {
-              printWindow.document.open();
-              printWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Report Unavailable</title></head><body style="font-family:Segoe UI,Arial,sans-serif;padding:16px">Report URL পাওয়া যায়নি। আবার চেষ্টা করুন।</body></html>');
-              printWindow.document.close();
-            } catch (e) {
-              // ignore
-            }
-          }
-          displayWarning('রিপোর্ট URL পাওয়া যায়নি।');
+          if (printWindow && !printWindow.closed) printWindow.close();
+          displayWarning({ message: 'রিপোর্ট URL পাওয়া যায়নি।' });
           return;
         }
 
         if (printWindow && !printWindow.closed) {
-          printWindow.location.href = printUrl;
+          printWindow.location.replace(printUrl);
           try { printWindow.focus(); } catch (e) {}
         } else {
           window.open(printUrl, '_blank');
@@ -538,17 +1612,9 @@ const closeCounterFromBilling = () => {
           }
         })();
 
-        displayWarning(firstError);
+        displayWarning({ message: firstError });
 
-        if (printWindow && !printWindow.closed) {
-          try {
-            printWindow.document.open();
-            printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Close Failed</title></head><body style="font-family:Segoe UI,Arial,sans-serif;padding:16px">${firstError}</body></html>`);
-            printWindow.document.close();
-          } catch (e) {
-            // ignore
-          }
-        }
+        if (printWindow && !printWindow.closed) printWindow.close();
       },
       onFinish: () => {
         cashCounterCloseBusy.value = false;
@@ -556,16 +1622,8 @@ const closeCounterFromBilling = () => {
     });
   } catch (e) {
     cashCounterCloseBusy.value = false;
-    displayWarning('Counter close request তৈরি করা যায়নি। পেজ রিফ্রেশ করে আবার চেষ্টা করুন।');
-    if (printWindow && !printWindow.closed) {
-      try {
-        printWindow.document.open();
-        printWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Close Failed</title></head><body style="font-family:Segoe UI,Arial,sans-serif;padding:16px">Counter close request তৈরি করা যায়নি। পেজ রিফ্রেশ করে আবার চেষ্টা করুন।</body></html>');
-        printWindow.document.close();
-      } catch (err) {
-        // ignore
-      }
-    }
+    displayWarning({ message: 'Counter close request তৈরি করা যায়নি। পেজ রিফ্রেশ করে আবার চেষ্টা করুন।' });
+    if (printWindow && !printWindow.closed) printWindow.close();
   }
 };
 
@@ -1605,7 +2663,12 @@ watch([() => itemForm.value.quantity, () => itemForm.value.unitPrice], () => {
   ).toFixed(2);
 });
 
-watch(() => patientForm.value.patient_id, (newPatientId) => {
+watch(() => patientForm.value.patient_id, (newPatientId, oldPatientId) => {
+  if (oldPatientId && Number(newPatientId || 0) !== Number(oldPatientId)) {
+    prescriptionIpdPatientId.value = null;
+    prescriptionIpdPrescriptionId.value = null;
+  }
+
   if (newPatientId && props.patients) {
     const selectedPatient = props.patients.find(
       (patient) => patient.id == newPatientId
@@ -1623,26 +2686,54 @@ watch(() => patientForm.value.patient_id, (newPatientId) => {
 });
 
 watch(() => commission.value.referrer_id, (newReferrerId) => {
-  if (newReferrerId && props.referrers) {
-    const selectedReferrer = props.referrers.find(
-      (referrer) => referrer.id == newReferrerId
-    );
-    if (selectedReferrer) {
-      updateCommissionRate(selectedReferrer);
-      // keep the search input in sync with selected referrer name
-      try {
-        referrerSearch.value = selectedReferrer.name || '';
-      } catch (e) {}
-    }
-  } else {
+  if (!newReferrerId) {
     commission.value.commissionRate = 0;
     commission.value.slider = 0;
     resetCommissionDetails();
     updateCommission();
+    return;
   }
+
+  const selectedReferrer = resolveSelectedReferrer();
+  if (!selectedReferrer) {
+    const typed = String(referrerSearch.value || '').trim();
+    const fellBack = (props.referrers || []).find((referrer) => referrerTextMatchesSelection(typed, referrer));
+    if (fellBack) {
+      commission.value.referrer_id = fellBack.id;
+      return;
+    }
+    return;
+  }
+
+  const currentInput = String(referrerSearch.value || '').trim();
+  if (!currentInput || !referrerTextMatchesSelection(currentInput, selectedReferrer)) {
+    referrerSearch.value = selectedReferrer.name || '';
+  }
+
+  updateCommissionRate(selectedReferrer);
 });
 
+watch(() => props.referrers, () => {
+  if (commission.value.referrer_id) {
+    syncReferrerSelectionState();
+  }
+}, { deep: true, immediate: true });
+
 watch(() => props.referrers, (newReferrers) => {
+  const isLockedEditSelection = Boolean(props.id && props.editData && commission.value.referrer_id);
+
+  if (isLockedEditSelection) {
+    filteredReferrers.value = [];
+    showReferrerDropdown.value = false;
+    const selectedReferrer = (newReferrers || []).find(
+      (referrer) => String(referrer.id) === String(commission.value.referrer_id)
+    );
+    if (selectedReferrer) {
+      referrerSearch.value = selectedReferrer.name || '';
+    }
+    return;
+  }
+
   const ql = String(referrerSearch.value || '').trim().toLowerCase();
   if (ql) {
     let filtered = (newReferrers || []).filter(r => (r.name || '').toLowerCase().includes(ql) || (r.phone || '').toLowerCase().includes(ql));
@@ -1665,7 +2756,10 @@ watch(() => props.referrers, (newReferrers) => {
   );
 
   if (selectedReferrer) {
-    referrerSearch.value = selectedReferrer.name || '';
+    const currentInput = String(referrerSearch.value || '').trim();
+    if (!currentInput || !referrerTextMatchesSelection(currentInput, selectedReferrer)) {
+      referrerSearch.value = selectedReferrer.name || '';
+    }
   } else {
     commission.value.referrer_id = '';
     referrerSearch.value = '';
@@ -1674,6 +2768,14 @@ watch(() => props.referrers, (newReferrers) => {
 
 // filter referrers as user types
 watch(referrerSearch, debounce((q) => {
+  const isLockedEditSelection = Boolean(props.id && props.editData && commission.value.referrer_id);
+  if (isLockedEditSelection) {
+    filteredReferrers.value = [];
+    showReferrerDropdown.value = false;
+    highlightedRefIndex.value = 0;
+    return;
+  }
+
   // If we just selected programmatically, don't reopen suggestions
   if (referrerJustSelected.value) {
     return;
@@ -1685,11 +2787,8 @@ watch(referrerSearch, debounce((q) => {
   );
 
   if (selectedReferrer) {
-    const selectedName = String(selectedReferrer.name || '').trim().toLowerCase();
-    const selectedPhone = String(selectedReferrer.phone || '').trim().toLowerCase();
-    const typedLower = typed.toLowerCase();
-
-    if (!typedLower || (typedLower !== selectedName && typedLower !== selectedPhone)) {
+    const typedMatchesSelected = referrerTextMatchesSelection(typed, selectedReferrer);
+    if (typed && !typedMatchesSelected) {
       commission.value.referrer_id = '';
       commission.value.commissionRate = 0;
       commission.value.slider = 0;
@@ -1744,6 +2843,17 @@ const selectReferrer = (r) => {
 };
 
 const handleReferrerKeydown = (e) => {
+  const isLockedEditSelection = Boolean(props.id && props.editData && commission.value.referrer_id);
+  if (isLockedEditSelection) {
+    if (['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    showReferrerDropdown.value = false;
+    filteredReferrers.value = [];
+    return;
+  }
+
   if (e.key === 'ArrowDown') {
     e.preventDefault();
     if (!showReferrerDropdown.value && filteredReferrers.value.length>0) showReferrerDropdown.value = true;
@@ -1793,9 +2903,10 @@ const handleReferrerKeydown = (e) => {
 };
 
 const handleReferrerFocus = (e) => {
-  // avoid re-opening immediately after a selection via Enter
-  if (referrerJustSelected.value) {
+  const isLockedEditSelection = Boolean(props.id && props.editData && commission.value.referrer_id);
+  if (isLockedEditSelection || referrerJustSelected.value) {
     showReferrerDropdown.value = false;
+    filteredReferrers.value = [];
     return;
   }
   // Close other open dropdowns (e.g., Gender) when focusing referrer
@@ -1833,7 +2944,26 @@ watch(() => summary.value.payableAmount, () => {
   calculateChangeAndDue();
 });
 
+watch(() => props.editData?.items, (editItems) => {
+  if (!props.id || !Array.isArray(editItems) || editItems.length === 0) return;
+  if (items.value.length === editItems.length && Number(summary.value.total || 0) > 0) return;
+
+  initializeEditMode();
+  nextTick(() => {
+    if (items.value.length > 0 && Number(summary.value.total || 0) <= 0) {
+      updateSummary();
+    }
+  });
+}, { deep: true });
+
+watch(() => items.value.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0), (itemsTotal) => {
+  if (props.id && itemsTotal > 0 && Number(summary.value.total || 0) <= 0) {
+    updateSummary();
+  }
+});
+
 watch(() => summary.value.discountType, (newType, oldType) => {
+  if (isInitializingEditMode.value) return;
   convertDiscountType(newType, oldType);
   updateSummary();
 });
@@ -1894,6 +3024,116 @@ watch(() => itemForm.value.category, (newCat, oldCat) => {
   } catch (e) { /* debug warn removed */ }
 });
 
+const getReferralCommissionBaseItems = () => {
+  const targetCents = Math.max(0, Math.round((Number(summary.value.payableAmount) || 0) * 100));
+  const itemWeights = items.value.map((item) =>
+    Math.max(0, Math.round((Number(item.netAmount) || 0) * 100))
+  );
+  const totalNetCents = itemWeights.reduce((sum, amount) => sum + amount, 0);
+  const weights = totalNetCents > 0
+    ? itemWeights
+    : items.value.map((item) => Math.max(0, Math.round((Number(item.totalAmount) || 0) * 100)));
+  const weightTotal = weights.reduce((sum, amount) => sum + amount, 0);
+  const baseCents = weights.map(() => 0);
+
+  if (targetCents > 0 && weightTotal > 0) {
+    const remainders = [];
+    let allocatedCents = 0;
+
+    weights.forEach((weight, index) => {
+      const exactCents = (targetCents * weight) / weightTotal;
+      baseCents[index] = Math.floor(exactCents);
+      allocatedCents += baseCents[index];
+      remainders.push({ index, remainder: exactCents - baseCents[index] });
+    });
+
+    remainders.sort((left, right) => right.remainder - left.remainder);
+    for (let remaining = targetCents - allocatedCents, index = 0; remaining > 0; remaining -= 1, index += 1) {
+      baseCents[remainders[index % remainders.length].index] += 1;
+    }
+  }
+
+  return items.value.map((item, index) => ({
+    ...item,
+    netAmount: baseCents[index] / 100,
+  }));
+};
+
+const calculateReferralCommission = (amount, rate) => {
+  const amountCents = Math.max(0, Math.round((Number(amount) || 0) * 100));
+  const commissionCents = Math.round((amountCents * (Number(rate) || 0)) / 100);
+  return commissionCents / 100;
+};
+
+const getReferralCommissionAllocation = (referrer, billItems = [], payableAmount = 0) => {
+  const normalizedItems = (billItems || []).map((item) => {
+    const category = normalizeCommissionCategory(item.category);
+    const itemNetAmount = Number(item.netAmount ?? item.totalAmount ?? 0);
+    const itemLevelRate = Number(item.referral_percentage || 0);
+    const rate = itemLevelRate > 0 ? itemLevelRate : getCategoryCommissionRate(referrer, category);
+    return {
+      ...item,
+      category,
+      rate,
+      netAmount: itemNetAmount,
+    };
+  });
+
+  const targetCents = Math.max(0, Math.round((Number(payableAmount) || 0) * 100));
+  const weights = normalizedItems.map((item) => Math.max(0, Math.round((Number(item.netAmount) || 0) * 100)));
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const allocatedCents = weights.map(() => 0);
+
+  if (targetCents > 0 && weightTotal > 0) {
+    const remainders = [];
+    let assignedCents = 0;
+
+    weights.forEach((weight, index) => {
+      const exactCents = (targetCents * weight) / weightTotal;
+      allocatedCents[index] = Math.floor(exactCents);
+      assignedCents += allocatedCents[index];
+      remainders.push({ index, remainder: exactCents - allocatedCents[index] });
+    });
+
+    remainders.sort((left, right) => right.remainder - left.remainder);
+    for (let remaining = targetCents - assignedCents, index = 0; remaining > 0; remaining -= 1, index += 1) {
+      allocatedCents[remainders[index % remainders.length].index] += 1;
+    }
+  }
+
+  const categories = {};
+  let totalCommissionAmount = 0;
+
+  normalizedItems.forEach((item, index) => {
+    const allocatedAmount = allocatedCents[index] / 100;
+    const commissionAmount = calculateReferralCommission(allocatedAmount, item.rate);
+    const category = item.category || 'unknown';
+
+    if (!categories[category]) {
+      categories[category] = {
+        total: 0,
+        commission: 0,
+        rate: item.rate,
+      };
+    }
+
+    categories[category].total += allocatedAmount;
+    categories[category].commission += commissionAmount;
+    totalCommissionAmount += commissionAmount;
+  });
+
+  return {
+    total: totalCommissionAmount,
+    categories: Object.entries(categories).map(([category, values]) => ({
+      category,
+      rate: parseFloat((Number(values.rate) || 0).toFixed(2)),
+      amount: parseFloat(values.total.toFixed(2)),
+      commission: parseFloat(values.commission.toFixed(2)),
+      hasCommission: values.commission > 0,
+    })),
+  };
+};
+
 const updateCommissionRate = (referrer) => {
   if (!referrer || items.value.length === 0) {
     commission.value.commissionRate = 0;
@@ -1935,43 +3175,10 @@ const updateCommissionRate = (referrer) => {
   commissionDetails.value.ecgRate = availableCommissions.ecg;
   commissionDetails.value.ultrasoundRate = availableCommissions.ultrasound;
 
-  let totalCommissionAmount = 0;
-  let categoriesWithoutCommission = [];
-  let categoriesWithCommission = [];
-
-  const categoryData = {};
-
-  items.value.forEach((item) => {
-    const category = normalizeCommissionCategory(item.category);
-    if (!categoryData[category]) {
-      categoryData[category] = {
-        totalAmount: 0,
-        items: [],
-      };
-    }
-    categoryData[category].totalAmount += item.netAmount;
-    categoryData[category].items.push(item);
-  });
-
-  Object.keys(categoryData).forEach((category) => {
-    const itemsInCategory = categoryData[category].items || [];
-    const categoryAmount = categoryData[category].totalAmount;
-    let categoryCommissionAmount = 0;
-
-    itemsInCategory.forEach((item) => {
-      const itemAmount = Number(item.netAmount || 0);
-      const itemLevelRate = Number(item.referral_percentage || 0);
-      const rate = itemLevelRate > 0 ? itemLevelRate : getCategoryCommissionRate(referrer, category);
-      categoryCommissionAmount += (itemAmount * rate) / 100;
-    });
-
-    if (categoryCommissionAmount > 0) {
-      categoriesWithCommission.push(category);
-      totalCommissionAmount += categoryCommissionAmount;
-    } else {
-      categoriesWithoutCommission.push(category);
-    }
-  });
+  const breakdown = getReferralCommissionAllocation(referrer, items.value, summary.value.payableAmount || summary.value.total || 0);
+  const totalCommissionAmount = breakdown.total;
+  const categoriesWithoutCommission = breakdown.categories.filter((entry) => !entry.hasCommission).map((entry) => entry.category);
+  const categoriesWithCommission = breakdown.categories.filter((entry) => entry.hasCommission).map((entry) => entry.category);
 
   if (categoriesWithoutCommission.length > 0 && categoriesWithCommission.length === 0) {
     commissionDetails.value.noCommissionMessage = `This referrer doesn't have commission for: ${categoriesWithoutCommission.join(', ')}`;
@@ -2070,22 +3277,29 @@ const calculateChangeAndDue = () => {
   const receivingAmount = Math.max(0, parseFloat(summary.value.receivingAmt) || 0);
   const isEditingExistingBill = Boolean(isEditMode.value || (props.id && props.editData));
 
-  const originalGrossPaid = isEditingExistingBill
+  // Baseline is the persisted paid amount for this bill. When editing, we must
+  // never discard that baseline just because the form is re-rendered or the user
+  // hasn't entered a new amount yet.
+  const persistedPaidAmount = isEditingExistingBill
     ? Math.max(0, parseFloat(props.editData?.paid_amt) || 0)
     : 0;
   const existingReturnAmount = isEditingExistingBill
     ? Math.max(0, parseFloat(props.editData?.return_amt) || 0)
     : 0;
 
-  // existingReturnAmount represents previously returned/refunded amount that
-  // reduces the effective paid total. Subtract it from original paid to get
-  // the true gross received amount prior to new receiving input.
-  const grossReceived = Math.max(0, originalGrossPaid - existingReturnAmount);
+  // Gross received should be the actual cash already collected minus any prior
+  // refund/return that has already been issued.
+  const grossReceived = Math.max(0, persistedPaidAmount - existingReturnAmount);
+
+  // New receiving is only the amount currently entered in this edit session.
+  // It must be added on top of the persisted paid total, not replace it.
   const totalGrossReceived = grossReceived + receivingAmount;
   const effectivePaid = Math.min(payableAmount, totalGrossReceived);
   const returnAmount = Math.max(0, totalGrossReceived - payableAmount);
   const dueAmount = Math.max(0, payableAmount - effectivePaid);
 
+  // Keep the payment fields stable during edit mode to avoid the UI jumping
+  // back to a wrong total when the user does not enter a fresh payment.
   summary.value.receivingAmt = roundMoney(receivingAmount);
   summary.value.paidAmt = roundMoney(effectivePaid);
   summary.value.returnAmt = roundMoney(returnAmount);
@@ -2103,7 +3317,7 @@ const commissionBreakdown = computed(() => {
 
   if (!selectedReferrer) return breakdown;
 
-  const categoryTotals = items.value.reduce((acc, item) => {
+  const categoryTotals = getReferralCommissionBaseItems().reduce((acc, item) => {
     const category = normalizeCommissionCategory(item.category);
     if (!acc[category]) {
       acc[category] = {
@@ -2129,7 +3343,7 @@ const commissionBreakdown = computed(() => {
         : getCategoryCommissionRate(selectedReferrer, category);
       const amt = Number(it.netAmount || 0);
       categoryAmount += amt;
-      categoryCommission += (amt * itemRate) / 100;
+      categoryCommission += calculateReferralCommission(amt, itemRate);
       weightedRateSum += (itemRate * amt);
     });
     const categoryRate = categoryAmount > 0 ? (weightedRateSum / categoryAmount) : 0;
@@ -2158,32 +3372,72 @@ const commissionBreakdown = computed(() => {
   return breakdown;
 });
 
-// Defer heavy item normalization until after initial render to speed up tab open
-const itemsReady = ref(false);
-onMounted(() => {
-  // small delay to allow UI to render first, then compute items
-  setTimeout(() => { itemsReady.value = true; }, 30);
-});
+const normalizeBillingItemCategory = (category, itemName = '') => {
+  const categoryText = String(category ?? '').trim();
+  const nameText = String(itemName ?? '').trim();
+  const haystack = `${categoryText} ${nameText}`.toLowerCase();
+
+  if (/(ultrasound|ultrasonogram|ultrasonography|usg|sono|sonography)/.test(haystack)) {
+    return 'Ultrasound';
+  }
+
+  if (/(ecg|ekg|electrocardiogram)/.test(haystack)) {
+    return 'ECG';
+  }
+
+  if (/(radiology|xray|x-ray|x ray|mri|ct|imaging|radiolog)/.test(haystack)) {
+    return 'Radiology';
+  }
+
+  if (!categoryText) {
+    return 'Service';
+  }
+
+  return categoryText;
+};
+
+const normalizeForMatch = (value) => {
+  if (value == null) return '';
+  return String(value)
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const isDisposableValue = (value) => {
+  if (value == null) return false;
+  try {
+    return /dispos|ডিসপ/.test(String(value).toLowerCase());
+  } catch (error) {
+    return false;
+  }
+};
 
 const allAvailableItems = computed(() => {
-  if (!itemsReady.value) return [];
-  const tests = props.pathologyAndRadiologyTests.map((test) => ({
+  const tests = (props.pathologyAndRadiologyTests || []).map((test) => ({
     id: test.id,
     name: test.test_name,
-    category: test.category_type,
+    category: normalizeBillingItemCategory(test.category_type, test.test_name),
     unitPrice: test.amount,
     referral_percentage: test.referral_percentage ?? 0,
     type: "test",
     room_no: test.room_no ?? '',
-    alt: [test.test_name, test.short_name ?? '', test.charge_name ?? '', test.category_type ?? '']
-      .concat(Object.values(test || {}).filter(v => (typeof v === 'string' || typeof v === 'number')).slice(0,10))
+    alt: [test.test_name, test.test_short_name ?? '', test.category_type ?? '']
       .filter(Boolean).join(' | '),
     normalizedCategories: [test.category_type, test.module, test.charge_category, test.main_category].filter(Boolean).map(normalizeForMatch),
     is_disposable: (isDisposableValue(test.test_name) || isDisposableValue(test.category_type) || isDisposableValue(test.short_name) || isDisposableValue(test.charge_name)),
+    discountPercentage: Math.min(100, Math.max(0, Number(test.discount_percentage ?? 0) || 0)),
+    discountRateLocked: Boolean(test.discount_rate_locked),
+    discountExempt: Boolean(test.discount_rate_locked) && Number(test.discount_percentage ?? 0) <= 0,
+    reagentRemainingTests: reagentAvailabilityForTest(test.id),
+    reagentStockItems: reagentStockItemsForTest(test.id),
+    reagentFilmCategory: props.reagentTestAvailability?.[String(test.id)]?.film_category ?? null,
+    reagentFilmUsageQuantity: Number(props.reagentTestAvailability?.[String(test.id)]?.film_usage_quantity ?? 0),
   }));
 
-  const medicines = props.medicineInventories
-    .filter((medicine) => medicine.status === "Active")
+  const medicines = medicineSearchResults.value
     .map((medicine) => ({
       id: medicine.id,
       name: medicine.medicine_name,
@@ -2192,11 +3446,28 @@ const allAvailableItems = computed(() => {
       stock: medicine.medicine_quantity,
       referral_percentage: medicine.referral_percentage ?? 0,
       type: "medicine",
-      alt: [medicine.medicine_name, medicine.medicine_code ?? '', medicine.medicine_brand ?? '']
-        .concat(Object.values(medicine || {}).filter(v => (typeof v === 'string' || typeof v === 'number')).slice(0,10))
+      alt: [medicine.medicine_name, medicine.medicine_code ?? '']
         .filter(Boolean).join(' | '),
       normalizedCategories: [medicine.category || 'Medicine', medicine.sub_category || medicine.type].filter(Boolean).map(normalizeForMatch),
       is_disposable: (isDisposableValue(medicine.medicine_name) || Object.keys(medicine||{}).some(k=> /dispos|ডিসপ/i.test(String(k)))),
+    }));
+
+  const storeItems = (props.departmentStoreItems || [])
+    .filter((item) => Number(item.stock) > 0)
+    .map((item) => ({
+      id: Number(item.id),
+      name: item.name,
+      category: 'Store Inventory',
+      stockCategory: item.stock_category || '',
+      unitPrice: Number(item.unit_price || 0),
+      stock: Number(item.stock || 0),
+      stockUnit: item.stock_unit || '',
+      department_id: Number(item.department_id),
+      departmentName: item.department_name || '',
+      type: 'store',
+      alt: [item.name, item.stock_category, item.department_name].filter(Boolean).join(' | '),
+      normalizedCategories: ['Store Inventory', item.stock_category].filter(Boolean).map(normalizeForMatch),
+      is_disposable: false,
     }));
 
     // Map any hospitalCharges provided by the backend into charge items
@@ -2228,7 +3499,7 @@ const allAvailableItems = computed(() => {
     });
 
     // Post-process items to coerce disposable detection into category when needed
-    const allItems = [...tests, ...medicines, ...charges];
+    const allItems = [...tests, ...medicines, ...storeItems, ...charges].filter(canShowBillingItem);
   const disposableKeywords = ['tube','v tube','v.tube','syringe','needle','glove','gauze','dispos'];
   allItems.forEach(it => {
     try {
@@ -2250,7 +3521,7 @@ const allAvailableItems = computed(() => {
           it.normalizedCategories = Array.isArray(it.normalizedCategories) ? it.normalizedCategories : [];
         } catch(e) { it.normalizedCategories = []; }
 
-        if (it.type !== 'medicine') {
+        if (it.type !== 'medicine' && it.type !== 'store') {
           it.category = 'Disposable';
           if (!it.normalizedCategories.some(nc => nc.includes('dispos'))) {
             it.normalizedCategories.push(normalizeForMatch('Disposable'));
@@ -2263,28 +3534,44 @@ const allAvailableItems = computed(() => {
     } catch(e){}
   });
 
+  allItems.forEach((item) => {
+    item.room_no = resolveCategoryRoomNumber(item.category, item.room_no ?? '');
+  });
+
+  allItems.forEach((item) => {
+    item.searchName = normalizeForMatch(item.name || '');
+    item.searchAlt = normalizeForMatch(item.alt || '');
+    item.searchText = normalizeForMatch(`${item.name || ''} ${item.alt || ''}`);
+  });
+
   return allItems;
 });
 
 // Unique category types for dropdowns (includes known defaults + detected ones)
 const categoryTypes = computed(() => {
+  if (props.isPharmacyDepartment) {
+    return ['Medicine'];
+  }
+
   const set = new Set();
 
-  (props.pathologyAndRadiologyTests || []).forEach(t => {
-    const v = (t.category_type || '').toString().trim();
+  allAvailableItems.value.filter((item) => item.type === 'test').forEach(t => {
+    const v = (t.category || '').toString().trim();
     if (v) set.add(v);
   });
 
-  if ((props.medicineInventories || []).length > 0) set.add('Medicine');
+  if ((props.departmentStoreItems || []).length > 0) set.add('Store Inventory');
 
   // include hospitalCharges from props and any extra fetched charges
   // hospitalCharges categories removed; categories come from tests and medicines above
 
   // Ensure a set of common types are always present
-  ['Pathology','Radiology','Medicine','OPD','IPD','Appointment','ECG','Ultrasound','Blood Bank','Ambulance','Disposable']
+  ['Pathology','Radiology','OPD','IPD','Appointment','ECG','Ultrasound','Blood Bank','Ambulance','Disposable']
     .forEach(s => set.add(s));
 
-  return Array.from(set);
+  return Array.from(set).filter((category) => (
+    !['medicine', 'pharmacy'].includes(normalizeForMatch(category))
+  ));
 });
 
 // debug logging removed to reduce console noise
@@ -2313,7 +3600,7 @@ onMounted(() => {
   try {
     window.__billing_debug.getPropCounts = () => ({
       pathologyAndRadiologyTests: (props.pathologyAndRadiologyTests || []).length,
-      medicineInventories: (props.medicineInventories || []).length,
+      medicineSearchResults: medicineSearchResults.value.length,
     });
 
     window.__billing_debug.search = (term) => {
@@ -2349,6 +3636,10 @@ const filteredItems = computed(() => {
     unitPrice: test.amount ?? 0,
     referral_percentage: test.referral_percentage ?? 0,
     type: 'test',
+    reagentRemainingTests: reagentAvailabilityForTest(test.id),
+    reagentStockItems: reagentStockItemsForTest(test.id),
+    reagentFilmCategory: props.reagentTestAvailability?.[String(test.id)]?.film_category ?? null,
+    reagentFilmUsageQuantity: Number(props.reagentTestAvailability?.[String(test.id)]?.film_usage_quantity ?? 0),
     // include extra searchable fields
     alt: [test.test_name, test.short_name ?? '', test.charge_name ?? ''].filter(Boolean).join(' | '),
   });
@@ -2381,13 +3672,9 @@ const filteredItems = computed(() => {
     // If user typed tokens, perform a global name-based match across all items
     // so typing a name will show matching items even when no category selected.
     if (tokens.length > 0) {
-      const tokenMatchesAll = allAvailableItems.value.filter((item) => {
-        try {
-          const hay = normalizeForMatch(((item.name || '') + ' ' + (item.alt || '')));
-          if (!normalizedTokens.length) return false;
-          return normalizedTokens.every((tok) => hay.includes(tok));
-        } catch (e) { return false; }
-      });
+      const tokenMatchesAll = allAvailableItems.value.filter((item) =>
+        normalizedTokens.length > 0 && normalizedTokens.every((token) => item.searchText.includes(token))
+      );
 
       // Prefer token matches that also match the selected category.
       // Do NOT fall back to tokenMatchesAll when a category is selected;
@@ -2513,34 +3800,6 @@ const filteredItems = computed(() => {
       // Removed broad serialized-object fallback to avoid false-positive matches
     }
 
-    // Debugging: log available categories and matches for troubleshooting
-    try {
-      const availableCats = Array.from(new Set(allAvailableItems.value.map(i => String(i.category || '').trim()).filter(Boolean)));
-      if (selectedCategory === 'disposable' || itemsToFilter.length === 0) {
-        // debug log removed
-      }
-
-      // If user selected a category but no matches found, try to refresh
-      // server-side props once for this category so newly created items
-      // (created in a different admin UI) become available in `allAvailableItems`.
-      try {
-              if (selectedCategory && itemsToFilter.length === 0) {
-          const key = String(selectedCategory).toLowerCase();
-          if (!attemptedPropsReload.value[key]) {
-            attemptedPropsReload.value[key] = true;
-            // debug log removed
-            try {
-              // Force a fresh props fetch (do not preserve state) so newly-created
-              // charges/items become available to this page.
-                    router.reload({ only: ['pathologyAndRadiologyTests','medicineInventories'], preserveState: false, preserveScroll: false, onSuccess: (page) => {
-                try { window.__billing_debug.latest.items = allAvailableItems.value; } catch(e){}
-                // debug log removed
-              } });
-            } catch (e) { /* console.warn removed */ }
-          }
-        }
-      } catch (e) {}
-    } catch (e) { /* console.warn removed */ }
   } else {
     // Reuse pre-built unified list to avoid rebuilding arrays on every computed evaluation
     itemsToFilter = allAvailableItems.value;
@@ -2550,22 +3809,21 @@ const filteredItems = computed(() => {
   if (!tokens.length) return itemsToFilter;
 
   // Match items where every token appears in either the name or alt fields
-  if (!normalizedTokens.length) return itemsToFilter;
+  if (!normalizedTokens.length) return [];
   
   // Filter items that match the search query
   const matchedItems = itemsToFilter.filter((item) => {
-    const hay = normalizeForMatch(((item.name || '') + ' ' + (item.alt || '')));
-    return normalizedTokens.every((tok) => hay.includes(tok));
+    return normalizedTokens.every((token) => item.searchText.includes(token));
   });
 
   // Smart sorting: prioritize by match quality and position
   const normalizedQuery = normalizeForMatch(rawQuery);
   
   return matchedItems.sort((a, b) => {
-    const normalizedAName = normalizeForMatch(a.name || '');
-    const normalizedAAlt = normalizeForMatch(a.alt || '');
-    const normalizedBName = normalizeForMatch(b.name || '');
-    const normalizedBAlt = normalizeForMatch(b.alt || '');
+    const normalizedAName = a.searchName;
+    const normalizedAAlt = a.searchAlt;
+    const normalizedBName = b.searchName;
+    const normalizedBAlt = b.searchAlt;
     
     // Helper function to calculate match score
     const getMatchScore = (itemName, itemAlt) => {
@@ -2606,19 +3864,10 @@ const filteredItems = computed(() => {
   });
 });
 
-// Dynamic style for items container: grows with number of items, enables scroll after a max height
-const itemsContainerStyle = computed(() => {
-  const itemRowHeight = 38; // approx row height in px
-  const headerHeight = 48; // header + padding
-  const calculated = headerHeight + items.value.length * itemRowHeight;
-  const maxAllowed = 600;
-  const height = Math.min(calculated, maxAllowed);
-  const overflow = calculated > maxAllowed ? 'auto' : 'visible';
-  return {
-    maxHeight: `${height}px`,
-    overflowY: overflow,
-    transition: 'max-height 200ms ease',
-  };
+watch(filteredItems, (matches) => {
+  if (searchQuery.value && matches.length > 0 && selectedIndex.value < 0) {
+    selectedIndex.value = 0;
+  }
 });
 
 const addItem = () => {
@@ -2629,30 +3878,44 @@ const addItem = () => {
     return;
   }
 
-  if (itemForm.value.category.toLowerCase() !== "medicine") {
-    const existingItem = items.value.find(
-      (item) =>
-        item.name === itemForm.value.itemName && item.category === itemForm.value.category
-    );
+  const selectedCategory = String(itemForm.value.category || '').trim().toLowerCase();
+  const selectedId = Number(itemForm.value.itemId);
+  const existingItem = items.value.find((item) => {
+    const existingCategory = String(item.category || '').trim().toLowerCase();
+    const sameCategory = existingCategory === selectedCategory;
+    const sameId = Number.isFinite(selectedId)
+      && selectedId > 0
+      && Number(item.id) === selectedId;
 
-    if (existingItem) {
-      displayWarning({ message: "This item has already been added to the cart." });
-      itemForm.value = {
-        category: "",
-        itemName: "",
-        itemId: null,
-        unitPrice: 0,
-        quantity: 1,
-        totalAmount: 0,
-      };
-      itemNameInput.value.focus();
-      return;
-    }
+    return sameCategory && (
+      sameId
+      || String(item.name || '').trim().toLowerCase() === String(itemForm.value.itemName || '').trim().toLowerCase()
+    );
+  });
+
+  if (existingItem) {
+    const duplicateItemName = itemForm.value.itemName;
+    requestMedicineSearch.cancel();
+    medicineSearchController?.abort();
+    medicineSearchResults.value = [];
+    medicineSearchLoading.value = false;
+    itemForm.value.category = '';
+    itemForm.value.itemName = '';
+    itemForm.value.itemId = null;
+    itemForm.value.unitPrice = 0;
+    itemForm.value.totalAmount = 0;
+    searchQuery.value = '';
+    selectedIndex.value = -1;
+    displayWarning({
+      message: `"${duplicateItemName}" is already in the bill. Duplicate items cannot be added.`,
+    });
+    itemNameInput.value?.focus();
+    return;
   }
 
   if (itemForm.value.category.toLowerCase() === "medicine") {
-    const selectedMedicine = props.medicineInventories.find(
-      (medicine) => medicine.medicine_name === itemForm.value.itemName
+    const selectedMedicine = medicineSearchResults.value.find(
+      (medicine) => Number(medicine.id) === Number(itemForm.value.itemId)
     );
 
     if (selectedMedicine) {
@@ -2672,20 +3935,74 @@ const addItem = () => {
     }
   }
 
+  const selectedInventoryItem = allAvailableItems.value.find(
+    (availableItem) => Number(availableItem.id) === Number(itemForm.value.itemId)
+      && availableItem.name === itemForm.value.itemName
+      && availableItem.category === itemForm.value.category
+  );
+  if (selectedInventoryItem?.type === 'store') {
+    const requestedQuantity = Number(itemForm.value.quantity || 0);
+    if (requestedQuantity > Number(selectedInventoryItem.stock || 0)) {
+      displayWarning({
+        message: `Only ${Number(selectedInventoryItem.stock || 0).toFixed(2)} ${selectedInventoryItem.stockUnit || 'units'} available in ${selectedInventoryItem.departmentName || 'department'} stock.`,
+      });
+      return;
+    }
+  }
+
+  let reagentTestsRemainingAfterAdd = null;
+  if (
+    selectedInventoryItem?.type === 'test'
+    && isReagentTrackedTestCategory(selectedInventoryItem.category)
+    && selectedInventoryItem.reagentRemainingTests !== null
+  ) {
+    const quantityInCart = items.value
+      .filter((item) => Number(item.id) === Number(selectedInventoryItem.id)
+        && String(item.category).toLowerCase() === String(selectedInventoryItem.category).toLowerCase())
+      .reduce((total, item) => total + Number(item.quantity || 0), 0);
+    const availableForThisBill = Math.max(0, selectedInventoryItem.reagentRemainingTests - quantityInCart);
+    const requestedQuantity = Number(itemForm.value.quantity || 0);
+
+    if (requestedQuantity > availableForThisBill) {
+      displayWarning({
+        message: `Only ${availableForThisBill} ${availableForThisBill === 1 ? 'test' : 'tests'} can be performed with current Lab reagent stock for "${selectedInventoryItem.name}". Send more stock to Lab before billing.`,
+      });
+      return;
+    }
+
+    reagentTestsRemainingAfterAdd = Math.max(0, availableForThisBill - requestedQuantity);
+  }
+
   items.value.push({
     id: itemForm.value.itemId,
     name: itemForm.value.itemName,
     category: itemForm.value.category,
-    type: (allAvailableItems.value.find(i => i.id === itemForm.value.itemId) || {}).type || '',
+    type: selectedInventoryItem?.type || '',
+    stock: selectedInventoryItem?.stock ?? null,
+    stockUnit: selectedInventoryItem?.stockUnit || '',
+    stockCategory: selectedInventoryItem?.stockCategory || '',
+    department_id: selectedInventoryItem?.department_id ?? null,
+    departmentName: selectedInventoryItem?.departmentName || '',
+    reagentFilmCategory: selectedInventoryItem?.reagentFilmCategory ?? null,
+    reagentFilmUsageQuantity: Number(selectedInventoryItem?.reagentFilmUsageQuantity ?? 0),
     unitPrice: parseFloat(itemForm.value.unitPrice),
-    referral_percentage: (allAvailableItems.value.find(i => i.id === itemForm.value.itemId) || {}).referral_percentage ?? 0,
-    roomNo: (allAvailableItems.value.find(i => i.id === itemForm.value.itemId) || {}).room_no ?? '',
+    referral_percentage: selectedInventoryItem?.referral_percentage ?? 0,
+    roomNo: selectedInventoryItem?.room_no ?? '',
     quantity: parseFloat(itemForm.value.quantity),
     totalAmount: parseFloat(itemForm.value.totalAmount),
     discount: 0,
+    discountExempt: Boolean(selectedInventoryItem?.discountExempt),
+    discountPercentage: Number(selectedInventoryItem?.discountPercentage || 0),
+    discountRateLocked: Boolean(selectedInventoryItem?.discountRateLocked),
     rugound: 0,
     netAmount: parseFloat(itemForm.value.totalAmount),
   });
+
+  if (reagentTestsRemainingAfterAdd !== null && reagentTestsRemainingAfterAdd <= 20) {
+    displayWarning({
+      message: `Low Lab reagent stock for "${selectedInventoryItem.name}": about ${reagentTestsRemainingAfterAdd} ${reagentTestsRemainingAfterAdd === 1 ? 'test' : 'tests'} will remain after this bill.`,
+    });
+  }
 
   itemForm.value = {
     category: "",
@@ -2704,35 +4021,102 @@ const addItem = () => {
 };
 
 const removeItem = (index) => {
+  if (editingQuantityIndex.value === index) {
+    editingQuantityIndex.value = null;
+    editedQuantity.value = '';
+  }
   items.value.splice(index, 1);
   updateSummary();
 };
 
+const startEditingItemQuantity = (index) => {
+  editingQuantityIndex.value = index;
+  editedQuantity.value = String(items.value[index]?.quantity ?? 1);
+  nextTick(() => {
+    const input = document.querySelector(`[data-bill-quantity-index="${index}"]`);
+    input?.focus();
+    input?.select();
+  });
+};
+
+const commitItemQuantity = (index) => {
+  if (editingQuantityIndex.value !== index) return;
+
+  const item = items.value[index];
+  const quantity = Number(editedQuantity.value);
+  if (!item || !Number.isInteger(quantity) || quantity < 1) {
+    displayWarning({ message: 'Quantity must be a whole number greater than zero.' });
+    editedQuantity.value = String(item?.quantity ?? 1);
+    return;
+  }
+
+  if (item.type === 'medicine' || item.type === 'store') {
+    const otherQuantity = items.value.reduce((total, cartItem, cartIndex) =>
+      cartIndex !== index && Number(cartItem.id) === Number(item.id)
+        ? total + Number(cartItem.quantity || 0)
+        : total, 0);
+    const available = Number(item.stock || 0) - otherQuantity;
+    if (quantity > available) {
+      displayWarning({
+        message: `Only ${Math.max(0, available)} ${item.type === 'store' ? (item.stockUnit || 'units') : 'units'} available in stock.`,
+      });
+      editedQuantity.value = String(item.quantity);
+      return;
+    }
+  }
+
+  item.quantity = quantity;
+  item.totalAmount = Number((Number(item.unitPrice || 0) * quantity).toFixed(2));
+  editingQuantityIndex.value = null;
+  editedQuantity.value = '';
+  updateSummary();
+};
+
+const cancelItemQuantityEdit = () => {
+  editingQuantityIndex.value = null;
+  editedQuantity.value = '';
+};
+
 const normalizeText = (value) => String(value ?? '').trim().toLowerCase();
-
-// Normalize for matching: remove non-alphanumeric, collapse spaces, lowercase
-const normalizeForMatch = (v) => {
-  if (v == null) return '';
-  return String(v)
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-};
-
-const isDisposableValue = (v) => {
-  if (v == null) return false;
-  try {
-    const s = String(v).toLowerCase();
-    return /dispos|ডিসপ/.test(s);
-  } catch (e) { return false; }
-};
 
 const isDisposableBillingItem = (item) => {
   if (!item) return false;
   if (item.is_disposable || isDisposableValue(item.category)) return true;
   const name = String(item.name || '').toLowerCase();
   return /dispos|tube|butterfly|needle/.test(name);
+};
+
+const isDiscountExemptBillingItem = (item) => {
+  if (Boolean(item?.discountExempt || item?.discount_exempt)) {
+    return true;
+  }
+
+  const locked = Boolean(item?.discountRateLocked || item?.discount_rate_locked);
+  const percent = Number(item?.discountPercentage ?? item?.discount_percentage ?? 0);
+
+  return locked && percent <= 0;
+};
+
+const getDisplayedItemDiscountPercent = (item) => {
+  if (isDisposableBillingItem(item) || isDiscountExemptBillingItem(item)) return 0;
+
+  if (summary.value.discountType === 'flat') {
+    const totalAmount = Number(item?.totalAmount || 0);
+    return totalAmount > 0 ? (Number(item?.discount || 0) / totalAmount) * 100 : 0;
+  }
+
+  const billPercent = Math.max(0, Number(summary.value.discount || 0));
+  if (billPercent <= 0) {
+    return 0;
+  }
+
+  const itemPercent = Math.max(0, Number(item?.discountPercentage ?? item?.discount_percentage ?? 0));
+  if (itemPercent > 0) {
+    return Math.min(billPercent, itemPercent);
+  }
+
+  const categoryCap = resolveCategoryDiscountCap(item?.category);
+  return categoryCap === null ? billPercent : Math.min(billPercent, categoryCap);
 };
 
 // Smart sorting helper for search results
@@ -2804,6 +4188,7 @@ const addPrescriptionTestsToItems = (tests = []) => {
     name: String(test.test_name ?? '').trim(),
     category: String(test.category_type ?? 'Pathology').trim(),
     unitPrice: Number(test.amount ?? 0),
+    room_no: test.room_no ?? '',
     referral_percentage: test.referral_percentage ?? 0,
   }));
 
@@ -2839,8 +4224,10 @@ const addPrescriptionTestsToItems = (tests = []) => {
       name: matched.name,
       category: matched.category,
       unitPrice: matched.unitPrice,
-      roomNo: matched.room_no || '',
+      roomNo: resolveCategoryRoomNumber(matched.category, matched.room_no || ''),
       referral_percentage: matched.referral_percentage ?? 0,
+      discountPercentage: Number(matched.discount_percentage ?? 0),
+      discountRateLocked: Boolean(matched.discount_rate_locked),
       quantity: 1,
       totalAmount: matched.unitPrice,
       discount: 0,
@@ -2859,6 +4246,56 @@ const addPrescriptionTestsToItems = (tests = []) => {
   return { addedCount, skippedCount };
 };
 
+const addPrescriptionMedicinesToItems = (medicines = []) => {
+  let addedCount = 0;
+  let skippedCount = 0;
+
+  medicines.forEach((medicine) => {
+    const medicineId = Number(medicine?.medicine_id || 0);
+    const medicineName = String(medicine?.medicine_name || '').trim();
+    const quantity = Math.max(1, Number(medicine?.quantity || 1));
+    const availableQuantity = Number(medicine?.available_quantity || 0);
+    const unitPrice = Number(medicine?.sale_price || 0);
+
+    if (!medicineId || !medicineName || quantity > availableQuantity) {
+      skippedCount += 1;
+      return;
+    }
+
+    const alreadyAdded = items.value.some((item) => (
+      String(item.category || '').toLowerCase() === 'medicine'
+      && Number(item.id) === medicineId
+    ));
+    if (alreadyAdded) {
+      skippedCount += 1;
+      return;
+    }
+
+    const totalAmount = unitPrice * quantity;
+    items.value.push({
+      id: medicineId,
+      name: medicineName,
+      category: 'Medicine',
+      unitPrice,
+      stock: availableQuantity,
+      quantity,
+      totalAmount,
+      discountPercentage: 0,
+      discountRateLocked: false,
+      discount: 0,
+      rugound: 0,
+      netAmount: totalAmount,
+    });
+    addedCount += 1;
+  });
+
+  if (addedCount > 0) {
+    updateSummary();
+  }
+
+  return { addedCount, skippedCount };
+};
+
 const searchPrescriptionCharge = async () => {
   const trimmedId = String(prescriptionSearchId.value ?? '').trim();
   if (!trimmedId) {
@@ -2867,6 +4304,8 @@ const searchPrescriptionCharge = async () => {
   }
 
   prescriptionSearchLoading.value = true;
+  prescriptionIpdPatientId.value = null;
+  prescriptionIpdPrescriptionId.value = null;
 
   try {
     const endpoint = route('backend.billing.prescriptions.search');
@@ -2885,16 +4324,29 @@ const searchPrescriptionCharge = async () => {
     }
 
     applyPrescriptionPatient(payload?.patient);
-    const { addedCount = 0, skippedCount = 0 } = addPrescriptionTestsToItems(payload?.tests || []) || {};
+    prescriptionIpdPatientId.value = payload?.ipd_patient_id ?? null;
+    prescriptionIpdPrescriptionId.value = payload?.ipd_prescription_id ?? null;
+
+    const { addedCount = 0, skippedCount = 0 } = props.isPharmacyDepartment
+      ? addPrescriptionMedicinesToItems(payload?.medicines || [])
+      : addPrescriptionTestsToItems(payload?.tests || []);
 
     if (addedCount === 0) {
-      displayWarning({ message: 'Prescription থেকে নতুন কোনো test add করা যায়নি।' });
+      displayWarning({
+        message: props.isPharmacyDepartment
+          ? 'Prescription থেকে কোনো medicine যোগ করা যায়নি।'
+          : 'Prescription থেকে নতুন কোনো test add করা যায়নি।',
+      });
       return;
     }
 
     const source = payload?.source ? ` (${payload.source})` : '';
     const skipText = skippedCount > 0 ? `, ${skippedCount} skip` : '';
-    displayResponse({ message: `${addedCount}টি test auto add হয়েছে${source}${skipText}.` });
+    displayResponse({
+      message: props.isPharmacyDepartment
+        ? `${addedCount}টি medicine auto add হয়েছে${source}${skipText}.`
+        : `${addedCount}টি test auto add হয়েছে${source}${skipText}.`,
+    });
 
     // Reset input after successful load for faster next scan/search.
     prescriptionSearchId.value = '';
@@ -2957,7 +4409,7 @@ const handlePrescriptionBlur = () => {
 };
 
 const selectPrescriptionSuggestion = (suggestion) => {
-  prescriptionSearchId.value = String(suggestion?.id ?? '').trim();
+prescriptionSearchId.value = String(suggestion?.search_value ?? suggestion?.id ?? '').trim();
   showPrescriptionSuggestions.value = false;
   searchPrescriptionCharge();
 };
@@ -2969,6 +4421,7 @@ const normalizeDiscountInputsByLimit = () => {
     : 0;
   const totalWithVat = total + vatAmount;
   const maxPercent = Number(maxBillingDiscountPercent.value) || 0;
+  const maxFlatCap = Number(maxAllowedFlatDiscountAmount.value) || 0;
 
   if (totalWithVat <= 0) {
     summary.value.discount = 0;
@@ -2977,37 +4430,44 @@ const normalizeDiscountInputsByLimit = () => {
   }
 
   const maxDiscountAmount = (totalWithVat * maxPercent) / 100;
+  const effectivePercentLimit = effectiveBillingDiscountPercentLimit.value;
   const discountType = summary.value.discountType;
   const rawDiscount = Math.max(0, Number(summary.value.discount) || 0);
   const rawExtra = Math.max(0, Number(summary.value.extraFlatDiscount) || 0);
 
   if (discountType === 'percentage') {
-    const safePercent = Math.min(rawDiscount, maxPercent);
-    const discountAmount = (total * safePercent) / 100;
-    const allowedExtra = Math.max(0, maxDiscountAmount - discountAmount);
+    const safePercent = Math.min(rawDiscount, effectivePercentLimit || maxPercent);
 
     if (summary.value.discount !== safePercent) {
       summary.value.discount = safePercent;
     }
-    if (summary.value.extraFlatDiscount !== Math.min(rawExtra, allowedExtra)) {
-      summary.value.extraFlatDiscount = Math.min(rawExtra, allowedExtra);
+
+    // Percentage discount and extra flat discount are independent fields.
+    // Never auto-create an extra flat discount from the percentage cap,
+    // otherwise edit mode double-counts the same discount.
+    const normalizedExtra = Math.min(rawExtra, maxFlatCap || maxDiscountAmount || totalWithVat);
+    if (rawExtra > 0 && summary.value.extraFlatDiscount !== normalizedExtra) {
+      summary.value.extraFlatDiscount = normalizedExtra;
+    } else if (rawExtra <= 0 && summary.value.extraFlatDiscount !== 0) {
+      summary.value.extraFlatDiscount = 0;
     }
     return;
   }
 
-  const safeFlatDiscount = Math.min(rawDiscount, maxDiscountAmount);
+  const safeFlatDiscount = Math.min(rawDiscount, maxFlatCap || maxDiscountAmount, totalWithVat);
   const allowedExtra = Math.max(0, maxDiscountAmount - safeFlatDiscount);
 
   if (summary.value.discount !== safeFlatDiscount) {
     summary.value.discount = safeFlatDiscount;
   }
-  if (summary.value.extraFlatDiscount !== Math.min(rawExtra, allowedExtra)) {
-    summary.value.extraFlatDiscount = Math.min(rawExtra, allowedExtra);
+  const normalizedExtra = Math.min(rawExtra, allowedExtra);
+  if (summary.value.extraFlatDiscount !== normalizedExtra) {
+    summary.value.extraFlatDiscount = normalizedExtra;
   }
 };
 
 const discountableItemsTotal = () => items.value.reduce(
-  (sum, item) => sum + (isDisposableBillingItem(item) ? 0 : Number(item.totalAmount || 0)),
+  (sum, item) => sum + (isDisposableBillingItem(item) || isDiscountExemptBillingItem(item) ? 0 : Number(item.totalAmount || 0)),
   0
 );
 
@@ -3041,30 +4501,108 @@ const updateSummary = () => {
 
   const amountToDiscount = totalWithVat.value;
   const discountableTotal = items.value.reduce(
-    (sum, item) => sum + (isDisposableBillingItem(item) ? 0 : item.totalAmount),
+    (sum, item) => sum + (isDisposableBillingItem(item) || isDiscountExemptBillingItem(item) ? 0 : Number(item.totalAmount || 0)),
+    0
+  );
+  const maxAllowedFlatValue = Number(maxAllowedFlatDiscountAmount.value) || 0;
+  const flatDiscountableTotal = items.value.reduce(
+    (sum, item) => sum + (isDisposableBillingItem(item) || isDiscountExemptBillingItem(item) ? 0 : Number(item.totalAmount || 0)),
     0
   );
   let discountAmount = 0;
 
+  const computeEffectiveItemDiscountPercent = (item) => {
+    if (isDisposableBillingItem(item) || isDiscountExemptBillingItem(item)) {
+      return 0;
+    }
+
+    const categoryLimit = resolveCategoryDiscountCap(item.category);
+    const basePercent = Math.max(0, Number(summary.value.discount) || 0);
+    const itemLimit = Math.min(100, Math.max(0, Number(item.discountPercentage || 0)));
+
+    if (summary.value.discountType === 'percentage') {
+      const percentWithItemRate = itemLimit > 0
+        ? (basePercent > 0 ? Math.min(basePercent, itemLimit) : itemLimit)
+        : (basePercent > 0 ? basePercent : 0);
+
+      if (!categoryDiscountCapEnabled.value || categoryLimit === null) {
+        return percentWithItemRate;
+      }
+
+      return Math.min(percentWithItemRate, categoryLimit);
+    }
+
+    if (itemLimit > 0) {
+      return basePercent > 0 ? Math.min(basePercent, itemLimit) : itemLimit;
+    }
+
+    if (!categoryDiscountCapEnabled.value || categoryLimit === null) {
+      return 0;
+    }
+
+    return Math.min(basePercent, categoryLimit);
+  };
+
   if (summary.value.discountType === "percentage") {
-    discountAmount = (discountableTotal * summary.value.discount) / 100;
+    const enteredPercent = Math.min(
+      Math.max(0, Number(summary.value.discount) || 0),
+      effectiveBillingDiscountPercentLimit.value || Number(maxBillingDiscountPercent.value) || 100
+    );
+
+    const categoryAdjustedDiscountAmount = items.value.reduce((sum, item) => {
+      if (isDisposableBillingItem(item) || isDiscountExemptBillingItem(item)) {
+        return sum;
+      }
+
+      const itemPercent = computeEffectiveItemDiscountPercent(item);
+
+      return sum + (Number(item.totalAmount || 0) * itemPercent) / 100;
+    }, 0);
+
+    discountAmount = Math.min(amountToDiscount, categoryAdjustedDiscountAmount);
   } else {
-    discountAmount = Math.min(parseFloat(summary.value.discount) || 0, discountableTotal);
+    const enteredFlatDiscount = Math.max(0, parseFloat(summary.value.discount) || 0);
+    const safeFlatDiscount = Math.min(enteredFlatDiscount, maxAllowedFlatValue || flatDiscountableTotal, flatDiscountableTotal, amountToDiscount);
+    discountAmount = safeFlatDiscount;
   }
 
-  const totalDiscountAmount = discountAmount + parseFloat(summary.value.extraFlatDiscount || 0);
+  // Extra Discount is a separate flat amount and must apply in both discount modes.
+  const totalDiscountAmount = Math.max(
+    0,
+    discountAmount + parseFloat(summary.value.extraFlatDiscount || 0)
+  );
   const finalDiscountAmount = Math.min(totalDiscountAmount, amountToDiscount);
-  const eligibleItemCount = items.value.filter((item) => !isDisposableBillingItem(item)).length;
-  const equalFlatItemDiscount = eligibleItemCount > 0
-    ? Math.min(discountAmount, discountableTotal) / eligibleItemCount
-    : 0;
+  const flatDiscountCapacity = (item) => {
+    if (isDisposableBillingItem(item) || isDiscountExemptBillingItem(item)) return 0;
+
+    const itemTotal = Number(item.totalAmount || 0);
+    const itemPercent = Math.min(100, Math.max(0, Number(item.discountPercentage || 0)));
+    const isLocked = Boolean(item.discountRateLocked || item.discount_rate_locked);
+    if (isLocked && itemPercent <= 0) {
+      return 0;
+    }
+    const categoryCap = resolveCategoryDiscountCap(item.category);
+    const effectivePercent = isLocked
+      ? itemPercent
+      : itemPercent > 0
+        ? itemPercent
+        : (categoryDiscountCapEnabled.value && categoryCap !== null ? categoryCap : maxBillingDiscountPercent.value);
+
+    return (itemTotal * effectivePercent) / 100;
+  };
+  const totalFlatDiscountCapacity = items.value.reduce(
+    (sum, item) => sum + flatDiscountCapacity(item),
+    0
+  );
 
   items.value = items.value.map((item) => {
-    const itemDiscount = isDisposableBillingItem(item)
+    const itemDiscount = isDisposableBillingItem(item) || isDiscountExemptBillingItem(item)
       ? 0
       : summary.value.discountType === "percentage"
-        ? (item.totalAmount * summary.value.discount) / 100
-        : equalFlatItemDiscount;
+        ? (item.totalAmount * computeEffectiveItemDiscountPercent(item)) / 100
+        : (totalFlatDiscountCapacity > 0
+          ? Math.min(discountAmount * flatDiscountCapacity(item) / totalFlatDiscountCapacity, flatDiscountCapacity(item))
+          : 0);
     return {
       ...item,
       discount: itemDiscount,
@@ -3138,8 +4676,14 @@ const handleKeyDown = (event, fieldName) => {
       if (selectedIndex.value !== -1 && filteredItems.value[selectedIndex.value]) {
         selectItem(filteredItems.value[selectedIndex.value]);
       }
+      requestMedicineSearch.cancel();
+      medicineSearchController?.abort();
+      medicineSearchLoading.value = false;
       searchQuery.value = "";
     } else if (event.key === "Escape") {
+      requestMedicineSearch.cancel();
+      medicineSearchController?.abort();
+      medicineSearchLoading.value = false;
       selectedIndex.value = -1;
       searchQuery.value = "";
     }
@@ -3157,6 +4701,12 @@ const handleKeyDown = (event, fieldName) => {
 const setCategory = (category) => {
   const cat = String(category ?? '').trim();
   itemForm.value.category = cat;
+  requestMedicineSearch.cancel();
+  medicineSearchController?.abort();
+  medicineSearchResults.value = [];
+  medicineSearchLoading.value = false;
+  medicineSearchError.value = false;
+  searchQuery.value = '';
   // Reset item-specific fields when category changes
   itemForm.value.itemName = '';
   itemForm.value.itemId = null;
@@ -3167,32 +4717,67 @@ const setCategory = (category) => {
   });
 };
 
-// Debounced setter to reduce recomputation while user types rapidly
-const debouncedSetSearchQuery = debounce((val) => {
-  console.log('[BillingPage] debouncedSetSearchQuery ->', val);
-  searchQuery.value = val;
+const openItemChargeCreate = () => {
+  showItemChargeModal.value = true;
+};
 
-  nextTick(() => {
-    try {
-      if (filteredItems.value && filteredItems.value.length > 0) {
-        selectedIndex.value = 0;
+const closeItemChargeModal = () => {
+  showItemChargeModal.value = false;
+};
 
-        // Do not auto-change category while typing — leave selection to the user.
-      }
-    } catch (e) {
-      console.warn('[BillingPage] auto-select category error', e);
-    }
+const goToItemChargeList = () => {
+  closeItemChargeModal();
+  router.visit(route('backend.itemcharge.index'));
+};
+
+const handleItemChargeCreated = () => {
+  showItemChargeModal.value = false;
+  router.reload({
+    only: ['pathologyAndRadiologyTests'],
+    preserveState: true,
+    preserveScroll: true,
   });
+};
+
+const requestMedicineSearch = debounce(async (query) => {
+  medicineSearchController?.abort();
+  const controller = new AbortController();
+  medicineSearchController = controller;
+
+  try {
+    const response = await axios.get(route('backend.billing.medicines.search'), {
+      params: { search: query },
+      signal: controller.signal,
+    });
+    if (searchQuery.value.trim() !== query) return;
+    if (!Array.isArray(response.data)) {
+      throw new Error('Medicine search returned an invalid response.');
+    }
+    medicineSearchResults.value = response.data;
+  } catch (error) {
+    if (error.name !== 'CanceledError' && error.name !== 'AbortError') {
+      if (searchQuery.value.trim() === query) {
+        medicineSearchResults.value = [];
+        medicineSearchError.value = true;
+      }
+    }
+  } finally {
+    if (searchQuery.value.trim() === query) {
+      medicineSearchLoading.value = false;
+    }
+  }
 }, 180);
 
-// Handle typing in the item name input: update debounced search query
 const handleItemInput = (event) => {
   const q = String(event.target.value ?? '').trim();
-  console.log('[BillingPage] handleItemInput ->', q);
   selectedIndex.value = -1;
 
   if (q === '') {
-    try { debouncedSetSearchQuery.cancel && debouncedSetSearchQuery.cancel(); } catch (e) {}
+    requestMedicineSearch.cancel();
+    medicineSearchController?.abort();
+    medicineSearchResults.value = [];
+    medicineSearchLoading.value = false;
+    medicineSearchError.value = false;
     // Do not clear selected category when input is emptied by user — preserve category
     itemForm.value.itemName = '';
     itemForm.value.itemId = null;
@@ -3201,8 +4786,12 @@ const handleItemInput = (event) => {
     selectedIndex.value = -1;
     return;
   }
-
-  debouncedSetSearchQuery(q);
+  searchQuery.value = q;
+  medicineSearchController?.abort();
+  medicineSearchResults.value = [];
+  medicineSearchError.value = false;
+  medicineSearchLoading.value = true;
+  requestMedicineSearch(q);
 };
 
 // Debug: watch searchQuery to see when it updates
@@ -3237,6 +4826,7 @@ const debugFormState = () => {
 
 const initializeEditMode = () => {
   if (props.id && props.editData) {
+    isInitializingEditMode.value = true;
     isEditMode.value = true;
 
     const lastPaymentType = props.editData.payment_type || props.editData.pay_mode || "Cash";
@@ -3299,6 +4889,7 @@ const initializeEditMode = () => {
       }
     }
 
+    let editAverageDiscountPercentage = 0;
     if (props.editData.items) {
       items.value = props.editData.items.map((item) => {
         // try to find item-level referral percentage from available props
@@ -3307,9 +4898,7 @@ const initializeEditMode = () => {
           const foundTest = (props.pathologyAndRadiologyTests || []).find(t => t.id == item.id);
           if (foundTest) refPercent = foundTest.referral_percentage ?? 0;
           else {
-            const foundMed = (props.medicineInventories || []).find(m => m.id == item.id);
-            if (foundMed) refPercent = foundMed.referral_percentage ?? 0;
-            else refPercent = item.referral_percentage ?? 0;
+            refPercent = item.referral_percentage ?? 0;
           }
         } catch (e) {
           refPercent = item.referral_percentage ?? 0;
@@ -3318,11 +4907,14 @@ const initializeEditMode = () => {
         return {
           id: item.id,
           name: item.name,
-          category: item.category,
+          category: normalizeBillingItemCategory(item.category, item.name),
           unitPrice: parseFloat(item.unit_price),
           quantity: parseFloat(item.quantity),
           totalAmount: parseFloat(item.total_amount),
           discount: item.discount || 0,
+          discountExempt: Boolean(item.discount_exempt),
+          discountPercentage: Number(item.discount_percentage ?? (props.pathologyAndRadiologyTests || []).find(t => t.id == item.id)?.discount_percentage ?? 0),
+          discountRateLocked: Boolean(item.discount_rate_locked),
           rugound: item.rugound || 0,
           netAmount: parseFloat(item.net_amount),
           referral_percentage: refPercent,
@@ -3330,49 +4922,27 @@ const initializeEditMode = () => {
         };
       });
 
-    // Fallback: if user selected 'disposable' but nothing matched, do a broader scan
-    try {
-      if (selectedCategory.includes('dispos') && itemsToFilter.length === 0) {
-        const fallback = allAvailableItems.value.filter(it => {
-          try {
-            const lname = String(it.name || '').toLowerCase();
-            const lalt = String(it.alt || '').toLowerCase();
-            if (lname.includes('dispos') || lalt.includes('dispos') || /ডিসপ/.test(lname) || /ডিসপ/.test(lalt)) return true;
-
-            // inspect any string/number property for the substring
-            const anyStringMatch = Object.values(it || {}).some(v => (typeof v === 'string' || typeof v === 'number') && /dispos|ডিসপ/i.test(String(v)));
-            if (anyStringMatch) return true;
-
-            // inspect keys: if a property name includes 'dispos' and its value is truthy (covers boolean flags)
-            const anyKeyFlag = Object.keys(it || {}).some(k => /dispos|ডিসপ/i.test(String(k)) && Boolean(it[k]));
-            if (anyKeyFlag) return true;
-
-            return false;
-          } catch (e) { return false; }
-        });
-        if (fallback.length > 0) {
-          console.log('[BillingPage] disposable fallback matched', { count: fallback.length, sample: fallback.slice(0,8) });
-          itemsToFilter = fallback;
-        }
-      }
-    } catch (e) { console.warn('[BillingPage] disposable fallback failed', e); }
-    // Broad token-based fallback: if no items matched the selected category,
-    // but the user has typed tokens, search across all items by those tokens.
-    try {
-      if ((itemsToFilter || []).length === 0 && tokens.length > 0) {
-        const tokenMatches = allAvailableItems.value.filter((item) => {
-          try {
-            const hay = ((item.name || '') + ' ' + (item.alt || '')).toLowerCase();
-            return tokens.every((tok) => hay.includes(tok));
-          } catch (e) { return false; }
-        });
-        if (tokenMatches.length > 0) {
-          console.log('[BillingPage] token-broad fallback used', { selectedCategory, tokens, count: tokenMatches.length, sample: tokenMatches.slice(0,8) });
-          itemsToFilter = tokenMatches;
-        }
-      }
-    } catch (e) { console.warn('[BillingPage] token-broad fallback failed', e); }
+      const editEligibleSubtotal = items.value.reduce((sum, item) => {
+        return sum + (isDisposableBillingItem(item) || isDiscountExemptBillingItem(item)
+          ? 0
+          : Number(item.totalAmount || 0));
+      }, 0);
+      const editAppliedDiscount = items.value.reduce((sum, item) => {
+        return sum + Number(item.discount || 0);
+      }, 0);
+      editAverageDiscountPercentage = editEligibleSubtotal > 0
+        ? Number(((editAppliedDiscount / editEligibleSubtotal) * 100).toFixed(4))
+        : 0;
     }
+
+    const persistedDiscountValue = Number(props.editData.discount || 0);
+    const persistedDiscountType = String(props.editData.discount_type || 'flat');
+    const legacyPercentEquivalent = persistedDiscountType === 'percentage' && Number(props.editData.total || 0) > 0 && persistedDiscountValue > 100
+      ? Number(((persistedDiscountValue / Number(props.editData.total || 0)) * 100).toFixed(4))
+      : persistedDiscountValue;
+    const restoredDiscount = persistedDiscountType === 'percentage'
+      ? (persistedDiscountValue > 0 ? legacyPercentEquivalent : editAverageDiscountPercentage)
+      : persistedDiscountValue;
 
     const originalPaidAmount = parseFloat(props.editData.paid_amt || 0);
     const existingReturnAmount = parseFloat(props.editData.return_amt || 0);
@@ -3387,10 +4957,10 @@ const initializeEditMode = () => {
     // Only when user explicitly enters a new amount should receivingAmount change
     let receivingAmount = "";
 
-    summary.value = {
+    summary.value = createDefaultSummaryState({
       total: parseFloat(props.editData.total || 0),
-      discount: parseFloat(props.editData.discount || 0),
-      discountType: props.editData.discount_type || "flat",
+      discount: restoredDiscount,
+      discountType: persistedDiscountType,
       extraFlatDiscount: parseFloat(props.editData.extra_flat_discount || 0),
       vatPercentage: parseFloat(props.editData.vat_percentage || 0),
       vatAmount: parseFloat(props.editData.vat_amount || 0),
@@ -3403,7 +4973,9 @@ const initializeEditMode = () => {
       deliveryDate: props.editData.delivery_date || "",
       deliveryTime: props.editData.delivery_time || "",
       remarks: props.editData.remarks || "",
-    };
+    });
+
+    updateSummary();
 
     // Normalize deliveryDate into a `datetime-local` friendly format
     try {
@@ -3439,14 +5011,18 @@ const initializeEditMode = () => {
     billingDate.value = initialBillingDate;
     billingTime.value = initialBillingTime;
     billingDateTouched.value = true;
+
+    nextTick(() => {
+      isInitializingEditMode.value = false;
+    });
   }
 };
 
-const saveBill = (backendInvoice = false) => {
-  console.log('=== SAVE BILL DEBUG ===');
-  console.log('isNewPatient:', isNewPatient.value);
-  console.log('patientForm.patient_id:', patientForm.value.patient_id);
-  console.log('patientSearchQuery:', patientSearchQuery.value);
+const saveBill = async (backendInvoice = false) => {
+  if (!navigator.onLine && !offlineBillingUnlocked.value) {
+    displayWarning({ message: 'অফলাইনে বিল করতে Settings থেকে encrypted offline billing চালু করুন, অথবা ইন্টারনেট সংযোগ ফিরে এলে চেষ্টা করুন।' });
+    return;
+  }
 
   if (!hasOpenCashCounterSession.value) {
     displayWarning({ message: 'কাউন্টার ক্লোজ আছে। বিল করার আগে Counter Start করুন।' });
@@ -3494,39 +5070,34 @@ const saveBill = (backendInvoice = false) => {
 
   const itemsForBackend = items.value.map((item) => ({
     id: item.id,
+    department_id: item.department_id ?? null,
     name: item.name,
     category: (() => {
-      const cat = item.category && String(item.category).trim();
-      if (cat) return cat;
-      // try by id
+      const normalizedCategory = normalizeBillingItemCategory(item.category, item.name);
+      if (normalizedCategory) return normalizedCategory;
       try {
         const byId = allAvailableItems.value.find(i => i.id === item.id);
-        if (byId && byId.category) return byId.category;
+        if (byId && byId.category) return normalizeBillingItemCategory(byId.category, byId.name);
       } catch (e) {}
-      // try by normalized name match
       try {
         const n = normalizeForMatch(item.name || '');
         const byName = (allAvailableItems.value || []).find(i => normalizeForMatch(i.name || '') === n);
-        if (byName && byName.category) return byName.category;
+        if (byName && byName.category) return normalizeBillingItemCategory(byName.category, byName.name);
       } catch (e) {}
-      // fallback
       return 'Service';
     })(),
     unit_price: item.unitPrice,
     quantity: item.quantity,
     total_amount: item.totalAmount,
     discount: item.discount,
+    discount_exempt: Boolean(item.discountExempt),
+    discount_percentage: Number(item.discountPercentage || 0),
+    discount_rate_locked: Boolean(item.discountRateLocked),
     rugound: item.rugound || 0,
     net_amount: item.netAmount,
+    referral_percentage: Number(item.referral_percentage || 0),
     room_no: item.room_no ?? item.roomNo ?? null,
   }));
-
-  try {
-    console.log('itemsForBackend payload:', JSON.parse(JSON.stringify(itemsForBackend || [])));
-    try { console.log('itemsForBackend payload (string):', JSON.stringify(itemsForBackend || [])); } catch(e) {}
-  } catch (e) {
-    console.log('itemsForBackend payload (stringify failed):', itemsForBackend);
-  }
 
   // FIX: Calculate age string properly
   let ageString = '';
@@ -3544,8 +5115,14 @@ const saveBill = (backendInvoice = false) => {
   }
 
   const submittedFlatDiscount = Math.max(0, Number(summary.value.discount) || 0);
+  const normalizedSubmittedDiscount = summary.value.discountType === 'percentage' && Number(summary.value.total || 0) > 0 && Number(summary.value.discount || 0) > 100
+    ? Number(((Number(summary.value.discount || 0) / Number(summary.value.total || 0)) * 100).toFixed(4))
+    : Number(summary.value.discount || 0);
   const formData = {
     is_new_patient: Boolean(isNewPatient.value),
+    pharmacy_mode: props.isPharmacyDepartment,
+    ipd_patient_id: prescriptionIpdPatientId.value,
+    ipd_prescription_id: prescriptionIpdPrescriptionId.value,
     
     patient_id: patientForm.value.patient_id || null,
     patient_mobile: patientForm.value.patientMobile?.trim() || '',
@@ -3561,9 +5138,9 @@ const saveBill = (backendInvoice = false) => {
     total: summary.value.total,
     discount: summary.value.discountType === 'flat'
       ? submittedFlatDiscount
-      : summary.value.discount || 0,
+      : normalizedSubmittedDiscount,
     discount_type: summary.value.discountType,
-    discount_allocation: summary.value.discountType === 'flat' ? 'equal' : 'proportional',
+    discount_allocation: 'proportional',
     extra_flat_discount: summary.value.extraFlatDiscount || 0,
     payable_amount: summary.value.payableAmount,
     paid_amt: paidAmount,
@@ -3667,55 +5244,89 @@ const saveBill = (backendInvoice = false) => {
     // Age is already set above
   }
 
-  console.log('Complete Form Data for Submission:', formData);
-  console.log('Age being sent:', formData.patient_age);
-  console.log('is_new_patient value being sent:', formData.is_new_patient);
-
   // include flag when saving as backend invoice
   if (backendInvoice) {
     formData.backend_invoice = true;
   }
 
-  // If this is Save & Print flow, open a blank tab first so the later
-  // invoice navigation is still treated as a user-initiated popup.
+  const requestId = createOfflineRequestId();
+  const invoiceModule = props.isPharmacyDepartment ? 'pharmacy' : 'billing';
+  formData.print_token = requestId;
+  let submitUrl = '';
+  try {
+    submitUrl = props.id ? route("backend.billing.update", { billing: props.id }) : route("backend.billing.store");
+    if (typeof submitUrl !== 'string' || submitUrl.includes('view-billing-page') || submitUrl.includes('view-billing-list-page')) {
+      throw new Error('Invalid billing route.');
+    }
+  } catch (error) {
+    submitUrl = props.id ? `/billing/${props.id}` : '/billing';
+  }
+
+  const queueBillLocally = async (receiptWindow = null) => {
+    if (props.id) {
+      throw new Error('Existing bills cannot be edited while offline. Reconnect before saving changes.');
+    }
+
+    await saveOfflineBillingRequest({
+      id: requestId,
+      adminId: offlineAdminId.value,
+      url: submitUrl,
+      method: 'POST',
+      data: formData,
+      routeName: 'backend.billing.store',
+      label: props.isPharmacyDepartment ? 'Pharmacy bill' : 'Billing invoice',
+    });
+
+    try {
+      await printOfflineProvisionalReceipt(receiptWindow, requestId, formData);
+    } catch (error) {
+      displayWarning({
+        message: `Bill saved offline, but its print view could not be prepared. ${error instanceof Error ? error.message : ''}`.trim(),
+      });
+    }
+    await refreshOfflineBillingRequests();
+    successMessage('Bill saved on this device. It will sync automatically when internet returns; this is a provisional receipt.');
+    resetAllForms();
+  };
+
+  if (!navigator.onLine) {
+    let receiptWindow = null;
+    if (!backendInvoice) {
+      try {
+        receiptWindow = window.open(window.location.href, '_blank');
+        if (receiptWindow) receiptWindow.opener = null;
+      } catch (error) {
+        receiptWindow = null;
+      }
+    }
+
+    try {
+      await queueBillLocally(receiptWindow);
+    } catch (error) {
+      if (receiptWindow && !receiptWindow.closed) receiptWindow.close();
+      displayWarning({ message: error instanceof Error ? error.message : 'The bill could not be saved offline.' });
+    }
+    return;
+  }
+
+  // Reserve a tab for the invoice, but keep the billing page in front while saving.
   let invoiceWindow = null;
   if (!backendInvoice) {
     try {
-      invoiceWindow = window.open('about:blank', '_blank');
-      try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
+      invoiceWindow = window.open('', '_blank');
+      if (invoiceWindow) {
+        invoiceWindow.opener = null;
+        window.focus();
+      }
     } catch (e) {
       invoiceWindow = null;
     }
-
-    const token = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'pt_' + Date.now();
-    formData.print_token = token;
-
-    let previewUrl = '';
-    try {
-      previewUrl = route('backend.download.invoice', { print_token: token, module: 'billing', fast_open: 1, auto_print: 1 });
-    } catch (e) {
-      previewUrl = `${window.location.origin}/download-invoice?print_token=${encodeURIComponent(token)}&module=billing&fast_open=1&auto_print=1`;
-    }
-
-    if (invoiceWindow) {
-      try {
-        invoiceWindow.location.href = previewUrl;
-      } catch (e) {
-        try { window.open(previewUrl, '_blank'); } catch (ee) { /* ignore */ }
-      }
-    } else {
-      try { window.open(previewUrl, '_blank'); } catch (e) { /* ignore */ }
-    }
   }
-  console.log('invoiceWindow opened (or null):', invoiceWindow);
 
   const form = useForm(formData);
 
     const submitOptions = {
       onSuccess: (response) => {
-        console.log('Save bill success:', response);
-        reloadReferrers();
-
         const flashSuccessMessage = response?.message || response?.data?.message || response?.props?.flash?.successMessage || response?.props?.flash?.message || null;
 
         // Prefer direct invoiceUrl from server if provided
@@ -3732,17 +5343,6 @@ const saveBill = (backendInvoice = false) => {
           }
         }
 
-        if (response?.invoiceUrl) {
-          try {
-            const providedUrl = String(response.invoiceUrl || '');
-            // navigate immediately
-            if (!backendInvoice) {
-              if (!fastInvoiceHtml) {
-                try { if (invoiceWindow && !invoiceWindow.closed) { invoiceWindow.location.href = providedUrl; invoiceWindow.focus(); } else { window.open(providedUrl, '_blank'); } } catch (e) { try { window.open(providedUrl, '_blank'); } catch (ee) { /* ignore */ } }
-              }
-            }
-          } catch (err) { /* ignore */ }
-        }
         if (response?.billId) billId = response.billId;
         if (!billId && response?.data?.billId) billId = response.data.billId;
         if (!billId && response?.data?.data?.billId) billId = response.data.data.billId;
@@ -3752,7 +5352,30 @@ const saveBill = (backendInvoice = false) => {
           try { const parsed = JSON.parse(response); if (parsed?.billId) billId = parsed.billId; } catch (e) { }
         }
 
-        console.log('onSuccess: extracted billId=', billId, 'backendInvoice=', backendInvoice, 'invoiceWindow=', invoiceWindow);
+        if (billId && !backendInvoice && !fastInvoiceHtml) {
+          let invoiceUrl = '';
+          try {
+            invoiceUrl = route('backend.download.invoice', {
+              id: billId,
+              module: invoiceModule,
+              fast_open: 1,
+              auto_print: 1,
+            });
+          } catch (e) {
+            invoiceUrl = `${window.location.origin}/download-invoice?id=${encodeURIComponent(billId)}&module=${encodeURIComponent(invoiceModule)}&fast_open=1&auto_print=1`;
+          }
+
+          try {
+            if (invoiceWindow && !invoiceWindow.closed) {
+              invoiceWindow.location.replace(invoiceUrl);
+            } else {
+              window.open(invoiceUrl, '_blank');
+            }
+          } catch (error) {
+            console.error('Could not navigate to the saved invoice.', error);
+          }
+        }
+
         successMessage(flashSuccessMessage || 'Billing saved successfully.');
 
         // Dispatch dashboard refresh event to update Net Income card
@@ -3770,8 +5393,7 @@ const saveBill = (backendInvoice = false) => {
           console.warn('Failed to dispatch dashboard refresh event:', e);
         }
 
-        // Keep the current billing page open after save so the user stays on the same tab.
-        // The invoice opens in a separate tab and the billing screen should not redirect away.
+        // Keep the current billing page open after a regular save.
         if (billId) {
           const isEditingExistingBill = Boolean(props.id && props.editData);
           if (!isEditingExistingBill) {
@@ -3785,91 +5407,105 @@ const saveBill = (backendInvoice = false) => {
           }
 
           if (!backendInvoice) {
-            let invoiceUrl = '';
-            try { invoiceUrl = route ? route('backend.download.invoice', { id: billId, module: 'billing', fast_open: 1, auto_print: 1 }) : ''; } catch (e) { invoiceUrl = ''; }
-            if (!invoiceUrl) {
-              try { invoiceUrl = `${window.location.origin}/download-invoice?id=${encodeURIComponent(billId)}&module=billing&fast_open=1&auto_print=1`; } catch (e) { invoiceUrl = '/download-invoice?id=' + encodeURIComponent(billId) + '&module=billing&fast_open=1&auto_print=1'; }
-            }
-            invoiceUrl = String(invoiceUrl || '');
-
-            try {
-              if (!fastInvoiceHtml) {
-                if (invoiceWindow && !invoiceWindow.closed) {
-                  try { invoiceWindow.location.href = invoiceUrl; invoiceWindow.focus(); } catch (err) { window.open(invoiceUrl, '_blank'); }
-                } else {
-                  window.open(invoiceUrl, '_blank');
-                }
-              }
-            } catch (e) {
-              if (!fastInvoiceHtml) {
-                try { window.open(invoiceUrl, '_blank'); } catch (ee) { }
-              }
-            }
-
             // Keep current billing page state even after invoice tab is closed.
             if (invoiceMonitorTimer) {
               clearInterval(invoiceMonitorTimer);
               invoiceMonitorTimer = null;
             }
           }
+
+          if (isEditingExistingBill && !backendInvoice) {
+            router.visit(route(props.isPharmacyDepartment ? 'backend.pharmacybill.index' : 'backend.billing.list'));
+            return;
+          }
+
+          window.setTimeout(() => {
+            reloadReferrers();
+            router.reload({ only: ['reagentTestAvailability'] });
+          }, 1500);
         } else {
           if (!props.id) resetAllForms();
-          console.warn('Bill ID not found in response; invoice tab cannot be navigated automatically.');
+          const invoiceUrl = String(response?.invoiceUrl || '');
+          if (!backendInvoice && invoiceUrl) {
+            try {
+              if (invoiceWindow && !invoiceWindow.closed) {
+                invoiceWindow.location.replace(invoiceUrl);
+              } else {
+                window.open(invoiceUrl, '_blank');
+              }
+            } catch (error) {
+              console.error('Could not open the saved invoice.', error);
+            }
+          } else if (!backendInvoice) {
+            try { if (invoiceWindow && !invoiceWindow.closed) invoiceWindow.close(); } catch (error) { }
+            displayWarning({ message: 'The bill was saved, but the invoice link was not returned. Please open the invoice from the billing list.' });
+          }
         }
       },
       onError: (errors) => {
         console.error('Save bill errors:', errors);
         try { if (invoiceWindow && !invoiceWindow.closed) invoiceWindow.close(); } catch (e) { }
 
-        if (errors.patient_name) {
-          displayWarning({ message: errors.patient_name });
+        const firstMessage = (value) => {
+          if (Array.isArray(value)) return value.find((message) => typeof message === 'string' && message.trim());
+          return typeof value === 'string' && value.trim() ? value : null;
+        };
+        const patientNameError = firstMessage(errors?.patient_name);
+        const patientPhoneError = firstMessage(errors?.patient_phone);
+        const patientGenderError = firstMessage(errors?.patient_gender);
+        const patientIdError = firstMessage(errors?.patient_id);
+
+        if (patientNameError) {
+          displayWarning({ message: patientNameError });
           patientSearchRef.value?.focus();
-        } else if (errors.patient_phone) {
-          displayWarning({ message: errors.patient_phone });
+        } else if (patientPhoneError) {
+          displayWarning({ message: patientPhoneError });
           patientMobileRef.value?.focus();
-        } else if (errors.patient_gender) {
-          displayWarning({ message: errors.patient_gender });
+        } else if (patientGenderError) {
+          displayWarning({ message: patientGenderError });
           genderSelectRef.value?.focus();
           setTimeout(() => openDropdown(genderSelectRef), 100);
-        } else if (errors.patient_id) {
-          displayWarning({ message: errors.patient_id });
+        } else if (patientIdError) {
+          displayWarning({ message: patientIdError });
           patientSearchRef.value?.focus();
-        } else if (errors.items) {
-          displayWarning({ message: errors.items });
-          itemNameInput.value?.focus();
         } else {
-          const errorMessage = typeof errors === 'string' ? errors : 'Please check the form for errors and try again.';
+          const errorMessages = typeof errors === 'string'
+            ? [errors]
+            : Object.entries(errors || {}).flatMap(([field, value]) => {
+                const messages = Array.isArray(value) ? value : [value];
+                return messages
+                  .filter((message) => typeof message === 'string' && message.trim())
+                  .map((message) => `${field}: ${message}`);
+              });
+          const errorMessage = errorMessages.length
+            ? errorMessages.join('\n')
+            : 'The bill could not be saved. Please try again or contact support.';
           displayWarning({ message: errorMessage });
+
+          if (Object.keys(errors || {}).some((field) => field === 'items' || field.startsWith('items.'))) {
+            itemNameInput.value?.focus();
+          }
         }
       },
-      onFinish: () => {
-        console.log('Save bill request finished');
-      }
     };
-
-    let submitUrl = '';
-    try {
-      submitUrl = props.id ? route("backend.billing.update", { billing: props.id }) : route("backend.billing.store");
-      // defensive: if route() returned a generic page URL (or a wrong mapping like
-      // `view-billing-list-page`), fallback below to the expected REST endpoint.
-      if (
-        typeof submitUrl !== 'string' ||
-        submitUrl.indexOf('/') === -1 ||
-        submitUrl.includes('view-billing-page') ||
-        submitUrl.includes('view-billing-list-page') ||
-        submitUrl.includes('backend.billing.update')
-      ) {
-        throw new Error('invalid route');
-      }
-    } catch (e) {
-      submitUrl = props.id ? `/billing/${props.id}` : '/billing';
-    }
 
     // Always use AJAX for both Save and Save & Print to avoid page redirect
     // Send raw AJAX request (axios) so server JSON won't be intercepted by Inertia
     const method = props.id ? 'put' : 'post';
-    axios({ method, url: submitUrl, data: formData })
+    sendBillingRequestWithSessionRefresh({
+      method,
+      url: submitUrl,
+      data: formData,
+      headers: {
+        'X-Offline-Request-Id': requestId,
+        'X-Offline-Admin-Id': String(offlineAdminId.value),
+      },
+    })
       .then((res) => {
+        if (!res) {
+          try { if (invoiceWindow && !invoiceWindow.closed) invoiceWindow.close(); } catch (error) { }
+          return;
+        }
         const payload = res?.data ?? res;
         if (typeof payload === 'string' && /<!doctype html|<html/i.test(payload)) {
           throw { response: { data: { errors: 'Billing save failed: server returned an HTML response instead of JSON.' } } };
@@ -3879,12 +5515,20 @@ const saveBill = (backendInvoice = false) => {
         }
         submitOptions.onSuccess(payload);
       })
-      .catch((err) => {
+      .catch(async (err) => {
+        if (!err?.response && !props.id) {
+          try {
+            await queueBillLocally(invoiceWindow);
+            return;
+          } catch (queueError) {
+            displayWarning({ message: queueError instanceof Error ? queueError.message : 'The bill could not be saved offline.' });
+          }
+        }
         const errors = err.response?.data?.errors ?? err.response?.data ?? err;
         submitOptions.onError(errors);
       })
       .finally(() => {
-        submitOptions.onFinish();
+        submitOptions.onFinish?.();
       });
 };
 
@@ -3895,6 +5539,7 @@ const shouldPreventPageRefresh = () => {
 };
 
 const resetAllForms = () => {
+  clearBillingItemsDraft();
   items.value = [];
   patientForm.value = {
     patient_id: "",
@@ -3906,23 +5551,13 @@ const resetAllForms = () => {
     payMode: "Cash",
     cardNumber: "",
   };
-  summary.value = {
-    total: 0,
-    discount: 0,
-    discountType: "flat",
-    extraFlatDiscount: 0,
-    payableAmount: 0,
-    paidAmt: 0,
-    changeAmt: 0.0,
-    dueAmount: 0.0,
-    receivingAmt: 0.0,
-    returnAmt: 0.0,
+  summary.value = createDefaultSummaryState({
     // Default delivery date/time: set a delivery slot based on the current hour.
     // Example: 2:00-2:59 -> 8:00, 3:00-3:59 -> 9:00, and so on.
     deliveryDate: (function(){ const value = getDefaultDeliveryDateTime(); return value.date; })(),
     deliveryTime: (function(){ const value = getDefaultDeliveryDateTime(); return value.time; })(),
     remarks: "",
-  };
+  });
   commission.value = {
     total: 0.0,
     physystAmt: 0.0,
@@ -4042,20 +5677,45 @@ const handlePatientSearchBlur = (event) => {
 };
 
 const cancelBill = () => {
-  router.visit(route("backend.billing.Page"));
+  if (props.id && props.editData) {
+    router.visit(route(props.isPharmacyDepartment ? 'backend.pharmacybill.index' : 'backend.billing.list'));
+    return;
+  }
+
+  if (items.value.length > 0) {
+    items.value = [];
+    clearBillingItemsDraft();
+    summary.value.discount = 0;
+    summary.value.extraFlatDiscount = 0;
+    updateSummary();
+    return;
+  }
+
+  router.visit(route('backend.billing.Page'));
+};
+
+const restoreEditSummaryFromItems = () => {
+  if (!props.id || items.value.length === 0) return;
+
+  const itemsTotal = items.value.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
+  if (itemsTotal <= 0) return;
+
+  if (Number(summary.value.total || 0) <= 0) {
+    summary.value.total = Number(itemsTotal.toFixed(2));
+  }
+
+  updateSummary();
 };
 
 const openListBillButton = () => {
+  let url;
   try {
-    const url = route("backend.billing.list");
-    if (url) {
-      window.location.assign(url);
-      return;
-    }
+    url = route(props.isPharmacyDepartment ? 'backend.pharmacybill.index' : 'backend.billing.list');
   } catch (e) {
-    // fallback when named route resolution fails
+    url = props.isPharmacyDepartment ? '/view-pharmacy-bill-list-page' : '/view-billing-list-page';
   }
-  window.location.assign('/view-billing-list-page');
+
+  openPageInNewTab(url);
 };
 
 const openAddBillButton = () => {
@@ -4071,10 +5731,57 @@ const openAddBillButton = () => {
   window.location.assign('/view-billing-page');
 };
 
+const openPageInNewTab = (url) => {
+  progress.start();
+  const pageWindow = window.open(url, '_blank');
+  if (!pageWindow) {
+    progress.finish();
+    window.alert('The page could not be opened because the browser blocked the new window. Allow pop-ups and try again.');
+    return;
+  }
+
+  pageWindow.opener = null;
+  window.setTimeout(() => progress.finish(), 800);
+};
+
+const openBillingPage = (url, { freshBillingDraft = false } = {}) => {
+  if (!url) return;
+
+  const destination = new URL(url, window.location.href);
+  if (freshBillingDraft) {
+    destination.searchParams.set('billing_draft', createOfflineRequestId());
+  }
+
+  openPageInNewTab(destination.href);
+};
+
 // Initialize edit mode if needed
 onMounted(() => {
+  isBrowserOnline.value = navigator.onLine;
+  document.addEventListener('visibilitychange', refreshBillingSessionWhenVisible);
+  billingSessionHeartbeatTimer = window.setInterval(() => {
+    refreshBillingSessionWhenVisible();
+  }, 5 * 60 * 1000);
+  refreshBillingSessionWhenVisible();
+  window.addEventListener('online', handleBrowserOnline);
+  window.addEventListener('offline', handleBrowserOffline);
+  window.addEventListener('offline-billing:queue-updated', handleOfflineQueueChanged);
+  window.addEventListener('offline-billing:setup-failed', handleOfflineSupportSetupFailed);
+  window.addEventListener('offline-billing:unlocked', handleOfflineUnlocked);
+  window.addEventListener('offline-billing:locked', handleOfflineDataLocked);
+  refreshOfflineEncryptionStatus();
+  refreshOfflineBillingRequests();
+  syncOfflineBillingQueue();
+
   if (props.id && props.editData) {
     initializeEditMode();
+    nextTick(() => {
+      if (items.value.length > 0) {
+        updateSummary();
+      }
+    });
+    setTimeout(restoreEditSummaryFromItems, 100);
+    setTimeout(restoreEditSummaryFromItems, 500);
     nextTick(() => {
       deliveryDateTouched.value = !!summary.value.deliveryDate;
     });
@@ -4105,10 +5812,7 @@ onMounted(() => {
       if (!c) return;
       catCounts[c] = (catCounts[c] || 0) + 1;
     });
-    (props.medicineInventories || []).forEach(m => {
-      const c = String('Medicine').trim();
-      catCounts[c] = (catCounts[c] || 0) + 1;
-    });
+    catCounts.Medicine = medicineSearchResults.value.length;
     // hospitalCharges removed from aggregated sources
 
     console.debug('[BillingPage] startup category counts', catCounts);
@@ -4119,9 +5823,28 @@ onMounted(() => {
   window.addEventListener('dashboard:refresh', handleDashboardSameTabRefresh);
   window.addEventListener('focus', handleBillingWindowFocus);
   reloadNetIncomeValue();
+  if (props.isPharmacyDepartment && props.prescriptionSearchValue) {
+    prescriptionSearchId.value = props.prescriptionSearchValue;
+    nextTick(() => searchPrescriptionCharge());
+  }
 });
 
 onUnmounted(() => {
+  window.removeEventListener('pagehide', flushOfflineBillingDraft);
+  document.removeEventListener('visibilitychange', refreshBillingSessionWhenVisible);
+  if (billingSessionHeartbeatTimer !== null) {
+    window.clearInterval(billingSessionHeartbeatTimer);
+    billingSessionHeartbeatTimer = null;
+  }
+  flushOfflineBillingDraft();
+  window.removeEventListener('online', handleBrowserOnline);
+  window.removeEventListener('offline', handleBrowserOffline);
+  window.removeEventListener('offline-billing:queue-updated', handleOfflineQueueChanged);
+  window.removeEventListener('offline-billing:setup-failed', handleOfflineSupportSetupFailed);
+  window.removeEventListener('offline-billing:unlocked', handleOfflineUnlocked);
+  window.removeEventListener('offline-billing:locked', handleOfflineDataLocked);
+  requestMedicineSearch.cancel();
+  medicineSearchController?.abort();
   // cleanup timers
   if (deliveryLiveTimer) {
     clearInterval(deliveryLiveTimer);
@@ -4303,6 +6026,21 @@ const handleDoctorSearchInput = (event) => {
   <Head :title="$page.props.pageTitle"/>
   <div class="billing-page-text min-h-screen bg-gray-50 dark:bg-gray-900 overflow-y-auto">
     <div class="w-full p-2">
+      <section v-if="isOfflineBillingDeveloper
+        && (pendingOfflineBillingRequests.some((entry) => entry.lastError)
+          || reviewOfflineBillingRequests.length || offlineBillingStorageError || offlineBillingCapabilityMessage)"
+        class="mb-3 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800">
+        <p v-if="offlineBillingCapabilityMessage" class="mt-1 text-amber-800">{{ offlineBillingCapabilityMessage }}</p>
+        <p v-if="offlineBillingStorageError" class="mt-1 text-red-700">{{ offlineBillingStorageError }}</p>
+        <p v-if="pendingOfflineBillingRequests.some((entry) => entry.lastError)" class="mt-1 text-amber-800">
+          {{ pendingOfflineBillingRequests.find((entry) => entry.lastError)?.lastError }}
+        </p>
+        <div v-for="entry in (offlineBillingUnlocked ? reviewOfflineBillingRequests : [])" :key="entry.id"
+          class="mt-2 flex flex-wrap items-center justify-between gap-2 rounded border border-red-200 bg-white px-2 py-1 text-red-800">
+          <span>{{ entry.label }} · {{ entry.lastError || 'Server needs this request reviewed.' }} · Ref {{ entry.id.slice(0, 8) }}</span>
+          <button type="button" class="underline" @click="removeReviewedOfflineRequest(entry.id)">Dismiss</button>
+        </div>
+      </section>
       <div class="bg-white rounded-lg shadow-lg dark:bg-slate-900 mb-4">
         <div class="mb-3">
           <div
@@ -4341,7 +6079,7 @@ const handleDoctorSearchInput = (event) => {
                       ref="prescriptionSearchInputRef"
                       type="text"
                       class="w-[140px] md:w-[170px] px-2 py-1 border border-slate-200 rounded text-[11px] bg-white text-slate-900 placeholder-slate-600 focus:border-slate-400 focus:outline-none min-w-0"
-                      placeholder="Prescription ID"
+                      :placeholder="props.isPharmacyDepartment ? 'Rx / OPD / IPD ID' : 'Prescription ID'"
                       @input="handlePrescriptionInput"
                       @focus="handlePrescriptionInput"
                       @blur="handlePrescriptionBlur"
@@ -4391,17 +6129,20 @@ const handleDoctorSearchInput = (event) => {
               </button>
               <button
                 type="button"
-                class="flex items-center px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs transition-colors duration-200 shadow-sm disabled:opacity-60"
+                class="flex items-center px-3 py-1.5 text-white rounded-md text-xs font-semibold transition-colors duration-200 shadow-sm disabled:opacity-60"
+                :class="hasOpenCashCounterSession
+                  ? 'bg-emerald-700 cursor-default'
+                  : 'bg-emerald-600 hover:bg-emerald-700'"
                 :disabled="cashCounterStartBusy"
                 @click="openCounterStartModal"
-                title="Start My Counter"
+                :title="hasOpenCashCounterSession ? 'Counter is open' : 'Start My Counter'"
               >
-                Counter Start
+                {{ hasOpenCashCounterSession ? 'Counter Open' : 'Counter Start' }}
               </button>
               <button
                 type="button"
-                class="flex items-center px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-xs transition-colors duration-200 shadow-sm disabled:opacity-60"
-                :disabled="cashCounterCloseBusy"
+                class="flex items-center px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-xs font-semibold transition-colors duration-200 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                :disabled="cashCounterCloseBusy || !hasOpenCashCounterSession"
                 @click="openCounterCloseModal"
                 title="Close My Counter"
               >
@@ -4410,33 +6151,65 @@ const handleDoctorSearchInput = (event) => {
               <button
                 type="button"
                 class="inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs transition hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50"
-                title="Open Total Net Income Report"
+                :title="props.isPharmacyDepartment ? 'Open Pharmacy Profit & Loss Report' : 'Open Total Net Income Report'"
                 @click="openNetIncomeReport"
               >
-                <span class="font-semibold text-white">Net Income</span>
+                <span class="font-semibold text-white">{{ props.isPharmacyDepartment ? 'Pharmacy Net Income' : 'Net Income' }}</span>
                 <span class="font-bold text-white">৳{{ formattedTotalNetIncome }}</span>
               </button>
-              <a :href="route('backend.billing.view')" target="_blank"
+              <button type="button"
+                @click="openBillingPage(route(props.isPharmacyDepartment ? 'backend.pharmacybill.create' : 'backend.billing.view'), { freshBillingDraft: !props.isPharmacyDepartment })"
                 class="flex items-center px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-xs transition-colors duration-200 shadow-sm"
                 style="color: #ffffff !important"
-                title="Billing List">
-                Billing Add
-              </a>
-              <a :href="route('backend.billing.list')" target="_blank"
+                :title="props.isPharmacyDepartment ? 'Pharmacy Bill Create' : 'Billing Add'">
+                {{ props.isPharmacyDepartment ? 'Pharmacy Add' : 'Billing Add' }}
+              </button>
+              <button v-if="!props.isPharmacyDepartment || props.canAccessPharmacyBillList"
+                type="button"
+                @click="openListBillButton"
                 class="flex items-center px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-xs transition-colors duration-200 shadow-sm"
                 style="color: #ffffff !important"
-                title="Billing List">
-                Billing List
-              </a>
+                :title="props.isPharmacyDepartment ? 'Pharmacy Bill List' : 'Billing List'">
+                {{ props.isPharmacyDepartment ? 'Pharmacy Bill List' : 'Billing List' }}
+              </button>
             </div>
           </div>
           <div class="border border-gray-300 border-t-0 p-3 bg-gray-50 dark:bg-slate-800 dark:border-gray-600">
-            <div class="flex items-center space-x-4 text-xs mb-3">
-              <span class="font-medium text-gray-700 dark:text-gray-300"><strong>UNIT:</strong> {{ unitCompanyName }}</span>
-              <span class="font-medium text-gray-700 dark:text-gray-300"><strong>Counter:</strong> {{ authInfo?.department?.name ?? "" }}
-              </span>
-              <span class="font-medium text-gray-700 dark:text-gray-300"><strong>Sales Person:</strong> {{ authInfo?.admin?.name ?? "" }}
-              </span>
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span class="font-medium text-gray-700 dark:text-gray-300"><strong>UNIT:</strong> {{ unitCompanyName }}</span>
+                <span class="font-medium text-gray-700 dark:text-gray-300"><strong>Counter:</strong> {{ authInfo?.department?.name ?? "" }}</span>
+                <span class="font-medium text-gray-700 dark:text-gray-300"><strong>Sales Person:</strong> {{ authInfo?.admin?.name ?? "" }}</span>
+              </div>
+              <div class="ml-auto flex flex-wrap items-center justify-end gap-3">
+                <span class="inline-flex items-center gap-1.5 font-semibold"
+                  :class="isBrowserOnline ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'"
+                  role="status" aria-live="polite">
+                  <span class="h-2 w-2 rounded-full"
+                    :class="isBrowserOnline ? 'bg-emerald-500' : 'bg-amber-500'"></span>
+                  {{ isBrowserOnline ? 'Online' : 'Offline' }}
+                </span>
+                <button v-if="isBrowserOnline && pendingOfflineBillingRequests.length" type="button"
+                  class="inline-flex h-7 w-7 items-center justify-center rounded bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-default disabled:opacity-60"
+                  :disabled="!offlineBillingUnlocked"
+                  :title="isOfflineBillingSyncing
+                    ? 'Synchronizing offline bills'
+                    : `Synchronize ${pendingOfflineBillingRequests.length} offline bill(s)`"
+                  :aria-label="isOfflineBillingSyncing ? 'Synchronizing offline bills' : 'Synchronize offline bills'"
+                  @click="syncOfflineBillingQueue">
+                  <svg class="h-4 w-4" :class="{ 'animate-spin': isOfflineBillingSyncing }"
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"
+                    aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M20 7v5h-5M4 17v-5h5M5.6 9A7 7 0 0 1 18 6l2 2M4 16l2 2a7 7 0 0 0 12.4-3"></path>
+                  </svg>
+                </button>
+                <a v-if="showPharmacyProductReturn"
+                  :href="route('backend.productreturn.index', { return_type: 'customer' })"
+                  class="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
+                  <span aria-hidden="true">↩</span> Product Return
+                </a>
+              </div>
             </div>
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-2 items-end">
               <div class="lg:col-span-2">
@@ -4449,34 +6222,64 @@ const handleDoctorSearchInput = (event) => {
               </div>
               <div class="lg:col-span-4 relative">
                 <InputLabel for="itemName" value="Item Name" class="text-xs mb-1" />
-                <div class="relative">
-                  <input v-model="itemForm.itemName" @input="handleItemInput($event)"
-                    @keydown="handleKeyDown($event, 'itemName')" @focus="selectedIndex = -1" id="itemName" type="text"
-                    class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                    placeholder="Search items..." autocomplete="off" ref="itemNameInput" />
-                  <div v-if="searchQuery || (itemForm.category && filteredItems.length > 0)"
-                    class="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto dark:bg-slate-700 dark:border-gray-600">
-                    <ul>
-                      <li v-for="(item, index) in filteredItems" :key="`${item.type}-${item.category}-${item.id}`" @click="selectItem(item)"
-                        @keypress.enter="selectItem(item);" :class="['list-focus px-3 py-2 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-600',
-                          { 'dropdown-highlight-blue font-semibold': index === selectedIndex }]"
-                        :ref="(el) => { if (index === selectedIndex) selectedItemRef = el }">
-                        <div class="flex justify-between">
-                          <span>{{ item.name }}</span>
-                          <span :class="{ 'text-white': index === selectedIndex, 'text-gray-500 dark:text-gray-300': index !== selectedIndex }">
-                            {{ item.type === "medicine" ? "Medicine" : item.category }}
-                            (৳{{ item.unitPrice }})
-                          </span>
-                        </div>
-                        <div v-if="item.type === 'medicine'" :class="['text-xs', { 'text-white': index === selectedIndex, 'text-gray-500 dark:text-gray-400': index !== selectedIndex }]">
-                          Stock: {{ item.stock }}
-                        </div>
-                      </li>
-                      <li v-if="filteredItems.length === 0" class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-                        No items found.
-                      </li>
-                    </ul>
+                <div class="flex items-start gap-2">
+                  <div class="relative flex-1">
+                    <input v-model="itemForm.itemName" @input="handleItemInput($event)"
+                      @keydown="handleKeyDown($event, 'itemName')" @focus="selectedIndex = -1" id="itemName" type="text"
+                      class="w-full px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
+                      placeholder="Search items..." autocomplete="off" ref="itemNameInput" />
+                    <div v-if="searchQuery || (itemForm.category && filteredItems.length > 0)"
+                      class="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto dark:bg-slate-700 dark:border-gray-600">
+                      <ul>
+                        <li v-for="(item, index) in filteredItems" :key="`${item.type}-${item.category}-${item.id}`" @click="selectItem(item)"
+                          @keypress.enter="selectItem(item);" :class="['list-focus px-3 py-2 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-600',
+                            { 'dropdown-highlight-blue font-semibold': index === selectedIndex }]"
+                          :ref="(el) => { if (index === selectedIndex) selectedItemRef = el }">
+                          <div class="flex items-center justify-between gap-2">
+                            <span class="flex min-w-0 items-center gap-2">
+                                <span
+                                  v-if="item.type === 'test' && reagentFilmSummaryForTest(item.id, item.category)"
+                                  class="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800"
+                                  :title="`${reagentCountUnitForCategory(item.category, reagentFilmSummaryForTest(item.id, item.category).remaining)} remaining: ${formatStockQuantity(reagentFilmSummaryForTest(item.id, item.category).remaining)}`"
+                                >
+                                  {{ formatStockQuantity(reagentFilmSummaryForTest(item.id, item.category).remaining) }}
+                                  {{ reagentFilmSummaryForTest(item.id, item.category).unit }}
+                                </span>
+                                <span
+                                    v-if="item.type === 'test' && item.reagentRemainingTests !== null && !reagentFilmSummaryForTest(item.id, item.category)"
+                                  :class="[
+                                    'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+                                  item.reagentRemainingTests <= 20
+                                    ? (index === selectedIndex ? 'bg-white text-amber-700' : 'bg-amber-100 text-amber-800')
+                                    : (index === selectedIndex ? 'bg-white text-emerald-700' : 'bg-emerald-100 text-emerald-800')
+                                ]"
+                                :title="`${item.reagentRemainingTests} tests supported by current Lab reagent stock`"
+                              >
+                                {{ item.reagentRemainingTests }}
+                                {{ reagentCountUnitForCategory(item.category, item.reagentRemainingTests) }}
+                              </span>
+                              <span class="truncate">{{ item.name }}</span>
+                            </span>
+                            <span :class="{ 'text-white': index === selectedIndex, 'text-gray-500 dark:text-gray-300': index !== selectedIndex }">
+                              {{ item.type === "medicine" ? "Medicine" : item.type === "store" ? `${item.stockCategory || 'Store'} · ${item.departmentName || 'Department'}` : item.category }}
+                              (৳{{ item.unitPrice }})
+                            </span>
+                          </div>
+                          <div v-if="item.type === 'medicine' || item.type === 'store'" :class="['text-xs', { 'text-white': index === selectedIndex, 'text-gray-500 dark:text-gray-400': index !== selectedIndex }]">
+                            Stock: {{ Number(item.stock || 0).toFixed(2) }} {{ item.stockUnit || '' }}
+                          </div>
+                        </li>
+                        <li v-if="filteredItems.length === 0" class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                          {{ medicineSearchError ? 'Could not load medicines. Try searching again.' : medicineSearchLoading ? 'Searching medicines...' : billingCatalogLoaded ? 'No items found.' : 'Loading items...' }}
+                        </li>
+                      </ul>
+                    </div>
                   </div>
+                  <button type="button" @click="openItemChargeCreate"
+                    class="flex-shrink-0 h-8 w-8 bg-emerald-600 text-white rounded hover:bg-emerald-700 flex items-center justify-center text-lg font-bold"
+                    title="Add Item Charge" aria-label="Add Item Charge">
+                    +
+                  </button>
                 </div>
               </div>
 
@@ -4513,16 +6316,16 @@ const handleDoctorSearchInput = (event) => {
         </div>
         <div class="mb-0">
           <div class="border border-gray-300 border-t-0">
-            <div :style="itemsContainerStyle" class="">
+            <div>
               <table class="w-full text-xs">
-                <thead class="bg-teal-700 text-white sticky top-0">
+                <thead class="bg-teal-700 text-white">
                   <tr>
                     <th class="px-2 py-2 text-left font-semibold">Item Name</th>
                     <th class="px-2 py-2 text-center font-semibold">Category</th>
                     <th class="px-2 py-2 text-center font-semibold">U/Price</th>
                     <th class="px-2 py-2 text-center font-semibold">Qty</th>
                     <th class="px-2 py-2 text-center font-semibold">T.Amt</th>
-                    <!-- <th class="px-2 py-2 text-center font-semibold">Disc%</th> -->
+                    <th class="px-2 py-2 text-center font-semibold">Disc%</th>
                     <th class="px-2 py-2 text-center font-semibold">Net Amt</th>
                     <th class="px-2 py-2 text-center font-semibold">Action</th>
                   </tr>
@@ -4530,8 +6333,13 @@ const handleDoctorSearchInput = (event) => {
                 <tbody class="bg-white dark:bg-slate-800">
                   <tr v-for="(item, index) in items" :key="index"
                     class="border-b border-gray-200 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-slate-700">
-                    <td class="px-2 py-2 font-medium dark:text-gray-200">
+                    <td class="px-2 py-2 font-medium dark:text-gray-200 cursor-pointer"
+                      title="Click item name to edit quantity"
+                      @click="startEditingItemQuantity(index)">
                       {{ item.name }}
+                      <div v-if="item.type === 'store'" class="mt-1 text-[10px] font-normal text-slate-500">
+                        Department stock: {{ Number(item.stock || 0).toFixed(2) }} {{ item.stockUnit || '' }}
+                      </div>
                     </td>
                     <td class="px-2 py-2 text-center dark:text-gray-200">
                       <span :class="{
@@ -4554,13 +6362,31 @@ const handleDoctorSearchInput = (event) => {
                     <td class="px-2 py-2 text-center dark:text-gray-200">
                       ৳{{ item.unitPrice.toFixed(2) }}
                     </td>
-                    <td class="px-2 py-2 text-center dark:text-gray-200">
-                      {{ item.quantity }}
+                    <td class="px-2 py-2 text-center dark:text-gray-200"
+                      @click="startEditingItemQuantity(index)">
+                      <input
+                        v-if="editingQuantityIndex === index"
+                        v-model="editedQuantity"
+                        :data-bill-quantity-index="index"
+                        type="number"
+                        min="1"
+                        step="1"
+                        class="w-16 px-1 py-1 text-center border border-blue-400 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-slate-700 dark:text-gray-200"
+                        @click.stop
+                        @keydown.enter.prevent.stop="commitItemQuantity(index)"
+                        @keydown.esc.prevent.stop="cancelItemQuantityEdit"
+                        @blur="commitItemQuantity(index)"
+                      />
+                      <span v-else class="inline-block min-w-[2rem] cursor-pointer" title="Click to edit quantity">
+                        {{ item.quantity }}
+                      </span>
                     </td>
                     <td class="px-2 py-2 text-center dark:text-gray-200">
                       ৳{{ item.totalAmount.toFixed(2) }}
                     </td>
-                    <!-- <td class="px-2 py-2 text-center dark:text-gray-200">0%</td> -->
+                    <td class="px-2 py-2 text-center dark:text-gray-200">
+                      {{ getDisplayedItemDiscountPercent(item).toFixed(2) }}%
+                    </td>
                     <td class="px-2 py-2 text-center font-semibold dark:text-gray-200">
                       ৳{{ item.netAmount.toFixed(2) }}
                     </td>
@@ -4575,6 +6401,12 @@ const handleDoctorSearchInput = (event) => {
               </table>
             </div>
           </div>
+        </div>
+        <div v-if="reagentStockAlerts.length" class="mx-3 mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="alert">
+          <p class="font-semibold">Low Lab reagent stock — fewer than 20 tests remain:</p>
+          <p v-for="test in reagentStockAlerts" :key="`${test.id}-${test.name}`" class="mt-1">
+            {{ test.name }}: {{ test.remaining }} {{ test.remaining === 1 ? 'test' : 'tests' }} remaining after this bill. Send more reagent stock to Lab.
+          </p>
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 p-3">
           <!-- PATIENT DETAILS section -->
@@ -4772,18 +6604,22 @@ const handleDoctorSearchInput = (event) => {
                 <InputLabel for="payMode" value="Pay Mode" class="text-xs" />
                 <select v-model="patientForm.payMode" id="payMode"
                   class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                  ref="payModeRef" @keydown="handlePayModeEnter">
+                  ref="payModeRef" @keydown="handlePayModeEnter" @change="patientForm.cardType = patientForm.payMode">
                   <option value="Cash">Cash</option>
                   <option value="Card">Card</option>
-                  <option value="Mobile Banking">Mobile Banking</option>
+                  <option value="Bank">Bank</option>
+                  <option value="Bkash">Bkash</option>
+                  <option value="Nagad">Nagad</option>
                 </select>
               </div>
 
-              <!-- Card/Account Number (conditional) -->
+              <!-- Card/Account/Mobile Number (conditional) -->
               <div class="grid grid-cols-3 gap-2 items-center" v-if="patientForm.payMode !== 'Cash'">
-                <InputLabel for="cardNumber" value="Card/Account No." class="text-xs" />
+                <InputLabel for="cardNumber"
+                  :value="['Bkash','Nagad'].includes(patientForm.payMode) ? 'Mobile No.' : 'Card/Account No.'"
+                  class="text-xs" />
                 <input v-model="patientForm.cardNumber" type="text" id="cardNumber"
-                  placeholder="Enter card/account number"
+                  :placeholder="['Bkash','Nagad'].includes(patientForm.payMode) ? 'Enter mobile number' : 'Enter card/account number'"
                   class="col-span-2 px-2 py-1.5 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                   ref="cardNumberRef" @keydown="handleCardNumberEnter" />
               </div>
@@ -4793,6 +6629,41 @@ const handleDoctorSearchInput = (event) => {
           <!-- Patient Modal -->
           <PatientModal :isOpen="isPatientModalOpen" :tpas="props.tpas" @close="closePatientModal"
             @patientCreated="handlePatientCreated" />
+
+          <Modal :show="showItemChargeModal" @close="closeItemChargeModal" maxWidth="2xl">
+            <div class="bg-white dark:bg-slate-800">
+              <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+                <h3 class="text-lg font-semibold text-slate-800 dark:text-slate-100">Create Item</h3>
+                <div class="flex items-center gap-2">
+                  <button type="button" @click="goToItemChargeList" class="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600">
+                    Item List
+                  </button>
+                  <button type="button" @click="closeItemChargeModal" class="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-100 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-800/30">
+                    Delete
+                  </button>
+                  <button type="button" @click="closeItemChargeModal" aria-label="Close modal" class="flex h-8 w-8 items-center justify-center rounded-full text-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white">
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div class="p-4">
+                <PathologyForm
+                  embedded
+                  :charges="props.hospitalCharges || []"
+                  :categoryTypeOptions="props.categoryTypeOptions || []"
+                  :mainCategories="props.mainCategories || []"
+                  :testCategories="props.testCategories || []"
+                  :chargeTypes="props.chargeTypes || []"
+                  :chargeCategories="props.chargeCategories || []"
+                  :chargeUnits="props.chargeUnits || []"
+                  :taxCategories="props.taxCategories || []"
+                  :pathologyUnits="props.pathologyUnits || []"
+                  :testParameters="props.testParameters || []"
+                  @created="handleItemChargeCreated"
+                />
+              </div>
+            </div>
+          </Modal>
 
           <!-- TOTAL SUMMARY section -->
           <div>
@@ -4839,9 +6710,9 @@ const handleDoctorSearchInput = (event) => {
                   </select>
                 </div>
                 <div class="flex">
-                  <input v-model="summary.discount" type="number" step="1" min="0" :max="summary.discountType === 'percentage' ? maxBillingDiscountPercent : null" id="discount"
+                  <input v-model="summary.discount" type="number" step="1" min="0" :max="summary.discountType === 'percentage' ? maxBillingDiscountPercent : maxAllowedFlatDiscountAmount" id="discount"
                     class="w-full px-2 py-1.5 border border-gray-300 rounded-l text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
-                    ref="discountRef" @keydown="handleDiscountEnter" @wheel="onDiscountWheel" @click="selectAllOnFocus" @focus="selectAllOnFocus" />
+                    ref="discountRef" @input="updateSummary" @keydown="handleDiscountEnter" @wheel="onDiscountWheel" @click="selectAllOnFocus" @focus="selectAllOnFocus" />
                   <span
                     class="px-2 py-1.5 bg-gray-200 border-t border-b border-r border-gray-300 rounded-r text-xs dark:bg-gray-600 dark:text-gray-200">৳</span>
                 </div>
@@ -5024,8 +6895,8 @@ const handleDoctorSearchInput = (event) => {
             </div>
             <div class="p-4 bg-white dark:bg-slate-800 dark:border-gray-600">
               <div class="flex justify-end space-x-3">
-                <button @click="cancelBill"
-                  class="px-4 py-2 text-gray-600 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded text-sm font-medium dark:text-gray-300 dark:bg-gray-700 dark:border-gray-600 dark:hover:bg-gray-600 dark:hover:text-gray-100 transition-colors">
+                <button type="button" @click="cancelBill"
+                  class="px-4 py-2 text-white bg-red-600 hover:bg-red-700 border border-red-700 rounded text-sm font-medium transition-colors">
                   Cancel
                 </button>
                 <button @click="saveBill()" @keydown.enter.prevent="saveBill()" ref="savePrintButtonRef"
@@ -5083,7 +6954,7 @@ const handleDoctorSearchInput = (event) => {
               :disabled="cashCounterStartBusy"
               @keydown.enter.prevent="startCounterFromBilling"
               class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-              placeholder="যেমন: 5000"
+              placeholder=""
             >
           </div>
 
@@ -5144,6 +7015,10 @@ const handleDoctorSearchInput = (event) => {
               <td class="py-1 font-semibold">Counter</td>
               <td class="py-1">{{ authInfo?.department?.name || 'N/A' }}</td>
             </tr>
+            <tr>
+              <td class="py-1 font-semibold">Expected</td>
+              <td class="py-1">{{ Number(cashCounterExpectedAmount || 0).toFixed(2) }}</td>
+            </tr>
           </table>
 
           <div class="mt-4">
@@ -5156,7 +7031,7 @@ const handleDoctorSearchInput = (event) => {
               :disabled="cashCounterCloseBusy"
               @keydown.enter.prevent="closeCounterFromBilling"
               class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100 disabled:cursor-not-allowed"
-              placeholder="যেমন: 5000"
+              placeholder=""
             >
           </div>
 

@@ -42,8 +42,8 @@ class PayrollServiceTaxAbsenceTest extends TestCase
         for ($i = 0; $i < $presentDays; $i++) {
             Attendance::create([
                 'employee_id' => $employee->id,
-                'date' => $periodStart->copy()->addDays($i)->toDateString(),
-                'status' => 'present',
+                'type' => 'in',
+                'recorded_at' => $periodStart->copy()->addDays($i)->startOfDay()->addHours(9),
             ]);
         }
 

@@ -40,6 +40,7 @@
                     @csrf
 
                     <input type="hidden" name="submission_token" value="{{ $submissionToken ?? '' }}">
+                    <input type="hidden" name="return_to" value="{{ $returnTo ?? '' }}">
 
                     <div class="mb-3">
                         <label class="form-label fw-bold">Pay Amount</label>

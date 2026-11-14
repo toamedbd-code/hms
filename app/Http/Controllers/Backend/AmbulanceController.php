@@ -21,6 +21,7 @@ class AmbulanceController extends Controller
     public function __construct(AmbulanceService $ambulanceService)
     {
         $this->ambulanceService = $ambulanceService;
+        $this->middleware('permission:ambulance-list');
     }
 
 

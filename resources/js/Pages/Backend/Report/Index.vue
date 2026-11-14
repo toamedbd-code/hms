@@ -26,9 +26,10 @@ const filters = ref({
 });
 
 const modules = [
-    { id: 'all_module', name: 'All Module' },
+    { id: 'all_module', name: 'All Transactions' },
     { id: 'billing', name: 'Billing' },
     { id: 'pharmacy', name: 'Pharmacy' },
+    { id: 'appointment', name: 'Appointment' },
     { id: 'opd', name: 'OPD' },
     { id: 'ipd', name: 'IPD' },
 ];
@@ -82,6 +83,12 @@ const getReportRowDetails = (item) => {
     const moduleKey = String(item?.module || '').toLowerCase();
 
     if (moduleKey === 'opd') {
+        const patient = item?.patient_name || 'N/A';
+        const doctor = item?.doctor_name || 'N/A';
+        return `${patient} | Dr. ${doctor}`;
+    }
+
+    if (moduleKey === 'appointment') {
         const patient = item?.patient_name || 'N/A';
         const doctor = item?.doctor_name || 'N/A';
         return `${patient} | Dr. ${doctor}`;
@@ -184,10 +191,10 @@ const downloadPdf = async () => {
             }
         });
 
-        params.append('inline', '1');
+        params.append('print_view', '1');
         const url = `${route('backend.report.generate-pdf')}?${params.toString()}`;
 
-        try { window.open(url, '_blank'); } catch (e) { window.open(url, '_blank'); }
+        window.open(url, '_blank', 'noopener,noreferrer');
 
     } catch (error) {
         console.error('Download error:', error);
@@ -206,12 +213,11 @@ const downloadPdf = async () => {
             }
         });
 
-        // Request inline viewing in new tab
-        const inlineInput = document.createElement('input');
-        inlineInput.type = 'hidden';
-        inlineInput.name = 'inline';
-        inlineInput.value = '1';
-        form.appendChild(inlineInput);
+        const printViewInput = document.createElement('input');
+        printViewInput.type = 'hidden';
+        printViewInput.name = 'print_view';
+        printViewInput.value = '1';
+        form.appendChild(printViewInput);
 
         document.body.appendChild(form);
         form.submit();
@@ -458,7 +464,7 @@ onUnmounted(() => {
                         <p class="text-gray-600">Generate reports by selecting date range and module</p>
                     </div>
                     <button @click="goBack"
-                        class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-gray-500 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gray-600">
+                        class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-emerald-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-emerald-700">
                         <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
                             stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
@@ -670,7 +676,7 @@ onUnmounted(() => {
                             </button>
                             
                             <button v-if="hasFiltered" @click="resetFilters"
-                                class="px-6 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
+                                class="px-6 py-2 border border-emerald-600 text-white bg-emerald-600 rounded-md hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2 transition-colors">
                                 Reset
                             </button>
                         </div>
@@ -690,7 +696,7 @@ onUnmounted(() => {
                             <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
-                            {{ downloadingPdf ? 'Generating PDF...' : 'Download PDF' }}
+                            {{ downloadingPdf ? 'Preparing print view...' : 'Print Report' }}
                         </button>
                     </div>
                     
@@ -810,6 +816,7 @@ onUnmounted(() => {
                                                 :class="{
                                                     'bg-yellow-100 text-yellow-800': item.module === 'pharmacy' || item.module === 'medicine',
                                                     'bg-purple-100 text-purple-800': item.module === 'opd',
+                                                    'bg-blue-100 text-blue-800': item.module === 'appointment',
                                                     'bg-pink-100 text-pink-800': item.module === 'ipd',
                                                     'bg-gray-100 text-gray-800': !item.module
                                                 }">

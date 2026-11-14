@@ -13,6 +13,7 @@ class StoreItem extends Model
         'item_code',
         'item_name',
         'category',
+        'stock_behavior',
         'unit',
         'reorder_level',
         'current_stock',

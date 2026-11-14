@@ -193,6 +193,7 @@ class BillingRequestValidationTest extends TestCase
             'billing_time' => '14:30:00',
             'print_token' => 'pt_abc123def456',
             'backend_invoice' => false,
+            'pharmacy_mode' => true,
             'remarks' => 'Test bill',
             'commission_total' => 0,
         ];
@@ -203,5 +204,59 @@ class BillingRequestValidationTest extends TestCase
         $validator = Validator::make($data, $rules);
 
         $this->assertTrue($validator->passes(), 'Complete submission should pass validation: ' . json_encode($validator->errors()));
+    }
+
+    public function test_item_discount_percentage_is_applied_as_a_cap_when_bill_discount_is_percentage()
+    {
+        $controller = app(\App\Http\Controllers\Backend\BillingController::class);
+        $method = new \ReflectionMethod($controller, 'resolveBillingItemDiscountPercent');
+        $method->setAccessible(true);
+
+        $item = [
+            'id' => 42,
+            'category' => 'Pathology',
+            'name' => 'CBC',
+            'discount_percentage' => 10,
+            'discount_rate_locked' => false,
+        ];
+
+        $this->assertSame(10.0, $method->invoke($controller, $item, 25.0));
+        $this->assertSame(10.0, $method->invoke($controller, $item, 10.0));
+        $this->assertSame(5.0, $method->invoke($controller, $item, 5.0));
+        $this->assertSame(10.0, $method->invoke($controller, $item, 0.0));
+    }
+
+    public function test_locked_item_at_zero_percent_blocks_bill_percentage_discount()
+    {
+        $controller = app(\App\Http\Controllers\Backend\BillingController::class);
+        $method = new \ReflectionMethod($controller, 'resolveBillingItemDiscountPercent');
+        $method->setAccessible(true);
+
+        $item = [
+            'id' => 99,
+            'category' => 'Pathology',
+            'name' => 'Discount Off Item',
+            'discount_percentage' => 0,
+            'discount_rate_locked' => true,
+        ];
+
+        $this->assertSame(0.0, $method->invoke($controller, $item, 15.0));
+    }
+
+    public function test_unlocked_item_without_item_percent_uses_bill_percentage_discount()
+    {
+        $controller = app(\App\Http\Controllers\Backend\BillingController::class);
+        $method = new \ReflectionMethod($controller, 'resolveBillingItemDiscountPercent');
+        $method->setAccessible(true);
+
+        $item = [
+            'id' => 100,
+            'category' => 'Pathology',
+            'name' => 'Follow Bill Discount',
+            'discount_percentage' => 0,
+            'discount_rate_locked' => false,
+        ];
+
+        $this->assertSame(15.0, $method->invoke($controller, $item, 15.0));
     }
 }

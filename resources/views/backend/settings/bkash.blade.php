@@ -38,6 +38,8 @@
                         @php
                             $subscription = \App\Models\Subscription::ensureExists();
                             $subscriptionActive = $subscription && $subscription->isActive();
+                            $isSandbox = !filter_var($bkashEnv['use_production'], FILTER_VALIDATE_BOOLEAN);
+                            $isEnabled = $setting ? (bool) $setting->is_enabled : true;
                         @endphp
 
                         <div class="alert alert-secondary d-flex justify-content-between align-items-center mb-4">
@@ -45,7 +47,7 @@
                                 <div class="fw-bold">Subscription Control</div>
                                 <div class="small">Current status: <strong>{{ $subscriptionActive ? 'ACTIVE' : 'INACTIVE' }}</strong></div>
                             </div>
-                            <div class="d-flex gap-2">
+                            <div class="d-flex align-items-end gap-2">
                                 <form method="POST" action="{{ route('backend.settings.payment.bkash.subscription.toggle') }}" class="d-inline">
                                     @csrf
                                     <input type="hidden" name="mode" value="off">
@@ -54,6 +56,9 @@
                                 <form method="POST" action="{{ route('backend.settings.payment.bkash.subscription.toggle') }}" class="d-inline">
                                     @csrf
                                     <input type="hidden" name="mode" value="on">
+                                    <label class="small text-muted">Active days
+                                        <input type="number" name="duration_days" value="{{ old('duration_days', optional($subscription)->duration_days ?? 30) }}" min="1" max="3650" required class="form-control form-control-sm" style="width: 90px;">
+                                    </label>
                                     <button type="submit" class="btn btn-success">Active</button>
                                 </form>
                             </div>
@@ -63,50 +68,95 @@
                             @csrf
 
                             <div class="mb-3">
+                                <label class="form-label">Merchant Account</label>
+                                <input name="merchant_account" class="form-control" value="{{ old('merchant_account', $bkashEnv['merchant_account']) }}">
+                            </div>
+
+                            <div class="mb-3">
                                 <label class="form-label">App Key</label>
-                                <input name="app_key" class="form-control" value="{{ old('app_key', optional($setting)->app_key) }}">
+                                <input name="app_key" class="form-control" value="{{ old('app_key', $bkashEnv['app_key']) }}">
                             </div>
 
                             <div class="mb-3">
                                 <label class="form-label">App Secret</label>
-                                <input name="app_secret" class="form-control" value="{{ old('app_secret', optional($setting)->app_secret) }}">
+                                <input name="app_secret" class="form-control" value="{{ old('app_secret', $bkashEnv['app_secret']) }}">
                             </div>
 
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">Merchant Username</label>
-                                    <input name="username" class="form-control" value="{{ old('username', optional($setting)->username) }}">
+                                    <input name="username" class="form-control" value="{{ old('username', $bkashEnv['username']) }}">
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">Merchant Number</label>
-                                    <input name="merchant_number" class="form-control" value="{{ old('merchant_number', '') }}">
+                                    <input name="merchant_number" class="form-control" value="{{ old('merchant_number', $bkashEnv['merchant_number']) }}">
                                     <small class="form-text text-muted">Leave blank to hide merchant number on checkout.</small>
                                 </div>
                             </div>
 
                             <div class="mb-3">
                                 <label class="form-label">Merchant Password</label>
-                                <input name="password" type="password" class="form-control" value="">
-                                <small class="form-text text-muted">Leave blank to keep existing password.</small>
+                                <input name="password" type="text" class="form-control" value="{{ old('password', $bkashEnv['password']) }}">
+                            </div>
+
+                            <hr>
+                            <h6 class="mb-3">bKash .env Connection Settings</h6>
+                            <div class="mb-3">
+                                <label class="form-label">Sandbox Base URL</label>
+                                <input name="sandbox_base_url" class="form-control" value="{{ old('sandbox_base_url', $bkashEnv['sandbox_base_url']) }}">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Production Base URL</label>
+                                <input name="production_base_url" class="form-control" value="{{ old('production_base_url', $bkashEnv['production_base_url']) }}">
+                            </div>
+                            <div class="row">
+                                @foreach ([
+                                    'token_endpoint' => 'Token Endpoint',
+                                    'create_payment_endpoint' => 'Create Payment Endpoint',
+                                    'execute_payment_endpoint' => 'Execute Payment Endpoint',
+                                    'query_payment_endpoint' => 'Query Payment Endpoint',
+                                ] as $field => $label)
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">{{ $label }}</label>
+                                        <input name="{{ $field }}" class="form-control" value="{{ old($field, $bkashEnv[$field]) }}">
+                                    </div>
+                                @endforeach
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Callback URL</label>
+                                <input name="callback_url" class="form-control" value="{{ old('callback_url', $bkashEnv['callback_url']) }}">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">HTTP Timeout (seconds)</label>
+                                    <input name="http_timeout" type="number" min="1" max="300" class="form-control" value="{{ old('http_timeout', $bkashEnv['http_timeout']) }}">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Verify SSL</label>
+                                    <select name="http_verify_ssl" class="form-select">
+                                        <option value="1" {{ filter_var(old('http_verify_ssl', $bkashEnv['http_verify_ssl']), FILTER_VALIDATE_BOOLEAN) ? 'selected' : '' }}>Yes</option>
+                                        <option value="0" {{ !filter_var(old('http_verify_ssl', $bkashEnv['http_verify_ssl']), FILTER_VALIDATE_BOOLEAN) ? 'selected' : '' }}>No</option>
+                                    </select>
+                                </div>
                             </div>
 
                             <div class="row">
                                 <div class="col-md-4 mb-3">
                                     <label class="form-label">Monthly Amount (BDT)</label>
-                                    <input name="monthly_amount" type="number" step="0.01" class="form-control" value="{{ old('monthly_amount', optional($setting)->monthly_amount ?? 0) }}">
+                                    <input name="monthly_amount" type="number" step="0.01" class="form-control" value="{{ old('monthly_amount', $monthlyAmount) }}">
                                 </div>
                                 <div class="col-md-4 mb-3">
                                     <label class="form-label">Sandbox Mode</label>
-                                    <select name="is_sandbox" class="form-select">
-                                        <option value="1" {{ optional($setting)->is_sandbox ? 'selected' : '' }}>Yes</option>
-                                        <option value="0" {{ optional($setting) && !optional($setting)->is_sandbox ? 'selected' : '' }}>No</option>
+                                    <select name="use_production" class="form-select">
+                                        <option value="0" {{ $isSandbox ? 'selected' : '' }}>Yes</option>
+                                        <option value="1" {{ !$isSandbox ? 'selected' : '' }}>No</option>
                                     </select>
                                 </div>
                                 <div class="col-md-4 mb-3">
                                     <label class="form-label">Enable bKash Payments</label>
                                     <select name="is_enabled" class="form-select">
-                                        <option value="1" {{ optional($setting)->is_enabled ? 'selected' : '' }}>Enabled</option>
-                                        <option value="0" {{ optional($setting) && !optional($setting)->is_enabled ? 'selected' : '' }}>Disabled</option>
+                                        <option value="1" {{ $isEnabled ? 'selected' : '' }}>Enabled</option>
+                                        <option value="0" {{ !$isEnabled ? 'selected' : '' }}>Disabled</option>
                                     </select>
                                 </div>
                             </div>
@@ -121,7 +171,12 @@
                                 <form method="POST" action="{{ route('backend.payment.bkash.initiate') }}" style="display:inline">
                                     @csrf
                                     <input type="hidden" name="amount" value="{{ optional($setting)->monthly_amount }}">
-                                    <button type="submit" class="btn btn-success">Pay Monthly Now (BDT {{ number_format(optional($setting)->monthly_amount, 2) }})</button>
+                                    @php
+                                        $monthlyBaseAmount = (float) optional($setting)->monthly_amount;
+                                        $gatewayFeePercent = (float) config('subscription.gateway_fee_percent', 1.5);
+                                        $monthlyGatewayAmount = round($monthlyBaseAmount * (1 + ($gatewayFeePercent / 100)), 2);
+                                    @endphp
+                                    <button type="submit" class="btn btn-success">Pay Monthly Now (BDT {{ number_format($monthlyGatewayAmount, 2) }})</button>
                                 </form>
                             @endif
 

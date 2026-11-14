@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use App\Models\Billing;
 use App\Models\BillItem;
+use App\Models\Appoinment;
 use App\Models\OpdPatient;
 use App\Models\IpdPatient;
 use App\Models\WebSetting;
@@ -111,8 +112,7 @@ class ReportController extends Controller
                     }
                 }
 
-                $expenseGrouped = $this->getExpenseDataByDate($dateConditions);
-                $totalExpense = abs((float) $expenseGrouped->sum('amount'));
+                $totalExpense = $this->accountingService->getExpenseTotal($dateConditions);
                 $totalDueCollection = $this->getDueCollectionTotalByDate($dateConditions);
                 $totalReturnAmount = $this->accountingService->getRefundTotal($dateConditions);
                 $actualDue = $this->getOutstandingDueTotal([], false);
@@ -146,8 +146,12 @@ class ReportController extends Controller
                     'opdRows' => $opdRows,
                     'opdTotals' => $opdTotals,
                     'allModuleTotals' => [],
-                    '_force_show_header_footer' => $request->query('inline') ? false : null,
+                    '_force_show_header_footer' => ($request->boolean('print_view') || $request->query('inline')) ? false : null,
                 ];
+
+                if ($request->boolean('print_view')) {
+                    return $this->renderDailySalesPrintView($data);
+                }
 
                 $pdf = $this->generateDailySalesPdf($data);
                 $filename = $this->getPdfFileName($selectedModule);
@@ -188,19 +192,21 @@ class ReportController extends Controller
             if ($selectedModule === 'all_module') {
                 $salesData = $this->getDailySalesData($filters);
                 $dateConditions = $this->getDateConditions($filters);
+                $appointmentModuleRows = $this->getAppointmentData($dateConditions, true);
                 $opdModuleRows = $this->getOpdData($dateConditions);
                 $ipdModuleRows = $this->getIpdData($dateConditions);
                 $pharmacyModuleRows = $this->getMedicineData($dateConditions);
                 $billingModuleRows = $this->getBillingData($dateConditions);
 
-                if (empty($opdModuleRows) && empty($ipdModuleRows) && empty($pharmacyModuleRows) && empty($billingModuleRows)) {
+                if (empty($appointmentModuleRows) && empty($opdModuleRows) && empty($ipdModuleRows) && empty($pharmacyModuleRows) && empty($billingModuleRows)) {
+                    $appointmentModuleRows = $this->getAppointmentData([], true);
                     $opdModuleRows = $this->getOpdData([]);
                     $ipdModuleRows = $this->getIpdData([]);
                     $pharmacyModuleRows = $this->getMedicineData([]);
                     $billingModuleRows = $this->getBillingData([]);
                 }
 
-                $moduleRows = array_merge($opdModuleRows, $ipdModuleRows, $pharmacyModuleRows, $billingModuleRows);
+                $moduleRows = array_merge($appointmentModuleRows, $opdModuleRows, $ipdModuleRows, $pharmacyModuleRows, $billingModuleRows);
 
                 usort($moduleRows, function ($a, $b) {
                     return strtotime((string)($a['date'] ?? '')) - strtotime((string)($b['date'] ?? ''));
@@ -223,6 +229,9 @@ class ReportController extends Controller
 
                 $billingRowsCollection = $moduleRowsCollection->filter(function ($row) {
                     return strtolower((string)($row['module'] ?? '')) === 'billing';
+                });
+                $appointmentRowsCollection = $moduleRowsCollection->filter(function ($row) {
+                    return strtolower((string)($row['module'] ?? '')) === 'appointment';
                 });
 
                 $pharmacyBillGroups = $pharmacyRowsCollection->groupBy(function ($row) {
@@ -257,6 +266,11 @@ class ReportController extends Controller
                         'records' => (float)$billingRowsCollection->count(),
                         'revenue' => (float)$billingRowsCollection->sum('revenue'),
                     ],
+                    'appointment' => [
+                        'label' => 'Appointment',
+                        'records' => (float)$appointmentRowsCollection->count(),
+                        'revenue' => (float)$appointmentRowsCollection->sum('revenue'),
+                    ],
                 ];
 
                 $data = [
@@ -276,8 +290,12 @@ class ReportController extends Controller
                     'reportRows' => $moduleRows,
                     'fallbackBillingRows' => [],
                     'allModuleTotals' => $allModuleTotals,
-                    '_force_show_header_footer' => $request->query('inline') ? false : null,
+                    '_force_show_header_footer' => ($request->boolean('print_view') || $request->query('inline')) ? false : null,
                 ];
+
+                if ($request->boolean('print_view')) {
+                    return $this->renderDailySalesPrintView($data);
+                }
 
                 $pdf = $this->generateDailySalesPdf($data);
                 $filename = $this->getPdfFileName($selectedModule);
@@ -317,6 +335,9 @@ class ReportController extends Controller
 
             $moduleReportData = $this->getReportData($filters);
             $reportRows = $moduleReportData['data'] ?? [];
+            $billingSalesData = $selectedModule === 'billing'
+                ? $this->getDailySalesData($filters)
+                : null;
 
             if ($selectedModule === 'billing' && empty($reportRows)) {
                 $reportRows = $this->getBillingData([]);
@@ -380,22 +401,26 @@ class ReportController extends Controller
                     $filters['singleDate'] ?? null
                 ),
                 'dailyData' => collect(),
-                'totals' => [
+                'totals' => $billingSalesData['totals'] ?? [
                     'total_records' => $moduleReportData['total'] ?? 0,
                     'total_revenue' => $moduleReportData['revenue'] ?? 0,
                     'average_revenue' => $moduleReportData['average'] ?? 0,
                     'total_return_amount' => 0,
                 ],
-                'billRows' => collect(),
-                'billTotals' => [],
+                'billRows' => $billingSalesData['billRows'] ?? collect(),
+                'billTotals' => $billingSalesData['billTotals'] ?? [],
                 'moduleDetails' => [],
                 'selectedModule' => $selectedModule,
                 'summary' => [],
                 'reportRows' => $reportRows,
                 'fallbackBillingRows' => $fallbackBillingRows,
                 'allModuleTotals' => [],
-                '_force_show_header_footer' => $request->query('inline') ? false : null,
+                '_force_show_header_footer' => ($request->boolean('print_view') || $request->query('inline')) ? false : null,
             ];
+
+            if ($request->boolean('print_view')) {
+                return $this->renderDailySalesPrintView($data);
+            }
 
             $pdf = $this->generateDailySalesPdf($data);
             $filename = $this->getPdfFileName($filters['module'] ?? 'all');
@@ -451,7 +476,7 @@ class ReportController extends Controller
             return $value !== null;
         });
 
-        $allowedModules = ['all_module', 'billing', 'pharmacy', 'medicine', 'opd', 'ipd'];
+        $allowedModules = ['all_module', 'billing', 'pharmacy', 'medicine', 'appointment', 'opd', 'ipd'];
         $selectedModule = $filters['module'] ?? 'all_module';
         $filters['module'] = in_array($selectedModule, $allowedModules, true) ? $selectedModule : 'all_module';
 
@@ -476,15 +501,19 @@ class ReportController extends Controller
 
         if (empty($filters['module']) || $filters['module'] == 'all_module') {
             $billingData = $this->getBillingData($dateConditions);
+            $appointmentData = $this->getAppointmentData($dateConditions, true);
             $medicineData = $this->getMedicineData($dateConditions);
             $opdData = $this->getOpdData($dateConditions);
             $ipdData = $this->getIpdData($dateConditions);
 
-            $data = array_merge($billingData, $medicineData, $opdData, $ipdData);
+            $data = array_merge($billingData, $appointmentData, $medicineData, $opdData, $ipdData);
         } else {
             switch ($filters['module']) {
                 case 'billing':
                     $data = $this->getBillingData($dateConditions);
+                    break;
+                case 'appointment':
+                    $data = $this->getAppointmentData($dateConditions);
                     break;
                 case 'pharmacy':
                 case 'medicine':
@@ -818,6 +847,51 @@ class ReportController extends Controller
         return $query;
     }
 
+    private function getAppointmentData($dateConditions, bool $excludeOpdMirrors = false)
+    {
+        $query = Appoinment::query()
+            ->where('status', 'Active')
+            ->whereNull('deleted_at')
+            ->where('appoinment_status', '!=', 'Cancelled')
+            ->with(['patient', 'admin', 'opdPatient:id,reference,paid_amount,balance_amount']);
+
+        if ($excludeOpdMirrors) {
+            $query->whereDoesntHave('opdPatient', function ($opdQuery) {
+                $opdQuery->whereNull('deleted_at')
+                    ->where(function ($statusQuery) {
+                        $statusQuery->whereNull('status')
+                            ->orWhere('status', '!=', 'Deleted');
+                    });
+            });
+        }
+
+        $this->applyDateFilter($query, $dateConditions, 'appoinment_date');
+
+        return $query->get([
+            'id', 'doctor_id', 'patient_id', 'transaction_id', 'appoinment_date',
+            'doctor_fee', 'discount_percentage', 'appoinment_status',
+        ])->map(function ($appointment) {
+            $fee = (float) ($appointment->doctor_fee ?? 0);
+            $discount = (float) ($appointment->discount_percentage ?? 0);
+            $netAmount = max(0, $fee - ($fee * $discount / 100));
+            $paidAmount = (float) ($appointment->opdPatient?->paid_amount ?? 0);
+            $dueAmount = max(0, $netAmount - $paidAmount);
+
+            return [
+                'date' => Carbon::parse($appointment->appoinment_date)->format('Y-m-d'),
+                'module' => 'appointment',
+                'records' => 1,
+                'revenue' => $netAmount,
+                'paid_amount' => $paidAmount,
+                'due_amount' => $dueAmount,
+                'status' => $dueAmount <= 0 ? 'completed' : ($paidAmount > 0 ? 'partial' : 'pending'),
+                'patient_name' => optional($appointment->patient)->name ?? 'N/A',
+                'doctor_name' => optional($appointment->admin)->name ?? 'N/A',
+                'bill_no' => $appointment->transaction_id ?? ('APP-' . $appointment->id),
+            ];
+        })->values()->all();
+    }
+
     private function getOpdData($dateConditions)
     {
         $query = OpdPatient::query()
@@ -925,19 +999,14 @@ class ReportController extends Controller
         $totalNetAmount = $billTotals['net_amount'] ?? 0;
         $totalPaidAmount = $billTotals['paid_amount'] ?? 0;
         $totalDueAmount = $this->getOutstandingDueTotal($dateConditions, true);
-        $billDueCollection = (float) ($billTotals['due_collected'] ?? 0);
-        $directDueCollection = $this->getDueCollectionTotalByDate($dateConditions);
-
-        // Use the direct due-collection total (entries in DueCollection within
-        // the selected date range) as the canonical due-collection figure for
-        // the report to avoid inflated numbers caused by taking the max of
-        // two overlapping sources.
-        $totalDueCollection = $directDueCollection;
 
         $incomeTotals = $this->accountingService->calculateFinalIncomeTotals($billRows, $dateConditions);
+        $totalDueCollection = $incomeTotals['total_due_collected'] ?? 0;
         $totalExpense = $incomeTotals['total_expense'] ?? 0;
         $totalReturnAmount = $incomeTotals['total_return_amount'] ?? 0;
-        $finalIncome = ($totalPaidAmount + $totalDueCollection) - $totalReturnAmount - $totalExpense;
+        $totalAppointmentReceipts = $incomeTotals['total_appointment_receipts'] ?? 0;
+        $totalLabReceipts = $incomeTotals['total_lab_receipts'] ?? 0;
+        $finalIncome = $incomeTotals['final_income'] ?? 0;
         $actualDue = $this->getOutstandingDueTotal([], false);
 
         $totals = [
@@ -945,6 +1014,8 @@ class ReportController extends Controller
             'paid_amount' => $totalPaidAmount,
             'due_amount' => max(0, $totalDueAmount),
             'due_collection' => $totalDueCollection,
+            'appointment_receipts' => $totalAppointmentReceipts,
+            'lab_receipts' => $totalLabReceipts,
             'total_expense' => $totalExpense,
             'final_income' => $finalIncome,
             'total_return_amount' => $totalReturnAmount,
@@ -1180,6 +1251,8 @@ class ReportController extends Controller
                 return 'Pharmacy Sales Report';
             case 'opd':
                 return 'OPD Revenue Report';
+            case 'appointment':
+                return 'Appointment Transactions Report';
             case 'ipd':
                 return 'IPD Revenue Report';
             default:
@@ -1199,6 +1272,8 @@ class ReportController extends Controller
                 return "Pharmacy_Report_{$timestamp}.pdf";
             case 'opd':
                 return "OPD_Report_{$timestamp}.pdf";
+            case 'appointment':
+                return "Appointment_Report_{$timestamp}.pdf";
             case 'ipd':
                 return "IPD_Report_{$timestamp}.pdf";
             default:
@@ -1218,6 +1293,40 @@ class ReportController extends Controller
             return 'Until ' . Carbon::parse($dateTo)->format('d-M-Y');
         }
         return Carbon::now()->format('d-M-Y');
+    }
+
+    private function reportViewData(array $data, $websetting, bool $showHeaderFooter, int $reportHeaderHeightPx, int $reportFooterHeightPx): array
+    {
+        return [
+            'title' => $data['title'],
+            'dateRange' => $data['dateRange'],
+            'dailyData' => $data['dailyData'],
+            'totals' => $data['totals'],
+            'billRows' => $data['billRows'] ?? collect(),
+            'billTotals' => $data['billTotals'] ?? [],
+            'moduleDetails' => $data['moduleDetails'] ?? [],
+            'selectedModule' => $data['selectedModule'],
+            'summary' => $data['summary'] ?? [],
+            'reportRows' => $data['reportRows'] ?? [],
+            'fallbackBillingRows' => $data['fallbackBillingRows'] ?? [],
+            'opdRows' => $data['opdRows'] ?? [],
+            'opdTotals' => $data['opdTotals'] ?? [],
+            'allModuleTotals' => $data['allModuleTotals'] ?? [],
+            'websetting' => $websetting,
+            'show_header_footer' => $showHeaderFooter,
+            'reportHeaderHeight' => $reportHeaderHeightPx,
+            'reportFooterHeight' => $reportFooterHeightPx,
+        ];
+    }
+
+    private function renderDailySalesPrintView(array $data)
+    {
+        $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
+
+        return response()->view('reports.general_report', array_merge(
+            $this->reportViewData($data, $websetting, false, 0, 0),
+            ['printView' => true]
+        ));
     }
 
     private function generateDailySalesPdf($data)
@@ -1260,7 +1369,7 @@ class ReportController extends Controller
         // Force a fixed half-inch (approx 48px at 96dpi) top margin for
         // listing reports so Report Settings changes don't affect these PDFs.
         // Listing reports are generated with a `selectedModule` value.
-        $listingModules = ['all_module', 'billing', 'pharmacy', 'medicine', 'opd', 'ipd'];
+        $listingModules = ['all_module', 'billing', 'pharmacy', 'medicine', 'appointment', 'opd', 'ipd'];
         if (isset($data['selectedModule']) && in_array($data['selectedModule'], $listingModules, true)) {
             $pageMarginTop = 48; // px (approx 0.5in)
         }
@@ -1304,27 +1413,13 @@ class ReportController extends Controller
 
         $mpdf->WriteHTML('<meta name="viewport" content="width=device-width, initial-scale=1.0">');
 
-        $html = view('reports.general_report', [
-            'title' => $data['title'],
-            'dateRange' => $data['dateRange'],
-            'dailyData' => $data['dailyData'],
-            'totals' => $data['totals'],
-            'billRows' => $data['billRows'] ?? collect(),
-            'billTotals' => $data['billTotals'] ?? [],
-            'moduleDetails' => $data['moduleDetails'] ?? [],
-            'selectedModule' => $data['selectedModule'],
-            'summary' => $data['summary'] ?? [],
-            'reportRows' => $data['reportRows'] ?? [],
-            'fallbackBillingRows' => $data['fallbackBillingRows'] ?? [],
-            'opdRows' => $data['opdRows'] ?? [],
-            'opdTotals' => $data['opdTotals'] ?? [],
-            'allModuleTotals' => $data['allModuleTotals'] ?? [],
-            'websetting' => $websetting,
-            // pass reporting flags/heights to view so templates can conditionally render
-            'show_header_footer' => $showHeaderFooter,
-            'reportHeaderHeight' => $reportHeaderHeightPx,
-            'reportFooterHeight' => $reportFooterHeightPx,
-        ])->render();
+        $html = view('reports.general_report', $this->reportViewData(
+            $data,
+            $websetting,
+            $showHeaderFooter,
+            $reportHeaderHeightPx,
+            $reportFooterHeightPx
+        ))->render();
 
         $mpdf->WriteHTML($html);
 

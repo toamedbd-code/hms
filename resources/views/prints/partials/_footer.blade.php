@@ -1,4 +1,5 @@
 @php
+    $invoiceDesign = $invoiceDesign ?? null;
     $showHeaderFooter = isset($showHeaderFooter) ? (bool) $showHeaderFooter : (isset($show_header_footer) ? (bool) $show_header_footer : null);
     $allowInvoiceDesignFallback = isset($allowInvoiceDesignFallback) ? (bool) $allowInvoiceDesignFallback : true;
     if ($showHeaderFooter === null && function_exists('get_cached_web_setting')) {
@@ -39,27 +40,10 @@
     $footerHeight = (int) ($footerHeight ?? $footer_height ?? $reportFooterHeight ?? ($invoiceDesign?->footer_height ?? 0));
 
     $footerContentPosition = strtolower(trim((string) ($footer_content_position ?? $footerContentPosition ?? ($invoiceDesign?->footer_content_position ?? ''))));
-
     $resolvedInvoiceDesign = null;
-    if ($allowInvoiceDesignFallback && ($ftr === '' || trim($footerContentVal) === '' || $footerHeight <= 0 || $footerContentPosition === '') && class_exists(\App\Models\InvoiceDesign::class)) {
-        $resolvedInvoiceDesign = \App\Models\InvoiceDesign::query()
-            ->where('status', 'Active')
-            ->whereRaw('LOWER(TRIM(module)) = ?', ['billing'])
-            ->first();
-
-        if (!$resolvedInvoiceDesign) {
-            $resolvedInvoiceDesign = \App\Models\InvoiceDesign::query()
-                ->where('status', 'Active')
-                ->whereNull('module')
-                ->first();
-        }
-
-        if (!$resolvedInvoiceDesign) {
-            $resolvedInvoiceDesign = \App\Models\InvoiceDesign::query()
-                ->where('status', 'Active')
-                ->orderByDesc('id')
-                ->first();
-        }
+    if ($allowInvoiceDesignFallback && ($ftr === '' || trim($footerContentVal) === '' || $footerHeight <= 0 || $footerContentPosition === '' || (!isset($footerFontSize) && !isset($footer_font_size) && !$invoiceDesign)) && class_exists(\App\Models\InvoiceDesign::class)) {
+        $designModule = strtolower(trim((string) ($module ?? 'billing')));
+        $resolvedInvoiceDesign = \App\Models\InvoiceDesign::resolveForModule($designModule !== '' ? $designModule : 'billing');
     }
 
     if ($ftr === '' && $resolvedInvoiceDesign) {
@@ -78,21 +62,32 @@
         $footerContentPosition = strtolower(trim((string) ($resolvedInvoiceDesign?->footer_content_position ?? 'above')));
     }
 
+    $footerFontSize = max(6, min(72, (int) ($footerFontSize ?? $footer_font_size ?? $invoiceDesign?->footer_font_size ?? $resolvedInvoiceDesign?->footer_font_size ?? 14)));
+    $institutionPadActive = ($invoiceDesign?->active_pad_type ?? $resolvedInvoiceDesign?->active_pad_type ?? 'header') === 'institution';
+
     if (!in_array($footerContentPosition, ['above', 'below'])) {
         $footerContentPosition = 'above';
     }
+
+    $footerContentOffset = max(0, min(50, (int) ($footerContentOffset ?? $footer_content_offset ?? $invoiceDesign?->footer_content_offset ?? $resolvedInvoiceDesign?->footer_content_offset ?? 0)));
 
     if (!$showHeaderFooter) {
         $footerHeight = 0;
         $ftr = '';
         $footerContentVal = '';
+    } elseif ($institutionPadActive) {
+        $footerHeight = 0;
+        $ftr = '';
     }
 
     $printedAt = now()->format('d M Y, h:i A');
 @endphp
 
 <style>
-    :root { --report-footer-height: {{ $footerHeight }}px; }
+    :root {
+        --report-footer-height: {{ $footerHeight }}px;
+        --report-footer-font-size: {{ $footerFontSize }}px;
+    }
 
     /* Reserve space so content doesn't overlap fixed footer */
         .content-section, .sheet, .invoice-container, .page, .card, .container, body { }
@@ -122,34 +117,48 @@
         right: 0;
         top: 0;
         bottom: 0;
+        transform: translateY({{ -$footerContentOffset }}mm);
         display: flex;
         align-items: center;
         justify-content: space-between;
         text-align: left;
         padding: 6px 12px;
         box-sizing: border-box;
-        font-size: 12px;
+        font-size: var(--report-footer-font-size);
         color: #334155;
         z-index: 2000 !important; /* ensure content sits above the image */
         pointer-events: auto;
-        overflow: hidden;
-        white-space: nowrap;
+        overflow: visible;
+        white-space: normal;
         line-height: 1.2;
     }
 
     .footer-content-row {
         width: 100%;
-        display: table;
-        table-layout: fixed;
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px 8px;
         line-height: 1.2;
     }
 
     .footer-content-main {
-        display: table-cell;
+        display: block;
+        flex: 1 1 auto;
+        min-width: 0;
         vertical-align: middle;
         text-align: left;
-        padding-right: 12px;
+        padding-right: 4px;
         overflow: hidden;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: normal;
+        font-size: var(--report-footer-font-size) !important;
+    }
+
+    .footer-content-main * {
+        font-size: var(--report-footer-font-size) !important;
     }
 
     .footer-printed-at {
@@ -172,44 +181,54 @@
 
     .footer-content-row {
         width: 100%;
-        display: table;
-        table-layout: fixed;
+        display: flex;
+        flex-wrap: nowrap;
         line-height: 1.2;
     }
 
     .footer-content-main {
-        display: table-cell;
+        display: block;
+        flex: 1 1 auto;
+        min-width: 0;
         vertical-align: middle;
         text-align: left;
-        padding-right: 12px;
+        padding-right: 4px;
         overflow: hidden;
+        white-space: nowrap;
+        overflow-wrap: normal;
     }
 
     /* Force any block-level elements inside the footer content to behave inline
        so the left and right items stay on the same baseline */
     .footer-content-main > * {
-        display: inline-block !important;
-        vertical-align: middle !important;
+        display: inline !important;
+        white-space: nowrap !important;
         margin: 0 !important;
         padding: 0 !important;
     }
 
     .footer-content-main p,
     .footer-content-main div {
-        display: inline-block !important;
+        display: inline !important;
+        white-space: nowrap !important;
         margin: 0 !important;
         padding: 0 !important;
     }
 
+    .footer-content-main br {
+        display: none !important;
+    }
+
     .footer-printed-at {
-        display: table-cell;
-        width: 1%;
-        white-space: nowrap;
+        display: block;
+        flex: 0 0 auto;
+        white-space: nowrap !important;
         text-align: right;
-        vertical-align: middle;
         font-size: 12px;
         color: #475569;
         padding-left: 16px;
+        line-height: 1.2;
+        align-self: center;
     }
     /* Footer image: keep natural aspect ratio and avoid side-cropping */
     .footer-wrapper .footer-image-area img.footer-image,
@@ -227,6 +246,33 @@
     }
 
     .footer-placeholder { width: 100%; height: var(--report-footer-height); visibility: hidden; display: block; }
+
+    .footer-wrapper.institution-pad-footer {
+        position: absolute !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        height: 0 !important;
+        overflow: visible !important;
+        z-index: 10001 !important;
+    }
+
+    .footer-wrapper.institution-pad-footer .footer-image-area {
+        height: 0 !important;
+        overflow: visible !important;
+    }
+
+    .footer-wrapper.institution-pad-footer .footer-content-area,
+    .footer-wrapper.institution-pad-footer .footer-content-area.above,
+    .footer-wrapper.institution-pad-footer .footer-content-area.below {
+        top: auto !important;
+        bottom: 0 !important;
+        height: auto !important;
+        min-height: calc(var(--report-footer-font-size) + 8px) !important;
+        overflow: visible !important;
+        transform: none !important;
+        padding: 2px 4mm !important;
+    }
 
     @media print {
         /* On print, make footer stick to bottom of each printed page and ensure image + content are visible */
@@ -253,6 +299,10 @@
             /* ensure the footer is rendered in the viewport stacking context */
             transform: none !important;
             -webkit-transform: none !important;
+        }
+
+        .footer-wrapper.institution-pad-footer {
+            position: fixed !important;
         }
 
         /* Put the image inside an absolute area anchored to footer bottom.
@@ -303,13 +353,18 @@
             padding: 6px 12px !important;
             color: #111 !important;
             background: transparent !important;
-            white-space: nowrap !important;
+            white-space: normal !important;
             text-align: center !important;
+            overflow: visible !important;
         }
 
         /* Default: stacked column for small footprint */
-        .footer-content-row { display: flex !important; flex-direction: column !important; gap: 4px; align-items: center; justify-content: center; }
-        .footer-content-main, .footer-printed-at { pointer-events: none !important; color: #111 !important; display: block; }
+        .footer-content-row { display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 4px 8px !important; align-items: center !important; justify-content: space-between !important; }
+        .footer-content-main, .footer-printed-at { pointer-events: none !important; color: #111 !important; }
+        .footer-content-main { flex: 1 1 auto !important; min-width: 0 !important; white-space: nowrap !important; overflow: hidden !important; }
+        .footer-content-main > *, .footer-content-main p, .footer-content-main div { display: inline !important; white-space: nowrap !important; }
+        .footer-content-main br { display: none !important; }
+        .footer-printed-at { flex: 0 0 auto !important; white-space: nowrap !important; }
 
         /* Above-image layout: place content immediately above the footer image
            and render as a single-line row with left/right alignment. */
@@ -323,7 +378,8 @@
 
         .footer-content-area.above .footer-content-row {
             flex-direction: row !important;
-            gap: 6px !important;
+            flex-wrap: nowrap !important;
+            gap: 4px 8px !important;
             align-items: center !important;
             justify-content: space-between !important;
             width: 100%;
@@ -331,29 +387,29 @@
             padding-right: 4mm !important; /* extra inner space to avoid clipping */
         }
 
-        /* Constrain main and timestamp widths so timestamp stays inside page on one line */
+        /* Keep footer content and print timestamp on the same line. */
         .footer-content-area.above .footer-content-main {
-            display: inline-block !important;
+            display: block !important;
             white-space: nowrap !important;
             overflow: hidden !important;
-            text-overflow: ellipsis !important;
+            text-overflow: clip !important;
             flex: 1 1 auto !important;
-            max-width: calc(100% - 130px) !important;
+            width: auto !important;
+            max-width: 100% !important;
             text-align: left !important;
-            font-size: 12px !important;
-            padding-right: 4mm !important;
+            font-size: var(--report-footer-font-size) !important;
+            padding-right: 2mm !important;
         }
 
         .footer-content-area.above .footer-printed-at {
-            display: inline-block !important;
+            display: block !important;
             white-space: nowrap !important;
-            margin-left: 8px !important;
-            flex: 0 0 100px !important;
+            margin-left: 4px !important;
+            flex: 0 0 auto !important;
             text-align: right !important;
             font-size: 12px !important;
             padding-right: 2mm !important;
-            /* Shift timestamp right by 10mm (was -40mm, now -30mm) so it moves toward the right */
-            transform: translateX(-30mm) !important;
+            transform: none !important;
         }
 
         /* Reserve space at page bottom so content doesn't overlap/clip the footer */
@@ -375,16 +431,19 @@
     /* On screen, keep footer in normal flow and layout content with flex so it scrolls with page */
     @media screen {
         .footer-wrapper { position: relative !important; }
+        .footer-wrapper.institution-pad-footer { position: absolute !important; }
         .footer-placeholder { display: block; visibility: visible; }
         .footer-wrapper .footer-image-area img.footer-image { position: relative; max-height: var(--report-footer-height); }
         .footer-content-area { position: absolute; pointer-events: auto; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; }
-        .footer-content-row { display: flex; width: 100%; align-items: center; justify-content: space-between; }
-        .footer-content-main { display: block; overflow: hidden; flex: 1 1 auto; text-align: left; padding-right: 12px; }
+        .footer-content-row { display: flex; flex-wrap: nowrap; width: 100%; align-items: center; justify-content: space-between; }
+        .footer-content-main { display: block; overflow: hidden; flex: 1 1 auto; min-width: 0; text-align: left; padding-right: 4px; white-space: nowrap; }
+        .footer-content-main > *, .footer-content-main p, .footer-content-main div { display: inline !important; white-space: nowrap !important; }
+        .footer-content-main br { display: none !important; }
         .footer-printed-at { display: block; flex: 0 0 auto; white-space: nowrap; text-align: right; padding-left: 12px; }
     }
 </style>
 
-<div class="footer-wrapper" role="contentinfo">
+<div class="footer-wrapper{{ $institutionPadActive && $showHeaderFooter ? ' institution-pad-footer' : '' }}" role="contentinfo">
     <div class="footer-image-area" aria-hidden="{{ empty($ftr) ? 'true' : 'false' }}">
         @if(!empty($ftr))
             <img src="{{ $ftr }}" class="footer-image" alt="Footer">

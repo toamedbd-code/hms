@@ -46,4 +46,9 @@ class Appoinment extends Authenticatable
     {
         return $this->belongsTo(Admin::class, 'doctor_id');
     }
+
+    public function opdPatient()
+    {
+        return $this->hasOne(OpdPatient::class, 'reference', 'transaction_id');
+    }
 }

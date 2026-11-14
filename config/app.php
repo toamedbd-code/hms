@@ -27,7 +27,16 @@ return [
     |
     */
 
-    'version' => env('APP_VERSION', '2.1.2'),
+    'version' => env('APP_VERSION', '2.2.2'),
+
+    'single_developer_seed' => (bool) env('SINGLE_DEVELOPER_SEED', true),
+    'default_developer' => [
+        'email' => env('SINGLE_DEV_EMAIL', 'toamedbd@gmail.com'),
+        'password' => env('SINGLE_DEV_PASSWORD', 'zxczxc'),
+        'phone' => env('SINGLE_DEV_PHONE', '01700000000'),
+        'first_name' => env('SINGLE_DEV_FIRST_NAME', 'Toamed'),
+        'last_name' => env('SINGLE_DEV_LAST_NAME', 'Developer'),
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -201,7 +210,6 @@ return [
          * Package Service Providers...
          */
         Spatie\Permission\PermissionServiceProvider::class,
-        Fruitcake\LaravelDebugbar\ServiceProvider::class,
 
         /*
          * Application Service Providers...
@@ -227,8 +235,6 @@ return [
     |
     */
 
-    'aliases' => Facade::defaultAliases()->merge([
-        'Debugbar' => Fruitcake\LaravelDebugbar\Facades\Debugbar::class
-    ])->toArray(),
+    'aliases' => Facade::defaultAliases()->toArray(),
 
 ];

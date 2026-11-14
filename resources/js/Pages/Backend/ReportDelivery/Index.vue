@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, nextTick } from 'vue';
+import { computed, ref, nextTick, onMounted, onUnmounted } from 'vue';
 import { router } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import Pagination from '@/Components/Pagination.vue';
@@ -20,6 +20,7 @@ const props = defineProps({
 const rows = computed(() => props.datas?.data ?? []);
 const search = ref(props.filters?.search ?? '');
 const status = ref(props.filters?.status ?? '');
+const numOfData = ref(props.filters?.numOfData ?? props.datas?.per_page ?? 10);
 
 const getItems = (billing) => billing.bill_items ?? billing.billItems ?? [];
 
@@ -103,13 +104,11 @@ const canSend = (billing) => {
   return items.some((it) => it.reported_at && !it.sent_at);
 };
 
-const canDeliver = (billing) => {
-  if (hasDue(billing)) return false;
-  const items = getRelevantItems(billing);
-  return items.some((it) => it.reported_at && !it.delivered_at);
-};
+const hasPrintedReport = (billing) => isReportComplete(billing)
+  && getItems(billing).some((item) => item.delivered_at);
 
 const getDeliveredBy = (billing) => {
+  if (!isReportComplete(billing)) return 'N/A';
   const items = getItems(billing);
   for (const it of items) {
     if (it.delivered_by && it.delivered_by.name) return it.delivered_by.name;
@@ -123,10 +122,10 @@ const getReportStatus = (billing) => {
   if (!items.length) return { label: 'Complete', classes: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
 
   const anyCollected = items.some((it) => it.sample_collected_at);
-  const allReported = items.every((it) => it.reported_at);
+  const hasUnreported = items.some((it) => !it.reported_at);
 
-  if (!anyCollected) return { label: 'Pending', classes: 'text-amber-700 bg-amber-50 border-amber-200' };
-  if (!allReported) return { label: 'Processing', classes: 'text-blue-700 bg-blue-50 border-blue-200' };
+  if (hasUnreported && !anyCollected) return { label: 'Pending', classes: 'text-amber-700 bg-amber-50 border-amber-200' };
+  if (hasUnreported) return { label: 'Processing', classes: 'text-blue-700 bg-blue-50 border-blue-200' };
   return { label: 'Complete', classes: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
 };
 
@@ -141,7 +140,7 @@ const handleSearch = () => {
     route('backend.report-delivery.index'),
     {
       search: search.value,
-      numOfData: props.datas?.per_page ?? 10,
+      numOfData: numOfData.value,
       status: status.value,
     },
     {
@@ -152,17 +151,13 @@ const handleSearch = () => {
   );
 };
 
-const sendAll = (billingId) => {
-  router.post(route('backend.report-delivery.sendAll', billingId), {}, { preserveScroll: true });
-};
+const refreshAfterPrint = () => router.reload({ preserveScroll: true });
 
-const deliverAll = (billingId) => {
-  router.post(route('backend.report-delivery.deliverAll', billingId), {}, { preserveScroll: true });
-};
-
-const processingDeliver = ref({});
+onMounted(() => window.addEventListener('focus', refreshAfterPrint));
+onUnmounted(() => window.removeEventListener('focus', refreshAfterPrint));
 
 const getDeliveryDate = (billing) => {
+  if (!isReportComplete(billing)) return null;
   const items = getItems(billing).map((it) => it.delivered_at).filter(Boolean);
   if (!items.length) return null;
   // find latest delivered_at
@@ -170,12 +165,20 @@ const getDeliveryDate = (billing) => {
   return formatDateTime(latest);
 };
 
-const canPrint = (billing) => {
-  const items = getItems(billing);
-  return items.some((it) => it.reported_at);
+const hasReportResult = (item) => {
+  const note = String(item?.report_note ?? '')
+    .replace('[[FULL_PAGE]]', '')
+    .replace(/<[^>]*>/g, '')
+    .trim();
+
+  return Boolean(note) || Number(item?.parameter_results_count ?? 0) > 0;
 };
 
-const getReportedItems = (billing) => getItems(billing).filter((it) => it.reported_at);
+const getReportedItems = (billing) => getItems(billing).filter(
+  (item) => item.reported_at && hasReportResult(item)
+);
+
+const canPrint = (billing) => getReportedItems(billing).length > 0;
 
 const getItemStatus = (it) => {
   if (!it) return { label: 'N/A', classes: 'text-gray-600 bg-gray-50 border-gray-200' };
@@ -187,21 +190,7 @@ const getItemStatus = (it) => {
   return { label: 'Complete', classes: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
 };
 
-// Helpers to open windows without keeping an opener reference (helps avoid cross-window focus/blocks)
-const openNoopener = (name = '_blank') => {
-  try {
-    const w = window.open('', name);
-    try {
-      if (w) w.opener = null;
-    } catch (e) {
-      // ignore
-    }
-    return w;
-  } catch (e) {
-    return null;
-  }
-};
-
+// Open report URLs directly so print tabs never start on an empty document.
 const openNoopenerUrl = (url, name = '_blank') => {
   try {
     const w = window.open(url, name);
@@ -218,6 +207,35 @@ const openNoopenerUrl = (url, name = '_blank') => {
       return null;
     }
   }
+};
+
+const reportPrintUrl = (itemId, { singleItem = false, itemIds = [] } = {}) => {
+  const url = new URL(route('backend.reporting.print', itemId), window.location.href);
+  if (singleItem) {
+    url.searchParams.set('single_item', '1');
+  } else if (itemIds.length) {
+    url.searchParams.set('item_ids', itemIds.join(','));
+  }
+  url.searchParams.set('mark_delivered', '1');
+  return url.href;
+};
+
+const getPrintBatches = (items) => {
+  const groupedItems = new Map();
+  items.forEach((item) => {
+    const category = String(item.category ?? '');
+    const itemName = String(item.item_name ?? '').toLowerCase();
+    const printSeparately = ['Radiology', 'Ultrasonogram', 'Ultrasonography', 'ECG'].includes(category)
+      || itemName.includes('cbc');
+    const groupKey = printSeparately ? `${category}:${item.id}` : category;
+    if (!groupedItems.has(groupKey)) groupedItems.set(groupKey, []);
+    groupedItems.get(groupKey).push(item);
+  });
+
+  return [...groupedItems.values()].map((group) => ({
+    primaryItem: group[0],
+    itemIds: group.map((item) => item.id),
+  }));
 };
 
 // Print picker state
@@ -249,40 +267,14 @@ const printItem = (it, billing) => {
     return;
   }
 
-  const win = openNoopener();
-  processingDeliver.value = { ...processingDeliver.value, [billing.id]: true };
-
-  router.post(
-    route('backend.report-delivery.deliverAll', billing.id),
-    {},
-    {
-      preserveScroll: true,
-      onSuccess: () => {
-          try {
-            const url = route('backend.reporting.print', it.id);
-            if (win) win.location = url;
-            else openNoopenerUrl(url);
-          } catch (e) {
-            // ignore
-          }
-        processingDeliver.value = { ...processingDeliver.value, [billing.id]: false };
-      },
-        onError: () => {
-          try {
-            openNoopenerUrl(route('backend.reporting.print', it.id));
-          } catch (e) {
-            // ignore
-          }
-          processingDeliver.value = { ...processingDeliver.value, [billing.id]: false };
-        },
-    }
-  );
+  const url = reportPrintUrl(it.id, { singleItem: true });
+  openNoopenerUrl(url);
 };
 
 const printSelected = (billing) => {
   if (!billing?.id) return;
   const ids = selectedPrintIds.value ?? [];
-  const items = printCandidates.value.filter((it) => ids.includes(it.id));
+  const items = printCandidates.value.filter((it) => ids.some((id) => String(id) === String(it.id)));
   if (!items.length) return;
 
   // If there is due on this billing, defer to due-collect flow with the selected items
@@ -292,46 +284,12 @@ const printSelected = (billing) => {
     return;
   }
 
-  // open placeholder windows now (user gesture) to avoid popup blockers
-  const wins = items.map(() => openNoopener());
-
-  processingDeliver.value = { ...processingDeliver.value, [billing.id]: true };
-
-  router.post(
-    route('backend.report-delivery.deliverAll', billing.id),
-    {},
-    {
-      preserveScroll: true,
-      onSuccess: () => {
-        items.forEach((it, idx) => {
-          const w = wins[idx];
-          try {
-            const url = route('backend.reporting.print', it.id);
-            if (w) w.location = url;
-            else openNoopenerUrl(url);
-          } catch (e) {
-            // ignore
-          }
-        });
-
-        processingDeliver.value = { ...processingDeliver.value, [billing.id]: false };
-        showPrintPicker.value = false;
-        handleSearch();
-      },
-      onError: () => {
-        items.forEach((it) => {
-          try {
-            openNoopenerUrl(route('backend.reporting.print', it.id));
-          } catch (e) {
-            // ignore
-          }
-        });
-        processingDeliver.value = { ...processingDeliver.value, [billing.id]: false };
-        showPrintPicker.value = false;
-        handleSearch();
-      },
-    }
-  );
+  const batches = getPrintBatches(items);
+  batches.forEach((batch) => {
+    const url = reportPrintUrl(batch.primaryItem.id, { itemIds: batch.itemIds });
+    openNoopenerUrl(url);
+  });
+  showPrintPicker.value = false;
 };
 
 const showDueModal = ref(false);
@@ -379,8 +337,12 @@ const submitDueCollect = () => {
 
   // items user wanted to print after collecting due (set when Print was clicked)
   const itemsToPrint = pendingPrintItems.value ?? [];
-  // open placeholder windows now (user gesture) — we'll close them if we don't proceed
-  const wins = itemsToPrint.map(() => openNoopener());
+  const printBatches = getPrintBatches(itemsToPrint);
+  // Open the current page rather than an empty tab while collection is submitted.
+  const wins = printBatches.map(() => window.open(window.location.href, '_blank'));
+  wins.forEach((win) => {
+    if (win) win.opener = null;
+  });
 
   beginSubmission();
   router.post(
@@ -407,7 +369,7 @@ const submitDueCollect = () => {
 
         // If full payment is required and we still have remaining due, do NOT print/deliver.
         if (requireFullPayment.value && remainingAfter > 0) {
-          // Close any placeholder windows opened earlier since we won't use them
+          // Close the opened report tabs because delivery is not allowed yet.
           try {
             wins.forEach((w) => {
               if (w && !w.closed) w.close();
@@ -422,78 +384,21 @@ const submitDueCollect = () => {
           return;
         }
 
-        // proceed to deliver and print
-        processingDeliver.value = { ...processingDeliver.value, [dueBilling.value.id]: true };
-
-        router.post(
-          route('backend.report-delivery.deliverAll', dueBilling.value.id),
-          {},
-          {
-            preserveScroll: true,
-            onSuccess: () => {
-              try {
-                if (itemsToPrint.length) {
-                  itemsToPrint.forEach((it, idx) => {
-                    const w = wins[idx];
-                    const url = route('backend.reporting.print', it.id);
-                    if (w) w.location = url;
-                    else openNoopenerUrl(url);
-                  });
-                }
-              } catch (e) {
-                // ignore
-              }
-
-              processingDeliver.value = { ...processingDeliver.value, [dueBilling.value.id]: false };
-              showDueModal.value = false;
-              resetSubmissionToken();
-              pendingPrintItems.value = [];
-              partialCollected.value = false;
-              handleSearch();
-            },
-            onError: () => {
-              if (itemsToPrint.length) {
-                itemsToPrint.forEach((it) => {
-                  try {
-                    openNoopenerUrl(route('backend.reporting.print', it.id));
-                  } catch (e) {
-                    // ignore
-                  }
-                });
-              }
-              processingDeliver.value = { ...processingDeliver.value, [dueBilling.value.id]: false };
-              showDueModal.value = false;
-              resetSubmissionToken();
-              pendingPrintItems.value = [];
-              partialCollected.value = false;
-              handleSearch();
-            },
-          }
-        );
-        // attempt early navigation to speed up perceived print opening when allowed
-        try {
-          if (isReady && isReady.value) {
-            setTimeout(() => {
-              try {
-                if (itemsToPrint.length) {
-                  itemsToPrint.forEach((it, idx) => {
-                    const w = wins[idx];
-                    const url = route('backend.reporting.print', it.id);
-                    if (w) w.location = url;
-                    else openNoopenerUrl(url);
-                  });
-                }
-              } catch (e) {
-                // ignore
-              }
-            }, 50);
-          }
-        } catch (e) {
-          // ignore
-        }
+        printBatches.forEach((batch, index) => {
+          const url = reportPrintUrl(batch.primaryItem.id, { itemIds: batch.itemIds });
+          if (wins[index] && !wins[index].closed) wins[index].location.replace(url);
+          else openNoopenerUrl(url);
+        });
+        showDueModal.value = false;
+        resetSubmissionToken();
+        pendingPrintItems.value = [];
+        partialCollected.value = false;
+        handleSearch();
       },
       onError: () => {
-        // leave modal open so user can retry
+        wins.forEach((win) => {
+          if (win && !win.closed) win.close();
+        });
       },
       onFinish: () => {
         endSubmission();
@@ -525,31 +430,9 @@ const handlePrint = (billing) => {
 
   if (reported.length === 1) {
     const firstReported = reported[0];
-    processingDeliver.value = { ...processingDeliver.value, [billing.id]: true };
 
-    // open placeholder window now to avoid popup blocker
-    const win = openNoopener();
-
-    router.post(
-      route('backend.report-delivery.deliverAll', billing.id),
-      {},
-      {
-        preserveScroll: true,
-        onSuccess: () => {
-          try {
-            const url = route('backend.reporting.print', firstReported.id);
-            if (win) win.location = url;
-            else openNoopenerUrl(url);
-          } catch (e) {
-            // ignore popup failures
-          }
-          processingDeliver.value = { ...processingDeliver.value, [billing.id]: false };
-        },
-        onError: () => {
-          processingDeliver.value = { ...processingDeliver.value, [billing.id]: false };
-        },
-      }
-    );
+    const url = reportPrintUrl(firstReported.id);
+    openNoopenerUrl(url);
 
     return;
   }
@@ -581,6 +464,22 @@ const goBack = () => {
             class="w-56 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-200"
             @keyup.enter="handleSearch"
           />
+          <label class="flex items-center gap-2 text-sm text-gray-700">
+            <span>Show</span>
+            <select
+              v-model="numOfData"
+              @change="handleSearch"
+              class="px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            >
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="30">30</option>
+              <option value="40">40</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="500">500</option>
+            </select>
+          </label>
           <select
             v-model="status"
             @change="handleSearch"
@@ -643,21 +542,19 @@ const goBack = () => {
               <td class="px-3 py-2 border">
                 <div class="flex flex-wrap items-center gap-2">
                   <button
+                    v-if="getReportStatus(billing).label !== 'Pending'"
                     type="button"
                     class="px-3 py-1 text-xs text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     @click="handlePrint(billing)"
-                    :disabled="!canPrint(billing) || processingDeliver[billing.id]"
+                    :disabled="!canPrint(billing)"
                   >
                     Print
                   </button>
-                  <button
-                    type="button"
-                    class="px-3 py-1 text-xs text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    @click="deliverAll(billing.id)"
-                    :disabled="!canDeliver(billing)"
-                  >
-                    Delivered
-                  </button>
+                  <span
+                    v-if="hasPrintedReport(billing)"
+                    class="px-3 py-1 text-xs font-semibold text-white bg-emerald-600 rounded"
+                    role="status"
+                  >Delivered</span>
                 </div>
               </td>
             </tr>
@@ -704,10 +601,10 @@ const goBack = () => {
                   <td class="px-3 py-2">{{ (it.reported_by && it.reported_by.name) || (it.reportedBy && it.reportedBy.name) || 'N/A' }}</td>
                   <td class="px-3 py-2">
                     <button
+                      v-if="getItemStatus(it).label !== 'Pending'"
                       type="button"
                       class="px-2 py-1 text-xs text-white bg-indigo-600 rounded hover:bg-indigo-700"
                       @click="printItem(it, printBilling)"
-                      :disabled="processingDeliver[printBilling?.id]"
                     >
                       Print
                     </button>
@@ -720,7 +617,7 @@ const goBack = () => {
           <div class="flex items-center justify-end gap-2">
             <button type="button" class="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded" @click="showPrintPicker = false">Cancel</button>
             <button type="button" class="px-4 py-2 text-sm text-gray-700 bg-white border rounded" @click="selectAllPrint">Select All</button>
-            <button type="button" class="px-4 py-2 text-sm text-white bg-indigo-600 rounded" :disabled="!selectedPrintIds.length || processingDeliver[printBilling?.id]" @click="printSelected(printBilling)">Print Selected</button>
+            <button type="button" class="px-4 py-2 text-sm text-white bg-indigo-600 rounded" :disabled="!selectedPrintIds.length" @click="printSelected(printBilling)">Print Selected</button>
           </div>
         </div>
       </div>

@@ -34,15 +34,15 @@ class StaffAttendanceRequest extends FormRequest
     public function messages()
     {
         return [
-            'staff_id.required' => 'The staff_id field is required.',
- 			'name.required' => 'The name field is required.',
- 			'role_id.required' => 'The role field is required.',
- 			'attendance_date.required' => 'The attendance date field is required.',
- 			'attendance_status.required' => 'The attendance field is required.',
- 			'in_time.required' => 'The in time field is required.',
- 			'out_time.required' => 'The out time field is required.',
- 			'note.required' => 'The note field is required.',
- 		
+            'staff_id.required' => 'Staff ID is required.',
+            'name.required' => 'Name is required.',
+            'records.*.name.required' => 'Staff name is required.',
+            'role_id.required' => 'Role is required.',
+            'attendance_date.required' => 'Attendance date is required.',
+            'attendance_status.required' => 'Attendance status is required.',
+            'in_time.required' => 'In time is required.',
+            'out_time.required' => 'Out time is required.',
+            'note.required' => 'Note is required.',
         ];
     }
 }

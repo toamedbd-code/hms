@@ -59,11 +59,32 @@ class StoreManagementMenuSeeder extends Seeder
                     'sorting' => 3,
                 ],
                 [
-                    'name' => 'GRN Receive',
+                    'name' => 'Purchase Delivery (GRN)',
                     'icon' => 'download-cloud',
                     'route' => 'backend.stock.grns',
                     'permission_name' => 'grn-receive',
                     'sorting' => 4,
+                ],
+                [
+                    'name' => 'Purchase Orders',
+                    'icon' => 'shopping-cart',
+                    'route' => 'backend.stock.purchase-orders',
+                    'permission_name' => 'store-purchase-orders',
+                    'sorting' => 12,
+                ],
+                [
+                    'name' => 'Purchase Payments',
+                    'icon' => 'credit-card',
+                    'route' => 'backend.stock.purchase-payments',
+                    'permission_name' => 'store-purchase-payments',
+                    'sorting' => 13,
+                ],
+                [
+                    'name' => 'Store Suppliers',
+                    'icon' => 'users',
+                    'route' => 'backend.storesupplier.index',
+                    'permission_name' => 'store-suppliers-list',
+                    'sorting' => 14,
                 ],
                 [
                     'name' => 'Store Adjustments',
@@ -100,6 +121,20 @@ class StoreManagementMenuSeeder extends Seeder
                     'permission_name' => 'monthly-closing',
                     'sorting' => 9,
                 ],
+                [
+                    'name' => 'Reagent Management',
+                    'icon' => 'thermometer',
+                    'route' => 'backend.stock.reagents',
+                    'permission_name' => 'reagent-management',
+                    'sorting' => 10,
+                ],
+                [
+                    'name' => 'Department Inventory',
+                    'icon' => 'layers',
+                    'route' => 'backend.stock.department-reagents',
+                    'permission_name' => 'department-reagent-stock',
+                    'sorting' => 11,
+                ],
             ];
 
             foreach ($desiredChildren as $child) {
@@ -131,6 +166,11 @@ class StoreManagementMenuSeeder extends Seeder
                 'low-stock-report',
                 'stock-movement-report',
                 'monthly-closing',
+                'reagent-management',
+                'department-reagent-stock',
+                'store-purchase-orders',
+                'store-purchase-payments',
+                'store-suppliers-list',
             ];
 
             foreach ($storePermissionNames as $index => $permissionName) {

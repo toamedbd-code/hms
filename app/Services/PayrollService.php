@@ -28,10 +28,7 @@ class PayrollService
         $allowances = $salary ? $salary->allowances : 0;
         $salaryDeductions = $salary ? $salary->deductions : 0;
 
-        $daysPresent = Attendance::where('employee_id', $employee->id)
-            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
-            ->where('status', 'present')
-            ->count();
+        $daysPresent = $this->countPresentDays($employee, $start, $end);
 
         // total days in the period (inclusive)
         $totalDays = $start->diffInDays($end) + 1;
@@ -70,6 +67,34 @@ class PayrollService
         ]);
 
         return $payslip;
+    }
+
+    /**
+     * Attendance is stored as biometric punches (`type` = in/out on `recorded_at`),
+     * and a device can push several rows for the same day, so presence is counted
+     * as the number of distinct dates the employee punched in.
+     */
+    protected function countPresentDays(Employee $employee, Carbon $start, Carbon $end): int
+    {
+        $query = Attendance::query()
+            ->where('type', 'in')
+            ->whereBetween('recorded_at', [$start, $end]);
+
+        $employeeCode = trim((string) ($employee->employee_id ?? ''));
+
+        $query->where(function ($q) use ($employee, $employeeCode) {
+            $q->where('employee_id', $employee->id);
+
+            if ($employeeCode !== '') {
+                $q->orWhere('employee_code', $employeeCode);
+            }
+        });
+
+        return $query->pluck('recorded_at')
+            ->filter()
+            ->map(fn($recordedAt) => Carbon::parse($recordedAt)->toDateString())
+            ->unique()
+            ->count();
     }
 
     public function runForAll(string $periodStart, string $periodEnd, $createdBy = null)

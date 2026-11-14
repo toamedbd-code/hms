@@ -141,7 +141,7 @@ const handleAction = (actionName, actionId) => {
                 <div class="flex flex-wrap items-center gap-2">
                     <input v-model="filters.patient_name"
                         class="block p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
-                        type="text" placeholder="Patient Name" @input="applyFilter" />
+                        type="text" placeholder="Patient Name / Patient ID / IPD ID" @input="applyFilter" />
 
                     <input v-model="filters.date_from"
                         class="block p-2 text-sm rounded-md border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"

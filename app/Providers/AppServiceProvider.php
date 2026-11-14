@@ -5,9 +5,11 @@ namespace App\Providers;
 use App\Models\ActivityLog;
 use App\Models\Company;
 use App\Services\ActivityLogService;
+use App\Support\DefaultDeveloperManager;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Pivot;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
@@ -98,62 +100,72 @@ class AppServiceProvider extends ServiceProvider
         // the running PHP process in time; try reading .env and enforce
         // DB config into runtime `config()` so middleware/auth can use it.
         try {
-            $dbHost = env('DB_HOST');
-            $dbPort = env('DB_PORT');
-            $dbName = env('DB_DATABASE');
-            $dbUser = env('DB_USERNAME');
-            $dbPass = env('DB_PASSWORD');
-            $cacheDriver = env('CACHE_DRIVER', config('cache.default', 'file'));
+            $mysqlConfig = config('database.connections.mysql', []);
+            $dbHost = $mysqlConfig['host'] ?? null;
+            $dbPort = $mysqlConfig['port'] ?? null;
+            $dbName = $mysqlConfig['database'] ?? null;
+            $dbUser = $mysqlConfig['username'] ?? null;
+            $dbPass = $mysqlConfig['password'] ?? null;
+            $cacheDriver = config('cache.default', 'file');
+            $needsDatabaseConfigFallback = !$this->app->configurationIsCached()
+                || empty($dbName)
+                || empty($dbUser);
 
-            $envPath = base_path('.env');
-            if (file_exists($envPath)) {
-                $contents = @file_get_contents($envPath);
-                if (is_string($contents) && $contents !== '') {
-                    if (preg_match('/^DB_HOST=(.+)$/m', $contents, $m)) { $dbHost = trim(trim($m[1]), "\"'"); }
-                    if (preg_match('/^DB_PORT=(.+)$/m', $contents, $m)) { $dbPort = trim(trim($m[1]), "\"'"); }
-                    if (preg_match('/^DB_DATABASE=(.+)$/m', $contents, $m)) { $dbName = trim(trim($m[1]), "\"'"); }
-                    if (preg_match('/^DB_USERNAME=(.+)$/m', $contents, $m)) { $dbUser = trim(trim($m[1]), "\"'"); }
-                    if (preg_match('/^DB_PASSWORD=(.*)$/m', $contents, $m)) { $dbPass = trim(trim($m[1]), "\"'"); }
-                    if (preg_match('/^CACHE_DRIVER=(.+)$/m', $contents, $m)) { $cacheDriver = trim(trim($m[1]), "\"'"); }
+            if ($needsDatabaseConfigFallback) {
+                $dbHost = env('DB_HOST') ?: $dbHost;
+                $dbPort = env('DB_PORT') ?: $dbPort;
+                $dbName = env('DB_DATABASE') ?: $dbName;
+                $dbUser = env('DB_USERNAME') ?: $dbUser;
+                $dbPass = env('DB_PASSWORD') ?? $dbPass;
+
+                $envPath = base_path('.env');
+                if (file_exists($envPath)) {
+                    $contents = @file_get_contents($envPath);
+                    if (is_string($contents) && $contents !== '') {
+                        if (preg_match('/^DB_HOST=(.+)$/m', $contents, $m)) { $dbHost = trim(trim($m[1]), "\"'"); }
+                        if (preg_match('/^DB_PORT=(.+)$/m', $contents, $m)) { $dbPort = trim(trim($m[1]), "\"'"); }
+                        if (preg_match('/^DB_DATABASE=(.+)$/m', $contents, $m)) { $dbName = trim(trim($m[1]), "\"'"); }
+                        if (preg_match('/^DB_USERNAME=(.+)$/m', $contents, $m)) { $dbUser = trim(trim($m[1]), "\"'"); }
+                        if (preg_match('/^DB_PASSWORD=(.*)$/m', $contents, $m)) { $dbPass = trim(trim($m[1]), "\"'"); }
+                    }
                 }
             }
 
             if (!empty($dbName) && !empty($dbUser)) {
-                // Capture previous effective DB config so we only log changes
-                $prevHost = config('database.connections.mysql.host') ?? '';
-                $prevPort = config('database.connections.mysql.port') ?? '';
-                $prevDatabase = config('database.connections.mysql.database') ?? '';
-                $prevUsername = config('database.connections.mysql.username') ?? '';
+                if ($needsDatabaseConfigFallback) {
+                    // Preserve the legacy fallback only when Laravel has no usable DB config.
+                    $prevHost = $mysqlConfig['host'] ?? '';
+                    $prevPort = $mysqlConfig['port'] ?? '';
+                    $prevDatabase = $mysqlConfig['database'] ?? '';
+                    $prevUsername = $mysqlConfig['username'] ?? '';
 
-                config(['database.connections.mysql.host' => $dbHost ?? $prevHost]);
-                config(['database.connections.mysql.port' => $dbPort ?? $prevPort]);
-                config(['database.connections.mysql.database' => $dbName]);
-                config(['database.connections.mysql.username' => $dbUser]);
-                config(['database.connections.mysql.password' => $dbPass]);
-
-                $_ENV['DB_HOST'] = $dbHost ?? '';
-                $_ENV['DB_PORT'] = $dbPort ?? '';
-                $_ENV['DB_DATABASE'] = $dbName ?? '';
-                $_ENV['DB_USERNAME'] = $dbUser ?? '';
-                $_ENV['DB_PASSWORD'] = $dbPass ?? '';
-
-                @putenv("DB_HOST={$dbHost}");
-                @putenv("DB_PORT={$dbPort}");
-                @putenv("DB_DATABASE={$dbName}");
-                @putenv("DB_USERNAME={$dbUser}");
-                @putenv("DB_PASSWORD={$dbPass}");
-
-                // Log non-sensitive DB info for diagnostics (do not log password)
-                if ($prevHost !== ($dbHost ?? '') || $prevDatabase !== ($dbName ?? '') || $prevUsername !== ($dbUser ?? '')) {
-                    Log::info('AppServiceProvider: enforced DB config at runtime', [
-                        'db_host' => $dbHost,
-                        'db_database' => $dbName,
-                        'db_username' => $dbUser,
+                    config([
+                        'database.connections.mysql.host' => $dbHost ?? $prevHost,
+                        'database.connections.mysql.port' => $dbPort ?? $prevPort,
+                        'database.connections.mysql.database' => $dbName,
+                        'database.connections.mysql.username' => $dbUser,
+                        'database.connections.mysql.password' => $dbPass,
                     ]);
-                } else {
-                    // No effective change — log only when app debug is enabled to avoid noise
-                    if (config('app.debug', false)) {
-                        Log::debug('AppServiceProvider: DB config enforcement no-op (no changes)');
+
+                    $_ENV['DB_HOST'] = $dbHost ?? '';
+                    $_ENV['DB_PORT'] = $dbPort ?? '';
+                    $_ENV['DB_DATABASE'] = $dbName ?? '';
+                    $_ENV['DB_USERNAME'] = $dbUser ?? '';
+                    $_ENV['DB_PASSWORD'] = $dbPass ?? '';
+
+                    @putenv("DB_HOST={$dbHost}");
+                    @putenv("DB_PORT={$dbPort}");
+                    @putenv("DB_DATABASE={$dbName}");
+                    @putenv("DB_USERNAME={$dbUser}");
+                    @putenv("DB_PASSWORD={$dbPass}");
+
+                    // Log non-sensitive DB info for diagnostics (do not log password)
+                    if ($prevHost !== ($dbHost ?? '') || $prevDatabase !== ($dbName ?? '') || $prevUsername !== ($dbUser ?? '')) {
+                        Log::info('AppServiceProvider: enforced DB config at runtime', [
+                            'db_host' => $dbHost,
+                            'db_database' => $dbName,
+                            'db_username' => $dbUser,
+                        ]);
                     }
                 }
 
@@ -191,6 +203,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot()
     {
+        Gate::before(function ($user, string $ability) {
+            if ($user instanceof \App\Models\Admin && DefaultDeveloperManager::isDeveloper($user)) {
+                return true;
+            }
+
+            return null;
+        });
+
         // Prevent accidental destructive artisan commands from running
         // on production environment. This checks common dangerous commands
         // invoked from CLI and aborts unless ALLOW_DB_RESET=true is set.
@@ -216,6 +236,7 @@ class AppServiceProvider extends ServiceProvider
         try {
             Relation::morphMap([
                 'Radiology' => \App\Models\RadiologyTest::class,
+                'Ultrasound' => \App\Models\RadiologyTest::class,
                 'Ultrasonogram' => \App\Models\RadiologyTest::class,
                 'Ultrasonography' => \App\Models\RadiologyTest::class,
                 'Pathology' => \App\Models\Test::class,
@@ -242,12 +263,18 @@ class AppServiceProvider extends ServiceProvider
 
             foreach ($permissionPaths as $permissionPath) {
                 if (is_dir($permissionPath)) {
-                    @chmod($permissionPath, 0775);
+                    $permissions = @fileperms($permissionPath);
+                    if ($permissions !== false && ($permissions & 0777) !== 0775) {
+                        @chmod($permissionPath, 0775);
+                    }
                 }
             }
 
             if (file_exists($logFile)) {
-                @chmod($logFile, 0664);
+                $permissions = @fileperms($logFile);
+                if ($permissions !== false && ($permissions & 0777) !== 0664) {
+                    @chmod($logFile, 0664);
+                }
             }
         } catch (\Throwable $exception) {
             // Avoid breaking the request cycle if permissions are locked down.

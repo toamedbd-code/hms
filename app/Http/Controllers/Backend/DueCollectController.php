@@ -8,13 +8,14 @@ use App\Models\Billing;
 use App\Models\DueCollection;
 use App\Models\OpdPatient;
 use App\Services\ActivityLogService;
+use App\Services\LedgerService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 class DueCollectController extends Controller
 {
-    public function __construct()
+    public function __construct(private LedgerService $ledgerService)
     {
         $this->middleware('auth:admin');
         $this->middleware('permission:billing-due-collect');
@@ -60,10 +61,12 @@ class DueCollectController extends Controller
     {
         $request->validate([
             'amount' => 'required|numeric|min:0.01',
+            'pay_mode' => 'nullable|string|in:Cash,Card,Bank,Mobile Banking',
         ]);
 
         $billing = Billing::findOrFail($id);
         $collectedAmount = (float) $request->amount;
+        $payMode = (string) ($request->input('pay_mode') ?: ($billing->pay_mode ?: 'Cash'));
         $returnTo = (string) $request->input('return_to', '');
         $ipdPatientId = (int) $request->input('ipd_patient_id', 0);
         $submissionToken = (string) $request->input('submission_token', '');
@@ -89,6 +92,7 @@ class DueCollectController extends Controller
             'billing_id'       => $billing->id,
             'collected_amount' => $collectedAmount,
             'collected_at'     => now(),
+            'payment_method'   => $payMode,
             'created_by'       => auth('admin')->id(),
         ]);
 
@@ -103,6 +107,21 @@ class DueCollectController extends Controller
         }
 
         $billing->save();
+
+        try {
+            $counterAccount = $this->ledgerService->resolvePaymentAccountCode($payMode);
+            $this->ledgerService->recordArCollection(
+                $counterAccount,
+                $collectedAmount,
+                'Due collection for invoice ' . ($billing->invoice_number ?: $billing->bill_number),
+                now()->toDateString(),
+                'DueCollection',
+                $billing->id,
+                auth('admin')->id()
+            );
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         ActivityLogService::log(
             'Due Collection',
@@ -172,27 +191,30 @@ class DueCollectController extends Controller
     public function opdIndex($id)
     {
         $opdPatient = OpdPatient::findOrFail($id);
+        $returnTo = (string) request()->query('return_to', '');
 
         if ((float) $opdPatient->balance_amount <= 0) {
-            return redirect()
-                ->route('backend.billing.list')
+            return redirect()->to($this->isInternalRedirectUrl($returnTo) ? $returnTo : route('backend.billing.list'))
                 ->with('errorMessage', 'No due amount available for this OPD invoice.');
         }
 
         $submissionToken = (string) Str::uuid();
 
-        return view('backend.due_collect.opd', compact('opdPatient', 'submissionToken'));
+        return view('backend.due_collect.opd', compact('opdPatient', 'submissionToken', 'returnTo'));
     }
 
     public function opdStore(Request $request, $id)
     {
         $request->validate([
             'amount' => 'required|numeric|min:0.01',
+            'pay_mode' => 'nullable|string|in:Cash,Card,Bank,Mobile Banking',
         ]);
 
         $opdPatient = OpdPatient::findOrFail($id);
         $collectAmount = (float) $request->amount;
+        $payMode = (string) ($request->input('pay_mode') ?: 'Cash');
         $currentDue = (float) $opdPatient->balance_amount;
+        $returnTo = (string) $request->input('return_to', '');
         $submissionToken = (string) $request->input('submission_token', '');
         $cacheKey = 'due_collect.opd.' . $opdPatient->id . '.' . $submissionToken;
 
@@ -229,10 +251,25 @@ class DueCollectController extends Controller
             'billing_id' => null,
             'collected_amount' => $collectAmount,
             'collected_at' => now(),
-            'payment_method' => 'opd',
+            'payment_method' => $payMode,
             'note' => 'OPD due collected for opd_patient_id:' . $opdPatient->id,
             'created_by' => auth('admin')->id(),
         ]);
+
+        try {
+            $counterAccount = $this->ledgerService->resolvePaymentAccountCode($payMode);
+            $this->ledgerService->recordArCollection(
+                $counterAccount,
+                $collectAmount,
+                'OPD due collection for invoice ' . ($opdPatient->invoice_no ?? ('OPD#' . $opdPatient->id)),
+                now()->toDateString(),
+                'OpdDueCollection',
+                $opdPatient->id,
+                auth('admin')->id()
+            );
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         ActivityLogService::log(
             'OPD Due Collection',
@@ -247,8 +284,10 @@ class DueCollectController extends Controller
             ]
         );
 
+        $redirectUrl = $this->isInternalRedirectUrl($returnTo) ? $returnTo : route('backend.billing.list');
+
         return redirect()
-            ->route('backend.billing.list')
+            ->to($redirectUrl)
             ->with('successMessage', 'OPD due collected successfully');
     }
 }

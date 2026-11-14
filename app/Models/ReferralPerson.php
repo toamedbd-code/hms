@@ -17,6 +17,10 @@ class ReferralPerson extends Authenticatable
 
     protected $guarded = [];
 
+    protected $casts = [
+        'category_commissions' => 'array',
+    ];
+
     protected static function boot()
     {
         parent::boot();

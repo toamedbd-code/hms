@@ -23,6 +23,7 @@ class BkashWebhookController extends Controller
         $amount = (float) data_get($payload, 'amount', 0);
         $period = strtolower((string) data_get($payload, 'period', 'monthly'));
         $period = in_array($period, ['yearly', 'monthly']) ? $period : 'monthly';
+        $payment = null;
 
         if (! in_array($status, ['success', 'completed', 'done', 'paid'])) {
             return response()->json(['ok' => false, 'reason' => 'invalid_status'], 400);
@@ -56,8 +57,12 @@ class BkashWebhookController extends Controller
         }
 
         $sub = Subscription::ensureExists();
-        $sub->is_active = true;
-        $sub->expires_at = $period === 'yearly' ? now()->addYear() : now()->addMonth();
+        $months = max(1, (int) data_get(
+            $payment?->metadata,
+            'months',
+            $period === 'monthly' ? $sub->renewalMonthsDue() : 1,
+        ));
+        $sub->extendForPeriod($period, $months);
         $sub->last_payment_id = $txId;
         $sub->save();
         Subscription::clearCurrentCache();

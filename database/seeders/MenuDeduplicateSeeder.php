@@ -11,81 +11,115 @@ class MenuDeduplicateSeeder extends Seeder
     public function run(): void
     {
         DB::transaction(function () {
-            $normalizeText = static function ($value): string {
-                return strtolower(trim((string) $value));
-            };
-
-            $normalizeRoute = static function ($route) use ($normalizeText): string {
-                $route = $normalizeText($route);
-
-                if ($route === '') {
-                    return '';
-                }
-
-                $aliases = [
-                    'backend.pharmacy.supplier.payment' => 'backend.supplierpayment.index',
-                    'admin.attendance.devices' => 'backend.attendance.devices',
-                ];
-
-                return $aliases[$route] ?? $route;
-            };
-
-            $menus = Menu::query()
-                ->whereNull('deleted_at')
-                ->orderBy('id')
-                ->get();
-
-            $keepByKey = [];
-            $duplicateIds = [];
-
-            foreach ($menus as $menu) {
-                $parentId = $menu->parent_id ?? 0;
-                $name = $normalizeText($menu->name ?? '');
-                $permission = $normalizeText($menu->permission_name ?? '');
-                $route = $normalizeRoute($menu->route ?? '');
-
-                // Keep DB rows on canonical route names so runtime filtering stays predictable.
-                if ($route !== '' && trim((string) ($menu->route ?? '')) !== $route) {
-                    $menu->route = $route;
-                    $menu->save();
-                }
-
-                // Global dedupe strategy:
-                // 1) Route-based (after route alias normalization)
-                // 2) Name + permission fallback for non-route menus
-                // 3) Name-only fallback when permission is empty
-                if ($route !== '') {
-                    $key = sprintf('r:%s:%s', $parentId, $route);
-                } elseif ($name !== '' && $permission !== '') {
-                    $key = sprintf('np:%s:%s:%s', $parentId, $name, $permission);
-                } elseif ($name !== '') {
-                    $key = sprintf('n:%s:%s', $parentId, $name);
-                } elseif ($permission !== '') {
-                    $key = sprintf('p:%s:%s', $parentId, $permission);
-                } else {
-                    // No stable identity available; keep row as-is.
-                    continue;
-                }
-
-                if (!isset($keepByKey[$key])) {
-                    $keepByKey[$key] = (int) $menu->id;
-                    continue;
-                }
-
-                $keepId = $keepByKey[$key];
-                $duplicateId = (int) $menu->id;
-
-                // Re-parent children from duplicate menu to the kept menu before deleting.
-                Menu::query()
-                    ->where('parent_id', $duplicateId)
-                    ->update(['parent_id' => $keepId]);
-
-                $duplicateIds[] = $duplicateId;
-            }
-
-            if (!empty($duplicateIds)) {
-                Menu::query()->whereIn('id', $duplicateIds)->delete();
-            }
+            $this->removeObsoleteMenus();
+            $this->normalizeLegacyRoutes();
+            $this->mergeDuplicateRows();
         });
+    }
+
+    private function removeObsoleteMenus(): void
+    {
+        Menu::query()
+            ->whereNull('parent_id')
+            ->where(function ($query) {
+                $query->where('name', 'InvoiceDesign Manage')
+                    ->orWhere('permission_name', 'invoicedesign-management');
+            })
+            ->delete();
+
+        Menu::query()
+            ->where('name', 'CMS Setting')
+            ->whereIn('route', [
+                'backend.websetting.create',
+                'websetting.create',
+                'backend.websetting.index',
+            ])
+            ->delete();
+    }
+
+    private function normalizeLegacyRoutes(): void
+    {
+        $aliases = [
+            'backend.pharmacy.supplier.payment' => 'backend.supplierpayment.index',
+            'admin.attendance.devices' => 'backend.attendance.devices',
+        ];
+
+        foreach ($aliases as $from => $to) {
+            Menu::query()->where('route', $from)->update(['route' => $to]);
+        }
+    }
+
+    private function mergeDuplicateRows(): void
+    {
+        $normalize = static fn ($value): string => strtolower(trim((string) $value));
+
+        $menus = Menu::query()
+            ->whereNull('deleted_at')
+            ->orderBy('id')
+            ->get();
+
+        $keepByKey = [];
+        $duplicateIds = [];
+
+        foreach ($menus as $menu) {
+            $parentId = $menu->parent_id ?? 0;
+            $name = $normalize($menu->name ?? '');
+            $permission = $normalize($menu->permission_name ?? '');
+            $route = $normalize($menu->route ?? '');
+
+            $keys = [];
+            if ($route !== '') {
+                $keys[] = sprintf('r:%s:%s', $parentId, $route);
+            }
+            if ($name !== '') {
+                $keys[] = sprintf('n:%s:%s', $parentId, $name);
+            }
+            if ($permission !== '') {
+                $keys[] = sprintf('p:%s:%s', $parentId, $permission);
+            }
+
+            if ($keys === []) {
+                continue;
+            }
+
+            $existingKeepId = null;
+            foreach ($keys as $key) {
+                if (isset($keepByKey[$key])) {
+                    $existingKeepId = $keepByKey[$key];
+                    break;
+                }
+            }
+
+            if ($existingKeepId === null) {
+                foreach ($keys as $key) {
+                    $keepByKey[$key] = (int) $menu->id;
+                }
+                continue;
+            }
+
+            $keep = Menu::query()->find($existingKeepId);
+            if ($keep) {
+                if (empty($keep->route) && !empty($menu->route)) {
+                    $keep->route = $menu->route;
+                }
+                if (empty($keep->icon) && !empty($menu->icon)) {
+                    $keep->icon = $menu->icon;
+                }
+                if (empty($keep->permission_name) && !empty($menu->permission_name)) {
+                    $keep->permission_name = $menu->permission_name;
+                }
+                $keep->save();
+            }
+
+            Menu::query()
+                ->where('parent_id', $menu->id)
+                ->update(['parent_id' => $existingKeepId]);
+
+            $duplicateIds[] = (int) $menu->id;
+        }
+
+        if ($duplicateIds !== []) {
+            Menu::query()->whereIn('id', array_values(array_unique($duplicateIds)))->delete();
+        }
     }
 }

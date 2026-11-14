@@ -152,6 +152,18 @@
             white-space: nowrap;
         }
 
+        .summary-table .due-collect-line {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .summary-table .due-collect-amount {
+            white-space: nowrap;
+        }
+
         .summary-table .total-row td {
             font-weight: bold;
             border-top: 2px solid #000;
@@ -412,10 +424,12 @@
                 @endif
                 @foreach(($opd_due_collections ?? []) as $dueCollection)
                 <tr>
-                    <td class="due-collect-label">
-                        {{ \Carbon\Carbon::parse($dueCollection->collected_at)->format('d-M-Y h:i A') }} - Due Collect
+                    <td colspan="2" class="due-collect-row">
+                        <div class="due-collect-line">
+                            <span class="due-collect-label">{{ \Carbon\Carbon::parse($dueCollection->collected_at)->format('d-M-Y h:i A') }} - Due Collect</span>
+                            <span class="due-collect-amount">Tk {{ priceFormat($dueCollection->collected_amount) }}</span>
+                        </div>
                     </td>
-                    <td class="amount-col">Tk {{ priceFormat($dueCollection->collected_amount) }}</td>
                 </tr>
                 @endforeach
                 @if ($totalPaidOPD != 0)
@@ -462,6 +476,24 @@
 
     <div class="footer-placeholder"></div>
     @include('prints.partials._footer')
+    @include('prints.partials._responsive_invoice_print')
+    @if(!empty($auto_print))
+    <script>
+        (function () {
+            var print = function () {
+                window.focus();
+                window.print();
+            };
+            if (document.readyState === 'complete') {
+                setTimeout(print, 600);
+            } else {
+                window.addEventListener('load', function () {
+                    setTimeout(print, 600);
+                }, { once: true });
+            }
+        })();
+    </script>
+    @endif
 </body>
 
 </html>

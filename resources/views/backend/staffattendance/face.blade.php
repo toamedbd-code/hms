@@ -8,7 +8,7 @@
         </a>
     </div>
 
-    <h2>Webcam Face-Detect Attendance</h2>
+    <h2>Face Attendance</h2>
 
     <div style="max-width:720px">
         <div style="margin-top:10px">

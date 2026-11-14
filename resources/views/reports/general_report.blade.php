@@ -57,15 +57,15 @@
         .total-row { background: #f0f0f0; font-weight: bold; }
         /* Column width hints for billing/module tables (adjust percentages to balance columns) */
         /* Billing/combined table columns: Bill No, Billing Date, Total, Discount, Extra, Net, Paid, Due, Due Collected */
-        .module-details-table th:nth-child(1), .module-details-table td:nth-child(1) { width: 16%; }
-        .module-details-table th:nth-child(2), .module-details-table td:nth-child(2) { width: 9%; }
-        .module-details-table th:nth-child(3), .module-details-table td:nth-child(3) { width: 11%; }
-        .module-details-table th:nth-child(4), .module-details-table td:nth-child(4) { width: 8%; }
-        .module-details-table th:nth-child(5), .module-details-table td:nth-child(5) { width: 8%; }
-        .module-details-table th:nth-child(6), .module-details-table td:nth-child(6) { width: 11%; }
-        .module-details-table th:nth-child(7), .module-details-table td:nth-child(7) { width: 11%; }
-        .module-details-table th:nth-child(8), .module-details-table td:nth-child(8) { width: 11%; }
-        .module-details-table th:nth-child(9), .module-details-table td:nth-child(9) { width: 11%; }
+        .module-details-table:not(.billing-details-table) th:nth-child(1), .module-details-table:not(.billing-details-table) td:nth-child(1) { width: 16%; }
+        .module-details-table:not(.billing-details-table) th:nth-child(2), .module-details-table:not(.billing-details-table) td:nth-child(2) { width: 9%; }
+        .module-details-table:not(.billing-details-table) th:nth-child(3), .module-details-table:not(.billing-details-table) td:nth-child(3) { width: 11%; }
+        .module-details-table:not(.billing-details-table) th:nth-child(4), .module-details-table:not(.billing-details-table) td:nth-child(4) { width: 8%; }
+        .module-details-table:not(.billing-details-table) th:nth-child(5), .module-details-table:not(.billing-details-table) td:nth-child(5) { width: 8%; }
+        .module-details-table:not(.billing-details-table) th:nth-child(6), .module-details-table:not(.billing-details-table) td:nth-child(6) { width: 11%; }
+        .module-details-table:not(.billing-details-table) th:nth-child(7), .module-details-table:not(.billing-details-table) td:nth-child(7) { width: 11%; }
+        .module-details-table:not(.billing-details-table) th:nth-child(8), .module-details-table:not(.billing-details-table) td:nth-child(8) { width: 11%; }
+        .module-details-table:not(.billing-details-table) th:nth-child(9), .module-details-table:not(.billing-details-table) td:nth-child(9) { width: 11%; }
         .module-details-table .bill-no-cell { white-space: nowrap; }
         /* Ensure combined totals use same widths */
         .combined-totals th:nth-child(1), .combined-totals td:nth-child(1) { width: 12%; }
@@ -76,9 +76,160 @@
         .combined-totals th:nth-child(6), .combined-totals td:nth-child(6) { width: 12%; }
         .combined-totals th:nth-child(7), .combined-totals td:nth-child(7) { width: 12%; }
         .combined-totals th:nth-child(8), .combined-totals td:nth-child(8) { width: 12%; }
+        @if(!empty($printView))
+            @page { margin: 4mm 4mm 9mm; }
+            html { background: #eee; }
+            body {
+                box-sizing: border-box;
+                width: 210mm;
+                min-height: 297mm;
+                margin: 16px auto;
+                padding: 8mm;
+                background: #fff;
+                box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+                font-size: 9px;
+                line-height: 1.3;
+            }
+            .report-print-view .header {
+                margin-bottom: 8px;
+                font-size: 9px;
+                line-height: 1.3;
+            }
+            .report-print-view .hospital-name {
+                font-size: 14px;
+                font-weight: 700;
+            }
+            .report-print-view .hospital-address,
+            .report-print-view .date-range,
+            .report-print-view .print-time {
+                font-size: 9px;
+            }
+            .report-print-view .report-title {
+                font-size: 12px;
+                font-weight: 700;
+            }
+            .report-print-view .module-details-table {
+                margin-bottom: 6px;
+                font-size: 8px;
+            }
+            .report-print-view .module-details-table th,
+            .report-print-view .module-details-table td {
+                padding: 3px 2px;
+                font-size: 8px;
+                line-height: 1.2;
+                overflow: visible;
+                text-overflow: clip;
+            }
+            .report-print-view .module-details-table thead th {
+                font-size: 8px;
+                white-space: normal;
+            }
+            .report-print-view .module-details-table td {
+                white-space: nowrap;
+            }
+            .report-print-view .module-details-table .bill-no-cell {
+                white-space: nowrap;
+                overflow-wrap: anywhere;
+            }
+            .report-print-view .tk .tk-symbol,
+            .report-print-view .tk .tk-value {
+                font-size: 8px;
+            }
+            .report-print-view .summary-table,
+            .report-print-view .summary-table td {
+                font-size: 9px;
+            }
+            .report-print-view .page-footer { display: none; }
+            @media print {
+                html { background: #fff; }
+                @page {
+                    margin: 4mm 4mm 9mm;
+                    @bottom-right {
+                        content: "Page " counter(page) " of " counter(pages);
+                        font-family: DejaVu Sans, sans-serif;
+                        font-size: 7px;
+                    }
+                }
+                .report-print-view {
+                    font-size: 9px;
+                    line-height: 1.2;
+                }
+                body {
+                    width: auto;
+                    min-height: 0;
+                    margin: 0;
+                    padding: 0;
+                    box-shadow: none;
+                }
+                .report-print-view .header {
+                    margin-bottom: 6px;
+                    font-size: 9px;
+                }
+                .report-print-view .hospital-name { font-size: 13px; }
+                .report-print-view .hospital-address,
+                .report-print-view .date-range,
+                .report-print-view .print-time { font-size: 8px; }
+                .report-print-view .report-title { font-size: 10px; }
+                .report-print-view .module-details-table {
+                    width: 100%;
+                    table-layout: auto;
+                    font-size: 9px;
+                }
+                .report-print-view .module-details-table th,
+                .report-print-view .module-details-table td {
+                    box-sizing: border-box;
+                    padding: 2px;
+                    font-size: 9px;
+                    line-height: 1.2;
+                    white-space: normal !important;
+                    overflow: visible !important;
+                    overflow-wrap: anywhere;
+                    word-break: break-word;
+                    text-overflow: clip;
+                }
+                .report-print-view .module-details-table td.amount,
+                .report-print-view .module-details-table td.bill-no-cell,
+                .report-print-view .module-details-table .tk {
+                    white-space: normal !important;
+                    overflow-wrap: anywhere;
+                    word-break: normal;
+                }
+                .report-print-view .tk .tk-symbol,
+                .report-print-view .tk .tk-value {
+                    font-size: 9px;
+                    white-space: normal;
+                    overflow-wrap: anywhere;
+                }
+                .report-print-view .summary-table,
+                .report-print-view .summary-table td { font-size: 9px; }
+                .report-print-view .page-footer { display: none; }
+            }
+            @media print and (max-width: 160mm) {
+                .report-print-view {
+                    font-size: 6px;
+                    line-height: 1.15;
+                }
+                .report-print-view .header { margin-bottom: 5px; font-size: 7px; }
+                .report-print-view .hospital-name { font-size: 10px; }
+                .report-print-view .hospital-address,
+                .report-print-view .date-range,
+                .report-print-view .print-time { font-size: 6px; }
+                .report-print-view .report-title { font-size: 8px; }
+                .report-print-view .module-details-table th,
+                .report-print-view .module-details-table td {
+                    padding: 1px;
+                    font-size: 6px;
+                    line-height: 1.15;
+                }
+                .report-print-view .tk .tk-symbol,
+                .report-print-view .tk .tk-value { font-size: 6px; }
+                .report-print-view .summary-table,
+                .report-print-view .summary-table td { font-size: 7px; }
+            }
+        @endif
         </style>
     </head>
-    <body>
+    <body class="{{ !empty($printView) ? 'report-print-view' : '' }}">
     @php
         $fmtTk = function ($value) {
             $symbol = 'TK.';
@@ -310,11 +461,11 @@
         </tr>
                 <tr>
             <td class="summary-label"><strong>Final Income</strong></td>
-            <td class="summary-value"><strong>{!! $fmtTk((($totals['paid_amount'] ?? 0) + ($totals['due_collected'] ?? $totals['due_collection'] ?? 0)) - ($totals['total_expense'] ?? 0) - ($totals['total_return_amount'] ?? 0)) !!}</strong></td>
+            <td class="summary-value"><strong>{!! $fmtTk((($totals['paid_amount'] ?? 0) + ($totals['due_collected'] ?? $totals['due_collection'] ?? 0) + ($totals['appointment_receipts'] ?? 0)) - ($totals['total_expense'] ?? 0) - ($totals['total_return_amount'] ?? 0)) !!}</strong></td>
         </tr>
     </table>
 
-    @elseif ($selectedModuleKey !== 'all_module' && !empty($reportRows))
+    @elseif ($selectedModuleKey !== 'all_module' && $selectedModuleKey !== 'billing' && !empty($reportRows))
     <table class="module-details-table">
         <thead>
             <tr>
@@ -330,13 +481,15 @@
             @foreach($reportRows as $row)
             @php
             $module = strtolower((string)($row['module'] ?? 'n/a'));
-            $moduleLabel = $module === 'medicine' ? 'Pharmacy' : strtoupper($module);
-            if (!in_array($module, ['opd', 'ipd', 'pharmacy', 'medicine'])) {
+            $moduleLabel = $module === 'medicine' ? 'Pharmacy' : ($module === 'appointment' ? 'Appointment' : strtoupper($module));
+            if (!in_array($module, ['appointment', 'opd', 'ipd', 'pharmacy', 'medicine'])) {
             $moduleLabel = ucfirst($module);
             }
 
             $details = '-';
             if ($module === 'opd') {
+                $details = ($row['patient_name'] ?? 'N/A') . ' | Dr. ' . ($row['doctor_name'] ?? 'N/A');
+            } elseif ($module === 'appointment') {
                 $details = ($row['patient_name'] ?? 'N/A') . ' | Dr. ' . ($row['doctor_name'] ?? 'N/A');
             } elseif ($module === 'ipd') {
                 $details = ($row['patient_name'] ?? 'N/A') . ' | Bed: ' . ($row['bed_number'] ?? 'N/A');
@@ -385,15 +538,19 @@
 
         $moduleBillRows = collect($reportRows ?? [])->filter(function ($row) {
             $module = strtolower((string)($row['module'] ?? ''));
-            return in_array($module, ['opd', 'ipd', 'pharmacy', 'medicine'], true);
+            return in_array($module, ['appointment', 'opd', 'ipd', 'pharmacy', 'medicine'], true);
         })->values()->map(function ($row, $index) {
             $module = strtolower((string)($row['module'] ?? ''));
             $modulePrefix = $module === 'medicine' ? 'PHARMACY' : strtoupper($module);
             $rowDate = $row['date'] ?? now()->format('Y-m-d');
             $amount = (float)($row['revenue'] ?? 0);
             $status = strtolower((string)($row['status'] ?? 'pending'));
-            $paidAmount = in_array($status, ['completed', 'paid', 'active'], true) ? $amount : 0;
-            $dueAmount = max(0, $amount - $paidAmount);
+            $paidAmount = array_key_exists('paid_amount', $row)
+                ? (float) $row['paid_amount']
+                : (in_array($status, ['completed', 'paid', 'active'], true) ? $amount : 0);
+            $dueAmount = array_key_exists('due_amount', $row)
+                ? (float) $row['due_amount']
+                : max(0, $amount - $paidAmount);
 
             // If revenue is missing/zero for an all-module billing row, try to retrieve
             // the actual billing amounts from the Billing model using the bill_no.
@@ -497,18 +654,7 @@
 
     @endphp
 
-    <table class="module-details-table">
-        <colgroup>
-            <col style="width:16%">
-            <col style="width:9%">
-            <col style="width:11%">
-            <col style="width:8%">
-            <col style="width:8%">
-            <col style="width:11%">
-            <col style="width:11%">
-            <col style="width:11%">
-            <col style="width:11%">
-        </colgroup>
+    <table class="module-details-table billing-details-table">
         <thead>
             <tr>
                 <th>Bill No</th>
@@ -595,11 +741,20 @@
         <div class="section-title center">No data found for this report.</div>
     @endif
 
-    @if(!isset($show_header_footer) || $show_header_footer)
+    @if(empty($printView) && (!isset($show_header_footer) || $show_header_footer))
         <div class="page-footer">
             <span class="page-count">Page {PAGENO} of {nbpg}</span>
         </div>
     @endif
 
 </body>
+@if(!empty($printView))
+    <script>
+        window.addEventListener('load', function () {
+            window.setTimeout(function () {
+                window.print();
+            }, 300);
+        });
+    </script>
+@endif
 </html>

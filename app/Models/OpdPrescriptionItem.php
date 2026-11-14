@@ -13,6 +13,7 @@ class OpdPrescriptionItem extends Model
         'opd_prescription_id',
         'test_name',
         'medicine_name',
+        'generic_name',
         'dose',
         'duration',
         'frequency',

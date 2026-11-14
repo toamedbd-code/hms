@@ -11,6 +11,7 @@ use App\Models\MedicineSupplier;
 use App\Models\PharmacyBill;
 use App\Models\Account;
 use App\Models\LedgerTransaction;
+use App\Models\StorePurchaseOrder;
 use App\Services\LedgerService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -25,8 +26,8 @@ class SupplierPaymentController extends Controller
     {
         $this->ledgerService = $ledgerService;
         $this->middleware('auth:admin');
-        $this->middleware('permission:supplier-payment-list', ['only' => ['index', 'create', 'store', 'show', 'edit', 'update', 'destroy', 'addPartialPayment', 'payDueBySupplier']]);
-        $this->middleware('permission:supplier-payment-list-create', ['only' => ['create', 'store']]);
+        $this->middleware('permission:supplier-payment-list', ['only' => ['index', 'create', 'store', 'show', 'edit', 'update', 'destroy', 'addPartialPayment', 'payDueBySupplier', 'storePurchasePayments', 'createStorePurchasePayment', 'storeStorePurchasePayment']]);
+        $this->middleware('permission:supplier-payment-list-create', ['only' => ['create', 'store', 'createStorePurchasePayment', 'storeStorePurchasePayment']]);
         $this->middleware('permission:supplier-payment-list-edit', ['only' => ['edit', 'update']]);
         $this->middleware('permission:supplier-payment-list-delete', ['only' => ['destroy']]);
         $this->middleware('permission:supplier-payment-list-status', ['only' => ['addPartialPayment', 'payDueBySupplier']]);
@@ -99,6 +100,86 @@ class SupplierPaymentController extends Controller
             'payableAccounts' => $payableAccounts,
             'filters' => $filters,
         ]);
+    }
+
+    public function storePurchasePayments(Request $request)
+    {
+        $payments = \App\Models\StorePurchasePayment::query()
+            ->with(['purchaseOrder.supplier:id,name', 'paymentAccount:id,name,code'])
+            ->when($request->filled('from_date'), fn ($query) => $query->whereDate('payment_date', '>=', $request->input('from_date')))
+            ->when($request->filled('to_date'), fn ($query) => $query->whereDate('payment_date', '<=', $request->input('to_date')))
+            ->latest('payment_date')
+            ->latest('id')
+            ->paginate((int) $request->input('per_page', 20))
+            ->withQueryString();
+
+        $outstandingOrders = StorePurchaseOrder::query()
+            ->with(['supplier:id,name', 'grns.items', 'payments'])
+            ->whereHas('grns')
+            ->latest('order_date')
+            ->get()
+            ->map(function (StorePurchaseOrder $order) {
+                $order->setAttribute('received_amount', (float) $order->grns
+                    ->flatMap(fn ($grn) => $grn->items)
+                    ->sum('line_total'));
+                $order->setAttribute('paid_amount', (float) $order->payments->sum('amount'));
+                $order->setAttribute('due_amount', max(0, (float) $order->received_amount - (float) $order->paid_amount));
+
+                return $order;
+            })
+            ->filter(fn (StorePurchaseOrder $order) => (float) $order->due_amount > 0.005)
+            ->values();
+
+        return Inertia::render('Backend/StockManagement/PurchasePayments', [
+            'pageTitle' => 'Store Supplier Payments',
+            'payments' => $payments,
+            'outstandingOrders' => $outstandingOrders,
+            'payableAccounts' => Account::query()->where('is_active', true)->where('type', 'asset')
+                ->whereIn('code', ['CASH', 'BANK'])
+                ->orderBy('name')->get(['id', 'name', 'code']),
+            'paymentRouteScope' => 'accounts',
+            'filters' => $request->only(['from_date', 'to_date', 'per_page']),
+        ]);
+    }
+
+    public function createStorePurchasePayment(int $id)
+    {
+        $order = StorePurchaseOrder::query()->with('supplier:id,name')->findOrFail($id);
+        $receivedAmount = (float) \App\Models\StoreGrnItem::query()
+            ->whereHas('grn', fn ($query) => $query->where('store_purchase_order_id', $order->id))
+            ->sum('line_total');
+        $paidAmount = (float) $order->payments()->sum('amount');
+
+        return Inertia::render('Backend/StockManagement/PurchasePaymentForm', [
+            'pageTitle' => 'Pay Store Supplier',
+            'order' => $order,
+            'receivedAmount' => $receivedAmount,
+            'paidAmount' => $paidAmount,
+            'payableAccounts' => Account::query()->where('is_active', true)->where('type', 'asset')
+                ->whereIn('code', ['CASH', 'BANK'])
+                ->orderBy('name')->get(['id', 'name', 'code']),
+            'paymentRouteScope' => 'accounts',
+        ]);
+    }
+
+    public function storeStorePurchasePayment(Request $request, int $id)
+    {
+        $data = $request->validate([
+            'amount' => 'required|numeric|min:0.01',
+            'payment_date' => 'required|date',
+            'payment_account_id' => 'required|integer|exists:accounts,id',
+            'reference_no' => 'nullable|string|max:100',
+            'notes' => 'nullable|string',
+        ]);
+
+        app(\App\Services\StorePurchasePaymentService::class)->record(
+            $id,
+            $data,
+            optional($request->user('admin'))->id
+        );
+
+        return redirect()->route('backend.accounts.store-purchase-payments.index')
+            ->with('successMessage', 'Store supplier payment recorded successfully.');
     }
 
     public function create(Request $request)
@@ -487,13 +568,13 @@ class SupplierPaymentController extends Controller
         }
 
         $cashCode = $this->resolvePaymentAccountCode($supplierpayment);
-        $payableCode = $this->ensureSystemAccount('AP_SUPPLIER', 'Supplier Payable', 'liability', 'LIABILITY', false);
+        $expenseCode = $this->ensureSystemAccount('PHARM_PURCHASE_EXP', 'Pharmacy Purchase Expense', 'expense', 'EXPENSE', true);
         $date = optional($supplierpayment->payment_date)->format('Y-m-d') ?? now()->toDateString();
         $createdBy = auth('admin')->id();
 
         $this->ledgerService->recordTransaction(
             [
-                ['account_code' => $payableCode, 'entry_type' => 'debit', 'amount' => $paidAmount],
+                ['account_code' => $expenseCode, 'entry_type' => 'debit', 'amount' => $paidAmount],
                 ['account_code' => $cashCode, 'entry_type' => 'credit', 'amount' => $paidAmount],
             ],
             'Supplier payment #' . $supplierpayment->id,
@@ -580,16 +661,17 @@ class SupplierPaymentController extends Controller
         $cashCode = $this->ensureSystemAccount('CASH', 'Cash', 'asset', 'ASSET', false);
         $payableCode = $this->ensureSystemAccount('AP_SUPPLIER', 'Supplier Payable', 'liability', 'LIABILITY', false);
 
-        $lines = [
-            ['account_code' => $inventoryCode, 'entry_type' => 'debit', 'amount' => $totalAmount],
-        ];
-
-        if ($paidAmount > 0) {
-            $lines[] = ['account_code' => $cashCode, 'entry_type' => 'credit', 'amount' => $paidAmount];
-        }
-
+        $expenseCode = $this->ensureSystemAccount('PHARM_PURCHASE_EXP', 'Pharmacy Purchase Expense', 'expense', 'EXPENSE', true);
+        $lines = [];
         if ($dueAmount > 0) {
+            $lines[] = ['account_code' => $inventoryCode, 'entry_type' => 'debit', 'amount' => $dueAmount];
             $lines[] = ['account_code' => $payableCode, 'entry_type' => 'credit', 'amount' => $dueAmount];
+        }
+        if ($paidAmount > 0) {
+            $lines[] = ['account_code' => $payableCode, 'entry_type' => 'debit', 'amount' => $paidAmount];
+            $lines[] = ['account_code' => $expenseCode, 'entry_type' => 'debit', 'amount' => $paidAmount];
+            $lines[] = ['account_code' => $inventoryCode, 'entry_type' => 'credit', 'amount' => $paidAmount];
+            $lines[] = ['account_code' => $cashCode, 'entry_type' => 'credit', 'amount' => $paidAmount];
         }
 
         $date = $purchase->purchase_date ? date('Y-m-d', strtotime((string) $purchase->purchase_date)) : now()->toDateString();

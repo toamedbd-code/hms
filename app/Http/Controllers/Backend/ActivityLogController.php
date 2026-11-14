@@ -7,6 +7,7 @@ use App\Models\ActivityLog;
 use App\Services\ActivityLogService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Inertia\Inertia;
 
 class ActivityLogController extends Controller
@@ -114,30 +115,38 @@ class ActivityLogController extends Controller
             return response()->json(['message' => 'Session expired or unauthorized. Please login again.'], 401);
         }
 
-        $today = Carbon::today()->toDateString();
+        $today = Carbon::today();
+        $activityData = Cache::remember(
+            'activity.log.alerts.' . $today->toDateString(),
+            max((int) config('cache.activity_log_alert_ttl_seconds', 60), 15),
+            function () use ($today) {
+                $startOfTomorrow = $today->copy()->addDay();
 
-        $activityData = [
-            'today_count' => ActivityLog::query()
-                ->whereDate('created_at', $today)
-                ->count(),
-            'recent' => ActivityLog::query()
-                ->orderByDesc('created_at')
-                ->limit(8)
-                ->get(['id', 'user_name', 'module', 'action', 'description', 'status', 'created_at'])
-                ->map(function ($log) {
-                    return [
-                        'id' => $log->id,
-                        'user_name' => $log->user_name,
-                        'module' => $log->module,
-                        'action' => $log->action,
-                        'description' => $log->description,
-                        'status' => $log->status,
-                        'created_at' => optional($log->created_at)->format('d-m-Y h:i A'),
-                    ];
-                })
-                ->values()
-                ->toArray(),
-        ];
+                return [
+                    'today_count' => ActivityLog::query()
+                        ->where('created_at', '>=', $today)
+                        ->where('created_at', '<', $startOfTomorrow)
+                        ->count(),
+                    'recent' => ActivityLog::query()
+                        ->orderByDesc('created_at')
+                        ->limit(8)
+                        ->get(['id', 'user_name', 'module', 'action', 'description', 'status', 'created_at'])
+                        ->map(function ($log) {
+                            return [
+                                'id' => $log->id,
+                                'user_name' => $log->user_name,
+                                'module' => $log->module,
+                                'action' => $log->action,
+                                'description' => $log->description,
+                                'status' => $log->status,
+                                'created_at' => optional($log->created_at)->format('d-m-Y h:i A'),
+                            ];
+                        })
+                        ->values()
+                        ->toArray(),
+                ];
+            }
+        );
 
         return response()->json($activityData);
     }

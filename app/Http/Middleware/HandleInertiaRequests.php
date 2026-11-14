@@ -4,20 +4,18 @@ namespace App\Http\Middleware;
 
 use App\Models\Company;
 use App\Models\ActivityLog;
-use App\Models\Admin;
 use App\Models\AdminDetail;
-use App\Models\CashCounterSession;
 use App\Models\Menu;
 use App\Models\MedicineInventory;
 use App\Services\CashCounterService;
 use App\Services\DashboardService;
+use App\Support\DefaultDeveloperManager;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Inertia\Middleware;
 use Closure;
-use Tighten\Ziggy\Ziggy;
 
 class HandleInertiaRequests extends Middleware
 {
@@ -43,28 +41,30 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
+        if (!$request->header('X-Inertia') && ($request->expectsJson() || $request->ajax())) {
+            return parent::share($request);
+        }
 
         $sideMenus = [];
         $companyInfo = [];
         $adminPermissions = collect();
+        $moduleSlugs = collect();
         $strictSidebarFiltering = false;
         $dashboardNetIncome = 0.0;
+        $dashboardPharmacyIncome = 0.0;
+        $isBillingView = $request->routeIs('backend.billing.view');
+        $needsCashCounterInfo = $isBillingView || $request->routeIs('backend.billing.edit');
+        $needsAdminDetails = $isBillingView
+            || $request->routeIs(
+                'backend.admin.create',
+                'backend.admin.edit',
+                'backend.radiology.create',
+                'backend.radiology.edit'
+            );
 
         // Load cached web setting early so we can prefer it for company info
         // when session fallback is not present.
         $webSetting = get_cached_web_setting();
-
-        // In local / debug environments, force a fresh read to avoid stale
-        // cached values during active development. This prevents a saved
-        // WebSetting from reverting on a full page reload while developing.
-        if (app()->environment('local') && config('app.debug')) {
-            try {
-                get_cached_web_setting(true);
-                $webSetting = get_cached_web_setting();
-            } catch (\Throwable $_) {
-                // ignore cache refresh failures in dev
-            }
-        }
 
         // Try to detect the admin user from the request (explicit guard) first,
         // fall back to the default auth guard accessor. This ensures that the
@@ -73,15 +73,6 @@ class HandleInertiaRequests extends Middleware
         $adminUser = $request->user('admin') ?? auth()->guard('admin')->user();
 
         if ($adminUser && strcasecmp(trim((string) ($adminUser->status ?? '')), 'Active') === 0) {
-            // Force a fresh role/permission snapshot so recent role changes reflect instantly.
-            try {
-                $adminUser = Admin::query()
-                    ->with(['roles.permissions', 'permissions'])
-                    ->find($adminUser->id) ?? $adminUser;
-            } catch (\Throwable $exception) {
-                // Fall back to currently authenticated user instance.
-            }
-
             try {
                 $adminPermissions = $adminUser->getAllPermissions()
                     ->pluck('name')
@@ -92,7 +83,6 @@ class HandleInertiaRequests extends Middleware
             } catch (\Throwable $exception) {
                 $adminPermissions = collect();
             }
-
             try {
                 $strictEmailsEnv = env('SIDEBAR_STRICT_EMAILS', '');
                 $strictEmails = array_filter(array_map('trim', explode(',', (string) $strictEmailsEnv)));
@@ -205,7 +195,6 @@ class HandleInertiaRequests extends Middleware
                 $companyInfo = [];
             }
         }
-
         $medicineExpiryAlert = [
             'expired_count' => 0,
             'expiring_soon_count' => 0,
@@ -225,21 +214,19 @@ class HandleInertiaRequests extends Middleware
             $today = Carbon::today()->toDateString();
             $soonDate = Carbon::today()->addDays(30)->toDateString();
 
-            $medicineExpiryAlert = $this->safeCacheRemember(
+            $medicineExpiryAlert = (function_exists('user_has_module') && user_has_module($adminUser, 'pharmacy'))
+                ? ($this->safeCacheRemember(
                 sprintf('alerts.medicine_expiry.%s.%s', $today, $soonDate),
                 max((int) config('cache.medicine_expiry_alert_ttl_seconds', 120), 30),
                 function () use ($today, $soonDate) {
                     return [
                         'expired_count' => MedicineInventory::query()
                             ->where('status', 'Active')
-                            ->whereNotNull('expiry_date')
-                            ->whereDate('expiry_date', '<', $today)
+                            ->where('expiry_date', '<', $today)
                             ->count(),
                         'expiring_soon_count' => MedicineInventory::query()
                             ->where('status', 'Active')
-                            ->whereNotNull('expiry_date')
-                            ->whereDate('expiry_date', '>=', $today)
-                            ->whereDate('expiry_date', '<=', $soonDate)
+                            ->whereBetween('expiry_date', [$today, $soonDate])
                             ->count(),
                         'days_window' => 30,
                     ];
@@ -248,80 +235,141 @@ class HandleInertiaRequests extends Middleware
                 'expired_count' => 0,
                 'expiring_soon_count' => 0,
                 'days_window' => 30,
-            ];
+            ])
+                : [
+                    'expired_count' => 0,
+                    'expiring_soon_count' => 0,
+                    'days_window' => 30,
+                ];
 
-            try {
-                $authInfo = AdminDetail::with(['admin', 'department', 'designation'])
-                    ->where('admin_id', $adminUser->id)
-                    ->first();
-            } catch (\Throwable $_) {
-                $authInfo = null;
-            }
-
-            try {
-                $detail = $adminUser?->details;
-                $filterType = $detail?->dashboard_filter_type ?? 'daily';
-                $filterFrom = $detail?->dashboard_filter_from;
-                $filterTo = $detail?->dashboard_filter_to;
-
-                /** @var DashboardService $dashboardService */
-                $dashboardService = app(DashboardService::class);
-                $filter = $dashboardService->resolveDashboardFilter($filterType, $filterFrom, $filterTo);
-                $dashboardNetIncome = (float) $dashboardService->countNetIncome($filter['dbRange'], $filter['appRange']);
-            } catch (\Throwable $_) {
-                $dashboardNetIncome = 0.0;
-            }
-
-            try {
-                $adminName = trim((string) ($adminUser->name ?? ''));
-                $activeCashCounterSession = CashCounterSession::query()
-                    ->whereRaw('LOWER(status) = ?', ['open'])
-                    ->where(function ($query) use ($adminUser, $adminName) {
-                        $query->where('created_by', $adminUser->id);
-
-                        if ($adminName !== '') {
-                            $query->orWhere(function ($subQuery) use ($adminName) {
-                                $subQuery->whereNull('created_by')
-                                    ->where('user_name', $adminName);
-                            });
-                        }
-                    })
-                    ->latest('opened_at')
-                    ->first();
-
-                if ($activeCashCounterSession) {
-                    $cashCounterInfo = (new CashCounterService())->getSummary($activeCashCounterSession->id);
+            if ($needsAdminDetails) {
+                try {
+                    $authInfo = AdminDetail::with(['admin', 'department', 'designation'])
+                        ->where('admin_id', $adminUser->id)
+                        ->first();
+                } catch (\Throwable $_) {
+                    $authInfo = null;
                 }
-            } catch (\Throwable $_) {
-                $cashCounterInfo = null;
+            }
+
+            if ($isBillingView) {
+                try {
+                    $dashboardNetIncome = (float) $this->safeCacheRemember(
+                        'dashboard.net_income.' . $adminUser->id,
+                        max((int) config('cache.dashboard_net_income_ttl_seconds', 30), 15),
+                        function () use ($adminUser) {
+                            $detail = $adminUser?->details;
+                            $filterType = $detail?->dashboard_filter_type ?? 'daily';
+                            $filterFrom = $detail?->dashboard_filter_from;
+                            $filterTo = $detail?->dashboard_filter_to;
+                            $dashboardService = app(DashboardService::class);
+                            $filter = $dashboardService->resolveDashboardFilter($filterType, $filterFrom, $filterTo);
+
+                            return (float) $dashboardService->countNetIncome($filter['dbRange'], $filter['appRange']);
+                        }
+                    );
+                } catch (\Throwable $_) {
+                    $dashboardNetIncome = 0.0;
+                }
+            }
+
+            if (
+                $isBillingView
+                && ($request->boolean('pharmacy_mode') || user_is_pharmacy_only($adminUser))
+            ) {
+                $detail = $adminUser?->details;
+                $dashboardService = app(DashboardService::class);
+                $filter = $dashboardService->resolveDashboardFilter(
+                    $detail?->dashboard_filter_type ?? 'daily',
+                    $detail?->dashboard_filter_from,
+                    $detail?->dashboard_filter_to
+                );
+                $filterCacheKey = md5($filter['from'] . '|' . $filter['to']);
+                $dashboardPharmacyIncome = (float) $this->safeCacheRemember(
+                    'dashboard.pharmacy_income.' . $adminUser->id . '.' . $filterCacheKey,
+                    max((int) config('cache.dashboard_net_income_ttl_seconds', 30), 15),
+                    fn () => (float) $dashboardService->countPharmacyIncome($filter['dbRange'], $filter['appRange'])
+                );
+            }
+
+            if ($needsCashCounterInfo) {
+                try {
+                    $cashCounterService = app(CashCounterService::class);
+                    $adminId = (int) $adminUser->id;
+                    $adminName = trim((string) ($adminUser->name ?? ''));
+                    $activeCashCounterSession = $cashCounterService->findOpenSessionForAdmin($adminId, $adminName);
+
+                    if (!$activeCashCounterSession) {
+                        $cashCounterInfo = ['session' => null];
+                    } else {
+                        $cacheKey = 'cash_counter.info.' . $adminId;
+                        $cachedCounterInfo = Cache::get($cacheKey);
+
+                        if (
+                            is_array($cachedCounterInfo)
+                            && (int) ($cachedCounterInfo['session']['id'] ?? 0) === (int) $activeCashCounterSession->id
+                        ) {
+                            $cashCounterInfo = $cachedCounterInfo;
+                        } else {
+                            $expected = $cashCounterService->calculateExpectedDrawerAmount($activeCashCounterSession);
+                            $cashCounterInfo = [
+                                'session' => [
+                                    'id' => (int) $activeCashCounterSession->id,
+                                    'status' => (string) $activeCashCounterSession->status,
+                                ],
+                                'expected_amount' => $expected,
+                                'drawer_expected_amount' => $expected,
+                            ];
+                            Cache::put(
+                                $cacheKey,
+                                $cashCounterInfo,
+                                max((int) config('cache.cash_counter_info_ttl_seconds', 20), 10)
+                            );
+                        }
+                    }
+                } catch (\Throwable $_) {
+                    $cashCounterInfo = [
+                        'session' => null,
+                    ];
+                }
             }
 
             $activityLogAlert['can_view'] = $adminPermissions->contains('activity-log-view')
                 || (bool) ($adminUser?->can('activity-log-view'));
 
             if ($activityLogAlert['can_view']) {
-                $activityData = [
-                    'today_count' => ActivityLog::query()
-                        ->whereDate('created_at', $today)
-                        ->count(),
-                    'recent' => ActivityLog::query()
-                        ->orderByDesc('created_at')
-                        ->limit(8)
-                        ->get(['id', 'user_name', 'module', 'action', 'description', 'status', 'created_at'])
-                        ->map(function ($log) {
-                            return [
-                                'id' => $log->id,
-                                'user_name' => $log->user_name,
-                                'module' => $log->module,
-                                'action' => $log->action,
-                                'description' => $log->description,
-                                'status' => $log->status,
-                                'created_at' => optional($log->created_at)->format('d-m-Y h:i A'),
-                            ];
-                        })
-                        ->values()
-                        ->toArray(),
-                ];
+                $activityData = $this->safeCacheRemember(
+                    'activity.log.alerts.' . $today,
+                    max((int) config('cache.activity_log_alert_ttl_seconds', 60), 15),
+                    function () {
+                        $startOfDay = Carbon::today();
+                        $startOfTomorrow = $startOfDay->copy()->addDay();
+
+                        return [
+                            'today_count' => ActivityLog::query()
+                                ->where('created_at', '>=', $startOfDay)
+                                ->where('created_at', '<', $startOfTomorrow)
+                                ->count(),
+                            'recent' => ActivityLog::query()
+                                ->orderByDesc('created_at')
+                                ->limit(8)
+                                ->get(['id', 'user_name', 'module', 'action', 'description', 'status', 'created_at'])
+                                ->map(function ($log) {
+                                    return [
+                                        'id' => $log->id,
+                                        'user_name' => $log->user_name,
+                                        'module' => $log->module,
+                                        'action' => $log->action,
+                                        'description' => $log->description,
+                                        'status' => $log->status,
+                                        'created_at' => optional($log->created_at)->format('d-m-Y h:i A'),
+                                    ];
+                                })
+                                ->values()
+                                ->toArray(),
+                        ];
+                    }
+                ) ?? ['today_count' => 0, 'recent' => []];
 
                 $activityLogAlert['today_count'] = (int) ($activityData['today_count'] ?? 0);
                 $activityLogAlert['recent'] = (array) ($activityData['recent'] ?? []);
@@ -359,30 +407,44 @@ class HandleInertiaRequests extends Middleware
                 $sharedWebSetting = $webSetting;
             }
         }
-
         return array_merge(parent::share($request), [
             'ziggy' => function () use ($request) {
-                return array_merge((new Ziggy)->toArray(), [
+                if ($request->header('X-Inertia')) {
+                    return null;
+                }
+
+                return [
                     'location' => $request->url(),
-                ]);
+                ];
             },
             'flash' => [
-                'successMessage' => $request->session()->get('successMessage'),
+                'successMessage' => $request->session()->pull('successMessage'),
                 'errorMessage' => $request->session()->get('errorMessage'),
                 'billId' => $request->session()->get('billId'),
-                'savedPassword' => $request->session()->get('savedPassword'),
+                'pharmacyBillId' => $request->session()->get('pharmacyBillId'),
+                'appointmentInvoiceUrl' => $request->session()->get('appointmentInvoiceUrl'),
                 'cashCounterPrintUrl' => $request->session()->get('cashCounterPrintUrl'),
             ],
             'auth' => [
-                'admin' => fn () => auth('admin')->user(),
+                'admin' => fn () => $adminUser ? [
+                    'id' => $adminUser->id,
+                    'first_name' => $adminUser->first_name,
+                    'last_name' => $adminUser->last_name,
+                    'name' => $adminUser->name,
+                    'email' => $adminUser->email,
+                    'photo' => $adminUser->photo,
+                    'updated_at' => $adminUser->updated_at,
+                    'is_developer' => DefaultDeveloperManager::isDeveloper($adminUser),
+                ] : null,
                 'permissions' => $adminPermissions,
                 'sideMenus' => $sideMenus,
                 'strictSidebarFiltering' => $strictSidebarFiltering,
+                'modules' => $moduleSlugs,
             ],
 
             'companyInfo' => $companyInfo,
             'appMeta' => [
-                'version' => (string) config('app.version', env('APP_VERSION', '2.1.1')),
+                'version' => (string) config('app.version', env('APP_VERSION', '2.2.2')),
             ],
             'locale' => app()->getLocale(),
             // Provide both `webSetting` and lowercase `websetting` keys so Inertia
@@ -397,6 +459,7 @@ class HandleInertiaRequests extends Middleware
             'authInfo' => fn () => $authInfo,
             'cashCounterInfo' => fn () => $cashCounterInfo,
             'dashboardNetIncome' => fn () => (float) $dashboardNetIncome,
+            'dashboardPharmacyIncome' => fn () => (float) $dashboardPharmacyIncome,
             'loginTexts' => [
                 'banner' => env('LOGIN_BANNER', 'Hospital Management Suite'),
                 'title' => env('LOGIN_TITLE', 'Welcome Back.'),

@@ -11,7 +11,10 @@ class InvoiceDesignRequest extends FormRequest
         $rules = [
             'footer_content' => 'nullable|string|max:2000',
             'footer_content_position' => 'nullable|in:above,below',
-            'module' => 'required|in:opd,ipd,pathology,radiology,pharmacy,appointment,billing,prescription',
+            'active_pad_type' => 'nullable|in:header,institution',
+            'full_page_pad_content_offset' => 'nullable|integer|min:0|max:100',
+            'footer_content_offset' => 'nullable|integer|min:0|max:50',
+            'module' => 'required|in:opd,ipd,ipd_final,pathology,radiology,pharmacy,appointment,billing,prescription',
             'header_height' => 'nullable|integer|min:0|max:1000',
             'footer_height' => 'nullable|integer|min:0|max:1000',
             'footer_font_size' => 'nullable|integer|min:6|max:72',
@@ -24,10 +27,12 @@ class InvoiceDesignRequest extends FormRequest
         if ($this->method() === 'POST') {
             $rules['headerPhoto'] = $fileRules;
             $rules['footerPhoto'] = $fileRules;
+            $rules['fullPagePad'] = $fileRules;
         } else {
             // PUT/PATCH (update)
             $rules['headerPhoto'] = $fileRules;
             $rules['footerPhoto'] = $fileRules;
+            $rules['fullPagePad'] = $fileRules;
         }
 
         return $rules;
@@ -74,10 +79,10 @@ class InvoiceDesignRequest extends FormRequest
             if ($this->method() === 'POST') {
                 $headerPhoto = $this->file('headerPhoto');
                 $footerPhoto = $this->file('footerPhoto');
+                $fullPagePad = $this->file('fullPagePad');
                 
-                if (!$headerPhoto && !$footerPhoto) {
-                    $validator->errors()->add('headerPhoto', __('Either header image or footer image is required.'));
-                    $validator->errors()->add('footerPhoto', __('Either header image or footer image is required.'));
+                if (!$headerPhoto && !$footerPhoto && !$fullPagePad) {
+                    $validator->errors()->add('headerPhoto', __('Upload a header image, footer image, or full-page institution pad.'));
                 }
             }
         });

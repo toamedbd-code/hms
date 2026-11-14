@@ -14,6 +14,10 @@ const props = defineProps({
         type: Array,
         default: () => []
     },
+    availableReportTypes: {
+        type: Array,
+        default: () => []
+    },
     reportType: {
         type: String,
         default: 'daily-transaction'
@@ -46,10 +50,11 @@ const dateTo = ref(props.dateTo || '');
 const isLoading = ref(false);
 const pdfOpening = ref(false);
 
-const reports = [
+const allReports = [
     { id: 'daily-transaction', label: 'Daily Transaction Report' },
     { id: 'all-transaction', label: 'All Transaction Report' },
     { id: 'pharmacy-transaction', label: 'Pharmacy Transaction Report' },
+    { id: 'department-transaction', label: 'Department Transaction Report' },
     { id: 'appointment-transaction', label: 'Appointment Transaction Report' },
     { id: 'opd-transaction', label: 'OPD Transaction Report' },
     { id: 'ipd-transaction', label: 'IPD Transaction Report' },
@@ -58,6 +63,9 @@ const reports = [
     { id: 'referral', label: 'Referral Report' },
     { id: 'pending-transaction', label: 'Pending Transaction Report' },
 ];
+const reports = computed(() => allReports.filter((report) => (
+    props.availableReportTypes.includes(report.id)
+)));
 
 const selectReport = (reportId) => {
     selectedReport.value = reportId;
@@ -74,13 +82,13 @@ const handleSearch = () => {
         date_from: dateFrom.value,
         date_to: dateTo.value,
     }, {
-        preserveState: false,
+        preserveState: true,
         preserveScroll: false
     });
 };
 
 const getReportTitle = () => {
-    const report = reports.find(r => r.id === selectedReport.value);
+    const report = reports.value.find(r => r.id === selectedReport.value);
     return report ? report.label : '';
 };
 
@@ -120,8 +128,7 @@ const goBack = () => {
     router.visit(route('backend.dashboard'));
 };
 
-// Open PDF in a new tab like the report generator flow
-const downloadPDF = async () => {
+const downloadPDF = () => {
     if (!dateFrom.value || !dateTo.value) {
         alert('Please select both date from and date to');
         return;
@@ -148,93 +155,14 @@ const downloadPDF = async () => {
     }
 
     try {
-        // Reuse a module-scoped reference to avoid opening duplicate tabs and
-        // close any intermediate blank window if created by the browser.
-        const winName = 'financeReportPopup';
-        // store reference on window to persist across component reloads
-        if (!window.__financeReportWin) window.__financeReportWin = null;
-
-        try {
-            // If we already have a reference and it's open, reuse it
-            if (window.__financeReportWin && !window.__financeReportWin.closed) {
-                try {
-                    window.__financeReportWin.location.href = pdfUrl;
-                    window.__financeReportWin.focus();
-                } catch (e) {
-                    // If navigating existing window fails, null it to open anew
-                    window.__financeReportWin = null;
-                }
-            }
-
-            if (!window.__financeReportWin) {
-                // Try to get a handle to a window with the name without creating a blank page
-                let probe = null;
-                try {
-                    probe = window.open('', winName);
-                } catch (e) {
-                    probe = null;
-                }
-
-                // If probe exists and is not an about:blank placeholder, reuse it
-                if (probe && probe.location && probe.location.href && probe.location.href !== 'about:blank') {
-                    try {
-                        probe.location.href = pdfUrl;
-                        probe.focus();
-                        window.__financeReportWin = probe;
-                    } catch (e) {
-                        // fallthrough to open normally
-                        try { probe.close(); } catch (ee) { /* ignore */ }
-                        window.__financeReportWin = window.open(pdfUrl, winName, 'noopener,noreferrer');
-                    }
-                } else {
-                    // If probe is a blank window, close it to avoid leftover blank tab
-                    if (probe && probe.location && probe.location.href === 'about:blank') {
-                        try { probe.close(); } catch (e) { /* ignore */ }
-                    }
-
-                    // Open the PDF directly in a named window
-                    window.__financeReportWin = window.open(pdfUrl, winName, 'noopener,noreferrer');
-                    try { if (window.__financeReportWin) window.__financeReportWin.focus(); } catch (e) { /* ignore */ }
-                }
-            }
-        } catch (openErr) {
-            console.warn('Primary open method failed, attempting anchor fallback', openErr);
-            try {
-                const a = document.createElement('a');
-                a.href = pdfUrl;
-                a.target = winName;
-                a.rel = 'noopener noreferrer';
-                a.style.display = 'none';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-            } catch (anchorErr) {
-                console.warn('Anchor fallback failed, attempting fetch-and-open fallback', anchorErr);
-                try {
-                    const resp = await fetch(pdfUrl, { credentials: 'same-origin' });
-                    if (!resp.ok) throw new Error('Network response was not ok');
-                    const blob = await resp.blob();
-                    const blobUrl = URL.createObjectURL(blob);
-                    const bw = window.open(blobUrl, winName);
-                    if (!bw) {
-                        const dl = document.createElement('a');
-                        dl.href = blobUrl;
-                        dl.download = `${selectedReport.value || 'report'}.pdf`;
-                        document.body.appendChild(dl);
-                        dl.click();
-                        document.body.removeChild(dl);
-                    } else {
-                        window.__financeReportWin = bw;
-                        try { window.__financeReportWin.focus(); } catch (e) { /* ignore */ }
-                    }
-                } catch (fetchErr) {
-                    console.error('Final fetch fallback failed:', fetchErr);
-                    alert('Unable to open PDF. Please try downloading from the server.');
-                }
-            }
+        const reportWindow = window.open(pdfUrl, '_blank');
+        if (!reportWindow) {
+            throw new Error('The browser blocked the report tab. Allow pop-ups and try again.');
         }
+        reportWindow.opener = null;
     } catch (error) {
-        console.error('Error opening report URL:', error);
+        console.error('Finance report could not be opened:', error);
+        alert(error instanceof Error ? error.message : 'Unable to open the finance report.');
     } finally {
         isLoading.value = false;
         setTimeout(() => {
@@ -470,11 +398,11 @@ watch(() => props.reportType, (newVal) => {
 });
 
 watch(() => props.dateFrom, (newVal) => {
-    if (newVal) dateFrom.value = newVal;
+    dateFrom.value = newVal || '';
 });
 
 watch(() => props.dateTo, (newVal) => {
-    if (newVal) dateTo.value = newVal;
+    dateTo.value = newVal || '';
 });
 
 const showFooterTotals = computed(() => {
@@ -499,8 +427,9 @@ const visibleDataFields = computed(() => {
 const getFooterColumnSpan = computed(() => {
     const spans = {
         'daily-transaction': 2,
-        'all-transaction': 2,
+        'all-transaction': 6,
         'pharmacy-transaction': 6,
+        'department-transaction': 3,
         'appointment-transaction': 6,
         'opd-transaction': 6,
         'ipd-transaction': 6,
@@ -519,8 +448,12 @@ const getFooterColumnSpan = computed(() => {
             <!-- Header -->
             <div class="mb-4 sm:mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                    <h1 class="text-xl sm:text-2xl font-semibold text-gray-800">Finance Reports</h1>
-                    <p class="text-sm text-gray-600 mt-1">Generate and view comprehensive financial reports</p>
+                    <h1 class="text-xl sm:text-2xl font-semibold text-gray-800">
+                        {{ availableReportTypes.length === 1 && availableReportTypes[0] === 'pharmacy-transaction' ? 'Pharmacy Report' : (availableReportTypes.length === 1 && availableReportTypes[0] === 'department-transaction' ? 'Department Report' : 'Finance Reports') }}
+                    </h1>
+                    <p class="text-sm text-gray-600 mt-1">
+                        {{ availableReportTypes.length === 1 && availableReportTypes[0] === 'pharmacy-transaction' ? 'View pharmacy sales, returns, and net income' : (availableReportTypes.length === 1 && availableReportTypes[0] === 'department-transaction' ? 'View department sales, discounts, returns, and pending income' : 'Generate and view comprehensive financial reports') }}
+                    </p>
                 </div>
                 <button @click="goBack"
                     class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-white bg-red-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-red-700">
@@ -567,7 +500,7 @@ const getFooterColumnSpan = computed(() => {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                 </svg>
-                                {{ isLoading ? 'Opening Report...' : 'Report' }}
+                                {{ isLoading ? 'Opening Report...' : 'Print Report' }}
                             </button>
                             <button type="button" @click="downloadExcelWithRawData"
                                 class="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm font-medium">
@@ -651,7 +584,7 @@ const getFooterColumnSpan = computed(() => {
                         <!-- Table with Footer -->
                         <div id="report-table"
                             class="overflow-x-auto bg-white rounded-lg shadow border border-gray-200">
-                            <table class="min-w-full divide-y divide-gray-200">
+                            <table class="min-w-full table-auto divide-y divide-gray-200">
                                 <thead class="bg-gray-50">
                                     <tr>
                                         <th v-for="(header, index) in visibleTableHeaders" :key="index" :class="[
@@ -666,8 +599,14 @@ const getFooterColumnSpan = computed(() => {
                                     <tr v-for="(row, rowIndex) in reportData" :key="rowIndex"
                                         :class="rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'">
                                         <td v-for="(field, fieldIndex) in visibleDataFields" :key="fieldIndex"
-                                            :class="['px-4 py-3 whitespace-nowrap text-sm', field.class]"
-                                            v-html="row[field.fieldName]"></td>
+                                            :class="['px-4 py-3 whitespace-normal break-words text-sm', field.class]"
+                                            :title="field.fieldName === 'item_names' ? row.item_names_tooltip : null"
+                                        >
+                                            <template v-if="field.fieldName === 'item_names'">
+                                                {{ row[field.fieldName] }}
+                                            </template>
+                                            <span v-else v-html="row[field.fieldName]"></span>
+                                        </td>
                                     </tr>
                                 </tbody>
 
@@ -715,41 +654,30 @@ const getFooterColumnSpan = computed(() => {
                                             </td>
                                         </template>
 
-                                        <!-- All Transaction Footer (same structure as Daily) -->
+                                        <!-- All Transaction Footer -->
                                         <template v-else-if="reportType === 'all-transaction'">
-                                            <td class="finance-total-cell text-center">
-                                                {{ footerTotals.total_transactions || 0 }}
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
-                                                {{ formatCurrency(footerTotals.total_amount || 0) }}
-                                            </td>
-                                            <td class="finance-total-cell text-right">
-                                                {{ formatCurrency(footerTotals.total_discount || 0) }}
+                                                {{ formatCurrency(footerTotals.discount || 0) }}
                                             </td>
                                             <td v-if="showsRefundColumn" class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_return_amount || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
-                                                {{ formatCurrency(footerTotals.amount_after_discount || 0) }}
+                                                {{ formatCurrency(footerTotals.payable_amount || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
-                                                {{ formatCurrency(footerTotals.cash_amount || 0) }}
+                                                {{ formatCurrency(footerTotals.paid_amt || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
-                                                {{ formatCurrency(footerTotals.non_cash_amount || 0) }}
-                                            </td>
-                                            <td class="finance-total-cell text-right">
-                                                {{ formatCurrency(footerTotals.total_commission || 0) }}
-                                            </td>
-                                            <td class="finance-total-cell text-right">
-                                                {{ formatCurrency(footerTotals.total_paid || 0) }}
-                                            </td>
-                                            <td class="finance-total-cell text-right">
-                                                {{ formatCurrency(footerTotals.total_due || 0) }}
+                                                {{ formatCurrency(footerTotals.due_amount || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.total_due_collected || 0) }}
                                             </td>
+                                            <td class="finance-total-cell text-center">—</td>
                                         </template>
 
                                         <!-- Appointment / OPD / IPD Transaction Footer -->
@@ -792,6 +720,9 @@ const getFooterColumnSpan = computed(() => {
                                                 {{ formatCurrency(footerTotals.total_return_amount || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.net_income || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
                                                 {{ formatCurrency(footerTotals.payable_amount || 0) }}
                                             </td>
                                             <td class="finance-total-cell text-right">
@@ -805,6 +736,24 @@ const getFooterColumnSpan = computed(() => {
                                             </td>
                                             <td class="finance-total-cell text-center">
                                                 —
+                                            </td>
+                                        </template>
+
+                                        <template v-else-if="reportType === 'department-transaction'">
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.discount || 0) }}
+                                            </td>
+                                            <td v-if="showsRefundColumn" class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.total_return_amount || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.net_income || 0) }}
+                                            </td>
+                                            <td class="finance-total-cell text-right">
+                                                {{ formatCurrency(footerTotals.due_amount || 0) }}
                                             </td>
                                         </template>
 
@@ -953,7 +902,8 @@ const getFooterColumnSpan = computed(() => {
 
 .finance-total-label {
     padding: 0.9rem 1rem;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
     font-size: 0.75rem;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -964,7 +914,8 @@ const getFooterColumnSpan = computed(() => {
 
 .finance-total-cell {
     padding: 0.9rem 1rem;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
     font-size: 0.82rem;
     font-weight: 700;
     color: #f8fafc;

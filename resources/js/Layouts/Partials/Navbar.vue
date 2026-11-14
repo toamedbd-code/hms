@@ -9,6 +9,8 @@ import eventBus from '@/eventBus.js';
 const isDark = useDark();
 const toggleDark = useToggle(isDark);
 const sideBarFlag = ref(false);
+const isMobileViewport = ref(window.innerWidth < 1024);
+const isMobileSidebarOpen = ref(false);
 const isDropdownVisible = ref(false);
 const isBedPanelOpen = ref(false);
 const isExpiryPanelOpen = ref(false);
@@ -16,6 +18,18 @@ const isActivityPanelOpen = ref(false);
 const showOnlyFailedActivities = ref(false);
 const bedStatuses = ref([]);
 const page = usePage();
+const brandingOverride = ref(null);
+let brandingHandler = null;
+const displayedCompanyName = computed(() => {
+    const branding = brandingOverride.value
+        || page.props?.websetting
+        || page.props?.webSetting
+        || page.props?.companyInfo
+        || (typeof window !== 'undefined' ? window.__last_branding_payload : null)
+        || {};
+    const companyName = String(branding.company_name || branding.name || '').trim();
+    return companyName || 'Hospital Management System';
+});
 const allowedMenuRoutes = computed(() => {
     const routes = new Set();
     const menus = page.props?.auth?.sideMenus ?? [];
@@ -169,8 +183,16 @@ const groupedBeds = computed(() => {
 const bedLoading = ref(false);
 const bedError = ref('');
 let activityAlertsTimer = null;
+let activityAlertsRequestInFlight = false;
+let mobileSidebarHandler = null;
 
 const toggleSidebar = () => {
+    if (isMobileViewport.value) {
+        isMobileSidebarOpen.value = !isMobileSidebarOpen.value;
+        eventBus.emit('mobileSidebarToggled', isMobileSidebarOpen.value);
+        return;
+    }
+
     sideBarFlag.value = !sideBarFlag.value;
     eventBus.emit('sidebarToggled', sideBarFlag.value);
     try {
@@ -183,11 +205,20 @@ const toggleSidebar = () => {
 const restoreSidebarState = () => {
     try {
         const saved = window.localStorage.getItem('backend.sidebar.collapsed');
-        if (saved === null) return;
-        sideBarFlag.value = saved === 'true';
-        eventBus.emit('sidebarToggled', sideBarFlag.value);
+        if (saved !== null) {
+            sideBarFlag.value = saved === 'true';
+            eventBus.emit('sidebarToggled', sideBarFlag.value);
+        }
     } catch (error) {
         // ignore
+    }
+};
+
+const handleViewportResize = () => {
+    isMobileViewport.value = window.innerWidth < 1024;
+    if (!isMobileViewport.value) {
+        isMobileSidebarOpen.value = false;
+        eventBus.emit('mobileSidebarToggled', false);
     }
 };
 
@@ -242,16 +273,18 @@ const toggleActivityPanel = () => {
     if (isActivityPanelOpen.value) {
         isBedPanelOpen.value = false;
         isExpiryPanelOpen.value = false;
+        refreshActivityAlerts();
     } else {
         showOnlyFailedActivities.value = false;
     }
 };
 
 const refreshActivityAlerts = async () => {
-    if (!activityLogAlert.value?.can_view) {
+    if (!activityLogAlert.value?.can_view || activityAlertsRequestInFlight) {
         return;
     }
 
+    activityAlertsRequestInFlight = true;
     try {
         const resolveAlertsUrl = () => {
             if (typeof route === 'function') {
@@ -293,6 +326,8 @@ const refreshActivityAlerts = async () => {
         };
     } catch (error) {
         // ignore refresh failures
+    } finally {
+        activityAlertsRequestInFlight = false;
     }
 };
 
@@ -347,19 +382,33 @@ const bedTooltip = (bed) => {
 
 onMounted(() => {
     document.addEventListener('click', handleOutsideClick);
+    window.addEventListener('resize', handleViewportResize);
     restoreSidebarState();
+    mobileSidebarHandler = (isOpen) => {
+        isMobileSidebarOpen.value = Boolean(isOpen);
+    };
+    eventBus.on('mobileSidebarToggled', mobileSidebarHandler);
+    brandingHandler = (payload) => {
+        brandingOverride.value = payload ?? null;
+    };
+    eventBus.on('branding.updated', brandingHandler);
 
     activityAlertsTimer = window.setInterval(() => {
         if (document.visibilityState === 'visible') {
             refreshActivityAlerts();
         }
-    }, 20000);
-
-    refreshActivityAlerts();
+    }, 60000);
 });
 
 onBeforeUnmount(() => {
     document.removeEventListener('click', handleOutsideClick);
+    window.removeEventListener('resize', handleViewportResize);
+    if (mobileSidebarHandler) {
+        eventBus.off('mobileSidebarToggled', mobileSidebarHandler);
+    }
+    if (brandingHandler && typeof eventBus.off === 'function') {
+        eventBus.off('branding.updated', brandingHandler);
+    }
     if (activityAlertsTimer) {
         window.clearInterval(activityAlertsTimer);
     }
@@ -367,24 +416,30 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div class="relative w-full">
-        <div :class="['absolute', 'w-full', { 'md:pl-[70px]': sideBarFlag, 'pl-[240px]': !sideBarFlag }]">
-            <div :class="['flex px-4 items-center justify-between w-full py-3 h-[50px]', isDark ? 'border-b border-gray-700 bg-slate-900' : 'border-b border-gray-200 bg-gray-100']">
-                    <div>
+    <div class="w-full shrink-0">
+            <div :class="['navbar-theme-surface flex h-[50px] w-full items-center justify-between px-2 py-3 sm:px-4', isDark ? 'navbar-dark-surface border-b border-slate-700' : 'border-b']">
+                    <div class="flex min-w-0 flex-1 items-center gap-3">
                     <button type="button" @click="toggleSidebar"
-                        :class="['p-2 rounded transition-colors duration-200', isDark ? 'text-white hover:text-white/90 hover:bg-slate-800' : 'text-gray-500 hover:text-blue-600 hover:bg-gray-100']">
+                        :class="['navbar-action-button bg-emerald-600', isDark ? 'navbar-action-button-dark' : 'navbar-action-button-light']"
+                        aria-label="Toggle sidebar"
+                        aria-controls="app-sidebar"
+                        :aria-expanded="isMobileViewport ? isMobileSidebarOpen : !sideBarFlag">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                             stroke="currentColor" class="w-5 h-5">
                             <path stroke-linecap="round" stroke-linejoin="round"
                                 d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
                         </svg>
                     </button>
+                    <div :class="['navbar-company-name hidden min-w-0 max-w-[42vw] truncate text-sm font-bold sm:block sm:text-base', isDark ? 'navbar-company-name-dark' : 'navbar-company-name-light']"
+                        :title="displayedCompanyName">
+                        {{ displayedCompanyName }}
+                    </div>
                 </div>
-                <div>
-                    <ul class="flex items-center space-x-2">
+                <div class="shrink-0">
+                    <ul class="flex items-center gap-1 sm:gap-2">
                         <li>
                             <button type="button" @click="toggleDark()"
-                                :class="['p-2 rounded transition-colors duration-200', isDark ? 'text-gray-300 hover:text-blue-400 hover:bg-slate-800' : 'text-gray-500 hover:text-blue-600 hover:bg-gray-100']"
+                                :class="['navbar-action-button bg-emerald-600', isDark ? 'navbar-action-button-dark' : 'navbar-action-button-light']"
                                 :title="isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
                                 <svg v-if="isDark" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
                                     <path stroke-linecap="round" stroke-linejoin="round"
@@ -399,7 +454,7 @@ onBeforeUnmount(() => {
 
                         <li class="relative" data-navbar-notification>
                             <button type="button" @click="toggleBedPanel"
-                                :class="['p-2 rounded transition-colors duration-200', isDark ? 'text-gray-300 hover:text-blue-400 hover:bg-slate-800' : 'text-gray-500 hover:text-blue-600 hover:bg-gray-100']"
+                                :class="['navbar-action-button bg-emerald-600', isDark ? 'navbar-action-button-dark' : 'navbar-action-button-light']"
                                 title="Bed Status">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                                     stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
@@ -409,7 +464,7 @@ onBeforeUnmount(() => {
                             </button>
 
                             <div v-if="isBedPanelOpen"
-                                :class="['absolute right-0 mt-2 w-[720px] rounded shadow-lg z-50', isDark ? 'bg-slate-900 border-gray-700' : 'bg-white border border-gray-200']">
+                                :class="['absolute right-0 mt-2 w-[calc(100vw-1rem)] md:w-[600px] lg:w-[720px] rounded shadow-lg z-50', isDark ? 'bg-slate-900 border-gray-700' : 'bg-white border border-gray-200']">
                                 <div :class="['px-3 py-2 flex items-center justify-between text-xs font-semibold', isDark ? 'border-b border-gray-700 text-white' : 'border-b border-gray-200 text-gray-700']">
                                     <span>Bed Status</span>
                                     <button type="button" :class="['text-[11px]', isDark ? 'text-gray-300 hover:text-gray-100' : 'text-gray-500 hover:text-gray-700']"
@@ -427,7 +482,7 @@ onBeforeUnmount(() => {
                                             <div v-if="beds.length" :class="['text-xs font-semibold mb-2', isDark ? 'text-white' : 'text-gray-700']">
                                                 {{ group }}
                                             </div>
-                                            <div v-if="beds.length" class="grid grid-cols-4 gap-2">
+                                            <div v-if="beds.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                                                 <button v-for="bed in beds" :key="bed.id" type="button"
                                                     @click="selectBed(bed)"
                                                     :title="bedTooltip(bed)"
@@ -456,7 +511,7 @@ onBeforeUnmount(() => {
                         
                         <li v-if="activityLogAlert.can_view" class="relative" data-navbar-notification>
                             <button type="button" @click="toggleActivityPanel"
-                                :class="['p-2 rounded transition-colors duration-200 block relative', isDark ? 'text-gray-300 hover:text-blue-400 hover:bg-slate-800' : 'text-gray-500 hover:text-blue-600 hover:bg-gray-100']"
+                                :class="['navbar-action-button bg-emerald-600 relative', isDark ? 'navbar-action-button-dark' : 'navbar-action-button-light']"
                                 title="User Activity Logs">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                                     stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
@@ -471,7 +526,7 @@ onBeforeUnmount(() => {
                             </button>
 
                             <div v-if="isActivityPanelOpen"
-                                :class="['absolute right-0 mt-2 w-[380px] rounded shadow-lg z-50', isDark ? 'bg-slate-900 border-gray-700' : 'bg-white border border-gray-200']">
+                                :class="['absolute right-0 mt-2 w-[calc(100vw-1rem)] sm:w-[380px] rounded shadow-lg z-50', isDark ? 'bg-slate-900 border-gray-700' : 'bg-white border border-gray-200']">
                                 <div :class="['px-3 py-2 text-xs font-semibold flex items-center justify-between', isDark ? 'border-b border-gray-700 text-white' : 'border-b border-gray-200 text-white']">
                                     <span>User Activity Logs</span>
                                     <span :class="['text-[11px]', isDark ? 'text-blue-700' : 'text-white']">Today: {{ activityLogAlert.today_count || 0 }}</span>
@@ -527,7 +582,7 @@ onBeforeUnmount(() => {
 
                         <li class="relative" data-navbar-notification>
                             <button type="button" @click="toggleExpiryPanel"
-                                :class="['cursor-pointer p-2 rounded transition-colors duration-200 relative', isDark ? 'text-gray-300 hover:text-blue-400 hover:bg-slate-800' : 'text-gray-500 hover:text-blue-600 hover:bg-gray-100']"
+                                :class="['navbar-action-button bg-emerald-600 relative', isDark ? 'navbar-action-button-dark' : 'navbar-action-button-light']"
                                 title="Medicine Expiry Alert">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                                     stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
@@ -541,7 +596,7 @@ onBeforeUnmount(() => {
                             </button>
 
                             <div v-if="isExpiryPanelOpen"
-                                class="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded shadow-lg z-50">
+                                class="absolute right-0 mt-2 w-64 max-w-[calc(100vw-1rem)] bg-white border border-gray-200 rounded shadow-lg z-50">
                                 <div class="px-3 py-2 border-b border-gray-200 text-xs font-semibold text-gray-700">
                                     Medicine Expiry Alert
                                 </div>
@@ -570,22 +625,22 @@ onBeforeUnmount(() => {
 
                         <li>
                             <div class="relative">
-                                <div class="flex items-center text-gray-500 hover:text-blue-600 transition-colors duration-200 p-2 rounded cursor-pointer">
+                                <div class="flex items-center transition-colors duration-200 rounded cursor-pointer">
                                     <Dropdown align="right">
                                     <template #trigger>
-                                        <div class="flex items-center gap-2">
-                                            <div :class="['h-7 w-7 rounded-full overflow-hidden flex items-center justify-center', isDark ? 'border-gray-600 bg-slate-800' : 'border border-gray-300 bg-gray-100']">
+                                        <div :class="['navbar-user-trigger flex items-center gap-2', isDark ? 'navbar-user-trigger-dark' : 'navbar-user-trigger-light']">
+                                            <div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full">
                                                 <img
                                                     v-if="adminPhoto"
                                                     :src="adminPhoto"
                                                     alt="Profile"
                                                     class="h-full w-full object-cover"
                                                 >
-                                                <span v-else :class="['text-[10px] font-semibold', isDark ? 'text-gray-200' : 'text-gray-600']">
+                                                <span v-else :class="['text-[10px] font-semibold', isDark ? 'text-slate-100' : 'text-emerald-900']">
                                                     {{ adminInitials }}
                                                 </span>
                                             </div>
-                                            <span :class="['hidden md:block max-w-[130px] truncate text-xs font-semibold', isDark ? 'text-white' : 'text-gray-700']">
+                                            <span :class="['hidden md:block max-w-[130px] truncate text-xs font-semibold', isDark ? 'navbar-company-name-dark' : 'navbar-company-name-light']">
                                                 {{ adminDisplayName }}
                                             </span>
                                         </div>
@@ -640,11 +695,86 @@ onBeforeUnmount(() => {
                     </ul>
                 </div>
             </div>
-        </div>
     </div>
 </template>
 
 <style scoped>
+.navbar-theme-surface {
+    background-color: var(--app-theme-navbar-surface, color-mix(in srgb, var(--app-theme-primary) 12%, var(--app-theme-surface)));
+    border-color: color-mix(in srgb, var(--app-theme-primary) 24%, #cbd5e1);
+}
+
+.navbar-theme-surface.navbar-dark-surface {
+    background-color: #111827;
+    border-color: #334155;
+}
+
+.navbar-company-name-light {
+    color: color-mix(in srgb, var(--app-theme-contrast) 82%, #111827);
+}
+
+.navbar-company-name-dark {
+    color: #f8fafc;
+}
+
+.navbar-action-button {
+    display: inline-flex;
+    width: 2.25rem;
+    height: 2.25rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.navbar-action-button-dark {
+    background-color: #1e293b;
+    border-color: #475569 !important;
+    color: #e2e8f0 !important;
+}
+
+.navbar-action-button-dark:hover {
+    background-color: #334155;
+    color: #ffffff !important;
+}
+
+.navbar-action-button-light {
+    background-color: #16a34a;
+    border-color: #15803d !important;
+    color: #ffffff !important;
+}
+
+.navbar-action-button-light:hover {
+    background-color: #15803d;
+    color: #ffffff !important;
+}
+
+.navbar-user-trigger {
+    min-height: 2.5rem;
+    max-width: 13rem;
+    padding: 0.25rem 0.5rem;
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.navbar-user-trigger-dark {
+    color: #f8fafc;
+}
+
+.navbar-user-trigger-dark:hover {
+    background: transparent !important;
+}
+
+.navbar-user-trigger-light {
+    color: color-mix(in srgb, var(--app-theme-contrast) 82%, #111827);
+}
+
+.navbar-user-trigger-light:hover {
+    background: transparent !important;
+}
+
 .bg-blue-50 {
     background-color: var(--app-theme-soft) !important;
 }

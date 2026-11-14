@@ -19,11 +19,11 @@ class RecoverSystemDataCommand extends Command
         $this->info('1/6 Re-seeding menu definitions...');
         foreach ([
             'MenuSeeder',
+            'UpdateItemChargeMenuSeeder',
             'SettingsMenuSyncSeeder',
             'QuickAccessMenuPermissionSyncSeeder',
             'StoreManagementMenuSeeder',
             'SalarySheetMenuSeeder',
-            'MenuDeduplicateSeeder',
         ] as $class) {
             try {
                 Artisan::call('db:seed', ['--class' => $class, '--force' => true]);
@@ -42,6 +42,8 @@ class RecoverSystemDataCommand extends Command
             'DutyRosterPermissionSeeder',
             'SalarySheetPermissionSeeder',
             'SidebarPermissionStabilitySeeder',
+            'DashboardCategoryPermissionSeeder',
+            'MenuDeduplicateSeeder',
         ] as $class) {
             try {
                 Artisan::call('db:seed', ['--class' => $class, '--force' => true]);

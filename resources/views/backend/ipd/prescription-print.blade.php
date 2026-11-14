@@ -474,6 +474,16 @@
                     <div>{{ $doctorDesignation ?? 'N/A' }}</div>
                 </div>
 
+                @if (collect([$nibp ?? '', $weight ?? '', $pulse ?? '', $temperature ?? ''])->filter()->isNotEmpty())
+                    <div class="section">
+                        <div class="section-title">Vitals</div>
+                        @if (!empty($nibp)) <div>NIBP: {{ $nibp }}</div> @endif
+                        @if (!empty($weight)) <div>Weight: {{ $weight }}</div> @endif
+                        @if (!empty($pulse)) <div>Pulse: {{ $pulse }}</div> @endif
+                        @if (!empty($temperature)) <div>Temperature: {{ $temperature }}</div> @endif
+                    </div>
+                @endif
+
                 <div class="section">
                     <div class="section-title">Complaints</div>
                     @php
@@ -490,6 +500,13 @@
                         <div>N/A</div>
                     @endif
                 </div>
+
+                @if (!empty($examinations))
+                    <div class="section">
+                        <div class="section-title">On Examinations</div>
+                        <div>{!! nl2br(e($examinations)) !!}</div>
+                    </div>
+                @endif
 
                 <div class="section">
                     <div class="section-title">Diagnosis</div>
@@ -528,7 +545,7 @@
                     <ol>
                         @forelse (($medicineItems ?? []) as $item)
                             <li class="rx-item">
-                                <strong>{{ $item['medicine_name'] ?? 'N/A' }}</strong>,
+                                <strong>{{ $item['medicine_name'] ?? 'N/A' }}</strong>@if (!empty($item['generic_name'])) <span>({{ $item['generic_name'] }})</span>@endif,
                                 Dose: {{ $item['dose'] ?? 'N/A' }},
                                 Instructions: {{ $item['instructions'] ?? 'N/A' }}
                                 @if (!empty($item['frequency']))

@@ -3,16 +3,19 @@ import { ref } from "vue";
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
-import { router } from '@inertiajs/vue3';
+import { router, useForm } from '@inertiajs/vue3';
 
 let props = defineProps({
     filters: Object,
+    isDeveloper: Boolean,
 });
 
 const filters = ref({
 
     numOfData: props.filters?.numOfData ?? 10,
 });
+const csvInput = ref(null);
+const csvForm = useForm({ csv_file: null });
 
 const applyFilter = () => {
     router.get(route('backend.billingdoctor.index'), filters.value, { preserveState: true });
@@ -25,6 +28,25 @@ const goBack = () => {
     }
 
     router.visit(route('backend.dashboard'));
+};
+
+const openCsvPicker = () => {
+    csvInput.value?.click();
+};
+
+const uploadCsv = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    csvForm.csv_file = file;
+    csvForm.post(route('backend.billingdoctor.import-csv'), {
+        forceFormData: true,
+        preserveScroll: true,
+        onFinish: () => {
+            csvForm.reset('csv_file');
+            event.target.value = '';
+        },
+    });
 };
 
 </script>
@@ -47,12 +69,44 @@ const goBack = () => {
                     >
                         Back
                     </button>
+                    <template v-if="isDeveloper">
+                        <a
+                            :href="route('backend.billingdoctor.sample-csv')"
+                            class="px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 transition-colors"
+                        >
+                            CSV Sample
+                        </a>
+                        <input
+                            ref="csvInput"
+                            type="file"
+                            accept=".csv,text/csv"
+                            class="hidden"
+                            @change="uploadCsv"
+                        />
+                        <button
+                            type="button"
+                            :disabled="csvForm.processing"
+                            @click="openCsvPicker"
+                            class="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                        >
+                            {{ csvForm.processing ? 'Uploading...' : 'Upload CSV' }}
+                        </button>
+                        <a
+                            :href="route('backend.billingdoctor.export-csv')"
+                            class="px-3 py-2 text-sm font-medium text-white bg-sky-600 rounded-md hover:bg-sky-700 transition-colors"
+                        >
+                            Download All Doctors
+                        </a>
+                    </template>
                     <a :href="route('backend.billingdoctor.create')"
                         class="px-4 py-2 text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors duration-200">
                         Create / Add Doctor
                     </a>
                 </div>
             </div>
+            <p v-if="csvForm.errors.csv_file" class="mb-2 px-3 py-2 text-sm text-red-700 bg-red-100 rounded-md">
+                {{ csvForm.errors.csv_file }}
+            </p>
             <div
                 class="flex justify-between w-full p-2 py-3 space-x-2 text-gray-700 rounded-md bg-slate-300 shadow-gray-800/50 dark:bg-gray-700 dark:text-gray-200">
 

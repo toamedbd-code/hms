@@ -2,19 +2,18 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import vue from '@vitejs/plugin-vue';
 
-// NOTE: Temporarily removed `laravel-vite-plugin` to avoid incompatible peer
-// dependency issues when building with the current `vite` version on this
-// environment. The app will still build frontend assets; if you rely on
-// automatic Blade/Vite integration (hot refresh, blade directives), restore
-// the plugin after installing a compatible version.
-
 export default defineConfig({
     base: '/build/',
+    // Laravel serves static assets from public directly; do not copy public
+    // into the nested public/build output directory.
+    publicDir: false,
+
     resolve: {
         alias: {
-            '@': resolve(__dirname, 'resources/js')
-        }
+            '@': resolve(import.meta.dirname, 'resources/js'),
+        },
     },
+
     plugins: [
         vue({
             template: {
@@ -25,48 +24,53 @@ export default defineConfig({
             },
         }),
     ],
+
     build: {
         outDir: 'public/build',
         manifest: 'manifest.json',
         emptyOutDir: true,
-        // Use esbuild for faster minification of JS
+
+        // Target modern browsers — smaller, faster output
+        target: 'es2020',
+
+        // esbuild is faster than Rollup's default terser
         minify: 'esbuild',
-        // Disable LightningCSS CSS minification because Tailwind generated attribute selectors
-        // are causing LightningCSS to fail during CSS minification.
-        cssMinify: false,
-        // Raise chunk size warning limit to 800KB
-        chunkSizeWarningLimit: 800,
-        // Enable CSS code splitting for faster page loads
+
+        // Use esbuild for CSS minification (avoids LightningCSS attribute-selector issues)
+        cssMinify: 'esbuild',
+
+        // CSS code splitting: only load CSS needed per page
         cssCodeSplit: true,
+
+        // Skip printing per-chunk gzip sizes — saves 10–15 s on large builds
+        reportCompressedSize: false,
+
+        chunkSizeWarningLimit: 1000,
+
+        esbuild: {
+            target: 'es2020',
+            // Strip all JSDoc / license comment blocks from output
+            legalComments: 'none',
+        },
+
         rollupOptions: {
             input: {
-                app: 'resources/js/app.js'
+                app: 'resources/js/app.js',
             },
             output: {
-                // Manual chunk splitting: separates large vendor libs into cacheable chunks
-                manualChunks(id) {
-                    if (id.includes('node_modules')) {
-                        // Core Vue / Inertia
-                        if (id.includes('vue') || id.includes('@inertiajs') || id.includes('@vueuse')) {
-                            return 'vendor-vue';
-                        }
-                        // Charts
-                        if (id.includes('chart.js') || id.includes('vue-chartjs')) {
-                            return 'vendor-charts';
-                        }
-                        // PDF / Canvas tools
-                        if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('html2pdf') || id.includes('pdfjs-dist')) {
-                            return 'vendor-pdf';
-                        }
-                        // Excel / file utilities
-                        if (id.includes('xlsx') || id.includes('file-saver') || id.includes('mammoth')) {
-                            return 'vendor-files';
-                        }
-                        // Everything else from node_modules
-                        return 'vendor';
-                    }
-                }
-            }
-        }
-    }
+                // Keep hashed file names for long-term browser caching and let Vite
+                // keep lazy page dependencies out of the initial application bundle.
+                entryFileNames: 'assets/[name]-[hash].js',
+                chunkFileNames: 'assets/[name]-[hash].js',
+                assetFileNames: 'assets/[name]-[hash].[ext]',
+            },
+        },
+    },
+
+    // Dev server tweaks
+    server: {
+        hmr: {
+            overlay: true,
+        },
+    },
 });

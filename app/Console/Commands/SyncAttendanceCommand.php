@@ -2,7 +2,9 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
+use App\Services\AttendanceDeviceService;
 use App\Services\ZktecoService;
+use Illuminate\Support\Facades\Cache;
 
 class SyncAttendanceCommand extends Command
 {
@@ -19,7 +21,23 @@ class SyncAttendanceCommand extends Command
 
     public function handle()
     {
+        $deviceSettings = app(AttendanceDeviceService::class);
+        if (!$deviceSettings->isDeviceIntegrationEnabled()) {
+            $this->info('Attendance device integration is disabled.');
+            return 0;
+        }
+
+        if (!$deviceSettings->shouldPullSync()) {
+            $this->info('Pull sync is off. Device data flow is set to webhook.');
+            return 0;
+        }
+
+        $interval = $deviceSettings->integrationSettings()['sync_interval_minutes'];
         $deviceId = $this->option('device');
+        if (!$deviceId && Cache::has('attendance.device.pull_sync')) {
+            $this->info('Skipped: waiting for the configured sync interval.');
+            return 0;
+        }
         if ($deviceId) {
             $this->info("Queueing sync for device {$deviceId}...");
             $device = \App\Models\AttendanceDevice::find($deviceId);
@@ -37,6 +55,7 @@ class SyncAttendanceCommand extends Command
                 \App\Jobs\SyncDeviceAttendanceJob::dispatch($device->id);
                 $this->info("Queued device {$device->id}");
             }
+            Cache::put('attendance.device.pull_sync', 1, now()->addMinutes($interval));
         }
 
         return 0;

@@ -34,12 +34,14 @@ class Kernel extends HttpKernel
             \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
             \Illuminate\Session\Middleware\StartSession::class,
             \App\Http\Middleware\SetLocaleFromSession::class,
+            \App\Http\Middleware\InitializeSessionActivity::class,  // Initialize session activity
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
             \App\Http\Middleware\VerifyCsrfToken::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
             \App\Http\Middleware\HandleInertiaRequests::class,
             \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
             \App\Http\Middleware\OptimizeLoginResponse::class,  // Speed up login page
+            \App\Http\Middleware\HandleRememberMeSession::class,  // Session timeout check
         ],
 
         'api' => [
@@ -78,7 +80,10 @@ class Kernel extends HttpKernel
         'AuthCheck' => Middleware\AuthCheck::class,
         'AdminAuth' => Middleware\AdminAuth::class,
         'subscription.active' => \App\Http\Middleware\EnsureSubscriptionActive::class,
+        'remember.me' => \App\Http\Middleware\HandleRememberMeSession::class,
+        'auto.login' => \App\Http\Middleware\AutoLoginFromRememberToken::class,
         'org.context' => \App\Http\Middleware\ResolveOrganizationContext::class,
         'branch.scope' => \App\Http\Middleware\EnsureBranchScope::class,
+        'offline.idempotent' => \App\Http\Middleware\IdempotentOfflineBillingRequest::class,
     ];
 }

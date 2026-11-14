@@ -1,36 +1,70 @@
 import { router } from '@inertiajs/vue3';
-import toastr from 'toastr';
-import 'toastr/build/toastr.css';
-import Swal from 'sweetalert2';
 
+let toastrPromise;
+let sweetAlertPromise;
 
-toastr.options = {
-    closeButton: true,
-    progressBar: true,
+const loadToastr = () => {
+    if (!toastrPromise) {
+        toastrPromise = import('toastr')
+            .then(({ default: toastr }) => {
+                toastr.options = {
+                    closeButton: true,
+                    progressBar: true,
+                    preventDuplicates: true,
+                    positionClass: toastr.options?.positionClass || 'toast-top-right',
+                    timeOut: 3500,
+                    extendedTimeOut: 1000,
+                };
+                window.toastr = toastr;
+                return toastr;
+            })
+            .catch((error) => {
+                toastrPromise = undefined;
+                throw error;
+            });
+    }
+
+    return toastrPromise;
 };
 
-const swalWithBootstrapButtons = Swal.mixin({
-    customClass: {
-        confirmButton: "btn btn-success",
-        cancelButton: "btn btn-danger"
-    },
-    buttonsStyling: false
-});
+const loadSweetAlert = () => {
+    if (!sweetAlertPromise) {
+        sweetAlertPromise = import('sweetalert2')
+            .then(({ default: Swal }) => Swal)
+            .catch((error) => {
+                sweetAlertPromise = undefined;
+                throw error;
+            });
+    }
+
+    return sweetAlertPromise;
+};
+
+export const showToast = (type, message) => {
+    return loadToastr()
+        .then((toastr) => toastr[type](message))
+        .catch((error) => {
+            console.error('Unable to load the notification library.', error);
+            if (typeof window !== 'undefined') {
+                window.alert(String(message || ''));
+            }
+        });
+};
 
 export const successMessage = (message) => {
-    toastr.success(message);
+    showToast('success', message);
 };
 
 export const infoMessage = (message) => {
-    toastr.info(message);
+    showToast('info', message);
 };
 
 export const warningMessage = (message) => {
-    toastr.warning(message);
+    showToast('warning', message);
 };
 
 export const errorMessage = (message) => {
-    toastr.error(message);
+    showToast('error', message);
 };
 
 export const displayWarning = (errors) => {
@@ -43,6 +77,9 @@ export const displayWarning = (errors) => {
 
 
 export const displayResponse = (response) => {
+    // Signal the global inertia:success handler to skip (avoid duplicate toast)
+    try { if (typeof window !== 'undefined') window.__inertiaMarkToastShown?.(); } catch (_) {}
+
     // Inertia responses include flash messages under props.flash
     if (response?.props?.flash?.successMessage) {
         successMessage(response.props.flash.successMessage);
@@ -85,24 +122,37 @@ export const showToastIfNoFlash = (response) => {
 };
 
 export const successAlert = (title, message) => {
-    Swal.fire({
-        title: title,
+    return loadSweetAlert().then((Swal) => Swal.fire({
+        title,
         text: message,
-        icon: "success"
-    });
+        icon: 'success',
+    }));
 };
+
 export const failAlert = (title, message) => {
-    Swal.fire({
-        title: title,
+    return loadSweetAlert().then((Swal) => Swal.fire({
+        title,
         text: message,
-        icon: "error"
-    });
+        icon: 'error',
+    }));
 };
 
-
+const showCancelledAlert = (Swal) => {
+    return Swal.mixin({
+        customClass: {
+            confirmButton: 'btn btn-success',
+            cancelButton: 'btn btn-danger',
+        },
+        buttonsStyling: false,
+    }).fire({
+        title: 'Cancelled',
+        text: 'Your imaginary data is safe :)',
+        icon: 'error',
+    });
+};
 
 export const statusChangeConfirmation = (url) => {
-    Swal.fire({
+    return loadSweetAlert().then((Swal) => Swal.fire({
         title: "Warning",
         text: "Are you sure you want to change the status?",
         icon: "warning",
@@ -127,20 +177,14 @@ export const statusChangeConfirmation = (url) => {
                 errorMessage("An error occurred while changing status.");
             }
         }
-        else if (
-            result.dismiss === Swal.DismissReason.cancel
-        ) {
-            swalWithBootstrapButtons.fire({
-                title: "Cancelled",
-                text: "Your imaginary data is safe :)",
-                icon: "error"
-            });
+        else if (result.dismiss === Swal.DismissReason.cancel) {
+            return showCancelledAlert(Swal);
         }
-    });
+    }));
 };
 
 export const deleteConfirmation = (url) => {
-    Swal.fire({
+    return loadSweetAlert().then((Swal) => Swal.fire({
         title: "Are you sure?",
         text: "You won't be able to revert this!",
         icon: "warning",
@@ -169,14 +213,8 @@ export const deleteConfirmation = (url) => {
                 errorMessage("An error occurred while changing status.");
             }
         }
-        else if (
-            result.dismiss === Swal.DismissReason.cancel
-        ) {
-            swalWithBootstrapButtons.fire({
-                title: "Cancelled",
-                text: "Your imaginary data is safe :)",
-                icon: "error"
-            });
+        else if (result.dismiss === Swal.DismissReason.cancel) {
+            return showCancelledAlert(Swal);
         }
-    });
+    }));
 };

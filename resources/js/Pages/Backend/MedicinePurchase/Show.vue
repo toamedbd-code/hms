@@ -56,7 +56,7 @@ const formatDate = (value) => {
           <Link :href="route('backend.medicinepurchase.edit', purchase.id)" class="px-3 py-2 text-sm text-black bg-yellow-400 rounded hover:bg-yellow-500">
             Edit
           </Link>
-          <Link :href="route('backend.medicinepurchase.index')" class="px-3 py-2 text-sm text-white bg-gray-600 rounded hover:bg-gray-700">
+          <Link :href="route('backend.medicinepurchase.index')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">
             Back
           </Link>
         </div>

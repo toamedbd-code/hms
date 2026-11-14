@@ -25,6 +25,8 @@ const saveError = ref("");
 const doctorSignaturePreview = ref(props.prescription?.doctor_signature_url ?? "");
 const doctorSealPreview = ref(props.prescription?.doctor_seal_url ?? "");
 const medicineSuggestions = ref([]);
+const medicineMemoryByName = ref({});
+const medicineDuplicateError = ref("");
 const testSuggestions = ref([]);
 // Medicine dropdown refs/state (align with IPD implementation)
 const medicineInputs = ref([]);
@@ -151,12 +153,24 @@ const focusedTestIndex = ref(-1);
 const showTestDropdown = ref(false);
 const highlightedIndex = ref(-1);
 
+const normalizeMedicineName = (value) => String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+const uniqueMedicineRows = (rows) => {
+    const seen = new Set();
+    return rows.filter((row) => {
+        const name = normalizeMedicineName(row?.medicine_name);
+        if (!name) return true;
+        if (seen.has(name)) return false;
+        seen.add(name);
+        return true;
+    });
+};
+
 const form = useForm({
     notes: props.prescription?.notes ?? "",
     nibp: props.opdpatient?.nibp ?? "",
     doctor_designation: props.prescription?.doctor_designation ?? props.opdpatient?.consultation_type ?? "",
     items: props.prescription?.items?.length
-        ? props.prescription.items
+        ? uniqueMedicineRows(props.prescription.items
               .filter((item) => {
                   const medicineName = String(item?.medicine_name ?? "").trim().toUpperCase();
                   return medicineName !== "" && medicineName !== "N/A";
@@ -164,15 +178,17 @@ const form = useForm({
               .map((item) => ({
               test_name: item.test_name ?? "",
               medicine_name: item.medicine_name ?? "",
+              generic_name: item.generic_name ?? "",
               dose: item.dose ?? "",
               duration: item.duration ?? "",
               frequency: item.frequency ?? "",
               instructions: item.instructions ?? "",
-          }))
+          })))
         : [
               {
                   test_name: "",
                   medicine_name: "",
+                  generic_name: "",
                   dose: "",
                   duration: "",
                   frequency: "",
@@ -228,6 +244,7 @@ const addRow = () => {
     form.items.push({
         test_name: "",
         medicine_name: "",
+        generic_name: "",
         dose: "",
         duration: "",
         frequency: "",
@@ -243,6 +260,7 @@ const addRow = () => {
 const removeRow = (index) => {
     if (form.items.length === 1) return;
     form.items.splice(index, 1);
+    validateMedicineDuplicates();
 };
 
 const addTestRow = () => {
@@ -261,6 +279,10 @@ const removeTestRow = (index) => {
 
 const savePrescription = () => {
     saveError.value = "";
+    if (!validateMedicineDuplicates()) {
+        saveError.value = medicineDuplicateError.value;
+        return;
+    }
     form.post(route("backend.opdpatient.prescription.store", props.opdpatient.id), {
         preserveScroll: true,
         onSuccess: (response) => {
@@ -307,10 +329,15 @@ const normalizeMedicineResults = (results) => {
             if (typeof item === "string") {
                 return {
                     name: item,
+                    generic_name: "",
                     dose: "",
                     duration: "",
                     frequency: "",
                     instructions: "",
+                    dose_options: [],
+                    duration_options: [],
+                    frequency_options: [],
+                    instructions_options: [],
                 };
             }
 
@@ -321,16 +348,72 @@ const normalizeMedicineResults = (results) => {
 
             return {
                 name,
+                generic_name: String(item?.generic_name ?? ""),
                 dose: String(item?.dose ?? ""),
                 duration: String(item?.duration ?? ""),
                 frequency: String(item?.frequency ?? ""),
                 instructions: String(item?.instructions ?? ""),
+                dose_options: Array.isArray(item?.dose_options) ? item.dose_options : [],
+                duration_options: Array.isArray(item?.duration_options) ? item.duration_options : [],
+                frequency_options: Array.isArray(item?.frequency_options) ? item.frequency_options : [],
+                instructions_options: Array.isArray(item?.instructions_options) ? item.instructions_options : [],
             };
         })
         .filter(Boolean);
 };
 
 const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
+
+const rememberMedicineSuggestions = (items) => {
+    items.forEach((item) => {
+        const key = normalizeMedicineName(item?.name);
+        if (!key) return;
+
+        const remembered = medicineMemoryByName.value[key] ?? {};
+        const next = { ...remembered, ...item };
+        ["dose", "frequency", "duration", "instructions"].forEach((field) => {
+            next[`${field}_options`] = [...new Set([
+                ...(remembered[`${field}_options`] ?? []),
+                ...(item[`${field}_options`] ?? []),
+                item[field],
+            ].map((value) => String(value ?? "").trim()).filter(Boolean))];
+        });
+        medicineMemoryByName.value[key] = next;
+    });
+};
+
+const medicineOptionsListId = (index, field) => `opd-${field}-suggestions-${index}`;
+const medicineOptionsFor = (row, field) => {
+    const remembered = medicineMemoryByName.value[normalizeMedicineName(row?.medicine_name)];
+    return remembered?.[`${field}_options`] ?? [];
+};
+
+const rememberMedicineField = (row, field) => {
+    const key = normalizeMedicineName(row?.medicine_name);
+    const value = String(row?.[field] ?? "").trim();
+    if (!key || !value) return;
+
+    const remembered = medicineMemoryByName.value[key] ?? {};
+    medicineMemoryByName.value[key] = {
+        ...remembered,
+        [`${field}_options`]: [...new Set([...(remembered[`${field}_options`] ?? []), value])],
+    };
+};
+
+const validateMedicineDuplicates = () => {
+    const seen = new Set();
+    const duplicate = form.items.find((row) => {
+        const name = normalizeMedicineName(row?.medicine_name);
+        if (!name) return false;
+        if (seen.has(name)) return true;
+        seen.add(name);
+        return false;
+    });
+    medicineDuplicateError.value = duplicate
+        ? `${duplicate.medicine_name} is already added to this prescription.`
+        : "";
+    return !duplicate;
+};
 
 const applyMedicineDefaults = (index, medicineName) => {
     const row = form.items[index];
@@ -345,12 +428,14 @@ const applyMedicineDefaults = (index, medicineName) => {
 
     const match = medicineSuggestions.value.find(
         (item) => normalizeText(item?.name) === selectedName
-    );
+    ) ?? medicineMemoryByName.value[normalizeMedicineName(medicineName)];
 
     if (!match) {
+        row.generic_name = "";
         return;
     }
 
+    row.generic_name = match.generic_name ?? "";
     row.dose = match.dose ?? "";
     row.duration = match.duration ?? "";
     row.frequency = match.frequency ?? "";
@@ -362,6 +447,8 @@ const onMedicineInput = (index) => {
     if (!row) {
         return;
     }
+    row.generic_name = "";
+    validateMedicineDuplicates();
     searchMedicine(row.medicine_name, index);
 };
 
@@ -370,6 +457,7 @@ const onMedicineChange = (index) => {
     if (!row) {
         return;
     }
+    if (!validateMedicineDuplicates()) return;
     applyMedicineDefaults(index, row.medicine_name);
 };
 
@@ -383,10 +471,7 @@ const searchMedicine = (query, rowIndex = null) => {
         return;
     }
     medicineSearchTimer = setTimeout(async () => {
-        const url = route("backend.medicineinventory.search", {
-            q: term,
-            include_defaults: 1,
-        });
+        const url = route("backend.opdpatient.prescription.medicines.suggest", { q: term });
 
         try {
             const response = await fetch(url, { headers: { Accept: "application/json" } });
@@ -397,6 +482,7 @@ const searchMedicine = (query, rowIndex = null) => {
 
             const data = await response.json();
             medicineSuggestions.value = normalizeMedicineResults(data?.results);
+            rememberMedicineSuggestions(medicineSuggestions.value);
 
             if (rowIndex !== null) {
                 // show dropdown for this row
@@ -416,6 +502,11 @@ const searchMedicine = (query, rowIndex = null) => {
 
 const onMedicineFocus = (rowIndex) => {
     activeMedicineRowIndex.value = rowIndex;
+    const medicineName = String(form.items[rowIndex]?.medicine_name ?? '').trim();
+    if (medicineName.length >= 2) {
+        searchMedicine(medicineName, rowIndex);
+        return;
+    }
     if (Array.isArray(medicineSuggestions.value) && medicineSuggestions.value.length > 0) {
         medicineSuggestionsVisible.value = true;
         computeMedicineDropdownPosition(rowIndex);
@@ -476,6 +567,14 @@ const onMedicineEnter = async (rowIndex) => {
 const selectMedicineSuggestion = async (rowIndex, item) => {
     const name = typeof item === 'string' ? item : (item?.name ?? item?.medicine_name ?? '');
     if (!name) return;
+    const normalizedName = normalizeMedicineName(name);
+    if (form.items.some((row, index) =>
+        index !== rowIndex && normalizeMedicineName(row?.medicine_name) === normalizedName
+    )) {
+        medicineDuplicateError.value = `${name} is already added to this prescription.`;
+        return;
+    }
+    medicineDuplicateError.value = "";
     form.items[rowIndex].medicine_name = name;
     applyMedicineDefaults(rowIndex, name);
     medicineSuggestionsVisible.value = false;
@@ -630,7 +729,7 @@ const onTestEnter = async (rowIndex) => {
 
 <template>
     <BackendLayout>
-        <div class="w-full p-2 bg-white rounded-md dark:bg-slate-900">
+        <div class="prescription-workspace w-full p-2 rounded-md">
             <div class="mb-3 flex items-center justify-between no-print">
                 <h1 class="text-xl font-bold dark:text-white">OPD Prescription</h1>
                 <div class="flex items-center gap-3">
@@ -654,7 +753,7 @@ const onTestEnter = async (rowIndex) => {
                 </div>
             </div>
 
-            <div class="border border-gray-200 rounded-md p-3 dark:border-gray-700 prescription-print">
+            <div class="prescription-form-panel border border-gray-200 rounded-md p-3 dark:border-gray-700 prescription-print">
                 <div class="print-only mb-4">
                     <div class="prescription-header">
                         <div>
@@ -664,7 +763,6 @@ const onTestEnter = async (rowIndex) => {
                         </div>
                         <div class="text-xs text-gray-700 text-right">
                             <p>Date: {{ formatCurrentDate() }}</p>
-                            <p>OPD ID: {{ props.opdpatient?.id ?? 'N/A' }}</p>
                         </div>
                     </div>
                     <div class="prescription-patient">
@@ -757,6 +855,9 @@ const onTestEnter = async (rowIndex) => {
                 <div v-if="saveError" class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                     {{ saveError }}
                 </div>
+                <div v-if="medicineDuplicateError" class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    {{ medicineDuplicateError }}
+                </div>
 
                 <div class="overflow-x-auto">
                     <table class="w-full text-xs border-collapse">
@@ -793,6 +894,7 @@ const onTestEnter = async (rowIndex) => {
                                             <div v-if="activeMedicineRowIndex === index && medicineSuggestionsVisible" :id="`medicineDropdownPortal_${index}`" :style="{ position: 'absolute', top: (medicineDropdownCoords[index]?.top ? medicineDropdownCoords[index].top + 'px' : '0px'), left: (medicineDropdownCoords[index]?.left ? medicineDropdownCoords[index].left + 'px' : '0px'), width: (medicineDropdownCoords[index]?.width ? medicineDropdownCoords[index].width + 'px' : '240px') }" class="z-50 bg-white border rounded shadow text-xs">
                                                 <div v-for="(item, sIndex) in medicineSuggestions" :key="sIndex" @mousedown.prevent="selectMedicineSuggestion(index, item)" @mouseenter="medicineHighlightedIndex = sIndex" :class="{ 'bg-blue-100': medicineHighlightedIndex === sIndex, 'highlighted': medicineHighlightedIndex === sIndex }" class="px-3 py-2 cursor-pointer">
                                                     <div class="font-medium">{{ typeof item === 'string' ? item : (item.name ?? item.medicine_name ?? '') }}</div>
+                                                    <div v-if="typeof item !== 'string' && item.generic_name" class="text-[11px] text-emerald-700">({{ item.generic_name }})</div>
                                                     <div v-if="typeof item !== 'string' && (item.dose || item.duration)" class="text-[11px] text-gray-500">{{ item.dose ? item.dose + (item.duration ? ' · ' + item.duration : '') : (item.duration ?? '') }}</div>
                                                 </div>
                                                 <div v-if="!medicineSuggestions.length" class="px-3 py-2 text-sm text-gray-500 text-center">No medicines found</div>
@@ -807,9 +909,17 @@ const onTestEnter = async (rowIndex) => {
                                     <input
                                         v-model="row.dose"
                                         type="text"
+                                        :list="medicineOptionsListId(index, 'dose')"
+                                        @input="rememberMedicineField(row, 'dose')"
                                         class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="e.g. 1 tab"
                                     />
+                                    <datalist :id="medicineOptionsListId(index, 'dose')">
+                                        <option v-for="option in medicineOptionsFor(row, 'dose')" :key="option" :value="option" />
+                                    </datalist>
+                                    <p v-if="row.generic_name" class="mt-1 text-[11px] font-medium text-emerald-700">
+                                        ({{ row.generic_name }})
+                                    </p>
                                     <p v-if="form.errors[`items.${index}.dose`]" class="mt-1 text-xs text-red-600">
                                         {{ form.errors[`items.${index}.dose`] }}
                                     </p>
@@ -818,9 +928,14 @@ const onTestEnter = async (rowIndex) => {
                                     <input
                                         v-model="row.duration"
                                         type="text"
+                                        :list="medicineOptionsListId(index, 'duration')"
+                                        @input="rememberMedicineField(row, 'duration')"
                                         class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="e.g. 7 days"
                                     />
+                                    <datalist :id="medicineOptionsListId(index, 'duration')">
+                                        <option v-for="option in medicineOptionsFor(row, 'duration')" :key="option" :value="option" />
+                                    </datalist>
                                     <p v-if="form.errors[`items.${index}.duration`]" class="mt-1 text-xs text-red-600">
                                         {{ form.errors[`items.${index}.duration`] }}
                                     </p>
@@ -829,17 +944,27 @@ const onTestEnter = async (rowIndex) => {
                                     <input
                                         v-model="row.frequency"
                                         type="text"
+                                        :list="medicineOptionsListId(index, 'frequency')"
+                                        @input="rememberMedicineField(row, 'frequency')"
                                         class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="e.g. 1-0-1"
                                     />
+                                    <datalist :id="medicineOptionsListId(index, 'frequency')">
+                                        <option v-for="option in medicineOptionsFor(row, 'frequency')" :key="option" :value="option" />
+                                    </datalist>
                                 </td>
                                 <td class="px-2 py-2 border">
                                     <input
                                         v-model="row.instructions"
                                         type="text"
+                                        :list="medicineOptionsListId(index, 'instructions')"
+                                        @input="rememberMedicineField(row, 'instructions')"
                                         class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:border-blue-500 focus:outline-none dark:bg-slate-700 dark:border-gray-600 dark:text-gray-200"
                                         placeholder="After meal"
                                     />
+                                    <datalist :id="medicineOptionsListId(index, 'instructions')">
+                                        <option v-for="option in medicineOptionsFor(row, 'instructions')" :key="option" :value="option" />
+                                    </datalist>
                                 </td>
                                 <td class="px-2 py-2 border text-center no-print">
                                     <button

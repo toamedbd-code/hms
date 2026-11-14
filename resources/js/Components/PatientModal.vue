@@ -5,10 +5,13 @@ import axios from 'axios';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
+import Modal from '@/Components/Modal.vue';
 import { displayResponse, showToastIfNoFlash } from '@/responseMessage.js';
 import { parse, format, isValid, differenceInYears, differenceInMonths, differenceInDays, subYears, subMonths, subDays } from 'date-fns';
 
-const props = defineProps(['isOpen']);
+const props = defineProps({
+    isOpen: { type: Boolean, default: false },
+});
 const emit = defineEmits(['close', 'patientCreated']);
 
 const form = useForm({
@@ -178,18 +181,13 @@ const handleAgeInput = (currentInput, nextInput) => {
 </script>
 
 <template>
-    <Teleport to="body">
-        <div v-if="isOpen" class="fixed inset-0 z-50 overflow-y-auto">
-            <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-                <div class="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75" @click="closeModal"></div>
-
-                <div
-                    class="inline-block w-full max-w-4xl p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-xl rounded-lg dark:bg-slate-900">
+    <Modal :show="isOpen" @close="closeModal" maxWidth="2xl">
+        <div class="p-6 dark:bg-slate-900">
                     <div class="flex items-center justify-between pb-4 border-b border-gray-200 dark:border-gray-700">
                         <h3 class="text-lg font-medium text-gray-900 dark:text-white">
                             Add New Patient
                         </h3>
-                        <button @click="closeModal" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                        <button type="button" @click="closeModal" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M6 18L18 6M6 6l12 12"></path>
@@ -264,13 +262,13 @@ const handleAgeInput = (currentInput, nextInput) => {
                             </div>
                         </form>
                     </div>
-                </div>
-            </div>
         </div>
-    </Teleport>
+    </Modal>
 </template>
 
 <style scoped>
+@reference "../../css/app.css";
+
 .form-input {
     @apply block w-full p-2 text-sm rounded-md shadow-sm border border-gray-300 focus:border-indigo-500 focus:ring-indigo-500;
 }

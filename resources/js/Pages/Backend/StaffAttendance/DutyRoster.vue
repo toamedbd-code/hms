@@ -137,7 +137,7 @@ const goBack = () => {
             Back
           </button>
           <input type="month" v-model="selectedMonth" @change="applyFilter" class="p-2 border rounded" />
-          <input v-model="searchTerm" type="text" placeholder="Search name or employee id" class="p-2 border rounded" />
+          <input v-model="searchTerm" type="text" placeholder="Search name or employee ID" class="p-2 border rounded" />
           <input v-model="dateFromFilter" type="date" class="p-2 border rounded" />
           <input v-model="dateToFilter" type="date" class="p-2 border rounded" />
           <button class="px-3 py-2 text-sm text-white bg-indigo-600 rounded" @click="applyFilter">Search</button>
@@ -181,7 +181,7 @@ const goBack = () => {
       </div>
 
       <div class="mt-6">
-        <h2 class="font-semibold mb-2">Roster for month</h2>
+        <h2 class="font-semibold mb-2">Roster for this month</h2>
         <div v-for="(group, date) in rows" :key="date" class="mb-4">
           <div class="font-medium">{{ date }}</div>
           <div class="mt-2 grid grid-cols-1 gap-1">

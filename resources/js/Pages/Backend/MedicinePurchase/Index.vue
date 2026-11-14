@@ -1,8 +1,7 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
-import Pagination from '@/Components/Pagination.vue';
 
 const props = defineProps({
   purchases: {
@@ -12,6 +11,9 @@ const props = defineProps({
 });
 
 const rows = props.purchases?.data ?? [];
+const paginationLinks = computed(() => (
+  Array.isArray(props.purchases?.links) ? props.purchases.links : []
+));
 
 const deletePurchase = (id) => {
   if (!window.confirm('Are you sure you want to delete this purchase?')) return;
@@ -50,7 +52,12 @@ const statusClass = (purchase) => {
   <BackendLayout>
     <div class="w-full p-4 mt-3 bg-white rounded shadow-md">
       <div class="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-100 rounded">
-        <h1 class="text-xl font-semibold text-gray-800">Purchase Product List</h1>
+        <div class="flex flex-wrap items-center gap-2">
+          <Link :href="route('backend.dashboard')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">
+            Back
+          </Link>
+          <h1 class="text-xl font-semibold text-gray-800">Purchase Product List</h1>
+        </div>
         <Link :href="route('backend.medicinepurchase.create')" class="px-3 py-2 text-sm text-white bg-indigo-600 rounded hover:bg-indigo-700">
           Add Purchase Product
         </Link>
@@ -119,13 +126,30 @@ const statusClass = (purchase) => {
         </table>
       </div>
 
-      <div v-if="props.purchases?.links?.length" class="pt-2">
-        <p class="text-sm text-gray-600 text-center md:text-left">
+      <div v-if="paginationLinks.length > 2" class="grid grid-cols-1 gap-4 pt-2 my-4 md:grid-cols-2 justify-items-center">
+        <p class="w-full text-sm text-center text-gray-600 md:text-left">
           Displaying {{ props.purchases?.from ?? 0 }} to {{ props.purchases?.to ?? 0 }} of {{ props.purchases?.total ?? 0 }} items
         </p>
+        <nav class="w-full">
+          <ul class="flex items-center justify-center space-x-2 md:justify-end">
+            <li v-for="(link, index) in paginationLinks" :key="`${index}-${link.label}`">
+              <Link
+                v-if="link.url"
+                :href="link.url"
+                preserve-scroll
+                class="inline-flex min-w-9 justify-center rounded-md border border-gray-300 px-3 py-2 transition-colors hover:bg-gray-200"
+                :class="{ 'bg-gray-200 font-semibold text-slate-800': link.active }"
+                v-html="link.label"
+              />
+              <span
+                v-else
+                class="inline-flex min-w-9 justify-center rounded-md border border-gray-300 px-3 py-2 text-gray-400"
+                v-html="link.label"
+              />
+            </li>
+          </ul>
+        </nav>
       </div>
-
-      <Pagination />
     </div>
   </BackendLayout>
 </template>

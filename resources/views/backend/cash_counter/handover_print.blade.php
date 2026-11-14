@@ -44,7 +44,12 @@
             ? ($userSummaries[0]['user_name'] ?? ($session->user_name ?? 'N/A'))
             : (($userSummaryCount === 0 && !empty($session->user_name)) ? $session->user_name : 'All Users');
         $headerCounterName = $session->counter_name ?? 'N/A';
-        $headerTotalAmount = (float) ($totals['total_collection'] ?? 0);
+        $headerOpeningAmount = (float) ($counterTotals['opening_amount'] ?? 0);
+        $headerCollectionAmount = (float) ($counterTotals['collection_total'] ?? $totals['total_collection'] ?? 0);
+        $headerInputAmount = (float) ($counterTotals['input_total'] ?? 0);
+        $headerExpectedAmount = (float) ($counterTotals['expected_amount'] ?? 0);
+        $headerClosingAmount = (float) ($counterTotals['closing_amount'] ?? 0);
+        $headerDifferenceAmount = (float) ($counterTotals['difference_amount'] ?? 0);
         $billingSources = $sourceBreakdown['billing'] ?? collect();
         $dueSources = $sourceBreakdown['due'] ?? collect();
         $detailedBillingRows = $detailedBillingRows ?? collect();
@@ -69,8 +74,22 @@
             <td class="summary-value">{{ $headerCounterName }}</td>
         </tr>
         <tr>
-            <td class="summary-label">Total Amount</td>
-            <td class="summary-value right" colspan="3">{{ number_format($headerTotalAmount, 2) }}</td>
+            <td class="summary-label">Opening Amount</td>
+            <td class="summary-value right">{{ number_format($headerOpeningAmount, 2) }}</td>
+            <td class="summary-label">Collection</td>
+            <td class="summary-value right">{{ number_format($headerCollectionAmount, 2) }}</td>
+        </tr>
+        <tr>
+            <td class="summary-label">Cash Input</td>
+            <td class="summary-value right">{{ number_format($headerInputAmount, 2) }}</td>
+            <td class="summary-label">Expected</td>
+            <td class="summary-value right">{{ number_format($headerExpectedAmount, 2) }}</td>
+        </tr>
+        <tr>
+            <td class="summary-label">Closing Amount</td>
+            <td class="summary-value right">{{ number_format($headerClosingAmount, 2) }}</td>
+            <td class="summary-label">Difference</td>
+            <td class="summary-value right">{{ number_format($headerDifferenceAmount, 2) }}</td>
         </tr>
     </table>
 
@@ -211,6 +230,7 @@
         <thead>
             <tr>
                 <th class="center">Opening</th>
+                <th class="center">Collection</th>
                 <th class="center">Expected</th>
                 <th class="center">Closing</th>
                 <th class="center">Handover In</th>
@@ -220,12 +240,13 @@
         </thead>
         <tbody>
             <tr>
-                <td class="right">{{ number_format($counterTotals['opening_amount'], 2) }}</td>
-                <td class="right">{{ number_format($counterTotals['expected_amount'], 2) }}</td>
-                <td class="right">{{ number_format($counterTotals['closing_amount'], 2) }}</td>
-                <td class="right">{{ number_format($counterTotals['handover_in_amount'], 2) }}</td>
-                <td class="right">{{ number_format($counterTotals['handover_out_amount'], 2) }}</td>
-                <td class="right">{{ number_format($counterTotals['difference_amount'], 2) }}</td>
+                <td class="right">{{ number_format($counterTotals['opening_amount'] ?? 0, 2) }}</td>
+                <td class="right">{{ number_format($counterTotals['collection_total'] ?? 0, 2) }}</td>
+                <td class="right">{{ number_format($counterTotals['expected_amount'] ?? 0, 2) }}</td>
+                <td class="right">{{ number_format($counterTotals['closing_amount'] ?? 0, 2) }}</td>
+                <td class="right">{{ number_format($counterTotals['handover_in_amount'] ?? 0, 2) }}</td>
+                <td class="right">{{ number_format($counterTotals['handover_out_amount'] ?? 0, 2) }}</td>
+                <td class="right">{{ number_format($counterTotals['difference_amount'] ?? 0, 2) }}</td>
             </tr>
         </tbody>
     </table>

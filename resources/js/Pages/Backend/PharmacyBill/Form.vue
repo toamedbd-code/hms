@@ -1,7 +1,8 @@
 <script setup>
-import { ref, onMounted, computed, watch, nextTick } from 'vue';
+import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
+import axios from 'axios';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
@@ -15,12 +16,13 @@ const props = defineProps([
     'pharmacybill',
     'id',
     'patients',
-    'medicines',
     'doctors',
     'billnumber',
     'pharmacyNo',
     'caseId',
-    'categories'
+    'categories',
+    'prescriptionPrefill',
+    'ipdPatient',
 ]);
 
 const createMedicineRow = () => ({
@@ -60,6 +62,11 @@ const initializeMedicineRows = () => {
 };
 
 const medicineRows = ref(initializeMedicineRows());
+const medicineSearchResults = ref([]);
+const medicineSearchLoading = ref({});
+const medicineSearchTimers = new Map();
+const medicineSearchControllers = new Map();
+const medicineSearchQueries = new Map();
 
 const selectedPatient = ref(props.pharmacybill?.patient_id ?
     props.patients.find(p => p.id === props.pharmacybill.patient_id) : null
@@ -74,6 +81,8 @@ const form = useForm({
     bill_no: props.pharmacybill?.bill_no ?? props.billnumber,
     case_id: props.pharmacybill?.case_id ?? props.caseId,
     patient_id: props.pharmacybill?.patient_id ?? '',
+    ipd_patient_id: props.pharmacybill?.ipd_patient_id ?? props.ipdPatient?.id ?? '',
+    ipd_prescription_id: props.pharmacybill?.ipd_prescription_id ?? props.prescriptionPrefill?.id ?? '',
     doctor_id: props.pharmacybill?.doctor_id ?? '',
     date: props.pharmacybill?.date ?? new Date().toISOString().slice(0, 10),
     products: [],
@@ -101,6 +110,9 @@ const shouldShowReturnAmount = computed(() => {
     return form.payment_mode === 'Cash' && overPaymentAmount.value > 0;
 });
 
+const selectedProductCount = computed(() => medicineRows.value.filter((row) => row.medicineName).length);
+const dueAmount = computed(() => Math.max(ensureNumber(form.net_amount, 0) - ensureNumber(form.payment_amount, 0) + ensureNumber(form.return_amount, 0), 0));
+
 watch(
     () => [form.payment_mode, form.payment_amount, form.net_amount],
     () => {
@@ -118,11 +130,68 @@ watch(
 );
 
 const getFilteredMedicines = (categoryName) => {
-    if (!categoryName) return props.medicines;
-    return props.medicines.filter(medicine =>
-        medicine.category?.name === categoryName
+    const results = medicineSearchResults.value.filter((medicine) =>
+        !categoryName || medicine.category?.name === categoryName
     );
+    const selectedMedicines = medicineRows.value
+        .map((row) => row.medicineName)
+        .filter((medicine) => medicine && (!categoryName || medicine.category?.name === categoryName));
+
+    return [...new Map([...selectedMedicines, ...results].map((medicine) => [medicine.id, medicine])).values()];
 };
+
+const searchMedicines = (query, row, rowIndex) => {
+    const search = String(query || '').trim();
+    medicineSearchQueries.set(rowIndex, search);
+    clearTimeout(medicineSearchTimers.get(rowIndex));
+    medicineSearchControllers.get(rowIndex)?.abort();
+
+    if (search.length < 2) {
+        medicineSearchResults.value = medicineSearchResults.value.filter((medicine) =>
+            medicine.category?.name !== row.medicineCategory
+        );
+        medicineSearchLoading.value = { ...medicineSearchLoading.value, [rowIndex]: false };
+        return;
+    }
+
+    medicineSearchLoading.value = { ...medicineSearchLoading.value, [rowIndex]: true };
+    medicineSearchTimers.set(rowIndex, setTimeout(async () => {
+        const controller = new AbortController();
+        medicineSearchControllers.set(rowIndex, controller);
+
+        try {
+            const response = await axios.get(route('backend.pharmacybill.medicines.search'), {
+                params: { search, category: row.medicineCategory || undefined },
+                signal: controller.signal,
+            });
+            if (medicineSearchQueries.get(rowIndex) !== search) return;
+            if (!Array.isArray(response.data)) {
+                throw new Error('Medicine search returned an invalid response.');
+            }
+
+            const otherResults = medicineSearchResults.value.filter((medicine) =>
+                medicine.category?.name !== row.medicineCategory
+            );
+            medicineSearchResults.value = [...otherResults, ...response.data];
+        } catch (error) {
+            if (error.name !== 'CanceledError' && error.name !== 'AbortError') {
+                medicineSearchResults.value = medicineSearchResults.value.filter((medicine) =>
+                    medicine.category?.name !== row.medicineCategory
+                );
+                displayWarning({ message: 'Could not load medicines. Please try searching again.' });
+            }
+        } finally {
+            if (medicineSearchQueries.get(rowIndex) === search) {
+                medicineSearchLoading.value = { ...medicineSearchLoading.value, [rowIndex]: false };
+            }
+        }
+    }, 180));
+};
+
+onBeforeUnmount(() => {
+    medicineSearchTimers.forEach((timer) => clearTimeout(timer));
+    medicineSearchControllers.forEach((controller) => controller.abort());
+});
 
 const addMedicineRow = () => {
     medicineRows.value.push(createMedicineRow());
@@ -293,6 +362,42 @@ onMounted(() => {
     if (!Array.isArray(medicineRows.value)) {
         medicineRows.value = [createMedicineRow()];
     }
+
+    const prefill = props.prescriptionPrefill;
+    if (prefill && !props.id) {
+        if (props.ipdPatient) {
+            form.case_id = props.ipdPatient.billing?.case_number
+                || `IPD-${String(props.ipdPatient.id).padStart(6, '0')}`;
+        }
+        if (prefill.patient_id) {
+            const patient = (props.patients ?? []).find((item) => Number(item.id) === Number(prefill.patient_id));
+            if (patient) {
+                selectedPatient.value = patient;
+                form.patient_id = patient.id;
+            }
+        }
+        if (prefill.doctor_id) {
+            const doctor = (props.doctors ?? []).find((item) => Number(item.id) === Number(prefill.doctor_id));
+            if (doctor) {
+                selectedDoctor.value = doctor;
+                form.doctor_id = doctor.id;
+            }
+        }
+        if (Array.isArray(prefill.rows) && prefill.rows.length) {
+            medicineRows.value = prefill.rows.map((row) => {
+                const base = createMedicineRow();
+                return {
+                    ...base,
+                    medicineCategory: row.medicineCategory || '',
+                    medicineName: row.medicine || null,
+                    quantity: ensureNumber(row.quantity, 1),
+                    availableQty: ensureNumber(row.availableQty, 0),
+                    salePrice: ensureNumber(row.salePrice, 0),
+                    amount: ensureNumber(row.salePrice, 0) * ensureNumber(row.quantity, 1),
+                };
+            });
+        }
+    }
     
     calculateTotal();
     nextTick(() => {
@@ -301,6 +406,21 @@ onMounted(() => {
 });
 
 const submit = (shouldPrint = false) => {
+    const selectedRows = medicineRows.value.filter((row) => row.medicineName);
+    if (selectedRows.length === 0) {
+        displayWarning({ message: 'Add at least one medicine before saving the bill.' });
+        return;
+    }
+
+    const invalidRow = selectedRows.find((row) => (
+        ensureNumber(row.quantity, 0) < 1
+        || ensureNumber(row.quantity, 0) > ensureNumber(row.availableQty, 0)
+    ));
+    if (invalidRow) {
+        displayWarning({ message: 'Check the medicine quantity against the available stock.' });
+        return;
+    }
+
     let printTab = null;
     let printToken = null;
     if (shouldPrint) {
@@ -343,10 +463,16 @@ const submit = (shouldPrint = false) => {
     form.post(routeName, {
         onSuccess: (page) => {
             const billId = page?.props?.flash?.billId;
+            const pharmacyBillId = page?.props?.flash?.pharmacyBillId;
 
             if (shouldPrint) {
-                const printUrl = billId
-                    ? route('backend.download.invoice', { id: billId, module: 'pharmacy' })
+                const printUrl = billId && pharmacyBillId
+                    ? route('backend.download.invoice', {
+                        id: billId,
+                        module: 'pharmacy',
+                        pharmacy_bill_id: pharmacyBillId,
+                        fast_open: 1,
+                    })
                     : null;
 
                 if (printUrl) {
@@ -432,195 +558,210 @@ const goToProductReturn = () => {
         <PatientModal :isOpen="isPatientModalOpen" @close="closePatientModal"
             @patientCreated="handlePatientCreated" />
 
-        <div class="w-full transition duration-1000 ease-in-out transform bg-white rounded-lg shadow-lg">
-            <div
-                class="flex items-center justify-between w-full px-4 py-2 bg-gray-100 border-b rounded-md border-gray-300">
-                <div class="flex items-center space-x-4">
-                    <div class="relative min-w-[280px]">
-                        <div class="relative">
-                            <div class="col-span-1">
-                                <Multiselect v-model="selectedPatient" :options="patients" :track-by="'id'"
-                                    :label="'name'" placeholder="Search and select a patient"
-                                    class="w-full text-sm h-[30px] rounded-md border border-slate-300"
-                                    @select="handlePatientSelection" />
-                                <InputError class="mt-1" :message="form.errors.patient_id" />
-                            </div>
+        <div class="w-full rounded-md bg-[#dff7ef] p-2 dark:bg-slate-950">
+            <div class="overflow-hidden rounded-lg border border-teal-200 bg-[#f1fcf7] shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                <div class="flex flex-col gap-3 bg-[#063b56] px-4 py-3 text-white lg:flex-row lg:items-center lg:justify-between">
+                    <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+                        <div class="min-w-0 flex-1 sm:min-w-[280px]">
+                            <Multiselect v-model="selectedPatient" :options="patients" track-by="id" label="name"
+                                placeholder="Search and select a patient" :show-labels="false"
+                                class="pharmacy-patient-select text-sm"
+                                @select="handlePatientSelection" />
+                            <InputError class="mt-1" :message="form.errors.patient_id" />
                         </div>
-                    </div>
-                    <button @click="openPatientModal"
-                        class="px-3 py-2.5 text-sm text-white bg-blue-600 rounded hover:bg-blue-700">
-                        + New Patient
-                    </button>
-                </div>
-                <div class="p-2 py-2 flex items-center space-x-2">
-                    <div class="flex items-center space-x-3">
-                        <button @click="goToProductReturn"
-                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-emerald-400 to-emerald-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-emerald-500 hover:to-emerald-700">
-                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                                stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M3 7.5h11.25M3 12h7.5m-7.5 4.5h11.25M16.5 7.5l4.5 4.5m0 0-4.5 4.5m4.5-4.5h-9" />
-                            </svg>
-                            Billing Product Return
+                        <button type="button" @click="openPatientModal"
+                            class="inline-flex shrink-0 items-center justify-center rounded-md bg-teal-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-white/70">
+                            + New Patient
                         </button>
-                        <button @click="goToPharmacyBillList"
-                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-400 to-blue-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-gradient-to-r hover:from-blue-500 hover:to-blue-700 ml-2">
-                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                                stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z">
-                                </path>
-                            </svg>
-                            Pharmacy Bill List
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" @click="goToProductReturn"
+                            class="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-300">
+                            <span aria-hidden="true">↩</span> Product Return
+                        </button>
+                        <button type="button" @click="goToPharmacyBillList"
+                            class="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                            <span aria-hidden="true">☷</span> Pharmacy Bill List
                         </button>
                     </div>
                 </div>
-            </div>
 
             <form @submit.prevent="submit" class="p-4">
+                <AlertMessage />
 
-                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                <div v-if="props.ipdPatient" class="mb-4 rounded-md border border-teal-300 bg-teal-50 px-3 py-2 text-sm text-teal-900">
+                    IPD dispensing for {{ props.ipdPatient.patient?.name || props.ipdPatient.patient?.first_name || 'Patient' }}
+                    — Patient ID: {{ props.ipdPatient.patient_id }}, IPD ID: {{ props.ipdPatient.id }}.
+                    Confirming this bill will deduct stock and add the charge to the IPD running bill.
+                </div>
+                <div v-if="props.prescriptionPrefill?.unmatched?.length" class="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    These prescribed names were not matched to active inventory and must be selected manually:
+                    {{ props.prescriptionPrefill.unmatched.join(', ') }}.
+                </div>
+
+                <section class="mb-5 overflow-hidden rounded-lg border border-teal-200 bg-white dark:border-slate-700 dark:bg-slate-800/60">
+                    <div class="mb-3 flex items-center justify-between gap-3 bg-[#20877e] px-4 py-3 text-white">
+                        <div>
+                            <h1 class="text-lg font-bold">{{ $page.props.pageTitle }}</h1>
+                        </div>
+                        <span class="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-white">
+                            {{ props.id ? 'Edit Bill' : 'New Pharmacy Bill' }}
+                        </span>
+                    </div>
+                    <div class="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
                     <div>
-                        <InputLabel for="pharmacy_no" value="Pharmacy No" />
+                        <InputLabel for="pharmacy_no" value="Pharmacy No" class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500" />
                         <input id="pharmacy_no"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full rounded-md border-slate-300 bg-white p-2.5 text-sm text-slate-700 shadow-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
                             v-model="form.pharmacy_no" type="text" placeholder="Pharmacy No" readonly />
                         <InputError class="mt-2" :message="form.errors.pharmacy_no" />
                     </div>
                     <div>
-                        <InputLabel for="bill_no" value="Bill No" />
+                        <InputLabel for="bill_no" value="Bill No" class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500" />
                         <input id="bill_no"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full rounded-md border-slate-300 bg-white p-2.5 text-sm text-slate-700 shadow-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
                             v-model="form.bill_no" type="text" placeholder="Bill No" readonly />
                         <InputError class="mt-2" :message="form.errors.bill_no" />
                     </div>
                     <div>
-                        <InputLabel for="case_id" value="Case ID" />
+                        <InputLabel for="case_id" value="Case ID" class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500" />
                         <input id="case_id"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full rounded-md border-slate-300 bg-white p-2.5 text-sm text-slate-700 shadow-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
                             v-model="form.case_id" type="text" placeholder="Case ID" />
                         <InputError class="mt-2" :message="form.errors.case_id" />
                     </div>
                     <div>
-                        <InputLabel for="date" value="Date" />
+                        <InputLabel for="date" value="Date" class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500" />
                         <input id="date"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            class="block w-full rounded-md border-slate-300 bg-white p-2.5 text-sm text-slate-700 shadow-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
                             v-model="form.date" type="date" />
                         <InputError class="mt-2" :message="form.errors.date" />
                     </div>
                 </div>
+                </section>
 
-                <hr class="my-4" />
-
-                <div class="mt-4">
-                    <div class="flex items-center justify-between mb-2">
-                        <h2 class="text-lg font-semibold dark:text-white">Medicine Products</h2>
+                <section class="mb-5 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div class="flex flex-wrap items-center justify-between gap-3 bg-[#20877e] px-4 py-3 text-white">
+                        <div>
+                            <h2 class="text-base font-semibold">Medicine Products</h2>
+                            <p class="text-xs text-blue-100">{{ selectedProductCount }} selected item{{ selectedProductCount === 1 ? '' : 's' }}</p>
+                        </div>
                         <button type="button" @click="addMedicineRow"
-                            class="px-3 py-1 text-white bg-blue-500 rounded hover:bg-blue-600">+ Add</button>
+                            class="inline-flex items-center gap-1 rounded-md bg-teal-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-300">
+                            <span class="text-lg leading-none">+</span> Add Medicine
+                        </button>
                     </div>
 
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm border-collapse table-auto">
-                            <thead>
-                                <tr class="bg-gray-200">
-                                    <th class="p-2 text-left border border-gray-300 dark:border-gray-600">Medicine
-                                        Category *</th>
-                                    <th class="p-2 text-left border border-gray-300 dark:border-gray-600">Medicine Name
-                                        *</th>
-                                    <th class="p-2 text-left border border-gray-300 dark:border-gray-600">Batch No *
-                                    </th>
-                                    <th class="p-2 text-left border border-gray-300 dark:border-gray-600">Expiry Date *
-                                    </th>
-                                    <th class="p-2 text-left border border-gray-300 dark:border-gray-600">Quantity * |
-                                        Available Qty
-                                    </th>
-                                    <th class="p-2 text-left border border-gray-300 dark:border-gray-600">Sale Price
-                                        (Tk.) * Tax
-                                    </th>
-                                    <th class="p-2 text-left border border-gray-300 dark:border-gray-600">Amount (Tk.) *
-                                    </th>
-                                    <th class="p-2 text-center border border-gray-300 dark:border-gray-600">Action</th>
+                    <div class="medicine-table-scroll">
+                        <table class="w-full min-w-[1120px] border-collapse text-xs">
+                            <thead class="bg-[#207c75] text-white dark:bg-slate-800 dark:text-slate-200">
+                                <tr>
+                                    <th class="border-b border-white/20 px-3 py-3 text-left font-semibold">Category <span class="text-rose-200">*</span></th>
+                                    <th class="border-b border-white/20 px-3 py-3 text-left font-semibold">Medicine <span class="text-rose-200">*</span></th>
+                                    <th class="border-b border-white/20 px-3 py-3 text-left font-semibold">Batch</th>
+                                    <th class="border-b border-white/20 px-3 py-3 text-left font-semibold">Expiry</th>
+                                    <th class="border-b border-white/20 px-3 py-3 text-left font-semibold">Quantity / Stock</th>
+                                    <th class="border-b border-white/20 px-3 py-3 text-left font-semibold">Sale Price / Tax</th>
+                                    <th class="border-b border-white/20 px-3 py-3 text-right font-semibold">Amount (Tk.)</th>
+                                    <th class="w-16 border-b border-white/20 px-3 py-3 text-center font-semibold">Action</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
                                 <tr v-for="(row, index) in medicineRows" :key="row.id"
-                                    class="hover:bg-gray-50 dark:hover:bg-gray-800">
-                                    <td class="p-1 border border-gray-300 dark:border-gray-600">
+                                    class="bg-white transition hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800">
+                                    <td class="medicine-dropdown-cell px-2 py-2">
                                         <select v-model="row.medicineCategory"
                                             @change="handleCategorySelection(row.medicineCategory, row, index)"
                                             :id="`category-select-${index}`"
-                                            class="w-full p-1 text-sm border-none rounded focus:outline-none dark:bg-slate-700 dark:text-white">
-                                            <option value="">Select</option>
+                                            class="w-full rounded-md border-slate-300 bg-white px-2 py-2 text-xs text-slate-700 focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white">
+                                            <option value="">Select category</option>
                                             <option v-for="category in props.categories" :key="category.id"
                                                 :value="category.name">
                                                 {{ category.name }}</option>
                                         </select>
                                     </td>
-                                    <td class="p-1 border border-gray-300 dark:border-gray-600 medicine-dropdown-cell">
+                                    <td class="medicine-dropdown-cell px-2 py-2">
                                         <div :id="`medicine-multiselect-${index}`" class="medicine-multiselect-wrapper">
                                             <Multiselect v-model="row.medicineName"
                                                 :options="getFilteredMedicines(row.medicineCategory)" :searchable="true"
-                                                :close-on-select="true" :show-labels="false" label="medicine_name"
-                                                track-by="id" placeholder="Select medicine"
+                                                :internal-search="false" :loading="medicineSearchLoading[index] || false"
+                                                :close-on-select="true" :show-labels="false" :show-no-results="true"
+                                                label="medicine_name" track-by="id"
+                                                :placeholder="row.medicineCategory ? 'Type 2+ letters to search' : 'Select category first'"
+                                                @search-change="searchMedicines($event, row, index)"
                                                 @select="handleMedicineSelection($event, row, index)"
                                                 :class="`text-xs medicine-multiselect medicine-multiselect-${index}`">
+                                                <template #noOptions>
+                                                    <span class="text-xs text-slate-500">Choose a category to search medicines.</span>
+                                                </template>
+                                                <template #noResult>
+                                                    <span class="text-xs text-slate-500">No matching medicine found in available stock.</span>
+                                                </template>
                                             </Multiselect>
                                         </div>
                                     </td>
-                                    <td class="p-1 border border-gray-300 dark:border-gray-600">
+                                    <td class="px-2 py-2">
                                         <input v-model="row.batchNo" type="text"
-                                            class="w-full p-1 text-sm border-none rounded focus:outline-none dark:bg-slate-700 dark:text-white"
+                                            class="w-full rounded-md border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
                                             readonly />
                                     </td>
-                                    <td class="p-1 border border-gray-300 dark:border-gray-600">
+                                    <td class="px-2 py-2">
                                         <input type="date" v-model="row.expiryDate"
-                                            class="w-full p-1 text-sm border-none rounded focus:outline-none dark:bg-slate-700 dark:text-white"
+                                            class="w-full rounded-md border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
                                             readonly />
                                     </td>
-                                    <td class="p-1 border border-gray-300 dark:border-gray-600">
-                                        <div class="flex items-center space-x-1">
+                                    <td class="px-2 py-2">
+                                        <div class="flex items-center gap-2">
                                             <input type="number" v-model="row.quantity" :id="`quantity-${index}`"
                                                 @input="validateQuantity(row)"
                                                 @keydown.enter.prevent="handleQuantityEnter(index)"
-                                                class="w-16 p-1 text-sm text-center border-none rounded focus:outline-none dark:bg-slate-700 dark:text-white"
+                                                class="w-20 rounded-md border-slate-300 px-2 py-2 text-center text-xs focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
                                                 min="1" :max="row.availableQty" />
-                                            <span class="text-xs text-gray-500">| {{ ensureNumber(row.availableQty, 0) }}</span>
+                                            <span class="whitespace-nowrap rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                                                Stock {{ ensureNumber(row.availableQty, 0) }}
+                                            </span>
                                         </div>
                                     </td>
-                                    <td class="p-1 border border-gray-300 dark:border-gray-600">
-                                        <div class="flex items-center space-x-1">
+                                    <td class="px-2 py-2">
+                                        <div class="flex items-center gap-1.5">
                                             <input type="number" v-model="row.salePrice" @input="calculateTotal"
-                                                class="w-20 p-1 text-sm border-none rounded focus:outline-none dark:bg-slate-700 dark:text-white"
+                                                class="w-24 rounded-md border-slate-300 px-2 py-2 text-xs focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
                                                 step="0.01" />
                                             <input type="number" v-model="row.tax" @input="calculateTotal"
-                                                class="w-12 p-1 text-sm border-none rounded focus:outline-none dark:bg-slate-700 dark:text-white"
+                                                class="w-16 rounded-md border-slate-300 px-2 py-2 text-xs focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
                                                 placeholder="%" step="0.01" />
-                                            <span class="text-xs">%</span>
+                                            <span class="text-[10px] text-slate-500">%</span>
                                         </div>
                                     </td>
-                                    <td
-                                        class="p-1 text-center border border-gray-300 dark:border-gray-600 dark:text-white">
-                                        {{ ensureNumber(row.amount, 0).toFixed(2) }}
+                                    <td class="px-3 py-2 text-right font-semibold tabular-nums text-slate-800 dark:text-slate-100">
+                                        ৳ {{ ensureNumber(row.amount, 0).toFixed(2) }}
                                     </td>
-                                    <td class="p-1 text-center border border-gray-300 dark:border-gray-600">
+                                    <td class="px-2 py-2 text-center">
                                         <button type="button" @click="removeMedicineRow(index)"
-                                            class="p-1 text-white bg-red-500 rounded hover:bg-red-600"
+                                            class="inline-flex h-8 w-8 items-center justify-center rounded-md bg-rose-50 text-lg font-semibold text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-rose-900/20 dark:text-rose-300 dark:hover:bg-rose-900/40"
+                                            :aria-label="`Remove medicine row ${index + 1}`"
                                             :disabled="medicineRows.length === 1">
-                                            ×
+                                            &times;
                                         </button>
                                     </td>
                                 </tr>
                             </tbody>
+                            <tfoot class="bg-slate-50 dark:bg-slate-800">
+                                <tr>
+                                    <td colspan="6" class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">Subtotal</td>
+                                    <td class="px-3 py-3 text-right text-sm font-bold tabular-nums text-slate-900 dark:text-white">৳ {{ ensureNumber(form.subtotal, 0).toFixed(2) }}</td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
                         </table>
                     </div>
-                </div>
+                    <InputError class="px-4 py-2" :message="form.errors.products" />
+                </section>
 
-                <hr class="my-4" />
-
-                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div class="space-y-4">
+                <div class="grid grid-cols-1 items-start gap-5 xl:grid-cols-2">
+                    <section class="space-y-4 rounded-lg border border-teal-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
                         <div class="relative">
-                            <InputLabel for="doctor_id" value="Hospital Doctor" />
+                            <InputLabel for="doctor_id" value="Hospital Doctor" class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500" />
                             <Multiselect v-model="selectedDoctor" :options="props.doctors" :searchable="true"
                                 :close-on-select="true" :show-labels="false" label="name" track-by="id"
                                 placeholder="Select a doctor" @select="handleDoctorSelection">
@@ -628,108 +769,123 @@ const goToProductReturn = () => {
                             <InputError class="mt-2" :message="form.errors.doctor_id" />
                         </div>
                         <div>
-                            <InputLabel for="note" value="Note" />
+                            <InputLabel for="note" value="Note" class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500" />
                             <textarea v-model="form.note" rows="3"
-                                class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"></textarea>
+                                class="block w-full rounded-md border-slate-300 p-2.5 text-sm shadow-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"></textarea>
                             <InputError class="mt-2" :message="form.errors.note" />
                         </div>
-                    </div>
+                    </section>
 
-                    <div class="p-4 bg-gray-100 rounded-md dark:bg-gray-800">
-                        <div class="space-y-3">
+                    <section class="overflow-hidden rounded-lg border border-teal-200 bg-white dark:border-teal-900 dark:bg-teal-950/30">
+                        <div class="mb-3 flex items-center justify-between bg-[#20877e] px-4 py-3 text-white">
+                            <div>
+                                <h2 class="text-base font-bold">Bill Summary</h2>
+                                <p class="text-xs text-teal-50">{{ selectedProductCount }} items</p>
+                            </div>
+                            <span class="text-xs font-medium text-teal-50">BDT (৳)</span>
+                        </div>
+                        <div class="space-y-3 p-4">
                             <div class="flex justify-between items-center">
-                                <span class="font-semibold dark:text-white">Total (Tk.)</span>
-                                <span class="text-2xl font-bold dark:text-white">{{ ensureNumber(form.subtotal, 0).toFixed(2) }}</span>
+                                <span class="text-sm font-medium text-slate-600 dark:text-slate-300">Subtotal</span>
+                                <span class="text-base font-bold tabular-nums text-slate-900 dark:text-white">৳ {{ ensureNumber(form.subtotal, 0).toFixed(2) }}</span>
                             </div>
 
                             <div class="flex justify-between items-center">
-                                <span class="dark:text-white">Discount (Tk.)</span>
-                                <div class="flex items-center space-x-2">
+                                <span class="text-sm text-slate-600 dark:text-slate-300">Discount</span>
+                                <div class="flex items-center gap-2">
                                     <input v-model="form.discount_percentage" type="number" step="0.01"
-                                        class="w-16 p-1 text-right border rounded dark:bg-gray-700 dark:text-white text-sm"
-                                        placeholder="%" />
-                                    <span class="text-sm dark:text-white">%</span>
-                                    <span class="dark:text-white">{{ ensureNumber(form.discount_amount, 0).toFixed(2) }}</span>
+                                        class="w-20 rounded-md border-slate-300 px-2 py-1.5 text-right text-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                                        placeholder="%" min="0" max="100" />
+                                    <span class="text-xs text-slate-500">%</span>
+                                    <span class="w-24 text-right text-sm font-medium tabular-nums text-slate-700 dark:text-slate-200">৳ {{ ensureNumber(form.discount_amount, 0).toFixed(2) }}</span>
                                 </div>
                             </div>
+                            <InputError :message="form.errors.discount_percentage" />
 
                             <div class="flex justify-between items-center">
-                                <span class="dark:text-white">Tax (Tk.)</span>
-                                <div class="flex items-center space-x-2">
+                                <span class="text-sm text-slate-600 dark:text-slate-300">VAT</span>
+                                <div class="flex items-center gap-2">
                                     <input v-model="form.vat_percentage" type="number" step="0.01"
-                                        class="w-16 p-1 text-right border rounded dark:bg-gray-700 dark:text-white text-sm"
-                                        placeholder="%" />
-                                    <span class="text-sm dark:text-white">%</span>
-                                    <span class="dark:text-white">{{ ensureNumber(form.vat_amount, 0).toFixed(2) }}</span>
+                                        class="w-20 rounded-md border-slate-300 px-2 py-1.5 text-right text-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                                        placeholder="%" min="0" max="100" />
+                                    <span class="text-xs text-slate-500">%</span>
+                                    <span class="w-24 text-right text-sm font-medium tabular-nums text-slate-700 dark:text-slate-200">৳ {{ ensureNumber(form.vat_amount, 0).toFixed(2) }}</span>
                                 </div>
                             </div>
+                            <InputError :message="form.errors.vat_percentage" />
 
                             <div class="flex justify-between items-center">
-                                <span class="dark:text-white">Extra Discount (Tk.)</span>
+                                <span class="text-sm text-slate-600 dark:text-slate-300">Extra Discount</span>
                                 <div class="flex items-center space-x-2">
                                     <input v-model="form.extra_discount" type="number" step="0.01" min="0"
-                                        class="w-28 p-1 text-right border rounded dark:bg-gray-700 dark:text-white text-sm"
+                                        class="w-28 rounded-md border-slate-300 px-2 py-1.5 text-right text-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
                                         placeholder="0.00" />
-                                    <span class="dark:text-white">{{ ensureNumber(form.extra_discount, 0).toFixed(2) }}</span>
                                 </div>
                             </div>
+                            <InputError :message="form.errors.extra_discount" />
 
-                            <div class="flex justify-between items-center border-t pt-2">
-                                <span class="font-semibold dark:text-white">Net Amount (Tk.)</span>
-                                <span class="text-xl font-bold text-green-600 dark:text-green-400">{{
-                                    ensureNumber(form.net_amount, 0).toFixed(2)
-                                    }}</span>
+                            <div class="flex justify-between items-center border-t border-teal-200 pt-3 dark:border-teal-900">
+                                <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">Net Amount</span>
+                                <span class="text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">৳ {{ ensureNumber(form.net_amount, 0).toFixed(2) }}</span>
                             </div>
 
-                            <div class="border-t pt-3 space-y-2">
+                            <div class="grid grid-cols-1 gap-3 border-t border-teal-200 pt-3 sm:grid-cols-2 dark:border-teal-900">
                                 <div>
-                                    <InputLabel for="payment_mode" value="Payment Mode" />
+                                    <InputLabel for="payment_mode" value="Payment Mode" class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500" />
                                     <select v-model="form.payment_mode"
-                                        class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                        class="block w-full rounded-md border-slate-300 bg-white p-2.5 text-sm shadow-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200">
                                         <option>Cash</option>
                                         <option>Card</option>
                                         <option>Bank Transfer</option>
                                     </select>
+                                    <InputError class="mt-1" :message="form.errors.payment_mode" />
                                 </div>
 
                                 <div>
-                                    <InputLabel for="payment_amount" value="Payment Amount (Tk.)" />
-                                    <input v-model="form.payment_amount" type="number" step="0.01"
-                                        class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                    <InputLabel for="payment_amount" value="Payment Amount (Tk.)" class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500" />
+                                    <input v-model="form.payment_amount" type="number" step="0.01" min="0"
+                                        class="block w-full rounded-md border-slate-300 bg-white p-2.5 text-sm shadow-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200" />
+                                    <InputError class="mt-1" :message="form.errors.payment_amount" />
                                 </div>
 
-                                <div v-if="shouldShowReturnAmount">
-                                    <InputLabel for="return_amount" value="Return Amount (Tk.)" />
+                                <div v-if="shouldShowReturnAmount" class="sm:col-span-2">
+                                    <InputLabel for="return_amount" value="Return Amount (Tk.)" class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500" />
                                     <input v-model="form.return_amount" type="number" step="0.01" min="0"
                                         :max="overPaymentAmount"
-                                        class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
+                                        class="block w-full rounded-md border-slate-300 bg-white p-2.5 text-sm shadow-sm focus:border-teal-500 focus:ring-teal-500 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200" />
 
-                                    <div class="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                                    <div class="mt-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                                         Return Preview: {{ ensureNumber(form.return_amount, 0).toFixed(2) }} Tk.
                                     </div>
                                 </div>
                             </div>
+                            <div class="flex justify-between border-t border-teal-200 pt-2 text-sm dark:border-teal-900">
+                                <span class="font-medium text-slate-600 dark:text-slate-300">Due Amount</span>
+                                <span class="font-bold tabular-nums text-amber-700 dark:text-amber-400">৳ {{ dueAmount.toFixed(2) }}</span>
+                            </div>
                         </div>
-                    </div>
+                    </section>
                 </div>
 
-                <div class="flex items-center justify-end mt-6 space-x-3">
-                    <button type="button"
+                <div class="mt-5 flex flex-col-reverse items-stretch justify-end gap-2 border-t border-slate-200 pt-4 sm:flex-row dark:border-slate-700">
+                    <button v-if="!form.ipd_patient_id" type="button"
                         @click="submit(true)"
-                        class="inline-flex items-center px-6 py-2 font-semibold text-white rounded shadow-sm transition-colors"
-                        :class="form.processing ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'"
+                        class="inline-flex items-center justify-center rounded-md px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors"
+                        :class="form.processing ? 'cursor-not-allowed bg-blue-300' : 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2'"
                         :disabled="form.processing">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M6 9V4h12v5M6 18h12M8 14h8M6 9h12a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z" />
                         </svg>
                         {{ form.processing ? 'Saving...' : 'Save & Print' }}
                     </button>
-                    <PrimaryButton type="submit" class="px-6 py-2" :class="{ 'opacity-25': form.processing }"
+                    <PrimaryButton type="submit" class="justify-center rounded-md px-5 py-2.5"
+                        :class="{ 'opacity-25': form.processing }"
                         :disabled="form.processing">
                         💾 {{ props.id ? 'Update' : 'Save' }}
                     </PrimaryButton>
                 </div>
             </form>
+            </div>
         </div>
     </BackendLayout>
 </template>
@@ -818,12 +974,14 @@ tbody tr {
     color: #60a5fa !important;
 }
 
-.overflow-x-auto {
-    overflow: visible !important;
+.medicine-table-scroll {
+    overflow-x: auto;
+    overflow-y: visible;
+    isolation: isolate;
 }
 
-.overflow-x-auto table {
-    min-width: 100%;
+.medicine-table-scroll table {
+    min-width: 1120px;
 }
 
 .z-30 {
@@ -836,5 +994,23 @@ tbody tr {
 
 .z-50 {
     z-index: 50;
+}
+
+.pharmacy-patient-select :deep(.multiselect__tags) {
+    min-height: 40px;
+    padding: 8px 40px 0 12px;
+    border-color: rgb(203 213 225);
+}
+
+.pharmacy-patient-select :deep(.multiselect__single) {
+    margin-bottom: 0;
+}
+
+.dark .pharmacy-patient-select :deep(.multiselect__tags),
+.dark .pharmacy-patient-select :deep(.multiselect__input),
+.dark .pharmacy-patient-select :deep(.multiselect__single) {
+    border-color: rgb(71 85 105);
+    background: rgb(30 41 59);
+    color: rgb(226 232 240);
 }
 </style>

@@ -10,67 +10,48 @@ class IpdPatientRequest extends FormRequest
     {
         switch ($this->method()) {
             case 'POST':
-                return [
-                    'patient_id' => 'required',
-                    'consultant_doctor_id' => 'required',
-
-                    'symptom_type' => 'nullable|string|max:255',
-                    'symptom_title' => 'nullable|string|max:255',
-                    'symptom_description' => 'nullable|string',
-                    'note' => 'nullable|string',
-
-                    'admission_date' => 'required',
-                    'case' => 'nullable|string|max:255',
-                    'tpa' => 'nullable|string|max:255',
-                    'casualty' => 'required',
-                    'old_patient' => 'required',
-                    'credit_limit' => 'nullable|numeric',
-                    'advance_amount' => 'nullable|numeric',
-                    'reference' => 'nullable|string|max:255',
-
-                    'bed_group_id' => 'required',
-                    'bed_id' => 'required',
-
-                    'live_consultation' => 'required',
-                    'hospital_charge_items' => 'nullable|array',
-                    'hospital_charge_items.*.item_name' => 'nullable|string|max:255',
-                    'hospital_charge_items.*.unit_price' => 'nullable|numeric|min:0',
-                    'hospital_charge_items.*.quantity' => 'nullable|integer|min:1',
-                ];
-                break;
+                return array_merge($this->commonRules(), [
+                    'advance_amount' => 'nullable|numeric|min:0',
+                ]);
 
             case 'PUT':
-                return [
-                    'patient_id' => 'required',
-                    'consultant_doctor_id' => 'required',
+                return $this->commonRules();
 
-                    'symptom_type' => 'nullable|string|max:255',
-                    'symptom_title' => 'nullable|string|max:255',
-                    'symptom_description' => 'nullable|string',
-                    'note' => 'nullable|string',
-
-                    'admission_date' => 'required',
-                    'case' => 'nullable|string|max:255',
-                    'tpa' => 'nullable|string|max:255',
-                    'casualty' => 'required',
-                    'old_patient' => 'required',
-                    'credit_limit' => 'nullable|numeric',
-                    'reference' => 'nullable|string|max:255',
-
-                    'bed_group_id' => 'required',
-                    'bed_id' => 'required',
-
-                    'live_consultation' => 'required',
-                    'hospital_charge_items' => 'nullable|array',
-                    'hospital_charge_items.*.item_name' => 'nullable|string|max:255',
-                    'hospital_charge_items.*.unit_price' => 'nullable|numeric|min:0',
-                    'hospital_charge_items.*.quantity' => 'nullable|integer|min:1',
-                ];
-                break;
             case 'PATCH':
-
-                break;
+                return [];
         }
+
+        return [];
+    }
+
+    protected function commonRules(): array
+    {
+        return [
+            'patient_id' => 'required|exists:patients,id',
+            'consultant_doctor_id' => 'required|exists:admins,id',
+
+            'symptom_type' => 'nullable|string|max:255',
+            'symptom_title' => 'nullable|string|max:255',
+            'symptom_description' => 'nullable|string',
+            'note' => 'nullable|string',
+
+            'admission_date' => 'required|date',
+            'case' => 'nullable|string|max:255',
+            'tpa' => 'nullable|string|max:255',
+            'casualty' => 'required|in:yes,no',
+            'old_patient' => 'required|in:yes,no',
+            'credit_limit' => 'nullable|numeric|min:0',
+            'reference' => 'nullable|string|max:255',
+
+            'bed_group_id' => 'required|exists:bedgroups,id',
+            'bed_id' => 'required|exists:beds,id',
+
+            'live_consultation' => 'required|in:yes,no',
+            'hospital_charge_items' => 'nullable|array',
+            'hospital_charge_items.*.item_name' => 'nullable|string|max:255',
+            'hospital_charge_items.*.unit_price' => 'nullable|numeric|min:0',
+            'hospital_charge_items.*.quantity' => 'nullable|integer|min:1',
+        ];
     }
 
     public function messages()
@@ -86,10 +67,12 @@ class IpdPatientRequest extends FormRequest
             'bed_group_id.required' => 'Please select a bed group',
             'bed_group_id.exists' => 'The selected bed group does not exist',
             'bed_id.required' => 'Bed number is required',
+            'bed_id.exists' => 'The selected bed does not exist',
             'casualty.required' => 'Please specify if this is a casualty case',
             'old_patient.required' => 'Please specify if this is an old patient',
             'live_consultation.required' => 'Please specify if live consultation is needed',
             'credit_limit.numeric' => 'Credit limit must be a number',
+            'advance_amount.numeric' => 'Advance amount must be a number',
         ];
     }
 }

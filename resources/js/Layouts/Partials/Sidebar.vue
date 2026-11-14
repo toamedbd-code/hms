@@ -1,16 +1,24 @@
 <script setup>
 import { reactive, ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from "vue";
 import { Link, usePage } from "@inertiajs/vue3";
+import { route as ziggyRoute } from "ziggy-js";
+import { Ziggy } from "@/ziggy.js";
 import SideBarSubMenu from "@/Components/SideBarSubMenu.vue";
 import eventBus from "@/eventBus.js";
 
 const page = usePage();
 const screenWidth = ref(window.innerWidth);
 const sideBar = ref(false);
+const isMobileOpen = ref(false);
+const companyNameElement = ref(null);
+const companyNameFontSize = ref(20);
+let companyNameResizeObserver = null;
 const brandingOverride = ref(null);
 let brandingHandler = null;
 let remoteUpdateHandler = null;
 let remoteForceHandler = null;
+let sidebarToggleHandler = null;
+let mobileSidebarHandler = null;
 
 const restoreSidebarCollapsedState = () => {
   try {
@@ -135,8 +143,46 @@ const webSetting = computed(() => {
 
   return ws || {};
 });
+const displayedCompanyName = computed(() => (
+  webSetting.value?.company_short_name
+  || webSetting.value?.company_name
+  || 'Company Name'
+));
+
+const fitCompanyName = async () => {
+  await nextTick();
+  const element = companyNameElement.value;
+  const availableHeight = element?.parentElement?.clientHeight ?? 0;
+  if (!element || !availableHeight) return;
+
+  for (let fontSize = 20; fontSize >= 1; fontSize -= 0.5) {
+    element.style.fontSize = `${fontSize}px`;
+    element.style.lineHeight = '1.1';
+    element.style.maxHeight = 'none';
+    if (element.scrollHeight <= availableHeight + 1) {
+      companyNameFontSize.value = fontSize;
+      element.style.maxHeight = `${availableHeight}px`;
+      return;
+    }
+  }
+
+  companyNameFontSize.value = 1;
+  element.style.maxHeight = `${availableHeight}px`;
+};
+
+watch([displayedCompanyName, sideBar], fitCompanyName, { flush: 'post' });
+const isSidebarCollapsed = computed(() => sideBar.value && screenWidth.value >= 1024);
+watch(screenWidth, fitCompanyName, { flush: 'post' });
 const sidebarScrollContainer = ref(null);
 const lastClickedRoute = ref(null);
+const clickedMenuContext = ref(null);
+const clickedMenuStorageKey = 'backend.sidebar.clicked-menu';
+try {
+  const savedMenuContext = window.sessionStorage.getItem(clickedMenuStorageKey);
+  clickedMenuContext.value = savedMenuContext ? JSON.parse(savedMenuContext) : null;
+} catch (error) {
+  clickedMenuContext.value = null;
+}
 // Timestamps to avoid older remote snapshots overriding newer server props
 const lastServerSnapshotAt = ref(0);
 const lastRemoteSnapshotAt = ref(0);
@@ -147,6 +193,19 @@ const handleResize = () => {
 
 onMounted(() => {
   restoreSidebarCollapsedState();
+  sidebarToggleHandler = (flag) => {
+    sideBar.value = flag;
+  };
+  mobileSidebarHandler = (isOpen) => {
+    isMobileOpen.value = Boolean(isOpen);
+  };
+  eventBus.on('sidebarToggled', sidebarToggleHandler);
+  eventBus.on('mobileSidebarToggled', mobileSidebarHandler);
+  fitCompanyName();
+  if (typeof ResizeObserver !== 'undefined' && companyNameElement.value?.parentElement) {
+    companyNameResizeObserver = new ResizeObserver(fitCompanyName);
+    companyNameResizeObserver.observe(companyNameElement.value.parentElement);
+  }
   window.addEventListener("resize", handleResize);
   // If server didn't provide sideMenus, try to fetch via API (fallback)
   try {
@@ -371,6 +430,13 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", handleResize);
+  if (sidebarToggleHandler) {
+    eventBus.off('sidebarToggled', sidebarToggleHandler);
+  }
+  if (mobileSidebarHandler) {
+    eventBus.off('mobileSidebarToggled', mobileSidebarHandler);
+  }
+  companyNameResizeObserver?.disconnect();
   try {
     if (brandingHandler && eventBus && typeof eventBus.off === 'function') {
       eventBus.off('branding.updated', brandingHandler);
@@ -384,10 +450,6 @@ onBeforeUnmount(() => {
   } catch (e) {
     // ignore
   }
-});
-
-eventBus.on("sidebarToggled", (flag) => {
-  sideBar.value = flag;
 });
 
 const navSidebar = reactive([
@@ -459,6 +521,7 @@ const integrationModules = computed(() => {
 });
 
 const routeAliasMap = {
+  'backend.Itemcharge.index': 'backend.itemcharge.index',
   'backend.pharmacy.supplier.payment': 'backend.supplierpayment.index',
   'backend.pharmacy.return.index': 'backend.productreturn.index',
   'activity-logs.index': 'backend.activity-logs.index',
@@ -470,6 +533,7 @@ const routeAliasMap = {
 Object.assign(routeAliasMap, {
   'websetting.create': 'backend.websetting.create',
   'billing.Page': 'backend.billing.Page',
+  'backend.billing.page': 'backend.billing.Page',
   'billing.index': 'backend.billing.Page',
   'journal-entry.index': 'backend.journal-entry.index',
   'accounts.vendor-payment.index': 'backend.accounts.vendor-payment.index',
@@ -582,6 +646,16 @@ const normalizeRouteName = (name) => {
     if (routeExists(doublePrefixed)) return doublePrefixed;
   }
 
+  try {
+    const routes = route()._config?.routes ?? {};
+    const caseInsensitiveMatch = Object.keys(routes).find(
+      (routeName) => routeName.toLowerCase() === original.toLowerCase()
+    );
+    if (caseInsensitiveMatch) return caseInsensitiveMatch;
+  } catch (error) {
+    // Keep the original route name if Ziggy route metadata is unavailable.
+  }
+
   return original;
 };
 
@@ -655,24 +729,20 @@ const getMenuHref = (name) => {
   }
 };
 
+const currentZiggyRoute = computed(() => {
+  const location = new URL(page.url, window.location.origin);
+  return ziggyRoute(undefined, {}, true, {
+    ...Ziggy,
+    url: location.origin,
+    location,
+  });
+});
+
 const isRouteActive = (name) => {
   const descriptor = parseRouteDescriptor(name);
   if (!hasRoute(descriptor.name)) return false;
   try {
-    const currentMatched = route().current(descriptor.name);
-    if (!currentMatched) {
-      return false;
-    }
-
-    if (descriptor.section && currentSection.value !== descriptor.section) {
-      return false;
-    }
-
-    if (descriptor.module) {
-      return currentModule.value === descriptor.module;
-    }
-
-    return true;
+    return currentZiggyRoute.value.current(descriptor.name, descriptor.params);
   } catch (error) {
     return false;
   }
@@ -954,6 +1024,11 @@ const blockedMenuNames = new Set([
 
 const normalizeMenuName = (name) => String(name ?? '').trim().toLowerCase();
 
+const isGeneralInventoryMenu = (menu) => (
+  normalizeMenuName(menu?.name) === 'general inventory'
+  || parseRouteDescriptor(menu?.route ?? '').name === 'backend.inventory.index'
+);
+
 const isBlockedMenuName = (name) => {
   const normalized = normalizeMenuName(name);
   return blockedMenuNames.has(normalized) || blockedMenuNames.has(String(name ?? '').trim());
@@ -961,6 +1036,10 @@ const isBlockedMenuName = (name) => {
 
 const isAccountManagementMenu = (menu) => {
   return normalizeMenuName(menu?.name) === 'account management';
+};
+
+const isPharmacyManagementMenu = (menu) => {
+  return normalizeMenuName(menu?.name) === 'pharmacy management';
 };
 
 const shouldHideDuplicateSupplierPayment = (menu, child) => {
@@ -978,7 +1057,11 @@ const shouldHideDuplicateSupplierPayment = (menu, child) => {
     return false;
   }
 
-  return !isAccountManagementMenu(menu);
+  return !isAccountManagementMenu(menu) && !isPharmacyManagementMenu(menu);
+};
+
+const shouldHideManualStockAdjustment = (menuItem) => {
+  return parseRouteDescriptor(menuItem?.route ?? '').name === 'backend.stock.adjustment.create';
 };
 
 const childUniqueKey = (child) => {
@@ -999,6 +1082,26 @@ const childUniqueKey = (child) => {
   return `name:${normalizedName}`;
 };
 
+const isMenuChildActive = (parentMenu, childMenu) => {
+  const descriptor = parseRouteDescriptor(childMenu?.route ?? '');
+  if (!descriptor.name || !isRouteActive(childMenu.route)) return false;
+
+  const context = clickedMenuContext.value;
+  if (context?.route === descriptor.name) {
+    return context.parent === childUniqueKey(parentMenu)
+      && context.child === childUniqueKey(childMenu);
+  }
+
+  const firstMatchingMenu = filteredMenus.value.find((menu) => (
+    getRenderedChildren(menu).some((child) => (
+      parseRouteDescriptor(child?.route ?? '').name === descriptor.name
+      && isRouteActive(child.route)
+    ))
+  ));
+
+  return !firstMatchingMenu || childUniqueKey(firstMatchingMenu) === childUniqueKey(parentMenu);
+};
+
 const isWebSettingMenu = (menu, children = []) => {
   const menuRouteName = parseRouteDescriptor(menu?.route ?? '').name;
   if (menuRouteName.startsWith('backend.websetting.')) {
@@ -1009,16 +1112,10 @@ const isWebSettingMenu = (menu, children = []) => {
 };
 
 const scrollSelectedMenuIntoView = (event) => {
-  const container = sidebarScrollContainer.value;
   const target = event?.currentTarget?.closest('li') ?? event?.target?.closest('li');
 
-  if (!container || !target) return;
-
-  const containerRect = container.getBoundingClientRect();
-  const targetRect = target.getBoundingClientRect();
-  const targetTop = targetRect.top - containerRect.top + container.scrollTop - 8;
-
-  container.scrollTop = Math.max(targetTop, 0);
+  if (!target) return;
+  target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 };
 
 const scrollRouteToTop = (routeName, behavior = 'auto') => {
@@ -1029,44 +1126,74 @@ const scrollRouteToTop = (routeName, behavior = 'auto') => {
   const target = container.querySelector(`[data-menu-route="${safeRouteName}"]`);
   if (!target) return;
 
-  const li = target.closest('li') ?? target;
-  const containerRect = container.getBoundingClientRect();
-  const targetRect = li.getBoundingClientRect();
-  const targetTop = targetRect.top - containerRect.top + container.scrollTop - 8;
+  const menuItem = target.closest('li') ?? target;
+  const itemRect = menuItem.getBoundingClientRect();
 
-  container.scrollTop = Math.max(targetTop, 0);
+  if (itemRect.top >= 0 && itemRect.bottom <= window.innerHeight) return;
+
+  menuItem.scrollIntoView({ block: 'nearest', behavior });
 };
 
-const handleMenuClick = (event, routeName = null) => {
+const handleMenuClick = (event, routeName = null, parentMenu = null, childMenu = null) => {
   if (routeName) {
-    lastClickedRoute.value = parseRouteDescriptor(routeName).name;
+    const normalizedRoute = parseRouteDescriptor(routeName).name;
+    lastClickedRoute.value = normalizedRoute;
+    if (parentMenu && childMenu) {
+      const matchingParents = orderedMenus.value.filter((menu) => (
+        getRenderedChildren(menu).some((child) => (
+          parseRouteDescriptor(child?.route ?? '').name === normalizedRoute
+        ))
+      ));
+
+      clickedMenuContext.value = matchingParents.length > 1
+        ? {
+            route: normalizedRoute,
+            parent: childUniqueKey(parentMenu),
+            child: childUniqueKey(childMenu),
+          }
+        : null;
+      try {
+        if (clickedMenuContext.value) {
+          window.sessionStorage.setItem(clickedMenuStorageKey, JSON.stringify(clickedMenuContext.value));
+        } else {
+          window.sessionStorage.removeItem(clickedMenuStorageKey);
+        }
+      } catch (error) {
+        clickedMenuContext.value = null;
+      }
+    } else {
+      clickedMenuContext.value = null;
+      try {
+        window.sessionStorage.removeItem(clickedMenuStorageKey);
+      } catch (error) {
+        clickedMenuContext.value = null;
+      }
+    }
   }
   scrollSelectedMenuIntoView(event);
+  if (window.innerWidth < 1024 && isMobileOpen.value) {
+    isMobileOpen.value = false;
+    eventBus.emit('mobileSidebarToggled', false);
+  }
 };
 
 const currentRouteName = computed(() => {
   try {
-    const current = route().current();
-    return current ? parseRouteDescriptor(current).name : null;
+    return currentZiggyRoute.value.current() ?? null;
   } catch (error) {
     return null;
   }
 });
 
-watch(currentRouteName, async (newRoute) => {
+watch([currentRouteName, () => page.url], async ([newRoute]) => {
   if (!newRoute) return;
 
   await nextTick();
 
-  // Auto-open the parent menu whose child matches the active route
   try {
-    const activeMenu = orderedMenus.value.find((menu) => Boolean(getActiveRoute(menu)));
-    if (activeMenu) {
-      const key = childUniqueKey(activeMenu);
-      if (!openState[key]) {
-        openState[key] = true;
-      }
-    }
+    orderedMenus.value.forEach((menu) => {
+      openState[childUniqueKey(menu)] = Boolean(getActiveRoute(menu));
+    });
   } catch (e) {
     // ignore
   }
@@ -1078,12 +1205,17 @@ watch(currentRouteName, async (newRoute) => {
 const filteredMenus = computed(() => {
   const base = (sourceMenus.value ?? []).map(menu => {
     if (!menu || typeof menu !== 'object') return null;
+    if (isGeneralInventoryMenu(menu)) return null;
     if (isBlockedMenuName(menu?.name)) {
       return null;
     }
 
     const filteredChildren = (menu.childrens ?? []).filter(child => {
         if (!child || typeof child !== 'object') return false;
+
+        if (shouldHideManualStockAdjustment(child)) {
+          return false;
+        }
 
         if (isBlockedMenuName(child?.name)) {
           return false;
@@ -1188,6 +1320,7 @@ const filteredMenus = computed(() => {
     if (!Array.isArray(base) || base.length === 0) {
       const fallbackBase = (sourceMenus.value ?? []).map((menu) => {
         if (!menu || typeof menu !== 'object') return null;
+        if (isGeneralInventoryMenu(menu)) return null;
         if (isBlockedMenuName(menu?.name)) return null;
 
         const fallbackChildren = Array.isArray(menu?.childrens)
@@ -1210,6 +1343,9 @@ const filteredMenus = computed(() => {
   try {
     const deduped = base.filter((m, idx) => {
       const normalizedName = normalizeMenuName(m?.name);
+      if ((m?.childrens ?? []).length > 0) {
+        return true;
+      }
 
       // If any other menu contains a child with the same normalized name,
       // treat this top-level menu as a duplicate and remove it.
@@ -1238,6 +1374,7 @@ const filteredMenus = computed(() => {
     if (deduped.length === 0) {
       const fallbackBase = (sourceMenus.value ?? []).map((menu) => {
         if (!menu || typeof menu !== 'object') return null;
+        if (isGeneralInventoryMenu(menu)) return null;
         if (isBlockedMenuName(menu?.name)) return null;
 
         const fallbackChildren = Array.isArray(menu?.childrens)
@@ -1392,7 +1529,14 @@ const insertionIndex = computed(() => {
 const orderedMenus = computed(() => {
   try {
     if (Array.isArray(filteredMenus.value) && filteredMenus.value.length > 0) {
-      return filteredMenus.value;
+      const menus = filteredMenus.value;
+      const activeIndex = menus.findIndex((menu) => Boolean(getActiveRoute(menu)));
+
+      if (activeIndex > 0) {
+        return [menus[activeIndex], ...menus.slice(0, activeIndex), ...menus.slice(activeIndex + 1)];
+      }
+
+      return menus;
     }
 
     // Fallback: include a safe Dashboard entry when nothing else is available.
@@ -1428,15 +1572,24 @@ const getActiveRoute = (mainMenu) => {
   // come from fallback/raw menu sources instead of `mainMenu.childrens`.
   const children = getRenderedChildren(mainMenu);
   if (Array.isArray(children)) {
+    const currentName = currentRouteName.value;
+    const context = clickedMenuContext.value;
+    if (context?.route === currentName) {
+      if (context.parent !== childUniqueKey(mainMenu)) return null;
+      const selectedChild = children.find((child) => (
+        childUniqueKey(child) === context.child && isRouteActive(child.route)
+      ));
+      return selectedChild?.route ?? null;
+    }
+
     for (const childMenu of children) {
-      if (childMenu?.route && isRouteActive(childMenu.route)) {
+      if (childMenu?.route && isMenuChildActive(mainMenu, childMenu)) {
         return childMenu.route;
       }
     }
 
     // Fallback: if current route-name matches a child route-name, treat parent as active.
     // This covers cases where query/default section params differ across menu definitions.
-    const currentName = currentRouteName.value;
     if (currentName) {
       for (const childMenu of children) {
         const descriptor = parseRouteDescriptor(childMenu?.route ?? '');
@@ -1484,28 +1637,37 @@ const getActiveRoute = (mainMenu) => {
 };
 
 const sidebarClasses = computed(() => {
-  const baseClasses = "bg-white text-gray-700 relative border-r border-gray-200 shadow-sm transition-all duration-200 flex-shrink-0 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700";
-  if (sideBar.value) {
+  const baseClasses = "h-full flex flex-col bg-white text-gray-700 relative border-r border-gray-200 shadow-sm transition-all duration-200 flex-shrink-0 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700";
+  if (isSidebarCollapsed.value) {
     return `block w-[70px] min-w-[70px] ${baseClasses}`;
   }
-
   return `block w-[240px] min-w-[240px] ${baseClasses}`;
 });
 </script>
 
 <template>
-  <div class="app-sidebar" :class="sidebarClasses">
+  <button
+    v-if="isMobileOpen"
+    type="button"
+    class="fixed inset-0 z-40 bg-slate-950/50 lg:hidden"
+    aria-label="Close navigation menu"
+    @click="isMobileOpen = false; eventBus.emit('mobileSidebarToggled', false)"
+  ></button>
+  <div id="app-sidebar" class="app-sidebar" :class="[sidebarClasses, { 'mobile-open': isMobileOpen }]">
     <!-- Header -->
-    <div class="w-full flex items-center h-[50px] border-b border-gray-200 bg-gray-100 dark:bg-slate-900 dark:border-slate-700 px-4">
-      <Link :href="route('backend.dashboard')"
-        class="text-xl font-bold text-gray-800 dark:text-slate-100 hover:text-emerald-700 transition-colors duration-200">
-      {{ sideBar ? webSetting?.company_short_name : webSetting?.company_name || 'Company Name' }}
-      <span v-if="!sideBar" class="block text-xs font-normal text-gray-500 dark:text-slate-400 mt-0.5"></span>
+    <div class="sidebar-branding-theme box-border flex h-[50px] min-h-[50px] w-full shrink-0 items-center border-b border-gray-200 px-3 py-1 dark:border-slate-700">
+      <Link :href="route('backend.dashboard')" @click="handleMenuClick($event, 'backend.dashboard')"
+        class="flex h-full w-full min-w-0 items-center text-left font-bold text-gray-800 dark:text-slate-100 hover:text-emerald-700 transition-colors duration-200">
+      <span
+        ref="companyNameElement"
+        class="block w-full whitespace-normal [overflow-wrap:anywhere]"
+        :style="{ fontSize: `${companyNameFontSize}px`, lineHeight: '1.1' }"
+      >{{ displayedCompanyName }}</span>
       </Link>
     </div>
 
     <!-- Navigation Menu -->
-    <div ref="sidebarScrollContainer" style="width: inherit" class="h-[calc(100vh-60px)] overflow-y-auto bg-white dark:bg-slate-950">
+    <div ref="sidebarScrollContainer" style="width: inherit" class="min-h-0 flex-1 overflow-y-auto bg-white dark:bg-slate-950">
       <ul class="w-full px-3 py-4 space-y-1">
         <!-- quickLinks will be inserted inline within the menu list (see insertionIndex) -->
 
@@ -1516,7 +1678,7 @@ const sidebarClasses = computed(() => {
         </template>
         <template v-for="(mainMenu, Index) in orderedMenus" :key="childUniqueKey(mainMenu)">
           <!-- Menu with Submenu -->
-          <li v-if="menuHasChildren(mainMenu)" :class="{ 'flex justify-center': sideBar }" class="relative" @click="onMenuTriggerClick($event, childUniqueKey(mainMenu), getActiveRoute(mainMenu) || (getRenderedChildren(mainMenu)[0] && getRenderedChildren(mainMenu)[0].route))">
+          <li v-if="menuHasChildren(mainMenu)" :class="{ 'flex justify-center': isSidebarCollapsed }" class="relative" @click="onMenuTriggerClick($event, childUniqueKey(mainMenu), getActiveRoute(mainMenu) || (getRenderedChildren(mainMenu)[0] && getRenderedChildren(mainMenu)[0].route))">
             <SideBarSubMenu
               align="left"
               :activeRoute="getActiveRoute(mainMenu)"
@@ -1537,7 +1699,7 @@ const sidebarClasses = computed(() => {
                       getActiveRoute(mainMenu) ? 'text-white' : 'text-gray-500 group-hover:text-emerald-700'
                     ]" />
                   </div>
-                  <span v-if="!sideBar" class="truncate font-medium text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
+                  <span v-if="!isSidebarCollapsed" class="truncate font-medium text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
                 </div>
               </template>
 
@@ -1546,27 +1708,27 @@ const sidebarClasses = computed(() => {
                   <li v-for="(submenu, subIndex) in getRenderedChildren(mainMenu)" :key="childUniqueKey(submenu)">
                     <template v-if="getMenuHref(submenu.route)">
                       <template v-if="isFullReloadRoute(submenu.route)">
-                        <a :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click.stop="handleMenuClick($event, submenu.route)" :class="[
-                          isRouteActive(submenu.route)
+                        <a :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click.stop="handleMenuClick($event, submenu.route, mainMenu, submenu)" :class="[
+                          isMenuChildActive(mainMenu, submenu)
                             ? 'bg-emerald-500 text-white font-medium'
                             : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-emerald-300',
                           'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-md mx-1',
-                          sideBar ? '' : 'ml-3',
+                          isSidebarCollapsed ? '' : 'ml-3',
                         ]">
-                          <FeatherIcon :name="submenu.icon" size="16" :class="isRouteActive(submenu.route) ? 'text-white' : 'text-gray-500'" />
-                          <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(submenu) }}</span>
+                          <FeatherIcon :name="submenu.icon" size="16" :class="isMenuChildActive(mainMenu, submenu) ? 'text-white' : 'text-gray-500'" />
+                          <span v-if="!isSidebarCollapsed" class="truncate text-sm">{{ getMenuDisplayName(submenu) }}</span>
                         </a>
                       </template>
                       <template v-else>
-                        <Link :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click.stop="handleMenuClick($event, submenu.route)" :class="[
-                          isRouteActive(submenu.route)
+                        <Link :href="getMenuHref(submenu.route)" :data-menu-route="normalizeRouteName(submenu.route)" @click.stop="handleMenuClick($event, submenu.route, mainMenu, submenu)" :class="[
+                          isMenuChildActive(mainMenu, submenu)
                             ? 'bg-emerald-500 text-white font-medium'
                             : 'bg-white text-gray-700 hover:bg-white hover:text-emerald-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-emerald-300',
                           'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-md mx-1',
-                          sideBar ? '' : 'ml-3',
+                          isSidebarCollapsed ? '' : 'ml-3',
                         ]">
-                          <FeatherIcon :name="submenu.icon" size="16" :class="isRouteActive(submenu.route) ? 'text-white' : 'text-gray-500'" />
-                          <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(submenu) }}</span>
+                          <FeatherIcon :name="submenu.icon" size="16" :class="isMenuChildActive(mainMenu, submenu) ? 'text-white' : 'text-gray-500'" />
+                          <span v-if="!isSidebarCollapsed" class="truncate text-sm">{{ getMenuDisplayName(submenu) }}</span>
                         </Link>
                       </template>
                     </template>
@@ -1574,10 +1736,10 @@ const sidebarClasses = computed(() => {
                       <a href="#" @click.prevent.stop="navigateFallback(submenu.route, $event)" :class="[
                         'bg-white text-gray-700 hover:bg-white hover:text-emerald-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-emerald-300',
                         'flex items-center px-4 py-2 space-x-3 transition-colors duration-200 rounded-md mx-1',
-                        sideBar ? '' : 'ml-3',
+                        isSidebarCollapsed ? '' : 'ml-3',
                       ]">
                         <FeatherIcon :name="submenu.icon" size="16" class="text-gray-500" />
-                        <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(submenu) }}</span>
+                        <span v-if="!isSidebarCollapsed" class="truncate text-sm">{{ getMenuDisplayName(submenu) }}</span>
                       </a>
                     </template>
                   </li>
@@ -1587,7 +1749,7 @@ const sidebarClasses = computed(() => {
           </li>
 
           <!-- Single Menu Item -->
-          <li v-else :class="{ 'flex justify-center': sideBar }">
+          <li v-else :class="{ 'flex justify-center': isSidebarCollapsed }">
             <div v-if="getMenuHref(mainMenu.route)">
               <template v-if="isFullReloadRoute(mainMenu.route)">
                 <a :href="getMenuHref(mainMenu.route)" :data-menu-route="normalizeRouteName(mainMenu.route)" @click.stop="handleMenuClick($event, mainMenu.route)" :class="[
@@ -1602,7 +1764,7 @@ const sidebarClasses = computed(() => {
                       isRouteActive(mainMenu.route) ? 'text-white' : 'text-gray-500 group-hover:text-emerald-700'
                     ]" />
                   </div>
-                  <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
+                  <span v-if="!isSidebarCollapsed" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
                 </a>
               </template>
               <template v-else>
@@ -1618,7 +1780,7 @@ const sidebarClasses = computed(() => {
                       isRouteActive(mainMenu.route) ? 'text-white' : 'text-gray-500 group-hover:text-emerald-700'
                     ]" />
                   </div>
-                  <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
+                  <span v-if="!isSidebarCollapsed" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
                 </Link>
               </template>
             </div>
@@ -1627,12 +1789,12 @@ const sidebarClasses = computed(() => {
               <div class="flex items-center justify-center w-5 h-5">
                 <FeatherIcon :name="mainMenu.icon" size="18" class="text-gray-500" />
               </div>
-              <span v-if="!sideBar" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
+              <span v-if="!isSidebarCollapsed" class="truncate text-sm">{{ getMenuDisplayName(mainMenu) }}</span>
             </div>
           </li>
 
           <template v-if="showHrHub && Index === insertionIndex">
-            <li v-for="quickLink in quickLinks" :key="`payroll-${quickLink.route}`" :class="{ 'flex justify-center': sideBar }">
+            <li v-for="quickLink in quickLinks" :key="`payroll-${quickLink.route}`" :class="{ 'flex justify-center': isSidebarCollapsed }">
               <template v-if="isFullReloadRoute(quickLink.route)">
                 <a :href="getMenuHref(quickLink.route)" :data-menu-route="normalizeRouteName(quickLink.route)" @click.stop="handleMenuClick($event, quickLink.route)" :class="[
                   isRouteActive(quickLink.route)
@@ -1646,7 +1808,7 @@ const sidebarClasses = computed(() => {
                       isRouteActive(quickLink.route) ? 'text-white' : 'text-gray-500 group-hover:text-emerald-700'
                     ]" />
                   </div>
-                  <span v-if="!sideBar" class="truncate text-sm">{{ quickLink.label }}</span>
+                  <span v-if="!isSidebarCollapsed" class="truncate text-sm">{{ quickLink.label }}</span>
                 </a>
               </template>
 
@@ -1663,7 +1825,7 @@ const sidebarClasses = computed(() => {
                       isRouteActive(quickLink.route) ? 'text-white' : 'text-gray-500 group-hover:text-emerald-700'
                     ]" />
                   </div>
-                  <span v-if="!sideBar" class="truncate text-sm">{{ quickLink.label }}</span>
+                  <span v-if="!isSidebarCollapsed" class="truncate text-sm">{{ quickLink.label }}</span>
                 </Link>
               </template>
             </li>
@@ -1678,6 +1840,32 @@ const sidebarClasses = computed(() => {
 </template>
 
 <style scoped>
+.app-sidebar {
+  min-height: 0;
+}
+
+@media (max-width: 1023px) {
+  .app-sidebar {
+    position: fixed;
+    z-index: 50;
+    inset: 0 auto 0 0;
+    width: min(240px, 85vw) !important;
+    min-width: min(240px, 85vw) !important;
+    max-width: 85vw;
+    height: 100vh;
+    height: 100dvh;
+    transform: translateX(-100%);
+    transition: transform 200ms ease;
+  }
+
+  .app-sidebar.mobile-open {
+    transform: translateX(0);
+  }
+}
+
+.sidebar-branding-theme {
+  background-color: var(--app-theme-navbar-surface, color-mix(in srgb, var(--app-theme-primary) 12%, var(--app-theme-surface)));
+}
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 10px;
@@ -1699,7 +1887,17 @@ const sidebarClasses = computed(() => {
 
 .bg-emerald-500 {
   background-color: #10b981 !important;
+  color: #ffffff !important;
 }
+
+/* Force white text on all children of active (green bg) menu items */
+.bg-emerald-500 .text-gray-500,
+.bg-emerald-500 .text-gray-700,
+.bg-emerald-500 .text-gray-800,
+.bg-emerald-500 span {
+  color: #ffffff !important;
+}
+
 
 .border-gray-200 {
   border-color: color-mix(in srgb, var(--app-theme-primary) 20%, #cbd5e1) !important;
@@ -1714,6 +1912,15 @@ const sidebarClasses = computed(() => {
 .text-emerald-700,
 .text-emerald-600 {
   color: var(--app-theme-primary) !important;
+}
+
+.dark .sidebar-branding-theme {
+  background-color: #111827 !important;
+  border-color: #334155 !important;
+}
+
+.dark .sidebar-branding-theme a {
+  color: #f8fafc !important;
 }
 
 .border-emerald-500 {
@@ -1767,6 +1974,17 @@ const sidebarClasses = computed(() => {
   color: var(--app-theme-primary) !important;
 }
 
+/* Active (green) menu — lock bg+text, prevent any hover override.
+   Double-class (.bg-emerald-500.rounded-md) gives higher specificity
+   than the single-class .hover\:bg-white:hover rule above. */
+.bg-emerald-500.rounded-md:hover,
+.bg-emerald-500.rounded-md:hover .text-gray-500,
+.bg-emerald-500.rounded-md:hover .text-gray-700,
+.bg-emerald-500.rounded-md:hover span {
+  background-color: #059669 !important;
+  color: #ffffff !important;
+}
+
 ::-webkit-scrollbar-track {
   background: color-mix(in srgb, var(--app-theme-soft) 25%, #e2e8f0);
   border-radius: 8px;
@@ -1779,6 +1997,16 @@ const sidebarClasses = computed(() => {
 
 ::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--app-theme-primary) 52%, #64748b);
+}
+
+/* Mobile backdrop fade */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 /* Submenu animations */

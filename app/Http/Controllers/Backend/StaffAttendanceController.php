@@ -15,6 +15,7 @@ use App\Services\AdminService;
 use App\Services\RoleService;
 use Illuminate\Support\Facades\DB;
 use App\Services\StaffAttendanceService;
+use App\Services\LedgerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Schema;
@@ -35,13 +36,14 @@ class StaffAttendanceController extends Controller
 {
     use SystemTrait;
 
-    protected $staffAttendanceService, $RoleService, $adminService;
+    protected $staffAttendanceService, $RoleService, $adminService, $ledgerService;
 
-    public function __construct(StaffAttendanceService $staffAttendanceService, RoleService $RoleService, AdminService $adminService)
+    public function __construct(StaffAttendanceService $staffAttendanceService, RoleService $RoleService, AdminService $adminService, LedgerService $ledgerService)
     {
         $this->staffAttendanceService = $staffAttendanceService;
         $this->RoleService = $RoleService;
         $this->adminService = $adminService;
+        $this->ledgerService = $ledgerService;
 
 
         $this->middleware('auth:admin');
@@ -81,8 +83,8 @@ class StaffAttendanceController extends Controller
     private function getTableHeaders()
     {
         return [
-            'Sl/No',
-            'Staff Id',
+            'SL',
+            'Staff ID',
             'Name',
             'Attendance Date',
             'Attendance Status',
@@ -156,7 +158,7 @@ class StaffAttendanceController extends Controller
         return Inertia::render(
             'Backend/StaffAttendance/Form',
             [
-                'pageTitle' => fn() => 'Staff Attendance Create',
+                'pageTitle' => fn() => 'Add Staff Attendance',
                 "roleDetails" => fn() => $roleDetails,
                 "users" => fn() => $users,
             ]
@@ -196,7 +198,7 @@ class StaffAttendanceController extends Controller
                     ], $existingRecord->id);
 
                     if ($updatedRecord) {
-                        $message = 'StaffAttendance updated successfully for staff ID: ' . $record['staff_id'];
+                        $message = 'Attendance updated successfully for staff ID: ' . $record['staff_id'];
                         $this->storeAdminWorkLog($updatedRecord->id, 'staff_attendances', $message);
                     }
                 } else {
@@ -211,10 +213,10 @@ class StaffAttendanceController extends Controller
                     ]);
 
                     if ($dataInfo) {
-                        $message = 'StaffAttendance created successfully for staff ID: ' . $record['staff_id'];
+                        $message = 'Attendance created successfully for staff ID: ' . $record['staff_id'];
                         $this->storeAdminWorkLog($dataInfo->id, 'staff_attendances', $message);
                     } else {
-                        throw new Exception("Failed to create StaffAttendance for staff ID: " . $record['staff_id']);
+                        throw new Exception("Failed to create attendance for staff ID: " . $record['staff_id']);
                     }
                 }
             }
@@ -223,12 +225,12 @@ class StaffAttendanceController extends Controller
 
             return redirect()
                 ->back()
-                ->with('successMessage', 'All StaffAttendance records processed successfully.');
+                ->with('successMessage', 'Attendance records saved successfully.');
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'StaffAttendanceController', 'store', substr($err->getMessage(), 0, 1000));
 
-            $message = "Server Errors Occurred. Please Try Again.";
+            $message = "A server error occurred. Please try again.";
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
@@ -243,7 +245,7 @@ class StaffAttendanceController extends Controller
         return Inertia::render(
             'Backend/StaffAttendance/Form',
             [
-                'pageTitle' => fn() => 'Staff Attendance Edit',
+                'pageTitle' => fn() => 'Edit Staff Attendance',
                 'staffattendance' => fn() => $staffattendance,
                 'id' => fn() => $id,
                 "users" => fn() => [$users],
@@ -274,7 +276,7 @@ class StaffAttendanceController extends Controller
                     ], $existingRecord->id);
 
                     if ($updatedRecord) {
-                        $message = 'StaffAttendance updated successfully for staff ID: ' . $record['staff_id'];
+                        $message = 'Attendance updated successfully for staff ID: ' . $record['staff_id'];
                         $this->storeAdminWorkLog($updatedRecord->id, 'staff_attendances', $message);
                     }
                 }
@@ -283,12 +285,12 @@ class StaffAttendanceController extends Controller
 
             return redirect()
                 ->back()
-                ->with('successMessage', 'All StaffAttendance records processed successfully.');
+                ->with('successMessage', 'Attendance records saved successfully.');
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'StaffAttendanceController', 'update', substr($err->getMessage(), 0, 1000));
 
-            $message = "Server Errors Occurred. Please Try Again.";
+            $message = "A server error occurred. Please try again.";
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
@@ -304,7 +306,7 @@ class StaffAttendanceController extends Controller
         try {
 
             if ($this->staffAttendanceService->delete($id)) {
-                $message = 'StaffAttendance deleted successfully';
+                $message = 'Attendance record deleted successfully.';
                 $this->storeAdminWorkLog($id, 'staff_attendances', $message);
 
                 DB::commit();
@@ -315,7 +317,7 @@ class StaffAttendanceController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To Delete StaffAttendance.";
+                $message = "Failed to delete attendance record.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -324,7 +326,7 @@ class StaffAttendanceController extends Controller
             DB::rollBack();
             $this->storeSystemError('Backend', 'StaffAttendancecontroller', 'destroy', substr($err->getMessage(), 0, 1000));
             DB::commit();
-            $message = "Server Errors Occur. Please Try Again.";
+            $message = "A server error occurred. Please try again.";
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
@@ -339,7 +341,7 @@ class StaffAttendanceController extends Controller
             $dataInfo = $this->staffAttendanceService->changeStatus(request());
 
             if ($dataInfo->wasChanged()) {
-                $message = 'StaffAttendance ' . request()->status . ' Successfully';
+                $message = 'Attendance record ' . request()->status . ' successfully.';
                 $this->storeAdminWorkLog($dataInfo->id, 'staff_attendances', $message);
 
                 DB::commit();
@@ -350,7 +352,7 @@ class StaffAttendanceController extends Controller
             } else {
                 DB::rollBack();
 
-                $message = "Failed To " . request()->status . " StaffAttendance.";
+                $message = "Failed to " . request()->status . " attendance record.";
                 return redirect()
                     ->back()
                     ->with('errorMessage', $message);
@@ -359,7 +361,7 @@ class StaffAttendanceController extends Controller
             DB::rollBack();
             $this->storeSystemError('Backend', 'StaffAttendanceController', 'changeStatus', substr($err->getMessage(), 0, 1000));
             DB::commit();
-            $message = "Server Errors Occur. Please Try Again.";
+            $message = "A server error occurred. Please try again.";
             return redirect()
                 ->back()
                 ->withErrors(['error' => $message]);
@@ -376,7 +378,7 @@ class StaffAttendanceController extends Controller
             [
                 'pageTitle' => fn() => 'Staff Attendance Report',
                 'breadcrumbs' => fn() => [
-                    ['link' => null, 'title' => 'Staff Attendance Report Manage'],
+                    ['link' => null, 'title' => 'Staff Attendance Report'],
                     ['link' => route('backend.staffattendance.index'), 'title' => 'Staff Attendance Report'],
                 ],
                 'tableHeaders' => fn() => $this->getReportTableHeaders(),
@@ -1188,7 +1190,28 @@ class StaffAttendanceController extends Controller
             'status' => 'Paid',
         ]);
 
-        return back()->with('successMessage', 'Salary payment recorded.');
+        if ((float) $validated['amount'] > 0) {
+            try {
+                $counterAccount = $this->ledgerService->resolvePaymentAccountCode($validated['payment_method'] ?? 'Cash');
+                $transaction = $this->ledgerService->recordExpense(
+                    'SALARY_EXP',
+                    $counterAccount,
+                    (float) $validated['amount'],
+                    'Salary payment for staff #' . $validated['staff_id'] . ' (' . $validated['month'] . ')',
+                    now()->toDateString(),
+                    'SalaryPayment',
+                    $payment->id,
+                    Auth::guard('admin')->id()
+                );
+
+                $payment->ledger_transaction_id = $transaction->id;
+                $payment->save();
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        return back()->with('successMessage', 'Salary payment recorded successfully.');
     }
 
     private function calculateRosterOvertimeBonus($attendanceBreakdown, $rosterByDate, float $hourlyRate, float $overtimeMultiplier): array
@@ -1242,8 +1265,8 @@ class StaffAttendanceController extends Controller
     private function getReportTableHeaders()
     {
         return [
-            'Sl/No',
-            'Staff Id',
+            'SL',
+            'Staff ID',
             'Name',
             'Role',
             'Mobile',
@@ -1322,10 +1345,10 @@ class StaffAttendanceController extends Controller
         return Inertia::render(
             'Backend/StaffAttendance/ReportDetails',
             [
-                'pageTitle' => fn() => 'Staff Attendance Report Details',
+                'pageTitle' => fn() => 'Attendance Report Details',
                 'breadcrumbs' => fn() => [
-                    ['link' => null, 'title' => 'Staff Attendance Report Manage'],
-                    ['link' => route('backend.staffattendance.report.details', ['id' => $id]), 'title' => 'Staff Attendance Report Details'],
+                    ['link' => null, 'title' => 'Staff Attendance Report'],
+                    ['link' => route('backend.staffattendance.report.details', ['id' => $id]), 'title' => 'Attendance Report Details'],
                 ],
                 'tableHeaders' => fn() => $this->getReportInfoTableHeaders(),
                 'dataFields' => fn() => $this->getReportInfoDataFields(),
@@ -1343,8 +1366,8 @@ class StaffAttendanceController extends Controller
     private function getReportInfoTableHeaders()
     {
         return [
-            'Sl/No',
-            'Staff Id',
+            'SL',
+            'Staff ID',
             'Name',
             'Present',
             'Late',

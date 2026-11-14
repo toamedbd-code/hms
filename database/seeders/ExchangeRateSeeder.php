@@ -36,5 +36,15 @@ class ExchangeRateSeeder extends Seeder
                 'rate' => 0.0106,
             ]);
         }
+
+        if ($bdt) {
+            ExchangeRate::updateOrCreate([
+                'from_currency_id' => $bdt->id,
+                'to_currency_id' => $bdt->id,
+                'date' => $today,
+            ], [
+                'rate' => 1,
+            ]);
+        }
     }
 }

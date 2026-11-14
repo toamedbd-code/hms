@@ -264,7 +264,11 @@
                                 @if((float)$item->due_amount > 0 || $hasOutstandingDue)
                                     <a href="{{ route('backend.patient.portal.payment', ['billing' => $item->id]) }}" style="display:inline-flex; align-items:center; justify-content:center; border:1px solid #f59e0b; background:#fffbeb; color:#92400e; border-radius:8px; padding:6px 10px; font-size:12px; font-weight:800; text-decoration:none;">Pay Now</a>
                                 @else
-                                    <a href="{{ route('backend.patient.portal.report.download', ['billing' => $item->id]) }}" style="display:inline-flex; align-items:center; justify-content:center; border:1px solid #10b981; background:#ecfdf5; color:#065f46; border-radius:8px; padding:6px 10px; font-size:12px; font-weight:800; text-decoration:none;">Download Report</a>
+                                    @forelse($item->billItems as $report)
+                                        <a href="{{ route('backend.patient.portal.report.item.download', ['billItem' => $report->id]) }}" style="display:inline-flex; align-items:center; justify-content:center; border:1px solid #10b981; background:#ecfdf5; color:#065f46; border-radius:8px; padding:6px 10px; margin:2px; font-size:12px; font-weight:800; text-decoration:none;">{{ $report->item_name }} PDF</a>
+                                    @empty
+                                        <span class="text-muted">No reports ready</span>
+                                    @endforelse
                                 @endif
                             </td>
                         </tr>

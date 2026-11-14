@@ -116,6 +116,79 @@ class DeveloperAccessControlTest extends TestCase
         $response->assertOk();
     }
 
+    public function test_billing_manager_can_restore_add_bill_permission_for_another_role(): void
+    {
+        $this->withoutMiddleware();
+
+        $roleEditor = Role::query()->create([
+            'name' => 'billing-role-editor',
+            'guard_name' => 'admin',
+            'is_private' => false,
+        ]);
+        $roleListEditPermission = Permission::query()->firstOrCreate([
+            'name' => 'role-list-edit',
+            'guard_name' => 'admin',
+        ]);
+        $billingPermission = Permission::query()->firstOrCreate([
+            'name' => 'billing',
+            'guard_name' => 'admin',
+        ]);
+        $billingAddPermission = Permission::query()->firstOrCreate([
+            'name' => 'billing-add',
+            'guard_name' => 'admin',
+        ], [
+            'parent_id' => $billingPermission->id,
+        ]);
+        $roleEditor->givePermissionTo($roleListEditPermission, $billingPermission);
+
+        $actor = Admin::query()->create([
+            'first_name' => 'Billing',
+            'last_name' => 'Editor',
+            'email' => 'billing-role-editor@example.test',
+            'phone' => '01710000004',
+            'password' => 'password',
+            'status' => 'Active',
+            'role_id' => $roleEditor->id,
+        ]);
+        $actor->assignRole($roleEditor);
+
+        $targetRole = Role::query()->create([
+            'name' => 'restricted-billing',
+            'guard_name' => 'admin',
+            'is_private' => false,
+        ]);
+
+        $this->actingAs($actor, 'admin');
+
+        $this->get(route('backend.role.edit', $targetRole->id))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->where('permissions', function ($permissions) use ($billingAddPermission) {
+                    foreach ($permissions as $group) {
+                        foreach ($group['child'] ?? [] as $child) {
+                            if ((int) $child['id'] === $billingAddPermission->id) {
+                                return true;
+                            }
+                        }
+                    }
+
+                    return false;
+                })
+            );
+
+        $updateResponse = $this->put(route('backend.role.update', $targetRole->id), [
+            'name' => $targetRole->name,
+            'guard_name' => 'admin',
+            'permission_ids' => [$billingPermission->id, $billingAddPermission->id],
+        ]);
+        $updateResponse->assertSessionHas('successMessage', 'Role updated successfully');
+
+        $this->assertDatabaseHas('role_has_permissions', [
+            'role_id' => $targetRole->id,
+            'permission_id' => $billingAddPermission->id,
+        ]);
+    }
+
     private function setEnv(string $key, string $value): void
     {
         putenv($key . '=' . $value);

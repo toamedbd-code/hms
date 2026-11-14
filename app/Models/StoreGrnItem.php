@@ -11,16 +11,23 @@ class StoreGrnItem extends Model
 
     protected $fillable = [
         'store_grn_id',
+        'store_purchase_order_item_id',
         'store_item_id',
         'quantity',
         'unit_cost',
         'line_total',
+        'inventory_lot_id',
+        'batch_no',
+        'expiry_date',
+        'serial_number',
+        'asset_tag',
     ];
 
     protected $casts = [
         'quantity' => 'decimal:2',
         'unit_cost' => 'decimal:2',
         'line_total' => 'decimal:2',
+        'expiry_date' => 'date',
     ];
 
     public function grn()
@@ -31,5 +38,10 @@ class StoreGrnItem extends Model
     public function storeItem()
     {
         return $this->belongsTo(StoreItem::class, 'store_item_id');
+    }
+
+    public function purchaseOrderItem()
+    {
+        return $this->belongsTo(StorePurchaseOrderItem::class, 'store_purchase_order_item_id');
     }
 }

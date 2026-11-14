@@ -107,7 +107,7 @@ const goBack = () => {
 
             <div class="mb-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
                 <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold bg-emerald-600 text-white mr-2">Auto Synced</span>
-                Face/Device attendance events automatically update IN time and OUT time for this list.
+                Face and device attendance events automatically update in-time and out-time in this list.
             </div>
 
             <div
@@ -117,7 +117,7 @@ const goBack = () => {
                         <div class="w-full">
                             <input id="title_en" v-model="filters.staff_id"
                                 class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
-                                type="text" placeholder="Staff Id" @input="applyFilter" />
+                                type="text" placeholder="Staff ID" @input="applyFilter" />
                         </div>
 
                         <div class="block min-w-24 md:hidden">

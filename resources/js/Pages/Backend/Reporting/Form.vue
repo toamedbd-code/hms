@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useForm, Link } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import InputLabel from '@/Components/InputLabel.vue';
@@ -29,7 +29,111 @@ const reportFieldRefs = reactive({});
 const fileUiState = reactive({});
 const editorUiState = reactive({});
 const FULL_PAGE_MARKER = '[[FULL_PAGE]]';
+const CBC_HISTOGRAM_MARKER_REGEX = /\[\[CBC_HISTOGRAM:(SHOW|HIDE)\]\]/i;
 const UNIVERSAL_FONT_STACK = "'Noto Sans Bengali', 'Hind Siliguri', 'SolaimanLipi', 'Kalpurush', 'Noto Sans', 'Noto Serif Bengali', 'Noto Serif', 'Arial Unicode MS', 'Segoe UI', sans-serif";
+let sessionHeartbeatTimer = null;
+
+const isCbcReportItem = (item) => {
+  const keyText = `${item?.item_name ?? ''} ${item?.category ?? ''} ${item?.report_function ?? ''}`.toLowerCase();
+  return keyText.includes('cbc')
+    || keyText.includes('complete blood count')
+    || keyText.includes('hematology')
+    || keyText.includes('haematology')
+    || keyText.includes('blood count');
+};
+
+const stripCbcHistogramMarker = (value) => String(value ?? '')
+  .replace(CBC_HISTOGRAM_MARKER_REGEX, '')
+  .trim();
+
+const updateCsrfToken = (token) => {
+  if (typeof token !== 'string' || token === '') return;
+  document.querySelector('meta[name="csrf-token"]')?.setAttribute('content', token);
+};
+
+const refreshReportingSession = async () => {
+  try {
+    const response = await fetch(route('backend.reporting.session'), {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    });
+
+    if (response.status === 401 || response.redirected) {
+      window.location.assign(response.url || route('backend.auth.login2'));
+      return null;
+    }
+
+    if (!response.ok) return false;
+
+    const payload = await response.json();
+    updateCsrfToken(payload?.csrf_token);
+    return typeof payload?.csrf_token === 'string' && payload.csrf_token !== '';
+  } catch (error) {
+    console.warn('[Reporting] Could not refresh the session before saving.', error);
+    return false;
+  }
+};
+
+const postReportItem = async (itemId, formData) => {
+  const sessionReady = await refreshReportingSession();
+  if (sessionReady === null) return null;
+  if (!sessionReady) {
+    errorMessage('রিপোর্ট সেভ করা যায়নি। সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।');
+    return null;
+  }
+
+  const send = () => {
+    formData.set('_token', document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
+    return fetch(route('backend.reporting.item.update', itemId), {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: formData,
+    });
+  };
+
+  let response = await send();
+  if (response.status === 419) {
+    const sessionRefreshed = await refreshReportingSession();
+    if (sessionRefreshed === null) return null;
+    if (sessionRefreshed) response = await send();
+  }
+
+  if (response.status === 401 || response.redirected) {
+    window.location.assign(response.url || route('backend.auth.login2'));
+    return null;
+  }
+
+  return response;
+};
+
+const refreshSessionWhenVisible = () => {
+  if (document.visibilityState === 'visible') {
+    refreshReportingSession();
+  }
+};
+
+onMounted(() => {
+  document.addEventListener('visibilitychange', refreshSessionWhenVisible);
+  sessionHeartbeatTimer = window.setInterval(() => {
+    refreshSessionWhenVisible();
+  }, 5 * 60 * 1000);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', refreshSessionWhenVisible);
+  if (sessionHeartbeatTimer !== null) {
+    window.clearInterval(sessionHeartbeatTimer);
+    sessionHeartbeatTimer = null;
+  }
+});
 
 const resolveInitialRange = (item) => {
   const savedRange = String(item?.report_range ?? '').trim();
@@ -93,26 +197,151 @@ const resolveNarrativeTemplate = (item) => {
   const text = `${item?.item_name ?? ''} ${item?.category ?? ''}`.toLowerCase();
 
   if (text.includes('ultrason') || text.includes('usg')) {
+    // Thyroid / neck
+    if (text.includes('thyroid') || text.includes('neck') || text.includes('parathyroid')) {
+      return [
+        'EXAMINATION: ULTRASONOGRAPHY OF THYROID',
+        '',
+        'FINDINGS:',
+        '- Thyroid gland:',
+        '  - Right lobe:',
+        '  - Left lobe:',
+        '  - Isthmus:',
+        '- Any nodule:',
+        '- Lymph nodes in neck:',
+        '',
+        'IMPRESSION:',
+        '- ',
+      ].join('\n');
+    }
+
+    // Pelvis / gynaecology / obstetrics
+    if (
+      text.includes('pelvi') || text.includes('obstet') || text.includes('gynae') ||
+      text.includes('gynaec') || text.includes('lower abdomen') || text.includes('uterus') ||
+      text.includes('ovari')
+    ) {
+      return [
+        'EXAMINATION: ULTRASONOGRAPHY OF PELVIS',
+        '',
+        'FINDINGS:',
+        '- Uterus:',
+        '- Endometrium:',
+        '- Right ovary:',
+        '- Left ovary:',
+        '- Urinary bladder:',
+        '- Pouch of Douglas:',
+        '- Any free fluid:',
+        '',
+        'IMPRESSION:',
+        '- ',
+      ].join('\n');
+    }
+
+    // Renal / KUB / kidney
+    if (
+      text.includes('renal') || text.includes('kub') || text.includes('kidney') ||
+      text.includes('urinary') || text.includes('bladder') || text.includes('ureter')
+    ) {
+      return [
+        'EXAMINATION: ULTRASONOGRAPHY OF KUB (KIDNEYS, URETERS & BLADDER)',
+        '',
+        'FINDINGS:',
+        '- Right kidney:',
+        '- Left kidney:',
+        '- Ureters:',
+        '- Urinary bladder:',
+        '',
+        'IMPRESSION:',
+        '- ',
+      ].join('\n');
+    }
+
+    // Scrotal / testes
+    if (text.includes('scrot') || text.includes('testi') || text.includes('testis')) {
+      return [
+        'EXAMINATION: ULTRASONOGRAPHY OF SCROTUM',
+        '',
+        'FINDINGS:',
+        '- Right testis:',
+        '- Left testis:',
+        '- Epididymis:',
+        '- Any hydrocele/varicocele:',
+        '',
+        'IMPRESSION:',
+        '- ',
+      ].join('\n');
+    }
+
+    // Breast
+    if (text.includes('breast')) {
+      return [
+        'EXAMINATION: ULTRASONOGRAPHY OF BREAST',
+        '',
+        'FINDINGS:',
+        '- Right breast:',
+        '- Left breast:',
+        '- Axillary lymph nodes:',
+        '',
+        'IMPRESSION:',
+        '- ',
+      ].join('\n');
+    }
+
+    // Hepatobiliary / upper abdomen / liver
+    if (text.includes('hepat') || text.includes('liver') || text.includes('gallbl') || text.includes('gall bl') || text.includes('biliary') || text.includes('upper abdomen')) {
+      return [
+        'EXAMINATION: ULTRASONOGRAPHY OF UPPER ABDOMEN',
+        '',
+        'FINDINGS:',
+        '- Liver:',
+        '- Gall bladder:',
+        '- Common bile duct:',
+        '- Pancreas:',
+        '- Spleen:',
+        '- Portal vein:',
+        '',
+        'IMPRESSION:',
+        '- ',
+      ].join('\n');
+    }
+
+    // Whole abdomen (default USG template)
     return [
-      'EXAMINATION: ULTRASONOGRAPHY',
+      'EXAMINATION: ULTRASONOGRAPHY OF WHOLE ABDOMEN',
       '',
       'FINDINGS:',
       '- Liver:',
       '- Gall bladder:',
+      '- Common bile duct:',
       '- Pancreas:',
       '- Spleen:',
       '- Both kidneys:',
       '- Urinary bladder:',
       '- Uterus/Prostate:',
+      '- Any free fluid:',
       '',
       'IMPRESSION:',
       '- ',
     ].join('\n');
   }
 
-  if (text.includes('xray') || text.includes('x-ray') || text.includes('x ray')) {
+  if (text.includes('xray') || text.includes('x-ray') || text.includes('x ray') || text.includes('radiograph')) {
+    // Detect body part for X-ray
+    let part = '';
+    if (text.includes('chest') || text.includes('cxr')) part = 'CHEST';
+    else if (text.includes('hand') || text.includes('wrist') || text.includes('finger')) part = 'HAND/WRIST';
+    else if (text.includes('knee')) part = 'KNEE';
+    else if (text.includes('shoulder')) part = 'SHOULDER';
+    else if (text.includes('hip')) part = 'HIP';
+    else if (text.includes('spine') || text.includes('lumbar') || text.includes('cervical') || text.includes('dorsal')) part = 'SPINE';
+    else if (text.includes('foot') || text.includes('ankle')) part = 'FOOT/ANKLE';
+    else if (text.includes('skull') || text.includes('head')) part = 'SKULL';
+    else if (text.includes('abdomen')) part = 'ABDOMEN';
+    else if (text.includes('elbow')) part = 'ELBOW';
+    const label = part ? `X-RAY ${part}` : 'X-RAY';
     return [
-      'EXAMINATION: X-RAY',
+      `EXAMINATION: ${label}`,
       '',
       'FINDINGS:',
       '- ',
@@ -122,20 +351,9 @@ const resolveNarrativeTemplate = (item) => {
     ].join('\n');
   }
 
-  if (text.includes('cbc')) {
+  if (text.includes('cbc') || text.includes('complete blood')) {
     return [
       'TEST: COMPLETE BLOOD COUNT (CBC)',
-      '',
-      'PARAMETERS:',
-      '- Hemoglobin (Hb):',
-      '- Total WBC count:',
-      '- Neutrophils:',
-      '- Lymphocytes:',
-      '- Monocytes:',
-      '- Eosinophils:',
-      '- Basophils:',
-      '- Platelet count:',
-      '- ESR:',
       '',
       'COMMENT:',
       '- ',
@@ -146,9 +364,11 @@ const resolveNarrativeTemplate = (item) => {
 };
 
 items.value.forEach((item) => {
+  const storedNote = String(item.report_note ?? '');
+  const histogramPreference = storedNote.match(CBC_HISTOGRAM_MARKER_REGEX)?.[1]?.toUpperCase();
   const initialUseFullPage = hasFullPageMarker(item.report_note ?? '')
     || /<[^>]+>/.test(String(item.report_note ?? ''));
-  const initialNote = stripFullPageMarker(item.report_note ?? '');
+  const initialNote = stripFullPageMarker(stripCbcHistogramMarker(storedNote));
 
   itemForms[item.id] = useForm({
     report_note: initialUseFullPage && !/<[^>]+>/.test(initialNote)
@@ -158,6 +378,7 @@ items.value.forEach((item) => {
     report_file: null,
     // Always use direct editable result box for simpler workflow.
     use_full_page: initialUseFullPage,
+    cbc_show_histogram: histogramPreference !== 'HIDE',
     // parameter_values will be populated below (empty by default)
     parameter_values: {},
     department: props.department || '',
@@ -206,6 +427,63 @@ const shouldRenderLargeResultBox = (itemId) => {
   return Boolean(fileUiState[itemId]?.selectedName)
     || Boolean(fileUiState[itemId]?.savedName)
     || Boolean(itemForms[itemId]?.use_full_page);
+};
+
+const hasParameterRows = (item) => {
+  if (!item) return false;
+
+  if (Array.isArray(item.parameter_groups) && item.parameter_groups.some((group) => Array.isArray(group.parameters) && group.parameters.length > 0)) {
+    return true;
+  }
+
+  return Array.isArray(item.parameters) && item.parameters.length > 0;
+};
+
+const countTotalParameters = (item) => {
+  if (!item) return 0;
+  if (Array.isArray(item.parameter_groups) && item.parameter_groups.length) {
+    return item.parameter_groups.reduce((sum, g) => sum + (Array.isArray(g.parameters) ? g.parameters.length : 0), 0);
+  }
+  return Array.isArray(item.parameters) ? item.parameters.length : 0;
+};
+
+const shouldShowParameterSection = (item) => {
+  if (!item) return false;
+
+  // Only show the parameter table when there are 2+ parameters.
+  // Single-parameter items use the plain Result textarea directly.
+  if (hasParameterRows(item) && countTotalParameters(item) > 1) {
+    return true;
+  }
+
+  const keyText = `${item.item_name ?? ''} ${item.category ?? ''} ${item.report_function ?? ''}`.toLowerCase();
+  const isCbcTest = keyText.includes('cbc')
+    || keyText.includes('complete blood count')
+    || keyText.includes('hematology')
+    || keyText.includes('haematology')
+    || keyText.includes('blood count');
+
+  return isCbcTest && countTotalParameters(item) > 1;
+};
+
+const getCbcParameterLabel = (item, param) => {
+  if (!isCbcReportItem(item)) return param?.name ?? '';
+
+  const normalizedName = String(param?.name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (['atypicalcell', 'blastatypical', 'blastatypicalcell', 'blastyatypical', 'blastyatypicalcell'].includes(normalizedName)) return 'Blast/Atypical Cell';
+  if (['myelocytes', 'myelocytespercent'].includes(normalizedName)) return 'Myelocytes';
+  return param?.name ?? '';
+};
+
+const getBloodFilmParameter = (item) => (item?.parameters ?? [])
+  .find((param) => String(param.name ?? '').trim().toLowerCase() === 'blood film') ?? null;
+
+const getReportNoteWithHistogramPreference = (itemId, item, note) => {
+  const cleanNote = stripCbcHistogramMarker(note);
+  if (!isCbcReportItem(item)) return cleanNote;
+
+  const preference = itemForms[itemId]?.cbc_show_histogram ? 'SHOW' : 'HIDE';
+  return `${cleanNote}\n[[CBC_HISTOGRAM:${preference}]]`;
 };
 
 const deactivateFullPageEditor = async (itemId) => {
@@ -1110,6 +1388,140 @@ const getParameterNoteFor = (itemId) => {
   return lines.length ? lines.join('\n') : null;
 };
 
+const parseParameterNumber = (value) => {
+  if (value === null || value === undefined) return null;
+
+  const cleaned = String(value).trim().replace(/,/g, '');
+  if (!cleaned) return null;
+
+  const numeric = Number(cleaned.replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const getParameterByName = (item, name) => {
+  if (!item) return null;
+
+  const allParams = Array.isArray(item.parameter_groups) && item.parameter_groups.length
+    ? item.parameter_groups.flatMap((group) => group.parameters || [])
+    : (item.parameters || []);
+  const normalize = (value) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const aliases = {
+    atypicalcell: 'blastatypical',
+    blastatypicalcell: 'blastatypical',
+    blastatypicalpercent: 'blastatypical',
+    blastyatypical: 'blastatypical',
+    blastyatypicalcell: 'blastatypical',
+    blastyatypicalpercent: 'blastatypical',
+    myelocytespercent: 'myelocytes',
+  };
+  const normalizedName = normalize(name);
+  const canonicalName = aliases[normalizedName] ?? normalizedName;
+
+  return allParams.find((param) => {
+    const normalizedParamName = normalize(param.name);
+    return normalizedParamName === normalizedName
+      || (aliases[normalizedParamName] ?? normalizedParamName) === canonicalName;
+  }) || null;
+};
+
+const setParameterValueByName = (itemId, name, value) => {
+  const item = (items.value || []).find((i) => i.id === itemId) || null;
+  if (!item || !itemForms[itemId]) return;
+
+  const param = getParameterByName(item, name);
+  if (!param) return;
+
+  itemForms[itemId].parameter_values[param.id] = value;
+};
+
+const applyCbcDifferentialRules = (itemId) => {
+  const item = (items.value || []).find((i) => i.id === itemId) || null;
+  if (!item || !shouldShowParameterSection(item)) return;
+
+  const diffNames = [
+    'Neutrophils',
+    'Lymphocytes',
+    'Monocytes',
+    'Eosinophils',
+    'Basophils',
+    'Blast/Atypical %',
+    'Myelocytes %',
+  ];
+  const diffValues = diffNames.map((name) => ({
+    name,
+    param: getParameterByName(item, name),
+  }));
+
+  const otherDifferentialValues = diffValues
+    .filter((entry) => entry.name !== 'Basophils')
+    .map((entry) => parseParameterNumber(itemForms[itemId]?.parameter_values?.[entry.param?.id ?? ''] ?? ''));
+  if (otherDifferentialValues.length === 6 && otherDifferentialValues.every((value) => value !== null)) {
+    const otherSum = otherDifferentialValues.reduce((sum, value) => sum + value, 0);
+    const computedBasophils = Number((100 - otherSum).toFixed(2));
+    if (Number.isFinite(computedBasophils) && computedBasophils >= 0) {
+      const basophilsParam = getParameterByName(item, 'Basophils');
+      if (basophilsParam) {
+        itemForms[itemId].parameter_values[basophilsParam.id] = String(computedBasophils);
+      }
+    }
+  }
+
+  const wbcParam = getParameterByName(item, 'Total WBC Count');
+  const eosParam = getParameterByName(item, 'Eosinophils');
+  const totalEosinophilsParam = getParameterByName(item, 'Total Cir. Eosinophils');
+
+  if (wbcParam && eosParam && totalEosinophilsParam) {
+    const wbcCount = parseParameterNumber(itemForms[itemId]?.parameter_values?.[wbcParam.id] ?? '');
+    const eosinophilsPercent = parseParameterNumber(itemForms[itemId]?.parameter_values?.[eosParam.id] ?? '');
+
+    if (wbcCount !== null && eosinophilsPercent !== null) {
+      const calculatedValue = Number(((wbcCount * eosinophilsPercent) / 100).toFixed(2));
+      itemForms[itemId].parameter_values[totalEosinophilsParam.id] = String(calculatedValue);
+    }
+  }
+};
+
+const getCbcDifferentialSummary = (itemId, item) => {
+  const names = [
+    'Neutrophils',
+    'Lymphocytes',
+    'Monocytes',
+    'Eosinophils',
+    'Basophils',
+    'Blast/Atypical %',
+    'Myelocytes %',
+  ];
+  const values = names.map((name) => {
+    const param = getParameterByName(item, name);
+    return param ? parseParameterNumber(itemForms[itemId]?.parameter_values?.[param.id] ?? '') : null;
+  });
+  const total = values.reduce((sum, value) => sum + (value ?? 0), 0);
+  const complete = values.every((value) => value !== null);
+
+  return {
+    total: Number(total.toFixed(2)),
+    complete,
+    isBalanced: complete && Math.abs(total - 100) < 0.01,
+  };
+};
+
+const handleCbcParameterInput = (itemId, paramName, event) => {
+  const item = (items.value || []).find((i) => i.id === itemId) || null;
+  if (!item || !itemForms[itemId]) return;
+
+  const target = getParameterByName(item, paramName);
+  if (!target) return;
+
+  itemForms[itemId].parameter_values[target.id] = event?.target?.value ?? '';
+  applyCbcDifferentialRules(itemId);
+};
+
+items.value.forEach((item) => {
+  if (shouldShowParameterSection(item)) {
+    applyCbcDifferentialRules(item.id);
+  }
+});
+
 const submitItem = (itemId) => {
   if (!itemForms[itemId]) {
     console.warn('[Reporting] submitItem called for uninitialized itemId', itemId);
@@ -1136,8 +1548,11 @@ const submitItem = (itemId) => {
     itemForms[itemId].errors = {};
 
     const fd = new FormData();
-    fd.append('_token', document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
-    fd.append('report_note', itemForms[itemId].report_note || '');
+    const item = (items.value || []).find((entry) => String(entry.id) === String(itemId));
+    fd.append(
+      'report_note',
+      getReportNoteWithHistogramPreference(itemId, item, itemForms[itemId].report_note || '')
+    );
     fd.append('report_range', itemForms[itemId].report_range || '');
     fd.append('department', itemForms[itemId].department || props.department || '');
 
@@ -1152,13 +1567,8 @@ const submitItem = (itemId) => {
     }
 
     try {
-      const res = await fetch(route('backend.reporting.item.update', itemId), {
-        method: 'POST',
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-        body: fd,
-      });
+      const res = await postReportItem(itemId, fd);
+      if (!res) return;
 
       const payload = await res.json().catch(() => null);
 
@@ -1166,6 +1576,8 @@ const submitItem = (itemId) => {
         if (res.status === 422 && payload && payload.errors) {
           itemForms[itemId].errors = payload.errors;
           warningMessage('Validation failed. ঠিক করে চেক করুন।');
+        } else if (res.status === 419) {
+          errorMessage('সেশন যাচাই করা যায়নি। রিপোর্টের লেখা কপি করে আবার লগইন করুন।');
         } else {
           errorMessage(payload?.message || 'Save failed.');
         }
@@ -1202,7 +1614,7 @@ const submitItem = (itemId) => {
       console.error(err);
       errorMessage('Save request failed.');
     } finally {
-      itemForms[itemId].processing = false;
+      if (itemForms[itemId]) itemForms[itemId].processing = false;
     }
   })();
 };
@@ -1245,35 +1657,110 @@ const backRoute = computed(() => {
   return route('backend.reporting.index');
 });
 
-const printPage = () => {
+/**
+ * Open a print window for the given bill item ID.
+ * The print page handles its own single auto-print after loading.
+ */
+const openPrintWindow = (itemId) => {
   try {
-    const firstId = (items.value && items.value.length && items.value[0].id) ? items.value[0].id : (props.billItems && props.billItems.length ? props.billItems[0].id : null);
-    if (firstId) {
-      const url = route('backend.reporting.print', firstId);
-      // Open in new tab/window without keeping opener reference
-      let w = null;
-      try {
-        w = window.open(url, '_blank');
-        try { if (w) w.opener = null; } catch (e) { /* ignore */ }
-      } catch (e) {
-        try { w = window.open(url, '_blank'); } catch (e2) { w = null; }
-      }
-
-      // Attempt to auto-trigger print in the opened window after a short delay
-      if (w) {
-        setTimeout(() => {
-          try { w.focus(); } catch (e) {}
-          try { w.print(); } catch (e) {}
-        }, 300);
-        return;
-      }
-    }
-
-    // Fallback: print current page
-    window.print();
+    const url = new URL(route('backend.reporting.print', itemId), window.location.href);
+    url.searchParams.set('single_item', '1');
+    const printWindow = window.open(url, '_blank');
+    if (printWindow) printWindow.opener = null;
   } catch (e) {
     console.warn('Print failed', e);
   }
+};
+
+/**
+ * Save a single item's report data without hiding it from the form,
+ * then open the print window. Used by the per-item Print button.
+ */
+const saveAndPrintItem = async (itemId) => {
+  if (!itemForms[itemId]) {
+    // Item already saved – print directly
+    openPrintWindow(itemId);
+    return;
+  }
+
+  const useFullPage = !!itemForms[itemId].use_full_page;
+  let reportNote = itemForms[itemId].report_note || '';
+
+  if (useFullPage) {
+    reportNote = withFullPageMarker(reportNote);
+  } else {
+    const parameterNote = getParameterNoteFor(itemId);
+    if (parameterNote) reportNote = parameterNote;
+    const unit = getUnitFromRange(itemForms[itemId].report_range);
+    reportNote = normalizeReportNote(reportNote, unit);
+  }
+
+  itemForms[itemId].processing = true;
+
+  try {
+    const fd = new FormData();
+    const item = (items.value || []).find((entry) => String(entry.id) === String(itemId));
+    fd.append('report_note', getReportNoteWithHistogramPreference(itemId, item, reportNote));
+    fd.append('report_range', itemForms[itemId].report_range || '');
+    fd.append('department', itemForms[itemId].department || props.department || '');
+
+    const paramVals = itemForms[itemId].parameter_values || {};
+    Object.keys(paramVals).forEach((k) => {
+      fd.append(`parameter_values[${k}]`, paramVals[k] ?? '');
+    });
+
+    const selectedFile = itemForms[itemId].report_file;
+    if (selectedFile instanceof File) fd.append('report_file', selectedFile);
+
+    const res = await postReportItem(itemId, fd);
+
+    if (!res?.ok) {
+      const payload = await res?.json().catch(() => null);
+      if (res?.status === 422) {
+        itemForms[itemId].errors = payload?.errors || {};
+        warningMessage(payload?.message || 'রিপোর্ট প্রিন্টের আগে রেজাল্ট সেভ করুন।');
+      } else if (res?.status === 419) {
+        errorMessage('সেশন যাচাই করা যায়নি। রিপোর্টের লেখা কপি করে আবার লগইন করুন।');
+      } else if (res) {
+        errorMessage(payload?.message || 'রিপোর্ট সেভ করা যায়নি, তাই প্রিন্ট করা হয়নি।');
+      }
+      return;
+    }
+
+    try { successMessage('রিপোর্ট সেভ হয়েছে। প্রিন্ট হচ্ছে...'); } catch (_) {}
+    if (!hiddenItemIds.value.some((id) => String(id) === String(itemId))) {
+      hiddenItemIds.value.push(itemId);
+    }
+    delete itemForms[itemId];
+    delete fileUiState[itemId];
+    delete editorUiState[itemId];
+    delete editorRefs[itemId];
+  } catch (err) {
+    console.warn('Auto-save before print failed', err);
+    errorMessage('রিপোর্ট সেভ করা যায়নি, তাই প্রিন্ট করা হয়নি।');
+    return;
+  } finally {
+    if (itemForms[itemId]) itemForms[itemId].processing = false;
+  }
+
+  openPrintWindow(itemId);
+};
+
+/**
+ * Print only a report item that has already been saved.
+ */
+const printPage = () => {
+  const allItems = props.billItems ?? [];
+  const savedItems = allItems.filter((item) => (
+    item.reported_at || hiddenItemIds.value.some((id) => String(id) === String(item.id))
+  ));
+
+  if (!savedItems.length) {
+    warningMessage('প্রিন্ট করার আগে অন্তত একটি আইটেমের রেজাল্ট সেভ করুন।');
+    return;
+  }
+
+  savedItems.forEach((item) => openPrintWindow(item.id));
 };
 
 </script>
@@ -1390,6 +1877,7 @@ const printPage = () => {
             <div :class="shouldRenderLargeResultBox(item.id) ? 'grid grid-cols-1 gap-3 lg:grid-cols-2' : 'grid grid-cols-1 gap-3 lg:grid-cols-3'">
               <div v-if="!shouldRenderLargeResultBox(item.id)">
                 <div class="text-sm font-medium text-gray-800">{{ item.item_name }}</div>
+                <div v-if="item.report_function" class="text-xs font-semibold text-indigo-700">{{ item.report_function }}</div>
                 <div class="text-xs text-gray-500">{{ item.category }} | Sample: {{ formatSampleDateTime(item.sample_collected_at) }}</div>
               </div>
 
@@ -1406,7 +1894,7 @@ const printPage = () => {
                 <InputError v-if="department !== 'ultrasound' && department !== 'xray'" class="mt-1" :message="itemForms[item.id].errors.report_range" />
               </div>
 
-              <div>
+              <div class="rounded-md border border-slate-200 bg-slate-50 p-3 shadow-sm">
                 <div class="flex items-center justify-between gap-2">
                   <InputLabel :for="`file_top_${item.id}`" value="Report File" />
                   <div v-if="item.report_file_url" class="flex items-center gap-2">
@@ -1428,15 +1916,19 @@ const printPage = () => {
                     </a>
                   </div>
                 </div>
-                <input
-                  :id="`file_top_${item.id}`"
-                  type="file"
-                  accept=".txt,.md,.html,.htm,.pdf,.doc,.docx,image/*"
-                  class="block w-full text-sm"
-                  @change="(e) => handleFileChange(e, item.id)"
-                />
-                <div v-if="fileUiState[item.id]?.selectedName" class="mt-1 text-xs text-green-700">
-                  Selected: {{ fileUiState[item.id].selectedName }}
+                <div class="mt-2 flex flex-wrap items-center gap-3">
+                  <label
+                    :for="`file_top_${item.id}`"
+                    class="inline-flex cursor-pointer items-center rounded-md bg-slate-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                  >
+                    Choose File
+                  </label>
+                  <span v-if="!fileUiState[item.id]?.selectedName && !fileUiState[item.id]?.savedName" class="text-sm text-slate-500">
+                    No file chosen
+                  </span>
+                  <span v-if="fileUiState[item.id]?.selectedName" class="text-sm font-medium text-green-700">
+                    Selected: {{ fileUiState[item.id].selectedName }}
+                  </span>
                   <a
                     v-if="fileUiState[item.id]?.previewUrl"
                     :href="fileUiState[item.id].previewUrl"
@@ -1447,6 +1939,13 @@ const printPage = () => {
                     Open
                   </a>
                 </div>
+                <input
+                  :id="`file_top_${item.id}`"
+                  type="file"
+                  accept=".txt,.md,.html,.htm,.pdf,.doc,.docx,image/*"
+                  class="sr-only"
+                  @change="(e) => handleFileChange(e, item.id)"
+                />
                 <p v-if="fileUiState[item.id]?.docHint" class="mt-1 text-xs text-amber-700">
                   DOC detected। যদি clean import না হয়, নিচের Result বক্সে editable fallback টেক্সট দেয়া হবে।
                 </p>
@@ -1456,12 +1955,12 @@ const printPage = () => {
 
             <div v-if="!shouldRenderLargeResultBox(item.id)" class="grid grid-cols-1 gap-4 mt-3 sm:grid-cols-2 lg:grid-cols-3">
               <div class="lg:col-span-3">
-                <div v-if="(item.parameter_groups && item.parameter_groups.length) || (item.parameters && item.parameters.length)" class="mb-3">
+                <div v-if="shouldShowParameterSection(item)" class="mb-3">
                   <div class="text-sm font-semibold mb-1">Parameters</div>
 
                   <!-- Grouped parameter view (preferred) -->
                   <div v-if="item.parameter_groups && item.parameter_groups.length" class="space-y-4">
-                    <div v-for="group in item.parameter_groups" :key="group.title">
+                    <div v-for="group in item.parameter_groups.filter((group) => group.title !== 'Blood Film' && (group.parameters || []).length)" :key="group.title">
                       <div class="w-full overflow-auto">
                         <table class="param-table w-full" style="border-collapse: collapse;">
                           <colgroup>
@@ -1476,7 +1975,7 @@ const printPage = () => {
                           <tbody>
                             <tr v-for="param in (group.parameters || [])" :key="param.id">
                               <td class="param-name-cell">
-                                <div class="text-sm font-medium">{{ param.name }}</div>
+                                <div class="text-sm font-medium">{{ getCbcParameterLabel(item, param) }}</div>
                                 <div class="text-xs text-gray-500">
                                   <span v-if="param.reference_from || param.reference_to">{{ param.reference_from }}<span v-if="param.reference_from && param.reference_to"> - </span>{{ param.reference_to }}</span>
                                   <span v-if="param.unit"> {{ param.unit }}</span>
@@ -1486,9 +1985,19 @@ const printPage = () => {
                                 <input
                                   type="text"
                                   v-model="itemForms[item.id].parameter_values[param.id]"
+                                  @input="handleCbcParameterInput(item.id, param.name, $event)"
                                   placeholder="Result"
                                   class="w-40 p-2 text-sm border rounded text-center"
                                 />
+                              </td>
+                            </tr>
+                            <tr v-if="group.title === 'Differential Count' && isCbcReportItem(item)">
+                              <td class="border-t bg-slate-50 px-3 py-2 text-sm font-semibold">Total Differential Count</td>
+                              <td
+                                class="border-t bg-slate-50 px-3 py-2 text-sm font-semibold"
+                                :class="getCbcDifferentialSummary(item.id, item).isBalanced ? 'text-emerald-700' : 'text-amber-700'"
+                              >
+                                {{ getCbcDifferentialSummary(item.id, item).total }}% / 100%
                               </td>
                             </tr>
                           </tbody>
@@ -1499,9 +2008,9 @@ const printPage = () => {
 
                   <!-- Fallback flat parameter list -->
                   <div v-else class="grid grid-cols-1 gap-2">
-                    <div v-for="param in item.parameters" :key="param.id" class="flex items-center gap-2">
+                    <div v-for="param in item.parameters.filter((parameter) => parameter.name !== 'Blood Film')" :key="param.id" class="flex items-center gap-2">
                       <div class="flex-1">
-                        <div class="text-xs font-medium">{{ param.name }}</div>
+                        <div class="text-xs font-medium">{{ getCbcParameterLabel(item, param) }}</div>
                         <div class="text-xs text-gray-500">
                           <span v-if="param.reference_from || param.reference_to">{{ param.reference_from }}<span v-if="param.reference_from && param.reference_to"> - </span>{{ param.reference_to }}</span>
                           <span v-if="param.unit"> {{ param.unit }}</span>
@@ -1510,10 +2019,21 @@ const printPage = () => {
                       <input
                         type="text"
                         v-model="itemForms[item.id].parameter_values[param.id]"
+                        @input="handleCbcParameterInput(item.id, param.name, $event)"
                         placeholder="Result"
                         class="w-36 p-2 text-sm border rounded"
                       />
                     </div>
+                  </div>
+                  <div v-if="getBloodFilmParameter(item)" class="mt-4">
+                    <InputLabel :for="`blood_film_${item.id}`" value="Blood Film" />
+                    <textarea
+                      :id="`blood_film_${item.id}`"
+                      v-model="itemForms[item.id].parameter_values[getBloodFilmParameter(item).id]"
+                      rows="3"
+                      placeholder="Enter blood film findings"
+                      class="mt-1 block w-full resize-y rounded-md border-slate-300 p-3 text-sm shadow-sm focus:border-indigo-300"
+                    ></textarea>
                   </div>
                 </div>
                 <InputLabel :for="`note_${item.id}`" value="Result" />
@@ -1536,6 +2056,18 @@ const printPage = () => {
               </div>
             </div>
 
+            <label
+              v-if="isCbcReportItem(item)"
+              class="mt-3 inline-flex items-center gap-2 text-sm text-slate-700"
+            >
+              <input
+                v-model="itemForms[item.id].cbc_show_histogram"
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>Show Histogram (only when analyzer data is available)</span>
+            </label>
+
             <div class="flex items-center justify-end gap-2 mt-4">
               <PrimaryButton
                 type="button"
@@ -1545,14 +2077,14 @@ const printPage = () => {
               >
                 Save Report
               </PrimaryButton>
-              <Link
-                class="px-3 py-1 text-xs text-white bg-indigo-600 rounded hover:bg-indigo-700"
-                :href="route('backend.reporting.print', item.id)"
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                class="px-3 py-1 text-xs text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50"
+                :disabled="itemForms[item.id]?.processing"
+                @click="saveAndPrintItem(item.id)"
               >
                 Print
-              </Link>
+              </button>
             </div>
           </div>
       </div>

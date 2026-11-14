@@ -1,0 +1,66 @@
+HMS OFFLINE BILLING - CPANEL UPLOAD PACKAGE
+
+PACKAGE TYPE
+This is an overlay update. Extract its contents into the existing HMS project root,
+preserving the folder structure. It is not a complete HMS installation.
+
+FILES TO UPLOAD (marked [UPLOAD])
+
+[UPLOAD] app/Http/Controllers/Backend/BillingController.php
+[UPLOAD] app/Http/Kernel.php
+[UPLOAD] app/Http/Middleware/IdempotentOfflineBillingRequest.php
+[UPLOAD] database/migrations/2026_10_23_000001_create_offline_billing_requests_table.php
+[UPLOAD] public/build/                         Production Vite assets and manifest
+[UPLOAD] public/hms-pwa-icon.svg
+[UPLOAD] public/manifest.webmanifest
+[UPLOAD] public/offline-billing.html
+[UPLOAD] public/offline-billing-unlock.js
+[UPLOAD] public/offline-crypto.js
+[UPLOAD] public/service-worker.js
+[UPLOAD] resources/js/Pages/Backend/Billing/BillingPage.vue
+[UPLOAD] resources/js/Pages/Backend/Billing/PendingList.vue
+[UPLOAD] resources/js/Pages/Backend/Billing/RefundList.vue
+[UPLOAD] resources/js/Pages/Backend/IpdPatient/Show.vue
+[UPLOAD] resources/js/app.js
+[UPLOAD] resources/js/offlineBillingQueue.js
+[UPLOAD] resources/views/app.blade.php
+[UPLOAD] routes/backend.php
+
+[KEEP]    This file is the upload checklist; it is included in the ZIP.
+[READ]    docs/offline-billing.md contains setup, use, and security limitations.
+
+DO NOT UPLOAD OR REPLACE
+- .env or .env.example
+- .vscode/sftp.json (may contain server credentials)
+- .git, vendor, node_modules, local databases, logs, or cache files
+- Any unrelated local project changes
+
+DEPLOYMENT CHECKLIST
+1. Back up the current website and database.
+2. Upload/merge the [UPLOAD] paths into the existing HMS project root. Do not
+   replace the complete public/build directory with old files; upload the
+   packaged production build files and manifest.
+3. From the HMS project root, run:
+      php artisan migrate --force
+4. Clear stale Laravel caches after deployment:
+      php artisan optimize:clear
+5. Confirm the subdomain serves the HMS public directory over HTTPS. The
+   service-worker.js must be reachable at the domain root and allowed to control
+   the / scope.
+6. Sign in online, open /view-billing-page, set the offline passphrase, and keep
+   the page open until offline support is ready. Test offline reopening only
+   after this first successful setup.
+7. Test a small non-production workflow before relying on offline billing.
+
+PERFORMANCE
+- public/build is a production Vite build, not development assets. It is
+  minified/optimized for deployment.
+- Enable PHP OPcache in the hosting control panel when available. Keep Laravel
+  debug mode disabled in production and configure suitable production caching
+  only after verifying the application.
+- Offline requests synchronize only while the page is open and unlocked.
+
+SECURITY NOTE
+This package does not include secrets or database credentials. Local offline
+data is protected by the user's passphrase, but browser JavaScript is executable
+source and cannot be hidden by putting it in a ZIP or obfuscating it.

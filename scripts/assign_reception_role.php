@@ -13,19 +13,8 @@ use Spatie\Permission\Models\Permission;
 $email = $argv[1] ?? 'eti@gmail.com';
 $roleName = $argv[2] ?? 'reception';
 
-$permissions = [
-    'frontoffice-list',
-    'appoinment-list',
-    'website-inbox',
-    'opd-patient-list',
-];
-
-foreach ($permissions as $p) {
-    Permission::firstOrCreate(['name' => $p, 'guard_name' => 'admin']);
-}
-
+// Get or create the role
 $role = Role::firstOrCreate(['name' => $roleName, 'guard_name' => 'admin']);
-$role->syncPermissions($permissions);
 
 $admin = Admin::where('email', $email)->first();
 if (!$admin) {
@@ -34,7 +23,8 @@ if (!$admin) {
 }
 
 try {
-    // Replace all roles for this user with the reception role to demonstrate strict view
+    // Assign the role to this user
+    // Note: The role should have permissions assigned via the admin panel, not via this script
     $admin->syncRoles([$role]);
     echo "Assigned role '{$role->name}' to {$email}\n";
 } catch (\Throwable $e) {
@@ -49,4 +39,4 @@ try {
     // ignore
 }
 
-echo "Done.\n";
+echo "Done. Please assign permissions to this role via the admin panel.\n";

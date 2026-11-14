@@ -3,6 +3,7 @@ namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Services\AttendanceDeviceService;
 use App\Services\ZktecoService;
 use App\Models\AttendanceDevice;
 use App\Jobs\SyncDeviceAttendanceJob;
@@ -24,6 +25,10 @@ class AttendanceSyncController extends Controller
      */
     public function sync(Request $request)
     {
+        if (!app(AttendanceDeviceService::class)->isDeviceIntegrationEnabled()) {
+            return redirect()->back()->with('errorMessage', 'Attendance device integration is disabled.');
+        }
+
         // Dispatch a queued job per active device so sync runs in background
         try {
             $devices = AttendanceDevice::where('status', 'Active')->get();
@@ -42,6 +47,10 @@ class AttendanceSyncController extends Controller
      */
     public function syncDevice(Request $request, $id)
     {
+        if (!app(AttendanceDeviceService::class)->isDeviceIntegrationEnabled()) {
+            return redirect()->back()->with('errorMessage', 'Attendance device integration is disabled.');
+        }
+
         $device = AttendanceDevice::findOrFail($id);
         try {
             SyncDeviceAttendanceJob::dispatch($device->id);

@@ -110,7 +110,7 @@
                     } else {
                         const isHtml = typeof raw === 'string' && raw.trim().startsWith('<!DOCTYPE');
                         if (resp.status === 401 || resp.status === 419 || isHtml) {
-                            statusEl.innerText = 'Session/PIN সমস্যা বা authorization issue. পেজ রিফ্রেশ করে আবার চেষ্টা করুন।';
+                            statusEl.innerText = 'Session or PIN problem. Refresh the page and try again.';
                         } else {
                             statusEl.innerText = 'Failed: ' + (data.message || JSON.stringify(data));
                         }

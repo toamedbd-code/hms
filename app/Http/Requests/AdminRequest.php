@@ -26,11 +26,11 @@ class AdminRequest extends FormRequest
         $rules = [
             // Basic User Information
             'first_name' => 'required|string|max:255',
-            'last_name' => 'required|string|max:255',
+            'last_name' => 'nullable|string|max:255',
             'email' => $this->method() == 'POST' ? 'required|email|unique:admins,email,'.$this->id : 'required',
             'photo' => 'nullable|file|mimes:png,jpg,jpeg|max:2048',
             'phone' => 'required|string|max:15',
-            'role_id' => 'required|exists:roles,id',
+            'role_id' => 'required|exists:roles,id,guard_name,admin',
             'password' => $this->method() == 'POST' ? 'required|string|min:6' : 'nullable|string|min:6',
             
             // Admin Details
@@ -113,7 +113,6 @@ class AdminRequest extends FormRequest
         return [
             // Basic User Information
             'first_name.required' => __('The first name field is required.'),
-            'last_name.required' => __('The last name field is required.'),
             'email.required' => __('The email field is required.'),
             'email.email' => __('Please enter a valid email address.'),
             'email.unique' => __('This email address is already taken.'),

@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { Link, router, usePage } from '@inertiajs/vue3';
 import { useModalSubmissionGuard } from '@/Composables/useModalSubmissionGuard';
 
 let props = defineProps({
@@ -120,6 +120,12 @@ const submitCollect = () => {
         </div>
 
         <div class="p-4 py-2 flex items-center space-x-2">
+            <Link
+                :href="route('backend.dashboard')"
+                class="inline-flex items-center px-4 py-2.5 text-sm font-semibold text-white bg-red-600 rounded-md shadow hover:bg-red-700"
+            >
+                Back
+            </Link>
             <div class="flex items-center space-x-3">
                 <div class="flex items-center bg-gray-50 dark:bg-gray-800 rounded-lg p-1 shadow-inner">
                     <button @click="goToChargeAdd"

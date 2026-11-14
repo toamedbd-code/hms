@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\DefaultDeveloperManager;
 use Closure;
 use Illuminate\Http\Request;
 
@@ -15,23 +16,31 @@ class CheckModuleAccess
             abort(403, 'Unauthorized');
         }
 
-        try {
-            // If no specific module slug provided, allow the request to continue
-            if (empty($moduleSlug)) {
-                return $next($request);
-            }
-
-            // Check whether the logged-in admin has the module assigned
-            $has = $user->modules()->where('slug', $moduleSlug)->exists();
-
-            if ($has) {
-                return $next($request);
-            }
-
-            // Otherwise forbid access
-            abort(403);
-        } catch (\Throwable $e) {
-            abort(403);
+        $moduleSlug = strtolower(trim((string) $moduleSlug));
+        if ($moduleSlug === '') {
+            return $next($request);
         }
+
+        if (DefaultDeveloperManager::isDeveloper($user)) {
+            return $next($request);
+        }
+
+        try {
+            if (function_exists('user_has_module') && user_has_module($user, $moduleSlug)) {
+                return $next($request);
+            }
+
+            $assigned = function_exists('user_assigned_module_slugs')
+                ? user_assigned_module_slugs($user)
+                : collect();
+
+            if ($assigned->isEmpty()) {
+                return $next($request);
+            }
+        } catch (\Throwable $e) {
+            return $next($request);
+        }
+
+        abort(403, 'This module is not assigned.');
     }
 }

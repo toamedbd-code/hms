@@ -14,7 +14,10 @@ class Test extends Model
 
     protected $fillable = [
         'category_type',
+        'main_category_id',
+        'discount_rate_locked',
         'test_name',
+        'report_function',
         'test_short_name',
         'test_type',
         'test_category_id',
@@ -29,6 +32,7 @@ class Test extends Model
         'standard_charge',
         'amount',
         'referral_percentage',
+        'discount_percentage',
         'test_parameters',
         'commissionable',
         'commission_rate',
@@ -36,15 +40,27 @@ class Test extends Model
     ];
 
     protected $casts = [
+        'discount_rate_locked' => 'boolean',
         'commissionable' => 'boolean',
         'commission_rate' => 'decimal:2',
         'referral_percentage' => 'decimal:2',
+        'discount_percentage' => 'decimal:2',
     ];
 
     // Relationships
     public function pathologyCategory()
     {
         return $this->belongsTo(TestCategory::class, 'test_category_id');
+    }
+
+    public function testSubCategory()
+    {
+        return $this->belongsTo(TestCategory::class, 'test_sub_category_id');
+    }
+
+    public function mainCategory()
+    {
+        return $this->belongsTo(MainCategory::class, 'main_category_id');
     }
 
     public function chargeCategory()

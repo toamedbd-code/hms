@@ -21,6 +21,7 @@
         <div>
             <div class="title">Sample Barcodes</div>
             <div class="meta">Bill No: {{ $billing->bill_number ?? 'N/A' }}</div>
+            <div class="meta">Enter or scan the exact barcode value as the analyzer sample ID/accession number.</div>
         </div>
         <a href="#" class="print-btn" onclick="window.print(); return false;">Print</a>
     </div>

@@ -125,7 +125,7 @@
     async function loadModels() {
         if (modelsLoaded) return true;
         if (typeof faceapi === 'undefined') {
-            statusEl.innerText = 'face-api.js load হয়নি। ইন্টারনেট বা CDN access চেক করুন।';
+            statusEl.innerText = 'face-api.js not loaded. Check internet or CDN access.';
             return false;
         }
 
@@ -198,8 +198,8 @@
     async function captureAndRegister() {
         const code = document.getElementById('employee_code').value.trim();
         if (!code) { statusEl.innerText = 'Enter employee code.'; return; }
-        if (!modelsLoaded) { statusEl.innerText = 'Model load হয়নি। আগে Start Camera দিন।'; return; }
-        if (!stream || !video.srcObject) { statusEl.innerText = 'Camera started না। আগে Start Camera দিন।'; return; }
+        if (!modelsLoaded) { statusEl.innerText = 'Models are not loaded. Click Start Camera first.'; return; }
+        if (!stream || !video.srcObject) { statusEl.innerText = 'Camera is not started. Click Start Camera first.'; return; }
 
         statusEl.innerText = 'Detecting face and computing descriptor...';
         let detections = null;

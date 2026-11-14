@@ -25,7 +25,7 @@
             <td class="label">Discharge</td><td class="colon">:</td><td class="value nowrap">{{ $vm['invoice']['discharge_at'] }}</td>
         </tr>
         <tr>
-            <td class="label">Refd. By</td><td class="colon">:</td><td class="value" colspan="4">{{ $vm['patient']['consultant_name'] }}</td>
+            <td class="label">Refd. By</td><td class="colon">:</td><td class="value refd-value" colspan="4">{{ $vm['patient']['consultant_name'] }}</td>
         </tr>
     </table>
 </div>

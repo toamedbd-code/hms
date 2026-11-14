@@ -15,7 +15,7 @@
     <hr />
     <h2>Shifts</h2>
     <table id="shifts-table" border="1" cellpadding="6">
-        <thead><tr><th>ID</th><th>Emp Code</th><th>Start</th><th>End</th><th>From</th><th>To</th><th>Action</th></tr></thead>
+        <thead><tr><th>ID</th><th>Employee Code</th><th>Start</th><th>End</th><th>From</th><th>To</th><th>Action</th></tr></thead>
         <tbody></tbody>
     </table>
 </div>

@@ -723,7 +723,7 @@
                             @forelse (($medicineItems ?? []) as $index => $item)
                                 <li class="rx-item">
                                     <div class="rx-one-line">
-                                        <span class="medicine-name">{{ $item['medicine_name'] ?? 'N/A' }}</span>,
+                                        <span class="medicine-name">{{ $item['medicine_name'] ?? 'N/A' }}</span>@if (!empty($item['generic_name'])) <span>({{ $item['generic_name'] }})</span>@endif,
                                         Dose: {{ $item['dose'] ?? 'N/A' }},
                                         Instructions: {{ $item['instructions'] ?? 'N/A' }}
                                         @if (!empty($item['frequency']))

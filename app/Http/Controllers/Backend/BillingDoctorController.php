@@ -10,6 +10,7 @@ use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Schema;
+use App\Support\DefaultDeveloperManager;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
 use Exception;
@@ -44,8 +45,135 @@ class BillingDoctorController extends Controller
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
+                'isDeveloper' => fn() => DefaultDeveloperManager::isDeveloper(auth('admin')->user()),
             ]
         );
+    }
+
+    public function downloadSampleCsv()
+    {
+        $this->ensureDeveloperAccess();
+
+        return response()->streamDownload(function () {
+            $output = fopen('php://output', 'w');
+            fputcsv($output, ['Name', 'Status']);
+            fclose($output);
+        }, 'billing-doctors-sample.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    public function exportCsv()
+    {
+        $this->ensureDeveloperAccess();
+
+        return response()->streamDownload(function () {
+            $output = fopen('php://output', 'w');
+            fputcsv($output, ['Name', 'Status']);
+
+            foreach ($this->billingdoctorService->all() as $doctor) {
+                fputcsv($output, [$doctor->name, $doctor->status]);
+            }
+
+            fclose($output);
+        }, 'billing-doctors-' . now()->format('Ymd-His') . '.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    public function importCsv(Request $request)
+    {
+        $this->ensureDeveloperAccess();
+
+        $validated = $request->validate([
+            'csv_file' => ['required', 'file', 'mimes:csv,txt', 'max:5120'],
+        ]);
+
+        $handle = fopen($validated['csv_file']->getRealPath(), 'r');
+        if ($handle === false) {
+            return back()->withErrors(['csv_file' => 'The uploaded CSV file could not be opened.']);
+        }
+
+        $headers = fgetcsv($handle);
+        if (!is_array($headers)) {
+            fclose($handle);
+            return back()->withErrors(['csv_file' => 'The CSV file is empty or invalid.']);
+        }
+
+        $headers[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $headers[0]);
+        $headerIndexes = [];
+        foreach ($headers as $index => $header) {
+            $headerIndexes[strtolower(trim((string) $header))] = $index;
+        }
+
+        if (!array_key_exists('name', $headerIndexes)) {
+            fclose($handle);
+            return back()->withErrors(['csv_file' => 'CSV must contain a Name column. Download the sample CSV for the correct format.']);
+        }
+
+        $rows = [];
+        $rowErrors = [];
+        $lineNumber = 1;
+        while (($row = fgetcsv($handle)) !== false) {
+            $lineNumber++;
+            if (count(array_filter($row, static fn ($value) => trim((string) $value) !== '')) === 0) {
+                continue;
+            }
+
+            $name = trim((string) ($row[$headerIndexes['name']] ?? ''));
+            $statusIndex = $headerIndexes['status'] ?? null;
+            $status = $statusIndex !== null ? trim((string) ($row[$statusIndex] ?? 'Active')) : 'Active';
+            $status = $status === '' ? 'Active' : ucfirst(strtolower($status));
+
+            $validator = \Illuminate\Support\Facades\Validator::make(
+                ['name' => $name, 'status' => $status],
+                ['name' => ['required', 'string', 'max:255'], 'status' => ['required', 'in:Active,Inactive']]
+            );
+
+            if ($validator->fails()) {
+                $rowErrors[] = 'Row ' . $lineNumber . ': ' . implode(' ', $validator->errors()->all());
+                continue;
+            }
+
+            $rows[] = ['name' => $name, 'status' => $status];
+        }
+        fclose($handle);
+
+        if ($rowErrors !== []) {
+            return back()->withErrors(['csv_file' => implode(' ', $rowErrors)]);
+        }
+        if ($rows === []) {
+            return back()->withErrors(['csv_file' => 'The CSV file contains no doctor rows.']);
+        }
+
+        $existingNames = $this->billingdoctorService->all()
+            ->pluck('name')
+            ->map(static fn ($name) => mb_strtolower(trim((string) $name)))
+            ->all();
+        $seenNames = array_fill_keys($existingNames, true);
+        $imported = 0;
+        $skipped = 0;
+
+        DB::transaction(function () use ($rows, &$seenNames, &$imported, &$skipped) {
+            foreach ($rows as $row) {
+                $normalizedName = mb_strtolower($row['name']);
+                if (isset($seenNames[$normalizedName])) {
+                    $skipped++;
+                    continue;
+                }
+
+                $this->billingdoctorService->create($row);
+                $seenNames[$normalizedName] = true;
+                $imported++;
+            }
+        });
+
+        return back()->with('successMessage', "Imported {$imported} billing doctors; skipped {$skipped} duplicates.");
+    }
+
+    private function ensureDeveloperAccess(): void
+    {
+        abort_unless(DefaultDeveloperManager::isDeveloper(auth('admin')->user()), 403);
     }
 
     private function getDatas()

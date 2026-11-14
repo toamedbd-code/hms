@@ -11,6 +11,7 @@ class StoreStockMovement extends Model
 
     protected $fillable = [
         'store_item_id',
+        'inventory_lot_id',
         'movement_type',
         'quantity',
         'unit_price',
@@ -30,5 +31,10 @@ class StoreStockMovement extends Model
     public function storeItem()
     {
         return $this->belongsTo(StoreItem::class, 'store_item_id');
+    }
+
+    public function inventoryLot()
+    {
+        return $this->belongsTo(StoreItemLot::class, 'inventory_lot_id');
     }
 }

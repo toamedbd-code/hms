@@ -409,6 +409,8 @@ const goBack = () => {
 </template>
 
 <style scoped>
+@reference "../../../../css/app.css";
+
 .form-input {
     @apply block w-full p-2 text-sm rounded-md border-slate-300 focus:border-indigo-300;
 }

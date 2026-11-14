@@ -72,13 +72,22 @@ class MedicinePurchaseController extends Controller
     {
         $suppliers = MedicineSupplier::where('status', 'Active')->get();
         $categories = MedicineCategory::where('status', 'Active')->get();
-        $medicines = $this->getMedicineOptions();
 
         return Inertia::render('Backend/MedicinePurchase/Form', [
             'suppliers' => $suppliers,
             'categories' => $categories,
-            'medicines' => $medicines,
             'isEdit' => false,
+        ]);
+    }
+
+    public function medicineOptions(Request $request)
+    {
+        $validated = $request->validate([
+            'medicine_category_id' => 'required|integer|exists:medicinecategories,id',
+        ]);
+
+        return response()->json([
+            'medicines' => $this->getMedicineOptions((int) $validated['medicine_category_id']),
         ]);
     }
 
@@ -183,21 +192,20 @@ class MedicinePurchaseController extends Controller
     {
         $suppliers = MedicineSupplier::where('status', 'Active')->get();
         $categories = MedicineCategory::where('status', 'Active')->get();
-        $medicines = $this->getMedicineOptions();
         $medicinepurchase->load('purchaseItems');
 
         return Inertia::render('Backend/MedicinePurchase/Form', [
             'purchase' => $medicinepurchase,
             'suppliers' => $suppliers,
             'categories' => $categories,
-            'medicines' => $medicines,
             'isEdit' => true,
         ]);
     }
 
-    private function getMedicineOptions()
+    private function getMedicineOptions(int $categoryId)
     {
         return MedicineInventory::query()
+            ->where('medicine_category_id', $categoryId)
             ->select([
                 'medicine_category_id',
                 'medicine_name',

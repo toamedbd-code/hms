@@ -53,5 +53,6 @@ class Kernel extends ConsoleKernel
         Commands\GenerateInvoiceFullPdf::class,
         Commands\RecomputeRefundAmounts::class,
         Commands\RecoverSystemDataCommand::class,
+        Commands\RecalculateReferralCommissions::class,
     ];
 }

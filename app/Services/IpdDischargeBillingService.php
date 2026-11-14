@@ -373,11 +373,16 @@ class IpdDischargeBillingService
                 $q->orWhere(function ($sub) use ($ipdpatient) {
                     $sub->where(function ($noteQuery) use ($ipdpatient) {
                         $noteQuery->where('note', 'like', '%ipd_patient_id:' . $ipdpatient->id . '%')
-                            ->orWhere('note', 'like', '%ipd_patient_id: ' . $ipdpatient->id . '%')
-                            ->orWhere('note', 'like', '%Collected via IPD payment%');
+                            ->orWhere('note', 'like', '%ipd_patient_id: ' . $ipdpatient->id . '%');
                     });
                 });
             }
+        });
+
+        // Older releases mirrored every IPD payment into due_collections, which made
+        // the same money count twice here. Those mirror rows are skipped.
+        $dueCollectionQuery->where(function ($q) {
+            $q->whereNull('note')->orWhere('note', 'not like', '%Collected via IPD payment%');
         });
 
         $paidAmount += (float) $dueCollectionQuery->sum('collected_amount');

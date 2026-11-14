@@ -616,16 +616,25 @@ class HomeController extends Controller
 
             $lastAppointmentId = Appoinment::query()->max('id') ?? 0;
             $nextId = $lastAppointmentId + 1;
+            $doctorId = (int) $validated['doctor_id'];
+            $appointmentDate = \Illuminate\Support\Carbon::parse($validated['appointment_date'])->toDateString();
+
+            Admin::query()->whereKey($doctorId)->lockForUpdate()->firstOrFail();
+            $patientSerial = ((int) DB::table('appoinments')
+                ->where('doctor_id', $doctorId)
+                ->whereDate('appoinment_date', $appointmentDate)
+                ->max('patient_serial')) + 1;
 
             Appoinment::create([
                 'patient_id' => $patient->id,
-                'doctor_id' => (int) $validated['doctor_id'],
+                'doctor_id' => $doctorId,
+                'patient_serial' => $patientSerial,
                 'doctor_fee' => 0,
                 'shift' => 'Morning',
                 'appoinment_date' => $validated['appointment_date'],
                 'slot' => 'Morning',
                 'appointment_priority' => 'Normal',
-                'payment_mode' => 'Cash',
+                'payment_mode' => null,
                 'transaction_id' => prefixed_serial('transaction_id_prefix', 'TRID', $nextId, 6),
                 'booking_source' => 'website',
                 'website_contact_phone' => $validated['patient_phone'],

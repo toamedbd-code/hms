@@ -21,6 +21,8 @@ class BillingRequest extends FormRequest
     {
         $rules = [
             'patient_id' => 'nullable|integer',
+            'ipd_patient_id' => 'nullable|integer|exists:ipdpatients,id',
+            'ipd_prescription_id' => 'nullable|integer|exists:ipd_prescriptions,id',
             'doctor_id' => 'nullable',
             'doctor_type' => 'nullable',
             'doctor_name' => 'nullable',
@@ -34,20 +36,24 @@ class BillingRequest extends FormRequest
             'patient_age' => 'nullable',
 
             'card_type' => 'required|string|max:50',
-            'pay_mode' => 'required|string|in:Cash,Card,Mobile Banking',
+            'pay_mode' => 'required|string|in:Cash,Card,Bank,Mobile Banking,Bkash,Nagad',
             'card_number' => 'nullable|string|max:50|required_unless:pay_mode,Cash',
 
             'items' => 'required|array|min:1',
             'items.*.id' => 'required|integer',
+            'items.*.department_id' => 'nullable|integer|exists:departments,id',
             'items.*.name' => 'required|string|max:255',
-            // Include ECG, Ultrasound and Ultrasonogram as valid categories (treated as radiology)
-            'items.*.category' => 'required|in:Pathology,Radiology,ECG,Ultrasound,Ultrasonogram,Medicine,OPD,IPD,Appointment,Disposable,Service',
+            'items.*.category' => 'required|string|max:100',
             'items.*.unit_price' => 'required|numeric|min:0',
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.total_amount' => 'required|numeric|min:0',
             'items.*.discount' => 'nullable|numeric|min:0',
+            'items.*.discount_exempt' => 'nullable|boolean',
+            'items.*.discount_percentage' => 'nullable|numeric|min:0|max:100',
+            'items.*.discount_rate_locked' => 'nullable|boolean',
             'items.*.rugound' => 'nullable|numeric',
             'items.*.net_amount' => 'required|numeric|min:0',
+            'items.*.referral_percentage' => 'nullable|numeric|min:0|max:100',
             'items.*.room_no' => 'nullable|string|max:50',
 
             'total' => 'required|numeric|min:0',
@@ -82,6 +88,7 @@ class BillingRequest extends FormRequest
             // Optional fields for API flow
             'print_token' => 'nullable|string|max:255',
             'backend_invoice' => 'nullable|boolean',
+            'pharmacy_mode' => 'nullable|boolean',
         ];
 
         $rules['is_new_patient'] = 'sometimes|boolean';
@@ -131,7 +138,7 @@ class BillingRequest extends FormRequest
             // Rest of your existing messages...
             'card_type.required' => 'Card type is required.',
             'pay_mode.required' => 'Payment mode is required.',
-            'pay_mode.in' => 'Payment mode must be Cash, Card, or Mobile Banking.',
+            'pay_mode.in' => 'Payment mode must be Cash, Card, Bank, Bkash, or Nagad.',
             'card_number.required_unless' => 'Card/Account number is required for non-cash payments.',
 
             // Items Validation
@@ -141,7 +148,6 @@ class BillingRequest extends FormRequest
             'items.*.id.integer' => 'Item ID must be a valid number.',
             'items.*.name.required' => 'Item name is required for each item.',
             'items.*.category.required' => 'Item category is required.',
-            'items.*.category.in' => 'Item category must be one of Pathology, Radiology, ECG, Ultrasound, Medicine, OPD, IPD, Appointment, Ultrasonogram, Disposable, or Service. ',
             'items.*.unit_price.required' => 'Unit price is required for each item.',
             'items.*.unit_price.numeric' => 'Unit price must be a valid number.',
             'items.*.unit_price.min' => 'Unit price cannot be negative.',
@@ -235,10 +241,37 @@ class BillingRequest extends FormRequest
             $discountType = (string) $this->input('discount_type', 'percentage');
             $discountValue = (float) $this->input('discount', 0);
             $extraFlatDiscount = (float) $this->input('extra_flat_discount', 0);
+            $items = $this->input('items', []);
+            $itemDiscountCap = 0.0;
+
+            if (is_array($items)) {
+                foreach ($items as $item) {
+                    if (!is_array($item) || ($item['discount_exempt'] ?? false)) {
+                        continue;
+                    }
+
+                    $category = strtolower(trim((string) ($item['category'] ?? '')));
+                    if (str_contains($category, 'dispos')) {
+                        continue;
+                    }
+
+                    $itemTotal = max(0, (float) ($item['total_amount'] ?? 0));
+                    $itemPercent = min(100, max(0, (float) ($item['discount_percentage'] ?? 0)));
+                    $itemIsLocked = (bool) ($item['discount_rate_locked'] ?? false);
+                    if ($itemIsLocked && $itemPercent <= 0) {
+                        continue;
+                    }
+                    $effectivePercent = $itemIsLocked
+                        ? $itemPercent
+                        : ($itemPercent > 0 ? $itemPercent : $maxDiscountPercent);
+
+                    $itemDiscountCap += ($itemTotal * $effectivePercent) / 100;
+                }
+            }
 
             $discountAmount = $discountType === 'percentage'
                 ? ($total * $discountValue) / 100
-                : $discountValue;
+                : min($discountValue, $itemDiscountCap);
 
             $totalDiscountAmount = max(0, $discountAmount) + max(0, $extraFlatDiscount);
             $appliedDiscountPercent = ($totalDiscountAmount / $total) * 100;
@@ -249,6 +282,34 @@ class BillingRequest extends FormRequest
                     'discount',
                     "Total discount cannot exceed {$formattedMaxPercent}% of total bill amount."
                 );
+            }
+
+            $categoryCapsEnabled = $this->resolveCategoryDiscountCapEnabled();
+            if ($categoryCapsEnabled && $discountType === 'percentage' && $discountValue > 0) {
+                $items = $this->input('items', []);
+                if (is_array($items)) {
+                    foreach ($items as $item) {
+                        if (!is_array($item)) {
+                            continue;
+                        }
+
+                        if ((bool) ($item['discount_exempt'] ?? false)) {
+                            continue;
+                        }
+
+                        if ((bool) ($item['discount_rate_locked'] ?? false)
+                            && (float) ($item['discount_percentage'] ?? 0) <= 0) {
+                            continue;
+                        }
+
+                        if ((float) ($item['discount_percentage'] ?? 0) > 0) {
+                            continue;
+                        }
+
+                        // Category caps are applied per item during billing calculation.
+                        // Do not reject the whole mixed-category bill based on its lowest cap.
+                    }
+                }
             }
         });
     }
@@ -265,6 +326,74 @@ class BillingRequest extends FormRequest
         $configured = (float) ($setting?->max_billing_discount_percent ?? $default);
 
         return max(0, min(100, $configured));
+    }
+
+    private function resolveCategoryDiscountCapEnabled(): bool
+    {
+        if (!function_exists('get_cached_web_setting')) {
+            return false;
+        }
+
+        $setting = get_cached_web_setting();
+        $attendanceOptions = $setting?->attendance_device_options ?? [];
+
+        if (is_string($attendanceOptions)) {
+            $attendanceOptions = json_decode($attendanceOptions, true);
+        }
+
+        if (!is_array($attendanceOptions)) {
+            return false;
+        }
+
+        return (bool) ($attendanceOptions['billing_discount_cap_by_category_enabled'] ?? false);
+    }
+
+    private function resolveCategoryDiscountCap(string $category): ?float
+    {
+        if (!function_exists('get_cached_web_setting')) {
+            return null;
+        }
+
+        $setting = get_cached_web_setting();
+        $attendanceOptions = $setting?->attendance_device_options ?? [];
+
+        if (is_string($attendanceOptions)) {
+            $attendanceOptions = json_decode($attendanceOptions, true);
+        }
+
+        if (!is_array($attendanceOptions)) {
+            return null;
+        }
+
+        $caps = $attendanceOptions['billing_category_discount_caps'] ?? [];
+        if (!is_array($caps)) {
+            return null;
+        }
+
+        $normalizedCategory = trim($category);
+        if ($normalizedCategory === '') {
+            return null;
+        }
+
+        foreach ([$normalizedCategory, strtolower($normalizedCategory), ucfirst(strtolower($normalizedCategory))] as $candidate) {
+            if (array_key_exists($candidate, $caps)) {
+                $value = (float) $caps[$candidate];
+                if (is_finite($value)) {
+                    return max(0, min(100, $value));
+                }
+            }
+        }
+
+        foreach ($caps as $key => $value) {
+            if (strcasecmp((string) $key, $normalizedCategory) === 0) {
+                $numeric = (float) $value;
+                if (is_finite($numeric)) {
+                    return max(0, min(100, $numeric));
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

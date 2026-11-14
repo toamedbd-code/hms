@@ -6,7 +6,7 @@ import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BarChart from '@/Components/Chart/BarChart.vue';
 import PieChart from '@/Components/Chart/PieChart.vue';
 
-const props = defineProps(['dashboardData', 'dashboardCardPermissions']);
+const props = defineProps(['dashboardData', 'dashboardCardPermissions', 'dashboardFilter', 'departmentScope']);
 const isDark = useDark();
 
 // Format Tk.0.00
@@ -29,31 +29,159 @@ const getStatValue = (key) => {
   return Number.isFinite(num) ? num : 0;
 };
 
+const getCategoryIcon = (name) => {
+  const category = String(name || '').trim().toLowerCase();
+  if (category.includes('ambulance')) return '🚑';
+  if (category.includes('appointment')) return '📅';
+  if (category.includes('blood')) return '🩸';
+  if (category.includes('ecg') || category.includes('echo')) return '❤️';
+  if (category.includes('ultrasound') || category.includes('sonogram')) return '🔊';
+  if (category.includes('radiology') || category.includes('x-ray') || category.includes('xray')) return '📷';
+  if (category.includes('pathology')) return '🧪';
+  if (category.includes('micro') || category.includes('biology')) return '🔬';
+  if (category.includes('pharmacy') || category.includes('medicine')) return '💊';
+  if (category.includes('disposable')) return '🧴';
+  if (category.includes('opd')) return '📄';
+  if (category.includes('ipd')) return '🏥';
+  return '📊';
+};
+
+const getPermissionSlug = (name) => String(name || '')
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-+|-+$/g, '');
+
 const statsCards = computed(() => {
+  const scopedReport = {
+    link: 'backend.finance-report.index',
+    params: {
+      report_type: props.departmentScope === 'pharmacy' ? 'pharmacy-transaction' : 'department-transaction',
+      date_from: props.dashboardFilter?.from,
+      date_to: props.dashboardFilter?.to,
+    },
+  };
   const cards = [
-    { name:'OPD Income', icon:'📄', key:'opdIncome', link:'backend.opdpatient.index' },
-    { name:'IPD Income', icon:'🏥', key:'ipdIncome', link:'backend.ipdpatient.index' },
-    { name:'Pharmacy Income', icon:'💊', key:'pharmacyIncome', link:'backend.pharmacybill.index' },
-    { name:'Disposable Income', icon:'🧴', key:'disposableIncome', link:'backend.itemcharge.index' },
-    { name:'Pathology Income', icon:'🧪', key:'pathologyIncome', link:'backend.pathology.index' },
-    { name:'Radiology Income', icon:'📷', key:'radiologyIncome', link:'backend.radiology.index' },
-    { name:'ECG Income', icon:'❤️', key:'ecgIncome', link:'backend.itemcharge.index' },
-    { name:'Ultrasound Income', icon:'🔊', key:'ultrasoundIncome', link:'backend.itemcharge.index' },
-    { name:'Blood Bank Income', icon:'💉', key:'bloodBankIncome', link:'backend.bloodbank.index' },
     { name:'Expenses', icon:'💰', key:'expenses', link:'backend.expense.index' },
-    { name:'Due Pending Income', icon:'⏳', key:'pendingIncome', link:'backend.pending.list' },
+    {
+      name:'Pharmacy Income',
+      icon:'💊',
+      key:'pharmacyIncome',
+      link: props.departmentScope ? 'backend.finance-report.index' : 'backend.pharmacybill.index',
+      params: props.departmentScope ? {
+        report_type: props.departmentScope === 'pharmacy' ? 'pharmacy-transaction' : 'department-transaction',
+        date_from: props.dashboardFilter?.from,
+        date_to: props.dashboardFilter?.to,
+      } : {},
+    },
+    {
+      name:'Pathology Income',
+      icon:'🧪',
+      key:'pathologyIncome',
+      link: props.departmentScope ? 'backend.finance-report.index' : 'backend.billing.list',
+      params: props.departmentScope ? {
+        report_type: 'department-transaction',
+        date_from: props.dashboardFilter?.from,
+        date_to: props.dashboardFilter?.to,
+      } : {},
+    },
+    {
+      name:'Radiology Income',
+      icon:'📷',
+      key:'radiologyIncome',
+      link: props.departmentScope ? 'backend.finance-report.index' : 'backend.billing.list',
+      params: props.departmentScope ? {
+        report_type: 'department-transaction',
+        date_from: props.dashboardFilter?.from,
+        date_to: props.dashboardFilter?.to,
+      } : {},
+    },
+    { name:'Total Doctor Visit Appointment', icon:'🩺', key:'doctorVisitAppointment', value: dashboardStats.value?.doctorVisitAppointment, link:'backend.appoinment.index' },
+    {
+      name:'Due Pending Income',
+      icon:'⏳',
+      key:'pendingIncome',
+      ...(props.departmentScope ? scopedReport : { link: 'backend.pending.list' }),
+    },
     {
       name:'Referral Commission',
       icon:'🤝',
       key:'referralCommission',
       link:'backend.referral.index',
     },
-    { name:'Total Net Income', icon:'💵', key:'netIncome', link:'backend.report.index' },
-    { name:'Total Refunds', icon:'🔄', key:'refunds', link:'backend.refunds.list' },
-    { name:'Total Discount', icon:'🏷️', key:'totalDiscountAmount', link:'backend.report.index' },
+    {
+      name: props.departmentScope
+        ? `${props.departmentScope.charAt(0).toUpperCase()}${props.departmentScope.slice(1)} Net Income`
+        : 'Total Net Income',
+      icon:'💵',
+      key:'netIncome',
+      ...(props.departmentScope ? scopedReport : { link: 'backend.report.index' }),
+    },
+    {
+      name:'Total Refunds',
+      icon:'🔄',
+      key:'refunds',
+      ...(props.departmentScope ? scopedReport : { link: 'backend.refunds.list' }),
+    },
+    {
+      name:'Product Returns',
+      icon:'↩️',
+      key:'productReturns',
+      link:'backend.productreturn.index',
+      params: {
+        return_type: 'all',
+        date_from: props.dashboardFilter?.from,
+        date_to: props.dashboardFilter?.to,
+      },
+    },
+    {
+      name:'Total Discount',
+      icon:'🏷️',
+      key:'totalDiscountAmount',
+      ...(props.departmentScope ? scopedReport : { link: 'backend.report.index' }),
+    },
   ];
 
-  return cards.filter((card) => props.dashboardCardPermissions?.[card.key]);
+  const visibleCards = cards.filter((card) => props.dashboardCardPermissions?.[card.key]);
+  const visibleCardNames = new Set(visibleCards.map((card) => String(card.name || '').trim().toLowerCase()));
+  const categoryCards = (dashboardStats.value?.categoryIncomes || [])
+    .filter((category) => {
+      const name = String(category.name || '').trim();
+      const permissionKey = `custom-category-${getPermissionSlug(name)}`;
+      return props.dashboardCardPermissions?.[permissionKey] && !visibleCardNames.has(`${name} Income`.toLowerCase());
+    })
+    .map((category) => ({
+    name: `${String(category.name || '').trim()} Income`,
+    icon: getCategoryIcon(category.name),
+    key: `custom-category-${getPermissionSlug(category.name)}`,
+    value: Number(category.amount) || 0,
+    link: 'backend.billing.list',
+    params: { category: category.name },
+    }));
+  const categoryCardNames = new Set([
+    ...visibleCardNames,
+    ...categoryCards.map((card) => card.name.toLowerCase()),
+  ]);
+  const mainCategoryCards = (dashboardStats.value?.mainCategoryIncomes || [])
+    .filter((category) => {
+      const name = String(category.name || '').trim();
+      const permissionKey = `main-category-${getPermissionSlug(name)}`;
+      return props.dashboardCardPermissions?.[permissionKey]
+        && !categoryCardNames.has(`${name} Income`.toLowerCase());
+    })
+    .map((category) => ({
+      name: `${String(category.name || '').trim()} Income`,
+      icon: getCategoryIcon(category.name),
+      key: `main-category-${getPermissionSlug(category.name)}-${category.id}`,
+      value: Number(category.amount) || 0,
+      link: 'backend.billing.list',
+      params: { main_category: category.name },
+    }));
+  return [...visibleCards, ...categoryCards, ...mainCategoryCards].sort((firstCard, secondCard) => (
+    String(firstCard.name || '').localeCompare(String(secondCard.name || ''), undefined, {
+      sensitivity: 'base',
+    })
+  ));
 });
 
 const canViewExpiredMedicines = computed(() => Boolean(props.dashboardCardPermissions?.expiredMedicines));
@@ -102,20 +230,51 @@ onUnmounted(() => {
         <template v-for="card in statsCards" :key="card.key">
           <Link
             :href="route(card.link, card.params || {})"
-            class="flex items-center rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900"
+            class="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-white p-2.5 text-left shadow-sm transition hover:shadow-md dark:border-slate-700 dark:bg-slate-900"
           >
-            <div class="mr-3 flex h-12 w-12 items-center justify-center rounded-lg bg-green-500 text-xl text-white">
+            <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-green-500 text-xl text-white">
               {{ card.icon }}
             </div>
 
-            <div class="min-w-0">
-              <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{{ card.name }}</p>
-              <p class="truncate text-lg font-bold text-slate-900 dark:text-slate-100">
-                {{ tkFormat(getStatValue(card.key)) }}
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-medium leading-tight text-slate-900 dark:text-slate-100" :title="card.name">{{ card.name }}</p>
+              <p class="mt-1 break-all text-base font-bold leading-tight text-slate-900 dark:text-slate-100">
+                {{ tkFormat(card.value ?? getStatValue(card.key)) }}
               </p>
             </div>
           </Link>
         </template>
+      </div>
+
+      <div v-if="props.dashboardCardPermissions?.doctorVisitAppointment" class="mb-4 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div class="border-b border-slate-200 px-4 py-3 font-semibold text-slate-800 dark:border-slate-700 dark:text-slate-100">
+          Doctor-wise Visit Appointment
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse text-sm">
+            <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+              <tr>
+                <th class="px-4 py-3">Doctor</th>
+                <th class="px-4 py-3 text-center">Appointments</th>
+                <th class="px-4 py-3 text-right">Visit Fee</th>
+                <th class="px-4 py-3 text-right">Paid</th>
+                <th class="px-4 py-3 text-right">Due</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="doctor in dashboardStats.doctorVisitAppointmentByDoctor || []" :key="doctor.doctor_id" class="border-t border-slate-100 dark:border-slate-700">
+                <td class="px-4 py-3 font-medium text-slate-800 dark:text-slate-100">{{ doctor.doctor_name }}</td>
+                <td class="px-4 py-3 text-center text-slate-600 dark:text-slate-300">{{ countFormat(doctor.appointment_count) }}</td>
+                <td class="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{{ tkFormat(doctor.fee) }}</td>
+                <td class="px-4 py-3 text-right font-semibold text-slate-800 dark:text-slate-100">{{ tkFormat(doctor.amount) }}</td>
+                <td class="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{{ tkFormat(doctor.due_amount) }}</td>
+              </tr>
+              <tr v-if="!(dashboardStats.doctorVisitAppointmentByDoctor || []).length">
+                <td class="px-4 py-4 text-center text-slate-500 dark:text-slate-400" colspan="5">No doctor visit appointments in this date range.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">

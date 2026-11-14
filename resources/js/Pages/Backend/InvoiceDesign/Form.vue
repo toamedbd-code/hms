@@ -10,6 +10,9 @@ import { displayResponse, displayWarning } from '@/responseMessage.js';
 
 const props = defineProps(['invoicedesign', 'id']);
 
+const savedFooterContentOffset = Number(props.invoicedesign?.footer_content_offset ?? 0);
+const defaultFooterContentOffset = Math.max(0, Math.min(50, savedFooterContentOffset));
+
 const normalizePreviewUrl = (value) => {
     if (!value) return null;
     const normalized = String(value).replace(/\\/g, '/').trim();
@@ -32,12 +35,10 @@ const form = useForm({
     module: props.invoicedesign?.module ?? '',
     headerPhoto: null,
     footerPhoto: null,
-    headerPhotoPreview: normalizePreviewUrl(
-        props.invoicedesign?.header_photo_url ?? props.invoicedesign?.header_photo_path
-    ),
-    footerPhotoPreview: normalizePreviewUrl(
-        props.invoicedesign?.footer_photo_url ?? props.invoicedesign?.footer_photo_path
-    ),
+    fullPagePad: null,
+    active_pad_type: props.invoicedesign?.active_pad_type ?? 'header',
+    full_page_pad_content_offset: props.invoicedesign?.full_page_pad_content_offset ?? 0,
+    footer_content_offset: defaultFooterContentOffset,
     header_height: props.invoicedesign?.header_height ?? 115,
     footer_height: props.invoicedesign?.footer_height ?? 70,
     footer_content_position: props.invoicedesign?.footer_content_position ?? 'above',
@@ -46,15 +47,29 @@ const form = useForm({
     _method: props.invoicedesign?.id ? 'put' : 'post',
 });
 
+const imagePreviews = ref({
+    headerPhoto: normalizePreviewUrl(
+        props.invoicedesign?.header_photo_url ?? props.invoicedesign?.header_photo_path
+    ),
+    footerPhoto: normalizePreviewUrl(
+        props.invoicedesign?.footer_photo_url ?? props.invoicedesign?.footer_photo_path
+    ),
+    fullPagePad: normalizePreviewUrl(
+        props.invoicedesign?.full_page_pad_url ?? props.invoicedesign?.full_page_pad_path
+    ),
+});
+
 const handlePhotoChange = (event, field) => {
     if (event.target.files.length > 0) {
         const file = event.target.files[0];
         form[field] = file;
+        if (field === 'fullPagePad') form.active_pad_type = 'institution';
+        if (field === 'headerPhoto') form.active_pad_type = 'header';
 
         // Display photo preview
         const reader = new FileReader();
         reader.onload = (e) => {
-            form[`${field}Preview`] = e.target.result;
+            imagePreviews.value[field] = e.target.result;
         };
         reader.readAsDataURL(file);
     }
@@ -62,9 +77,10 @@ const handlePhotoChange = (event, field) => {
 
 const removePhoto = (field) => {
     form[field] = null;
-    form[`${field}Preview`] = null;
+    imagePreviews.value[field] = null;
     // Reset file input
-    document.getElementById(field).value = '';
+    const input = document.getElementById(field);
+    if (input) input.value = '';
 };
 
 const submit = () => {
@@ -78,8 +94,14 @@ const submit = () => {
         onSuccess: (response) => {
             if (!props.id) {
                 form.reset();
+                imagePreviews.value = {
+                    headerPhoto: null,
+                    footerPhoto: null,
+                    fullPagePad: null,
+                };
                 document.getElementById('headerPhoto').value = '';
                 document.getElementById('footerPhoto').value = '';
+                document.getElementById('fullPagePad').value = '';
             }
             displayResponse(response);
         },
@@ -138,13 +160,14 @@ const goBack = () => {
 
                 <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
 
-                    <div class="col-span-3 md:col-span-3">
+                    <div class="col-span-1 w-full min-w-0 md:col-span-2 md:-mr-4">
                         <InputLabel for="module" value="Module *" />
                         <select id="module" v-model="form.module"
                             class="w-[20%] p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:focus:ring-slate-500 dark:focus:border-slate-500">
                             <option value="">Select Module</option>
                             <option value="opd">OPD</option>
                             <option value="ipd">IPD</option>
+                            <option value="ipd_final">IPD Final Bill</option>
                             <option value="pathology">Pathology</option>
                             <option value="radiology">Radiology</option>
                             <option value="pharmacy">Pharmacy</option>
@@ -153,15 +176,18 @@ const goBack = () => {
                             <option value="prescription">Prescription</option>
                         </select>
                         <InputError class="mt-1" :message="form.errors.module" />
+                        <p class="mt-1 text-sm text-gray-500">
+                            Each module can use its own header, footer, and institution pad. If no design is active for a module, the Billing design is used by default.
+                        </p>
                     </div>
 
                     <!-- Header Photo -->
-                    <div class="col-span-1 md:col-span-2">
+                    <div class="col-span-1 w-full min-w-0 md:col-span-2 md:-mr-4">
                         <InputLabel for="headerPhoto" value="Header Image" />
 
                         <!-- Preview above input -->
-                        <div v-if="form.headerPhotoPreview" class="relative w-full mb-2">
-                            <img :src="form.headerPhotoPreview" alt="Header preview"
+                        <div v-if="imagePreviews.headerPhoto" class="relative w-full mb-2">
+                            <img :src="imagePreviews.headerPhoto" alt="Header preview"
                                 class="object-fill w-full h-32 border rounded-md" />
                             <button type="button" @click="removePhoto('headerPhoto')"
                                 class="absolute p-1 text-white bg-red-500 rounded-full -top-2 -right-2 hover:bg-red-600">
@@ -181,56 +207,13 @@ const goBack = () => {
                         <InputError class="mt-1" :message="form.errors.headerPhoto" />
                     </div>
 
-                    <!-- Footer Content Field -->
-                    <div class="col-span-1 md:col-span-2">
-                        <InputLabel for="footer_content" value="Footer Content *" />
-                        <textarea id="footer_content" v-model="form.footer_content" rows="4"
-                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:focus:ring-slate-500 dark:focus:border-slate-500"
-                            placeholder="Enter Footer Contents"></textarea>
-                        <InputError class="mt-1" :message="form.errors.footer_content" />
-                    </div>
-
-                    <!-- Footer Content Position -->
-                    <div class="col-span-1 md:col-span-1">
-                        <InputLabel for="footer_content_position" value="Footer Content Position" />
-                        <select id="footer_content_position" v-model="form.footer_content_position"
-                            class="w-[40%] p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-                            <option value="above">Above Image</option>
-                            <option value="below">Below Image</option>
-                        </select>
-                        <InputError class="mt-1" :message="form.errors.footer_content_position" />
-                    </div>
-
-                    <!-- Footer Font Size -->
-                    <div class="col-span-1 md:col-span-1">
-                        <InputLabel for="footer_font_size" value="Footer Font Size (px)" />
-                        <input id="footer_font_size" type="number" min="6" max="72" step="1" v-model.number="form.footer_font_size"
-                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
-                        <InputError class="mt-1" :message="form.errors.footer_font_size" />
-                    </div>
-
-                    <!-- Header/Footer Height -->
-                    <div class="col-span-1 md:col-span-1">
-                        <InputLabel for="header_height" value="Header Height (px)" />
-                        <input id="header_height" type="number" min="0" max="1000" step="1" v-model.number="form.header_height"
-                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
-                        <InputError class="mt-1" :message="form.errors.header_height" />
-                    </div>
-
-                    <div class="col-span-1 md:col-span-1">
-                        <InputLabel for="footer_height" value="Footer Height (px)" />
-                        <input id="footer_height" type="number" min="0" max="1000" step="1" v-model.number="form.footer_height"
-                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
-                        <InputError class="mt-1" :message="form.errors.footer_height" />
-                    </div>
-
                     <!-- Footer Photo -->
-                    <div class="col-span-1 md:col-span-2">
+                    <div class="col-span-1 w-full min-w-0 md:col-span-2 md:-mr-4">
                         <InputLabel for="footerPhoto" value="Footer Image" />
 
                         <!-- Preview above input -->
-                        <div v-if="form.footerPhotoPreview" class="relative w-full mb-2">
-                            <img :src="form.footerPhotoPreview" alt="Footer preview"
+                        <div v-if="imagePreviews.footerPhoto" class="relative w-full mb-2">
+                            <img :src="imagePreviews.footerPhoto" alt="Footer preview"
                                 class="object-contain w-full h-32 border rounded-md" />
                             <button type="button" @click="removePhoto('footerPhoto')"
                                 class="absolute p-1 text-white bg-red-500 rounded-full -top-2 -right-2 hover:bg-red-600">
@@ -249,6 +232,143 @@ const goBack = () => {
 
                         <InputError class="mt-1" :message="form.errors.footerPhoto" />
                     </div>
+
+                    <!-- Footer Content Field -->
+                    <div class="col-span-1 w-full min-w-0 md:col-span-2 md:-mr-4">
+                        <InputLabel for="footer_content" value="Footer Content *" />
+                        <textarea id="footer_content" v-model="form.footer_content" rows="4"
+                            class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:focus:ring-slate-500 dark:focus:border-slate-500"
+                            placeholder="Enter Footer Contents"></textarea>
+                        <InputError class="mt-1" :message="form.errors.footer_content" />
+                    </div>
+
+                    <div class="col-span-1 w-full min-w-0 rounded-md border border-slate-200 bg-slate-50 p-4 md:col-span-2 md:-mr-4">
+                        <h2 class="mb-4 text-sm font-semibold text-slate-800">Footer and Image Layout</h2>
+                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                            <div>
+                                <InputLabel for="footer_content_position" value="Footer Content Position" />
+                                <select id="footer_content_position" v-model="form.footer_content_position"
+                                    class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                    <option value="above">Above Image</option>
+                                    <option value="below">Below Image</option>
+                                </select>
+                                <InputError class="mt-1" :message="form.errors.footer_content_position" />
+                            </div>
+
+                            <div>
+                                <InputLabel for="footer_content_offset" value="Footer Text Position (mm)" />
+                                <div class="mt-2 flex items-center gap-2">
+                                    <input id="footer_content_offset" type="range" min="0" max="50" step="1"
+                                        v-model.number="form.footer_content_offset" class="min-w-0 flex-1" />
+                                    <input type="number" min="0" max="50" step="1"
+                                        v-model.number="form.footer_content_offset"
+                                        class="w-16 rounded-md border-slate-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                </div>
+                                <InputError class="mt-1" :message="form.errors.footer_content_offset" />
+                            </div>
+
+                            <div>
+                                <InputLabel for="footer_font_size" value="Footer Font Size (px)" />
+                                <input id="footer_font_size" type="number" min="6" max="72" step="1" v-model.number="form.footer_font_size"
+                                    class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                                <InputError class="mt-1" :message="form.errors.footer_font_size" />
+                            </div>
+
+                            <div>
+                                <InputLabel for="header_height" value="Header Height (px)" />
+                                <input id="header_height" type="number" min="0" max="1000" step="1" v-model.number="form.header_height"
+                                    class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                                <InputError class="mt-1" :message="form.errors.header_height" />
+                            </div>
+
+                            <div>
+                                <InputLabel for="footer_height" value="Footer Height (px)" />
+                                <input id="footer_height" type="number" min="0" max="1000" step="1" v-model.number="form.footer_height"
+                                    class="w-full p-2 mt-1 text-sm border rounded-md shadow-sm border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                                <InputError class="mt-1" :message="form.errors.footer_height" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-span-1 md:col-span-2 rounded-md border border-slate-200 p-4">
+                        <InputLabel value="Invoice Pad Mode" />
+                        <div class="mt-3 flex flex-wrap items-center gap-3">
+                            <button
+                                type="button"
+                                class="rounded px-3 py-2 text-sm font-medium text-white transition"
+                                :class="form.active_pad_type !== 'institution'
+                                    ? 'bg-emerald-600 opacity-100 shadow'
+                                    : 'bg-emerald-600 opacity-45'"
+                                :aria-pressed="form.active_pad_type !== 'institution'"
+                                @click="form.active_pad_type = 'header'"
+                            >
+                                Header / Footer Images
+                            </button>
+                            <label class="relative inline-flex cursor-pointer items-center">
+                                <input
+                                    type="checkbox"
+                                    class="peer sr-only"
+                                    role="switch"
+                                    aria-label="Use full-page institution pad instead of header and footer images"
+                                    :checked="form.active_pad_type === 'institution'"
+                                    @change="form.active_pad_type = $event.target.checked ? 'institution' : 'header'"
+                                />
+                                <span class="relative h-7 w-14 rounded-full border border-green-700 bg-green-600 shadow-inner transition-colors peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-green-300">
+                                    <span
+                                        class="absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                                        :class="form.active_pad_type === 'institution' ? 'translate-x-7' : 'translate-x-0'"
+                                    ></span>
+                                </span>
+                            </label>
+                            <button
+                                type="button"
+                                class="rounded px-3 py-2 text-sm font-medium text-white transition"
+                                :class="form.active_pad_type === 'institution'
+                                    ? 'bg-emerald-600 opacity-100 shadow'
+                                    : 'bg-emerald-600 opacity-45'"
+                                :aria-pressed="form.active_pad_type === 'institution'"
+                                @click="form.active_pad_type = 'institution'"
+                            >
+                                Full-page Institution Pad
+                            </button>
+                        </div>
+                        <p class="mt-2 text-sm text-gray-500">Choose one mode: the institution pad replaces the separate header and footer images while it is active.</p>
+                        <InputError class="mt-1" :message="form.errors.active_pad_type" />
+                    </div>
+
+                    <div class="col-span-1 md:col-span-2 rounded-md border border-slate-200 p-4">
+                        <InputLabel for="fullPagePad" value="Full-page Institution Pad (A4)" />
+                        <p class="mt-1 text-sm text-gray-500">When Institution Pad mode is active, this full-page image replaces the separate header and footer images.</p>
+                        <div class="mt-3 grid grid-cols-1 items-start gap-4 md:grid-cols-2">
+                            <div class="min-w-0">
+                                <div v-if="imagePreviews.fullPagePad" class="relative mb-3 w-full max-w-[18rem]">
+                                    <img :src="imagePreviews.fullPagePad" alt="Full-page institution pad preview"
+                                        class="aspect-[210/297] w-full rounded-md border object-contain" />
+                                    <button type="button" @click="removePhoto('fullPagePad')"
+                                        class="absolute p-1 text-white bg-red-500 rounded-full -top-2 -right-2 hover:bg-red-600"
+                                        aria-label="Remove institution pad preview">
+                                        <span aria-hidden="true">&times;</span>
+                                    </button>
+                                </div>
+                                <input id="fullPagePad" type="file" accept="image/png,image/jpeg"
+                                    class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-gray-600 dark:file:text-gray-200"
+                                    @change="(e) => handlePhotoChange(e, 'fullPagePad')" />
+                                <InputError class="mt-1" :message="form.errors.fullPagePad" />
+                            </div>
+
+                            <div class="w-full rounded-md border border-slate-200 bg-white p-4">
+                                <InputLabel for="full_page_pad_content_offset" value="Text Start Position (mm)" />
+                                <div class="mt-3 flex items-center gap-4">
+                                    <input id="full_page_pad_content_offset" type="range" min="0" max="100" step="1"
+                                        v-model.number="form.full_page_pad_content_offset" class="min-w-0 flex-1" />
+                                    <input type="number" min="0" max="100" step="1"
+                                        v-model.number="form.full_page_pad_content_offset"
+                                        class="w-20 rounded-md border-slate-300 p-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                </div>
+                                <InputError class="mt-1" :message="form.errors.full_page_pad_content_offset" />
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Form Footer -->
@@ -260,14 +380,6 @@ const goBack = () => {
                     <PrimaryButton type="submit" class="px-4 py-2 text-sm"
                         :class="{ 'opacity-50 cursor-not-allowed': form.processing }" :disabled="form.processing">
                         <span v-if="form.processing">
-                            <svg class="w-5 h-5 mr-2 -ml-1 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none"
-                                viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
-                                    stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor"
-                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                                </path>
-                            </svg>
                             Saving...
                         </span>
                         <span v-else>

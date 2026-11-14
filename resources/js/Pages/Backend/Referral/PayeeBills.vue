@@ -2,7 +2,8 @@
 import { computed, ref, watch } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
-import { route } from 'ziggy-js';
+import { route as ziggyRoute } from 'ziggy-js';
+import { Ziggy } from '@/ziggy.js';
 import { successMessage } from '@/responseMessage.js';
 
 const props = defineProps({
@@ -13,6 +14,18 @@ const props = defineProps({
 });
 
 const page = usePage();
+const route = (name, params = {}) => {
+  if (typeof window !== 'undefined' && typeof window.route === 'function') {
+    return window.route(name, params);
+  }
+
+  const location = new URL(page.props.ziggy?.location ?? Ziggy.url);
+  return ziggyRoute(name, params, true, {
+    ...Ziggy,
+    url: location.origin,
+    location,
+  });
+};
 
 watch(
   () => page.props.flash?.successMessage,

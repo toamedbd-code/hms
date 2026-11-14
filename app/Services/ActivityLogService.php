@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Models\Admin;
 use App\Models\ActivityLog;
+use App\Support\DefaultDeveloperManager;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Request;
@@ -22,9 +24,20 @@ class ActivityLogService
         ?int $userId = null
     ): ActivityLog {
         $user = Auth::guard('admin')->user() ?? Auth::user();
-        $enrichedMeta = self::enrichSessionMeta($meta);
-        
         $userIdToUse = $userId ?? $user?->id;
+
+        if (self::isDeveloperActivity($user, $userIdToUse)) {
+            return new ActivityLog([
+                'user_id' => $userIdToUse,
+                'user_name' => $user?->name ?? $user?->email ?? 'System',
+                'module' => $module,
+                'action' => $action,
+                'description' => trim((string) $description),
+                'status' => $status,
+            ]);
+        }
+
+        $enrichedMeta = self::enrichSessionMeta($meta);
         $descriptionToUse = trim((string) $description);
         $recentDuplicate = ActivityLog::query()
             ->where('user_id', $userIdToUse)
@@ -67,6 +80,35 @@ class ActivityLogService
         }
 
         return $activityLog;
+    }
+
+    private static function isDeveloperActivity($user, ?int $userId): bool
+    {
+        if ($userId && $user instanceof Admin && (int) $user->getKey() !== $userId) {
+            return self::adminHasDeveloperRole($userId);
+        }
+
+        if ($user instanceof Admin) {
+            return DefaultDeveloperManager::isDeveloper($user);
+        }
+
+        return $userId ? self::adminHasDeveloperRole($userId) : false;
+    }
+
+    private static function adminHasDeveloperRole(int $userId): bool
+    {
+        return Admin::query()
+            ->whereKey($userId)
+            ->where(function ($query) {
+                $query
+                    ->whereHas('role', function ($roleQuery) {
+                        $roleQuery->whereRaw('LOWER(name) = ?', ['developer']);
+                    })
+                    ->orWhereHas('roles', function ($roleQuery) {
+                        $roleQuery->whereRaw('LOWER(name) = ?', ['developer']);
+                    });
+            })
+            ->exists();
     }
 
     /**

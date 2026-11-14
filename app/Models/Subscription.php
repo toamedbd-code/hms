@@ -13,12 +13,14 @@ class Subscription extends Model
 
     protected $fillable = [
         'is_active',
+        'duration_days',
         'expires_at',
         'last_payment_id',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
+        'duration_days' => 'integer',
         'expires_at' => 'datetime',
     ];
 
@@ -33,6 +35,47 @@ class Subscription extends Model
         }
 
         return Carbon::now()->lessThan($this->expires_at);
+    }
+
+    public function daysRemaining(?Carbon $at = null): int
+    {
+        if (! $this->expires_at) {
+            return 0;
+        }
+
+        $secondsRemaining = $this->expires_at->getTimestamp() - ($at ?? Carbon::now())->getTimestamp();
+
+        return max(0, (int) ceil($secondsRemaining / 86400));
+    }
+
+    public function canRenew(?Carbon $at = null): bool
+    {
+        return ! $this->isActive() || $this->daysRemaining($at) <= 5;
+    }
+
+    public function renewalMonthsDue(?Carbon $at = null): int
+    {
+        if (! $this->expires_at) {
+            return 1;
+        }
+
+        $at ??= Carbon::now();
+        $secondsOverdue = max(0, $at->getTimestamp() - $this->expires_at->getTimestamp());
+
+        return 1 + intdiv($secondsOverdue, 30 * 86400);
+    }
+
+    public function extendForPeriod(string $period = 'monthly', int $months = 1): void
+    {
+        $months = max(1, $months);
+        $start = $this->expires_at && $this->expires_at->isFuture()
+            ? $this->expires_at->copy()
+            : Carbon::now();
+
+        $this->is_active = true;
+        $this->expires_at = $period === 'yearly'
+            ? $start->addYear()
+            : $start->addDays(30 * $months);
     }
 
     public static function tableExists(): bool

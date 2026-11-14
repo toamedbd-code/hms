@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
 import * as XLSX from 'xlsx';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
+import { openPrintableHtml } from '@/printWindow.js';
 
 const page = usePage();
 
@@ -111,23 +112,9 @@ const printReport = () => {
     </html>
   `;
 
-  const features = 'noopener,noreferrer,width=1100,height=750,left=200,top=200,resizable,scrollbars';
-  const printWindow = (() => {
-    try {
-      // open a plain new tab (no popup feature string)
-      const w = window.open('', '_blank');
-      try { if (w) w.opener = null; } catch (e) { /* ignore */ }
-      return w;
-    } catch (e) {
-      return null;
-    }
-  })();
-  if (!printWindow) return;
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
-  try { printWindow.focus(); } catch (e) { /* ignore */ }
-  try { printWindow.print(); } catch (e) { /* ignore */ }
+  openPrintableHtml(html, 'width=1100,height=750,left=200,top=200,resizable,scrollbars', {
+    closeAfterPrint: false,
+  });
 };
 
 const exportExcel = () => {
@@ -166,9 +153,10 @@ const exportExcel = () => {
       <div class="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h1>
         <div class="flex items-center gap-2">
+          <a :href="route('backend.pharmacy.profit-loss.report')" class="px-3 py-2 text-sm font-semibold !text-white bg-violet-600 rounded hover:bg-violet-700">Profit &amp; Loss</a>
           <button type="button" class="px-3 py-2 text-sm font-semibold text-white bg-sky-600 rounded hover:bg-sky-700" @click="printReport">Print</button>
           <button type="button" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700" @click="exportExcel">Excel</button>
-          <a :href="route('backend.dashboard')" class="px-3 py-2 text-sm font-semibold text-white bg-gray-600 rounded hover:bg-gray-700">Back Dashboard</a>
+          <a :href="route('backend.dashboard')" class="px-3 py-2 text-sm font-semibold !text-white bg-emerald-600 rounded hover:bg-emerald-700">Back Dashboard</a>
         </div>
       </div>
 

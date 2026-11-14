@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\PatientPortal;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Backend\ReportingController;
 use App\Models\Appoinment;
 use App\Models\Billing;
+use App\Models\BillItem;
 use App\Models\DueCollection;
 use App\Models\InvoiceDesign;
 use App\Models\IpdPatient;
@@ -140,6 +142,16 @@ class PatientPortalController extends Controller
             ->when($toDate !== '', fn ($q) => $q->whereDate('created_at', '<=', $toDate));
 
         $billings = (clone $billingsQuery)
+            ->with(['billItems' => function ($query) {
+                $query->whereNotNull('reported_at')
+                    ->whereIn('category', ['Pathology', 'Radiology'])
+                    ->where(function ($query) {
+                        $query->whereNotNull('report_note')->where('report_note', '!=', '')
+                            ->orWhereNotNull('report_range')->where('report_range', '!=', '')
+                            ->orWhereNotNull('report_file')->where('report_file', '!=', '');
+                    })
+                    ->orderBy('id');
+            }])
             ->orderByDesc('id')
             ->limit(10)
             ->get(['id', 'bill_number', 'total', 'paid_amt', 'due_amount', 'payment_status', 'created_at']);
@@ -573,6 +585,79 @@ class PatientPortalController extends Controller
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="patient_report_' . $safeBillNo . '.pdf"',
         ]);
+    }
+
+    public function downloadReportItem(Request $request, int $billItem)
+    {
+        $this->ensurePortalEnabled($request);
+
+        /** @var Patient $patient */
+        $patient = Auth::guard('patient')->user();
+
+        $totalDue = (float) Billing::query()
+            ->where('patient_id', $patient->id)
+            ->sum('due_amount');
+
+        if ($totalDue > 0) {
+            return redirect()->route('backend.patient.portal.payment')
+                ->with('error', 'Report download করতে আগে due clear করুন।');
+        }
+
+        $reportItem = BillItem::query()
+            ->with('billing')
+            ->whereHas('billing', function ($query) use ($patient) {
+                $query->where('patient_id', $patient->id);
+            })
+            ->findOrFail($billItem);
+
+        if (
+            (float) ($reportItem->billing?->due_amount ?? 0) > 0
+            || str_starts_with((string) ($reportItem->billing?->case_number ?? ''), 'IPD-')
+            || !$this->hasPatientReportContent($reportItem)
+        ) {
+            abort(404);
+        }
+
+        $printView = app(ReportingController::class)->print($reportItem, true);
+        if (!$printView instanceof \Illuminate\View\View) {
+            abort(404);
+        }
+
+        $html = $printView->with('isPdf', true)->render();
+        $pdf = Pdf::loadHTML($html);
+        $pdf->setPaper('A4', 'portrait');
+        $pdf->setOptions([
+            'defaultMediaType' => 'print',
+            'isHtml5ParserEnabled' => true,
+            'isRemoteEnabled' => true,
+            'defaultFont' => 'dejavu sans',
+            'dpi' => 96,
+            'isPhpEnabled' => false,
+            'isJavascriptEnabled' => false,
+            'isFontSubsettingEnabled' => false,
+        ]);
+
+        $safeReportName = Str::of((string) ($reportItem->item_name ?? 'report'))
+            ->replaceMatches('/[^A-Za-z0-9_-]+/', '_')
+            ->trim('_')
+            ->limit(80, '')
+            ->toString();
+
+        return response($pdf->output(), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="report_' . ($safeReportName ?: $reportItem->id) . '.pdf"',
+        ]);
+    }
+
+    private function hasPatientReportContent(BillItem $item): bool
+    {
+        return in_array((string) $item->category, ['Pathology', 'Radiology'], true)
+            && !empty($item->reported_at)
+            && (
+                trim((string) ($item->report_note ?? '')) !== ''
+                || trim((string) ($item->report_range ?? '')) !== ''
+                || trim((string) ($item->report_file ?? '')) !== ''
+            );
     }
 
     private function exportDashboardCsv(

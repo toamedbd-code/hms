@@ -10,6 +10,9 @@ class AttendanceDevice extends Model
 
     protected $table = 'attendance_devices';
     protected $guarded = [];
+    protected $casts = [
+        'meta' => 'array',
+    ];
 
     // device attributes: name, identifier (serial/ip), type (fingerprint|face), secret, status, meta
 }

@@ -25,6 +25,7 @@ const moduleOptions = [
     { value: 'reporting', label: 'Reporting' },
     { value: 'billing', label: 'Billing' },
     { value: 'pharmacy', label: 'Pharmacy' },
+    { value: 'prescription', label: 'Prescription' },
     { value: 'opd', label: 'OPD' },
     { value: 'ipd', label: 'IPD' },
     { value: 'website', label: 'Website' },
@@ -40,6 +41,7 @@ const inferPermissionModule = (permissionName) => {
     if (/(report|reporting|invoice|print)/.test(name)) return 'reporting';
     if (/billing/.test(name)) return 'billing';
     if (/(pharmacy|medicine|supplier)/.test(name)) return 'pharmacy';
+    if (/prescription/.test(name)) return 'prescription';
     if (/(opd|outpatient)/.test(name)) return 'opd';
     if (/(ipd|inpatient)/.test(name)) return 'ipd';
     if (/(website|cms)/.test(name)) return 'website';

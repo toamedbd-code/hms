@@ -5,14 +5,9 @@
     <title>IPD Final Discharge Invoice</title>
 
     <style>
-        /* =========================
-           DOMPDF A4 Print Core CSS
-           ========================= */
-
         @page {
-            size: A4 portrait;
-            /* Reserve space for fixed header/footer */
-            margin: 28mm 10mm 12mm 10mm; /* top right bottom left */
+            size: auto;
+            margin: 10mm;
         }
 
         body {
@@ -146,6 +141,29 @@
         tr, td, th { page-break-inside: avoid; }
         .avoid-break { page-break-inside: avoid; }
         .page-break { page-break-before: always; }
+    </style>
+    @include('prints.partials._responsive_invoice_print')
+    <style>
+        @page {
+            size: auto;
+            margin: 10mm;
+        }
+
+        .invoice-design-header {
+            display: block;
+            width: 100%;
+            max-width: 100%;
+            object-fit: contain;
+        }
+
+        @media print {
+            .header {
+                position: static !important;
+                top: auto !important;
+                height: auto !important;
+            }
+
+        }
     </style>
 </head>
 

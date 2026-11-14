@@ -27,34 +27,101 @@ let searchTimeout = null;
 
 const billingTypes = [
     {
+        id: 'billing',
+        name: 'Billing',
+        icon: '💳',
+        routes: [
+            { name: 'backend.billing.view', accessGroups: [['billing-module-billing'], ['billing-create', 'billing-add']] },
+        ]
+    },
+    {
         id: 'appointment',
         name: 'Appointment',
         icon: '📅',
-        route: 'backend.appoinment.create'
+        routes: [
+            { name: 'backend.appoinment.create', accessGroups: [['billing-module-appointment'], ['appoinment-list']] },
+        ]
     },
     {
         id: 'opd',
         name: 'OPD',
         icon: '🩺',
-        route: 'backend.opdpatient.create'
+        routes: [
+            { name: 'backend.opdpatient.create', accessGroups: [['billing-module-opd'], ['opd-patient-list'], ['opd-patient-create']] },
+            { name: 'backend.opdpatient.index', accessGroups: [['billing-module-opd'], ['opd-patient-list']] },
+        ]
+    },
+    {
+        id: 'ipd',
+        name: 'IPD',
+        icon: '🏥',
+        routes: [
+            { name: 'backend.ipdpatient.create', accessGroups: [['billing-module-ipd'], ['ipd-patient-list'], ['ipd-patient-create']] },
+            { name: 'backend.ipdpatient.index', accessGroups: [['billing-module-ipd'], ['ipd-patient-list']] },
+        ]
+    },
+    {
+        id: 'prescription',
+        name: 'Prescription',
+        icon: '📝',
+        routes: [
+            { name: 'backend.prescription.create', accessGroups: [['billing-module-prescription'], ['prescription-add', 'prescription-list-create']] },
+            { name: 'backend.prescription.index', accessGroups: [['billing-module-prescription'], ['prescription-list']] },
+        ]
+    },
+    {
+        id: 'ambulance',
+        name: 'Ambulance',
+        icon: '🚑',
+        routes: [
+            { name: 'backend.ambulance.create', accessGroups: [['billing-module-ambulance'], ['ambulance-list']] },
+        ]
+    },
+    {
+        id: 'billing_report',
+        name: 'Billing Report',
+        icon: '📊',
+        routes: [
+            { name: 'backend.report.index', accessGroups: [['billing-module-billing-report'], ['report-list']] },
+        ]
+    },
+    {
+        id: 'bed_management',
+        name: 'Bed Management',
+        icon: '🛏️',
+        routes: [
+            { name: 'backend.bed.index', accessGroups: [['billing-module-bed-management'], ['bed-list']] },
+            { name: 'backend.bedtype.index', accessGroups: [['billing-module-bed-management'], ['bed-type-list']] },
+            { name: 'backend.bedgroup.index', accessGroups: [['billing-module-bed-management'], ['bed-group-list']] },
+            { name: 'backend.floor.index', accessGroups: [['billing-module-bed-management'], ['floor-list']] },
+        ]
     },
     {
         id: 'pathology',
         name: 'Pathology',
         icon: '🧪',
-        route: 'backend.pathology.create'
+        routes: [
+            { name: 'backend.pathology.create', accessGroups: [['billing-module-pathology'], ['pathology-list'], ['pathology-create']] },
+            { name: 'backend.pathology.index', accessGroups: [['billing-module-pathology'], ['pathology-list']] },
+        ]
     },
     {
         id: 'radiology',
         name: 'Radiology',
         icon: '🔬',
-        route: 'backend.radiology.create'
+        routes: [
+            { name: 'backend.radiology.create', accessGroups: [['billing-module-radiology'], ['radiology-list'], ['radiology-create']] },
+            { name: 'backend.radiology.index', accessGroups: [['billing-module-radiology'], ['radiology-list']] },
+        ]
     },
     {
         id: 'blood_issue',
         name: 'Blood Issue',
         icon: '🩸',
-        route: 'backend.bloodissue.create'
+        routes: [
+            { name: 'backend.bloodissue.create', accessGroups: [['billing-module-blood-issue'], ['blood-issue-list'], ['blood-issue-list-create']] },
+            { name: 'backend.bloodissue.index', accessGroups: [['billing-module-blood-issue'], ['blood-issue-list']] },
+        ]
     },
     // {
     //     id: 'blood_component',
@@ -66,12 +133,30 @@ const billingTypes = [
         id: 'pharmacy',
         name: 'Pharmacy',
         icon: '💊',
-        route: 'backend.pharmacybill.create'
+        routes: [
+            { name: 'backend.pharmacybill.create', accessGroups: [['billing-module-pharmacy'], ['pharmacy-bill-list'], ['pharmacy-bill-create']] },
+            { name: 'backend.pharmacybill.index', accessGroups: [['billing-module-pharmacy'], ['pharmacy-bill-list']] },
+        ]
     }
 ];
 
+const hasAccessToRoute = (routeOption) => routeOption.accessGroups.every((group) =>
+    group.some((permission) => userPermissions.value.includes(permission))
+);
+
+const visibleBillingTypes = computed(() => billingTypes.filter((type) =>
+    type.routes.some(hasAccessToRoute)
+));
+
 const navigateToBillingType = (type) => {
-    router.visit(route(type.route));
+    const routeOption = type.routes.find(hasAccessToRoute);
+    if (routeOption) {
+        try {
+            window.location.assign(route(routeOption.name));
+        } catch (error) {
+            console.error(`Unable to open the ${type.name} module.`, error);
+        }
+    }
 };
 
 let props = defineProps({
@@ -160,40 +245,6 @@ const handleBillSave = (billData) => {
     alert('Bill saved successfully!');
 };
 
-const openAddBillButton = () => {
-    router.visit(route('backend.billing.view'));
-};
-
-const openListBillButton = () => {
-    try {
-        const url = route('backend.billing.list');
-        if (url) {
-            window.location.assign(url);
-            return;
-        }
-    } catch (e) {
-        // fallback to route helper path if route name resolution fails
-    }
-    window.location.assign('/view-billing-list-page');
-};
-
-const goBack = () => {
-    if (window.history.length > 1) {
-        window.history.back();
-        return;
-    }
-    try {
-        const url = route('backend.dashboard');
-        if (url) {
-            window.location.assign(url);
-            return;
-        }
-    } catch (e) {
-        // fallback to dashboard path if route helper fails
-    }
-    window.location.assign('/dashboard');
-};
-
 const selectBillingTypeFromModal = (type) => {
     closeAddBillModal();
     navigateToBillingType(type);
@@ -220,41 +271,14 @@ const clearSearch = () => {
                             class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center flex-wrap">
                             <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-200">Single Module Billing
                             </h2>
-                            <div class="flex gap-2">
-                                <button @click="goBack"
-                                    class="px-4 py-2 bg-red-600 text-white text-sm rounded-md shadow-md hover:bg-red-700 transition-all duration-200 flex items-center gap-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-                                    </svg>
-                                    Back
-                                </button>
-                                <button @click="openListBillButton"
-                                    class="px-4 py-2 bg-gradient-to-r from-indigo-500 via-blue-500 to-cyan-500 text-white text-sm rounded-md shadow-md hover:shadow-lg hover:from-indigo-600 hover:via-blue-600 hover:to-cyan-600 transition-all duration-200 flex items-center gap-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none"
-                                        viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-                                    </svg>
-                                    Bill List
-                                </button>
-                                <button @click="openAddBillButton"
-                                    class="px-4 py-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-green-500 text-white text-sm rounded-md shadow-md hover:shadow-lg hover:from-emerald-600 hover:via-teal-600 hover:to-green-600 transition-all duration-200 flex items-center gap-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none"
-                                        viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M12 4v16m8-8H4" />
-                                    </svg>
-                                    Add Bill
-                                </button>
-                            </div>
                         </div>
 
                         <div class="p-6">
                             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <div v-for="type in billingTypes" :key="type.id" @click="navigateToBillingType(type)"
-                                    class="group cursor-pointer border rounded-lg p-6 text-center transition-all duration-200 hover:shadow-md hover:border-blue-300 border-gray-200 dark:border-gray-600 bg-white dark:bg-slate-800">
+                                <div v-for="type in visibleBillingTypes" :key="type.id" @click="navigateToBillingType(type)"
+                                    class="group flex h-32 cursor-pointer flex-col items-center justify-center border rounded-lg p-4 text-center transition-all duration-200 hover:shadow-md hover:border-blue-300 border-gray-200 dark:border-gray-600 bg-white dark:bg-slate-800">
                                     <div class="text-3xl mb-3">{{ type.icon }}</div>
-                                    <h3 class="font-semibold text-gray-800 dark:text-gray-200 mb-2">{{ type.name }}</h3>
+                                    <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ type.name }}</h3>
                                 </div>
                             </div>
                         </div>
@@ -411,8 +435,9 @@ const clearSearch = () => {
                                                         class="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300">
                                                         Edit
                                                     </button>
-                                                    <a :href="route('backend.download.invoice', { id: result.id, module: 'billing' })"
+                                                    <a :href="route('backend.download.invoice', { id: result.id, module: 'billing', fast_open: 1 })"
                                                         target="_blank"
+                                                        rel="noopener noreferrer"
                                                         class="inline-block text-white bg-teal-500 rounded p-1 hover:text-black-900 dark:text-white dark:hover:text-white">
                                                         Invoice
                                                     </a>

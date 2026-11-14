@@ -60,6 +60,8 @@ class AppoinmentController extends Controller
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
                 'isWebsiteInbox' => fn() => $isWebsiteInbox,
+                'filters' => fn() => request()->only(['booking_source', 'name', 'numOfData', 'doctor_id', 'appointment_date']),
+                'doctors' => fn() => $this->adminService->activeDoctors(),
             ]
         );
     }
@@ -67,12 +69,13 @@ class AppoinmentController extends Controller
     public function websiteInbox()
     {
         request()->merge(['booking_source' => 'website']);
+
         return $this->index();
     }
 
     private function getDatas()
     {
-        $query = $this->appoinmentService->list();
+        $query = $this->appoinmentService->list()->with(['patient', 'admin', 'opdPatient']);
 
         if (request()->filled('booking_source')) {
             $query->where('booking_source', request()->booking_source);
@@ -84,16 +87,34 @@ class AppoinmentController extends Controller
             });
         }
 
+        if (request()->filled('doctor_id')) {
+            $query->where('doctor_id', request()->doctor_id);
+        }
 
+        if (request()->filled('appointment_date')) {
+            $query->whereDate('appoinment_date', request()->appointment_date);
+        }
+
+        $query->orderBy('appoinment_date')->orderBy('doctor_id')->orderBy('patient_serial');
         $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
 
         $formatedDatas = $datas->map(function ($data, $index) {
             $customData = new \stdClass();
+            $customData->appointment_id = $data->id;
+            $customData->opd_patient_id = $data->opdPatient?->id;
+            $customData->opd_invoice = $data->opdPatient
+                ? 'OPD-' . str_pad((string) $data->opdPatient->id, 4, '0', STR_PAD_LEFT)
+                : 'N/A';
+            $customData->total_amount = (float) ($data->opdPatient?->amount ?? 0);
             $customData->index = $index + 1;
+            $customData->patient_serial = $data->patient_serial ?? 'N/A';
             $customData->patient_id = $data?->patient?->name ?? 'N/A';
             $customData->doctor_id = $data?->admin?->name ?? 'N/A';
             $customData->doctor_fee = $data->doctor_fee;
             $customData->discount = $data->discount_percentage;
+            $netAmount = max(0, (float) ($data->doctor_fee ?? 0) * (1 - (float) ($data->discount_percentage ?? 0) / 100));
+            $customData->paid_amount = (float) ($data->opdPatient?->paid_amount ?? 0);
+            $customData->due_amount = max(0, $netAmount - $customData->paid_amount);
             $customData->priority = $data->appointment_priority;
             $customData->appoinment_date = $data->appoinment_date ? Carbon::parse($data->appoinment_date)->format('d M Y, h:i A') : 'N/A';
             $customData->booking_source = ucfirst((string) ($data->booking_source ?? 'Panel'));
@@ -128,9 +149,18 @@ class AppoinmentController extends Controller
             if ($user && $user->can('appoinment-invoice')) {
                 $customData->links[] = [
                     'linkClass' => 'bg-teal-500 text-white semi-bold',
-                    'link' => route('backend.download.appointment.invoice', ['id' => $data->id, 'module' => 'appointment']),
+                    'link' => route('backend.download.appointment.invoice', ['id' => $data->id, 'module' => 'appointment', 'auto_print' => 1]),
                     'linkLabel' => getLinkLabel('Invoice', null, null),
                     'target' => '_blank'
+                ];
+            }
+
+            if ($user && $user->can('billing-due-collect') && $customData->due_amount > 0 && $data->opdPatient) {
+                $customData->links[] = [
+                    'linkClass' => 'bg-green-600 text-white semi-bold',
+                    'actionName' => 'appointment-due-collect',
+                    'actionId' => $data->id,
+                    'linkLabel' => getLinkLabel('Collect Due', null, null),
                 ];
             }
             
@@ -144,10 +174,13 @@ class AppoinmentController extends Controller
     {
         return [
             ['fieldName' => 'index', 'class' => 'text-center'],
+            ['fieldName' => 'patient_serial', 'class' => 'text-center'],
             ['fieldName' => 'patient_id', 'class' => 'text-center'],
             ['fieldName' => 'doctor_id', 'class' => 'text-center'],
             ['fieldName' => 'doctor_fee', 'class' => 'text-center'],
             ['fieldName' => 'discount', 'class' => 'text-center'],
+            ['fieldName' => 'paid_amount', 'class' => 'text-center'],
+            ['fieldName' => 'due_amount', 'class' => 'text-center'],
             ['fieldName' => 'appoinment_date', 'class' => 'text-center'],
             ['fieldName' => 'priority', 'class' => 'text-center'],
             ['fieldName' => 'booking_source', 'class' => 'text-center'],
@@ -161,10 +194,13 @@ class AppoinmentController extends Controller
     {
         return [
             'Sl/No',
+            'Patient Serial',
             'Patient Name',
             'Doctor Name',
             'Doctor Fee',
             'Discount',
+            'Paid',
+            'Due',
             'Appoinment Date',
             'Priority',
             'Source',
@@ -174,6 +210,54 @@ class AppoinmentController extends Controller
             'Status',
             'Action',
         ];
+    }
+
+    public function printSerialList(Request $request)
+    {
+        $filters = $request->validate([
+            'doctor_id' => 'required|exists:admins,id',
+            'appointment_date' => 'required|date',
+        ]);
+
+        $doctor = Admin::with('details.designation')->findOrFail($filters['doctor_id']);
+        $appointments = $this->appoinmentService->list()
+            ->with(['patient', 'admin'])
+            ->where('doctor_id', $doctor->id)
+            ->whereDate('appoinment_date', $filters['appointment_date'])
+            ->orderBy('patient_serial')
+            ->orderBy('id')
+            ->get();
+        $grossTotal = round((float) $appointments->sum(fn ($appointment) => (float) ($appointment->doctor_fee ?? 0)), 2);
+
+        return view('backend.appoinment.serial-print', [
+            'appointments' => $appointments,
+            'doctor' => $doctor,
+            'appointmentDate' => Carbon::parse($filters['appointment_date']),
+            'grossTotal' => $grossTotal,
+        ]);
+    }
+
+    public function printTokenList(Request $request)
+    {
+        $filters = $request->validate([
+            'doctor_id' => 'required|exists:admins,id',
+            'appointment_date' => 'required|date',
+        ]);
+
+        $doctor = Admin::findOrFail($filters['doctor_id']);
+        $appointments = $this->appoinmentService->list()
+            ->with('patient')
+            ->where('doctor_id', $doctor->id)
+            ->whereDate('appoinment_date', $filters['appointment_date'])
+            ->orderBy('patient_serial')
+            ->orderBy('id')
+            ->get();
+
+        return view('backend.appoinment.token-print', [
+            'appointmentPages' => $appointments->chunk(8),
+            'doctor' => $doctor,
+            'appointmentDate' => Carbon::parse($filters['appointment_date']),
+        ]);
     }
 
     public function create()
@@ -195,10 +279,24 @@ class AppoinmentController extends Controller
     public function store(AppoinmentRequest $request)
     {
 
+        $data = $request->validated();
+        $data['live_consultant'] = $data['live_consultant'] ?? 'No';
+        $amountReceived = (float) ($data['amount_received'] ?? 0);
+        $netAmount = max(0, (float) ($data['doctor_fee'] ?? 0) * (1 - (float) ($data['discount_percentage'] ?? 0) / 100));
+
+        if ($amountReceived > $netAmount) {
+            return redirect()->back()->withErrors(['amount_received' => 'Received amount cannot exceed the discounted appointment fee.'])->withInput();
+        }
+
+        if ($amountReceived > 0 && empty($data['payment_mode'])) {
+            return redirect()->back()->withErrors(['payment_mode' => 'Select a payment mode when receiving payment.'])->withInput();
+        }
+
+        unset($data['amount_received']);
+
         DB::beginTransaction();
         try {
-
-            $data = $request->validated();
+            $data['patient_serial'] = $this->nextPatientSerial($data['doctor_id'], $data['appoinment_date']);
 
             $lastAppointmentId = DB::table('appoinments')->max('id') ?? 0;
             $nextId = $lastAppointmentId + 1;
@@ -210,6 +308,9 @@ class AppoinmentController extends Controller
 
             if ($dataInfo) {
                 $this->syncOpdFromAppointment($dataInfo);
+                if ($amountReceived > 0) {
+                    $this->recordAppointmentReceipt($dataInfo, $amountReceived);
+                }
 
                 $message = 'Appoinment created successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'appoinments', $message);
@@ -230,9 +331,14 @@ class AppoinmentController extends Controller
 
                 DB::commit();
 
-                return redirect()
-                    ->back()
-                    ->with('successMessage', $message);
+                $redirect = redirect()->back()->with('successMessage', $message);
+                $redirect->with('appointmentInvoiceUrl', route('backend.download.appointment.invoice', [
+                    'id' => $dataInfo->id,
+                    'module' => 'appointment',
+                    'auto_print' => 1,
+                ]));
+
+                return $redirect;
             } else {
                 DB::rollBack();
 
@@ -258,6 +364,25 @@ class AppoinmentController extends Controller
     public function edit($id)
     {
         $appoinment = $this->appoinmentService->find($id);
+        $appoinment->load(['patient', 'admin', 'opdPatient']);
+        $patients = $this->patientService->activeList();
+        $doctors = $this->adminService->activeDoctors();
+
+        if ($appoinment->patient && !$patients->contains('id', $appoinment->patient->id)) {
+            $patients->push($appoinment->patient);
+        }
+
+        if ($appoinment->admin && !$doctors->contains('id', $appoinment->admin->id)) {
+            $doctors->push($appoinment->admin);
+        }
+
+        if (
+            strtolower((string) $appoinment->booking_source) === 'website'
+            && (float) ($appoinment->opdPatient?->paid_amount ?? 0) <= 0
+            && strtolower((string) $appoinment->payment_mode) === 'cash'
+        ) {
+            $appoinment->setAttribute('payment_mode', null);
+        }
 
         return Inertia::render(
             'Backend/Appoinment/Form',
@@ -265,8 +390,8 @@ class AppoinmentController extends Controller
                 'pageTitle' => fn() => 'Appoinment Edit',
                 'appoinment' => fn() => $appoinment,
                 'id' => fn() => $id,
-                'patients' => fn() => $this->patientService->activeList(),
-                'doctors' => fn() => $this->adminService->activeDoctors(),
+                'patients' => fn() => $patients,
+                'doctors' => fn() => $doctors,
             ]
         );
     }
@@ -278,6 +403,34 @@ class AppoinmentController extends Controller
 
             $data = $request->validated();
             $appoinment = $this->appoinmentService->find($id);
+            if (
+                strtolower((string) $appoinment->appoinment_status) !== 'pending'
+                && $data['appoinment_status'] === 'Approved'
+                && strtolower((string) $appoinment->appoinment_status) !== 'approved'
+            ) {
+                DB::rollBack();
+
+                return redirect()->back()->withErrors([
+                    'appoinment_status' => 'Only pending appointments can be approved.',
+                ])->withInput();
+            }
+
+            if (array_key_exists('live_consultant', $data)) {
+                $data['live_consultant'] = $data['live_consultant'] ?? 'No';
+            } else {
+                $data['live_consultant'] = $appoinment->live_consultant ?? 'No';
+            }
+
+            $appointmentDate = Carbon::parse($data['appoinment_date'])->toDateString();
+            $currentDate = Carbon::parse($appoinment->appoinment_date)->toDateString();
+            if ((int) $appoinment->doctor_id !== (int) $data['doctor_id'] || $currentDate !== $appointmentDate) {
+                Admin::query()
+                    ->whereIn('id', array_unique([(int) $appoinment->doctor_id, (int) $data['doctor_id']]))
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get();
+                $data['patient_serial'] = $this->nextPatientSerial($data['doctor_id'], $data['appoinment_date']);
+            }
 
             $dataInfo = $this->appoinmentService->update($data, $id);
 
@@ -332,6 +485,16 @@ class AppoinmentController extends Controller
                 ->back()
                 ->with('errorMessage', $message);
         }
+    }
+
+    private function nextPatientSerial(int|string $doctorId, string $appointmentDate): int
+    {
+        Admin::query()->whereKey($doctorId)->lockForUpdate()->firstOrFail();
+
+        return ((int) DB::table('appoinments')
+            ->where('doctor_id', $doctorId)
+            ->whereDate('appoinment_date', Carbon::parse($appointmentDate)->toDateString())
+            ->max('patient_serial')) + 1;
     }
 
     public function destroy($id)
@@ -390,6 +553,18 @@ class AppoinmentController extends Controller
         DB::beginTransaction();
 
         try {
+            $appointment = $this->appoinmentService->find($id);
+            if (
+                strtolower((string) $status) === 'approved'
+                && strtolower((string) $appointment->appoinment_status) !== 'pending'
+                && strtolower((string) $appointment->appoinment_status) !== 'approved'
+            ) {
+                DB::rollBack();
+
+                return redirect()->back()->withErrors([
+                    'appoinment_status' => 'Only pending appointments can be approved.',
+                ]);
+            }
 
             $dataInfo = $this->appoinmentService->changeStatus($id, $status);
 
@@ -472,13 +647,28 @@ class AppoinmentController extends Controller
         $opd->payment_mode = $paymentMode;
         $opd->amount = $amount;
         $opd->paid_amount = (float) ($opd->paid_amount ?? 0);
-        $opd->balance_amount = max(0, $amount - (float) $opd->paid_amount);
+        $netAmount = max(0, $amount - ($amount * $opd->discount / 100));
+        $opd->balance_amount = max(0, $netAmount - (float) $opd->paid_amount);
         $opd->payment_status = $opd->paid_amount <= 0
             ? 'Pending'
-            : ((float) $opd->paid_amount >= $amount ? 'Paid' : 'Partial');
+            : ((float) $opd->paid_amount >= $netAmount ? 'Paid' : 'Partial');
         $opd->live_consultation = strtolower((string) ($appointment->live_consultant ?? 'No')) === 'yes' ? 'yes' : 'no';
         $opd->status = $isCancelled ? 'Inactive' : 'Active';
 
+        $opd->save();
+    }
+
+    private function recordAppointmentReceipt($appointment, float $amountReceived): void
+    {
+        $opd = OpdPatient::query()
+            ->where('reference', $appointment->transaction_id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        $netAmount = max(0, (float) $opd->amount - ((float) $opd->amount * (float) $opd->discount / 100));
+        $opd->paid_amount = $amountReceived;
+        $opd->balance_amount = max(0, $netAmount - $amountReceived);
+        $opd->payment_status = $opd->balance_amount <= 0 ? 'Paid' : 'Partial';
         $opd->save();
     }
 

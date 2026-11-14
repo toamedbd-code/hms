@@ -64,86 +64,106 @@ public function calculateCommission()
         ];
     }
 
-    $billItems = $billing->billItems()->get();
-    $categoryBreakdown = [];
-    $totalCommission = 0;
-    $totalBillAmount = 0;
+    $billingCommission = (float) ($billing->commission_total ?? 0);
+    if ($billingCommission > 0) {
+        return [
+            'total_commission' => round($billingCommission, 2),
+            'category_breakdown' => $this->category_commissions ?? [],
+            'total_bill_amount' => round((float) ($billing->payable_amount ?? $billing->total ?? 0), 2),
+        ];
+    }
 
-    foreach ($billItems as $item) {
-        $category = strtolower($item->category ?? '');
-        // prefer net_amount, fallback to amount
-        $itemAmount = $item->net_amount ?? $item->amount ?? 0;
-        $totalBillAmount += $itemAmount;
+    $billItems = $billing->billItems;
+    $items = $billItems->map(function ($item) {
+        $category = strtolower((string) ($item->category ?? ''));
+        $itemName = $item->getRawOriginal('item_name') ?: 'N/A';
+        $name = strtolower($itemName);
 
-        if (!isset($categoryBreakdown[$category])) {
-            $categoryBreakdown[$category] = [
-                'amount' => 0,
-                'commission_rate' => 0,
-                'commission_amount' => 0
+        if (preg_match('/\b(usg|ultrasound|ultrasonogram|ultrasonography|sonography|sono)\b/', $category . ' ' . $name) === 1) {
+            $category = 'ultrasound';
+        }
+
+        return [
+            'id' => $item->item_id,
+            'name' => $itemName,
+            'category' => $category,
+            'net_amount' => $item->net_amount ?? $item->amount ?? 0,
+            'total_amount' => $item->total_amount ?? $item->amount ?? 0,
+            'commissionable' => $item->commissionable,
+            'commission_rate' => $item->commission_rate !== null
+                ? (float) $item->commission_rate
+                : null,
+        ];
+    })->all();
+
+    $result = app(\App\Services\ReferralCommissionCalculator::class)->calculate(
+        $items,
+        (float) ($billing->payable_amount ?? $billing->total ?? 0),
+        function ($item) use ($payee) {
+            $commissionable = $item['commissionable'];
+            $rate = $item['commission_rate'] ?? $this->getCommissionRateByCategory($payee, $item['category'], $item['name'] ?? '');
+
+            return [
+                'category' => $item['category'],
+                'rate' => in_array($commissionable, [false, 0, '0'], true) ? 0 : $rate,
             ];
         }
+    );
 
-        $categoryBreakdown[$category]['amount'] += $itemAmount;
-
-        // Prefer snapshot stored on the bill item itself. If snapshot not
-        // present, fall back to the underlying master item (itemable). If
-        // neither has overrides, fall back to category-level payee rate.
-        $itemable = $item->itemable ?? null;
-
-        $itemCommissionable = $item->commissionable ?? null;
-        $itemRate = isset($item->commission_rate) ? (float) $item->commission_rate : null;
-
-        if ($itemCommissionable === null && $itemable) {
-            $itemCommissionable = $itemable->commissionable ?? null;
-        }
-        if ($itemRate === null && $itemable) {
-            $itemRate = isset($itemable->commission_rate) ? (float) $itemable->commission_rate : null;
-        }
-
-        if ($itemCommissionable === false) {
-            $itemCommission = 0;
-            $effectiveRate = 0;
-        } elseif ($itemRate !== null) {
-            $effectiveRate = $itemRate;
-            $itemCommission = ($itemAmount * $effectiveRate) / 100;
-        } else {
-            $effectiveRate = $this->getCommissionRateByCategory($payee, $category);
-            $itemCommission = ($itemAmount * $effectiveRate) / 100;
-        }
-
-        $categoryBreakdown[$category]['commission_rate'] = $effectiveRate;
-        $categoryBreakdown[$category]['commission_amount'] += $itemCommission;
-        $totalCommission += $itemCommission;
+    $categoryBreakdown = [];
+    foreach ($result['categories'] as $category => $commission) {
+        $categoryBreakdown[$category] = [
+            'amount' => $commission['base_amount'],
+            'commission_rate' => $commission['rate'],
+            'commission_amount' => $commission['amount'],
+        ];
     }
 
     return [
-        'total_commission' => round($totalCommission, 2),
+        'total_commission' => $result['total'],
         'category_breakdown' => $categoryBreakdown,
-        'total_bill_amount' => round($totalBillAmount, 2)
+        'total_bill_amount' => round((float) ($billing->payable_amount ?? $billing->total ?? 0), 2)
     ];
 }
 
-private function getCommissionRateByCategory($payee, $category)
+private function getCommissionRateByCategory($payee, $category, $itemName = '')
 {
-    switch ($category) {
+    $normalized = strtolower(trim((string) ($category ?? '')));
+    $itemNameLower = strtolower(trim((string) $itemName));
+    $combined = trim($normalized . ' ' . $itemNameLower);
+
+    if (preg_match('/\b(usg|ultrasound|ultrasonogram|ultrasonography|sonography|sono)\b/', $combined) === 1) {
+        $normalized = 'ultrasound';
+    }
+
+    $fallbackRadiologyRate = (float) ($payee->radiology_commission ?? 0);
+    $fallbackUltrasoundRate = (float) ($payee->ultrasound_commission ?? $fallbackRadiologyRate);
+
+    switch ($normalized) {
         case 'pathology':
-            return $payee->pathology_commission ?? 0;
+            return (float) ($payee->pathology_commission ?? 0);
         case 'radiology':
-            return $payee->radiology_commission ?? 0;
-            case 'ecg':
-                return $payee->ecg_commission ?? 0;
-            case 'ultrasound':
-                return $payee->ultrasound_commission ?? 0;
+            return (float) ($payee->radiology_commission ?? 0);
+        case 'ecg':
+        case 'ekg':
+            return (float) ($payee->ecg_commission ?? $fallbackRadiologyRate);
+        case 'ultrasound':
+        case 'ultrasonogram':
+        case 'ultrasonography':
+        case 'usg':
+        case 'sono':
+        case 'sonography':
+            return $fallbackUltrasoundRate;
         case 'medicine':
-            case 'pharmacy':
-            return $payee->pharmacy_commission ?? 0;
-            case 'opd':
-            case 'appointment':
-                return $payee->opd_commission ?? 0;
-            case 'ipd':
-                return $payee->ipd_commission ?? 0;
+        case 'pharmacy':
+            return (float) ($payee->pharmacy_commission ?? 0);
+        case 'opd':
+        case 'appointment':
+            return (float) ($payee->opd_commission ?? 0);
+        case 'ipd':
+            return (float) ($payee->ipd_commission ?? 0);
         default:
-            return $payee->standard_commission ?? 0;
+            return (float) ($payee->standard_commission ?? 0);
     }
 }
 

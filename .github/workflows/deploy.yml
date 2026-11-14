@@ -39,11 +39,36 @@ jobs:
             if [ -f scripts/activate_subscription_db.php ]; then
               php scripts/activate_subscription_db.php || true
             fi
-            # clear caches
-            php artisan config:clear || true
-            php artisan cache:clear || true
+            # Clear stale config before applying the production database-backed stores.
+            php artisan config:clear
+            set_env_value() {
+              key="$1"
+              value="$2"
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${value}|" .env
+              else
+                printf '%s=%s\n' "$key" "$value" >> .env
+              fi
+            }
+            set_env_value CACHE_DRIVER database
+            set_env_value QUEUE_CONNECTION database
+            set_env_value APP_VERSION 2.2.2
+            set_env_value WEB_SETTING_CACHE_TTL_SECONDS 1800
+            set_env_value SIDE_MENU_CACHE_TTL_SECONDS 900
+            set_env_value ACTIVITY_LOG_ALERT_CACHE_TTL_SECONDS 60
+            set_env_value MEDICINE_EXPIRY_ALERT_CACHE_TTL_SECONDS 180
+            set_env_value DASHBOARD_NET_INCOME_CACHE_TTL_SECONDS 60
+            set_env_value CASH_COUNTER_INFO_CACHE_TTL_SECONDS 30
+            # Create/upgrade database-backed cache, session and queue tables before use.
+            php artisan migrate --force
+            CACHE_DRIVER=database php artisan cache:clear
+            # Clear remaining caches and warm safe production caches.
             php artisan route:clear || true
             php artisan view:clear || true
+            php artisan config:cache
+            php artisan view:cache
+            php artisan route:cache
+            php artisan queue:restart
             # restart php-fpm if service name provided
             if [ -n "${{ secrets.PHP_FPM_SERVICE }}" ]; then
               sudo systemctl restart "${{ secrets.PHP_FPM_SERVICE }}" || true

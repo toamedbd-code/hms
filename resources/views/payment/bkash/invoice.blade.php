@@ -62,8 +62,21 @@
             text-decoration: none;
             font-weight: 700;
         }
+        .close-btn {
+            background: #1f5f5b;
+        }
+        .login-btn {
+            display: inline-block;
+            background: #6b7280;
+            color: white;
+            padding: 12px 18px;
+            border-radius: 10px;
+            font-weight: 700;
+            text-decoration: none;
+            margin-left: 10px;
+        }
         @media print {
-            .print-btn { display: none; }
+            .print-btn, .close-btn, .login-btn, .no-print { display: none !important; }
         }
     </style>
 </head>
@@ -84,6 +97,10 @@
                 <div class="value">{{ $payment->provider_payment_id ?: $payment->id }}</div>
             </div>
             <div class="row">
+                <div class="label">Transaction ID</div>
+                <div class="value">{{ $transactionId ?: '-' }}</div>
+            </div>
+            <div class="row">
                 <div class="label">Status</div>
                 <div class="value">{{ ucfirst($payment->status) }}</div>
             </div>
@@ -102,9 +119,68 @@
         </div>
 
         <div class="footer">
-            <a class="print-btn" href="javascript:window.print()">Print Invoice</a>
-            <p style="margin-top: 14px; color: #6b7280;">This payment has been completed successfully and the subscription is now active.</p>
+            <button class="print-btn" onclick="printInvoice()" style="border:none; cursor:pointer;">🖨️ Print Invoice</button>
+            <button class="close-btn" onclick="finishInvoice()" style="display:inline-block; color:white; padding:12px 18px; border-radius:10px; font-weight:700; border:none; cursor:pointer; margin-left:10px;">✕ Close Tab</button>
+            <a id="login-link" class="login-btn no-print" href="{{ $loginUrl ?? url('/login') }}">← Back to Login</a>
+            <p style="margin-top: 14px; color: #6b7280;">Payment completed successfully. Subscription is now active.</p>
         </div>
     </div>
+
+    <script>
+        var loginUrl = document.getElementById('login-link').href;
+
+        var invoiceFinalized = false;
+        var printStarted = false;
+
+        function printInvoice() {
+            printStarted = true;
+            window.print();
+        }
+
+        window.onafterprint = function () {
+            if (printStarted) {
+                finishInvoice();
+            }
+        };
+
+        window.addEventListener('focus', function () {
+            if (printStarted && !invoiceFinalized) {
+                window.setTimeout(finishInvoice, 300);
+            }
+        });
+
+        if (window.matchMedia) {
+            window.matchMedia('print').addEventListener('change', function (event) {
+                if (printStarted && !event.matches) {
+                    finishInvoice();
+                }
+            });
+        }
+
+        function finishInvoice() {
+            if (invoiceFinalized) {
+                return;
+            }
+
+            invoiceFinalized = true;
+            try {
+                if (window.opener && !window.opener.closed) {
+                    var refreshUrl = new URL(loginUrl, window.location.origin);
+                    refreshUrl.searchParams.set('subscription_refresh', Date.now().toString());
+                    window.opener.location.replace(refreshUrl.toString());
+                }
+            } catch (e) {}
+
+            try { window.close(); } catch (e) {}
+
+            setTimeout(function () {
+                if (!window.closed) {
+                    var fallbackUrl = new URL(loginUrl, window.location.origin);
+                    fallbackUrl.searchParams.set('subscription_refresh', Date.now().toString());
+                    window.location.replace(fallbackUrl.toString());
+                }
+            }, 600);
+        }
+    </script>
 </body>
 </html>

@@ -218,7 +218,7 @@
         </div>
 
         <div class="meta" style="margin-top: 0;">
-            <div>Short Late Waiver: {{ $waiveShortLate ? 'ON' : 'OFF' }}</div>
+            <div>Short Late Waiver: {{ $waiveShortLate ? 'On' : 'Off' }}</div>
             <div>Waiver Limit: {{ $shortLateLimitMinutes }} min</div>
         </div>
 

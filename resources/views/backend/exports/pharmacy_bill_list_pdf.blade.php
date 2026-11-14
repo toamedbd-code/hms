@@ -61,6 +61,7 @@
                 <th>Bill No</th>
                 <th>Date</th>
                 <th>Patient</th>
+                <th>Bed No</th>
                 <th>Sub Total</th>
                 <th>Discount</th>
                 <th>Total</th>
@@ -76,6 +77,7 @@
                     <td>{{ $row['bill_no'] ?? '' }}</td>
                     <td>{{ $row['date'] ?? '' }}</td>
                     <td>{{ $row['patient'] ?? '' }}</td>
+                    <td>{{ $row['bed_no'] ?? 'N/A' }}</td>
                     <td class="text-right">{{ $row['total'] ?? '0.00' }}</td>
                     <td class="text-right">0.00</td>
                     <td class="text-right">{{ $row['total'] ?? '0.00' }}</td>
@@ -85,7 +87,7 @@
                 </tr>
             @empty
                 <tr>
-                    <td colspan="10" style="text-align: center;">No data found</td>
+                    <td colspan="11" style="text-align: center;">No data found</td>
                 </tr>
             @endforelse
         </tbody>

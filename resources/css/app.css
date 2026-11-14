@@ -1,6 +1,22 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../../tailwind.config.js";
+
+/* ─── Global loading cursor ─────────────────────────────────── */
+body.inertia-loading,
+body.inertia-loading * {
+    cursor: progress !important;
+}
+
+/* Disabled controls are unavailable, not waiting for a request. */
+button:disabled,
+button[aria-disabled="true"] {
+  cursor: not-allowed !important;
+}
+
+/* Spinner keyframes (used by PrimaryButton + custom buttons) */
+@keyframes btn-spin {
+    to { transform: rotate(360deg); }
+}
 
 :root {
   --app-theme-primary: #0284c7;
@@ -358,21 +374,24 @@ textarea:focus {
 }
 
 .theme-default {
-  --app-theme-muted-surface: #f0fdfa;
-  --app-theme-border: #bae6fd;
-  --app-theme-primary: #0369a1;
-  --app-theme-soft: #ecfeff;
-  --app-theme-contrast: #0f766e;
-  --app-theme-surface: #ffffff;
-  --app-theme-primary-rgb: 3 105 161;
+  --app-theme-muted-surface: #f0fdf4;
+  --app-theme-border: #bbf7d0;
+  --app-theme-primary: #059669;
+  --app-theme-soft: #dcfce7;
+  --app-theme-contrast: #166534;
+  --app-theme-surface: #fbfffc;
+  --app-theme-navbar-surface: #bbf7d0;
+  --app-theme-primary-rgb: 5 150 105;
 }
 
 .theme-default body {
-  background: linear-gradient(145deg, #ffffff 0%, #ecfeff 52%, #f0fdfa 100%);
+  background: linear-gradient(145deg, #ffffff 0%, #f0fdf4 48%, #dcfce7 100%);
 }
 
 .theme-default body::before {
-  background: none;
+  background:
+    radial-gradient(circle at 85% 12%, rgb(5 150 105 / 0.10) 0%, transparent 38%),
+    radial-gradient(circle at 12% 88%, rgb(22 101 52 / 0.08) 0%, transparent 34%);
 }
 
 .theme-default a,
@@ -381,14 +400,14 @@ textarea:focus {
 .theme-default .text-blue-700,
 .theme-default .text-violet-600,
 .theme-default .text-violet-700 {
-  color: #334155 !important;
+  color: #047857 !important;
 }
 
 .theme-default .bg-blue-50,
 .theme-default .bg-blue-50\/40,
 .theme-default .bg-blue-100,
 .theme-default .bg-violet-50 {
-  background-color: #f1f5f9 !important;
+  background-color: #f0fdf4 !important;
 }
 
 .theme-default .border-blue-200,
@@ -396,13 +415,13 @@ textarea:focus {
 .theme-default .border-blue-600,
 .theme-default .border-violet-200,
 .theme-default .border-violet-600 {
-  border-color: #cbd5e1 !important;
+  border-color: #bbf7d0 !important;
 }
 
 .theme-default button[style*="linear-gradient(to right, #3b82f6, #60a5fa)"],
 .theme-default button[style*="linear-gradient(to right, #2563eb, #3b82f6)"] {
-  background: linear-gradient(90deg, #0369a1 0%, #0ea5e9 52%, #10b981 100%) !important;
-  border-color: #0369a1 !important;
+  background: linear-gradient(90deg, #047857 0%, #059669 72%, #dc2626 100%) !important;
+  border-color: #047857 !important;
 }
 
 .theme-red body {
@@ -636,4 +655,22 @@ input[type="reset"]:not([class*="bg-"]) {
 /* When multiselect appends to body it uses absolute positioning; prefer fixed for robustness */
 body > .multiselect__content-wrapper {
   position: fixed !important;
+}
+
+button.password-toggle.password-toggle {
+  appearance: none !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  transform: none !important;
+}
+
+button.password-toggle.password-toggle:hover,
+button.password-toggle.password-toggle:active {
+  background: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
+  transform: none !important;
 }

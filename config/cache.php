@@ -13,10 +13,12 @@ return [
     |
     */
 
-    'web_setting_ttl_seconds' => env('WEB_SETTING_CACHE_TTL_SECONDS', 300),
-    'side_menu_ttl_seconds' => env('SIDE_MENU_CACHE_TTL_SECONDS', 180),
+    'web_setting_ttl_seconds' => env('WEB_SETTING_CACHE_TTL_SECONDS', 600),
+    'side_menu_ttl_seconds' => env('SIDE_MENU_CACHE_TTL_SECONDS', 300),
     'activity_log_alert_ttl_seconds' => env('ACTIVITY_LOG_ALERT_CACHE_TTL_SECONDS', 60),
-    'medicine_expiry_alert_ttl_seconds' => env('MEDICINE_EXPIRY_ALERT_CACHE_TTL_SECONDS', 120),
+    'medicine_expiry_alert_ttl_seconds' => env('MEDICINE_EXPIRY_ALERT_CACHE_TTL_SECONDS', 180),
+    'dashboard_net_income_ttl_seconds' => env('DASHBOARD_NET_INCOME_CACHE_TTL_SECONDS', 30),
+    'cash_counter_info_ttl_seconds' => env('CASH_COUNTER_INFO_CACHE_TTL_SECONDS', 20),
 
     /*
     |--------------------------------------------------------------------------

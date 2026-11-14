@@ -1164,7 +1164,7 @@ const saveBill = () => {
       invoiceWindow = window.open(previewUrl, '_blank');
       try { if (invoiceWindow) invoiceWindow.opener = null; } catch (e) { /* ignore */ }
     } catch (e) {
-      invoiceWindow = window.open('', '_blank');
+      invoiceWindow = window.open(window.location.href, '_blank');
     }
   } catch (e) {
     invoiceWindow = null;
@@ -1431,16 +1431,14 @@ const cancelBill = () => {
 };
 
 const openListBillButton = () => {
+  let url;
   try {
-    const url = route("backend.billing.list");
-    if (url) {
-      window.location.assign(url);
-      return;
-    }
+    url = route("backend.billing.list");
   } catch (e) {
-    // fallback route if named route fails
+    url = '/view-billing-list-page';
   }
-  window.location.assign('/view-billing-list-page');
+
+  window.open(url, '_blank', 'noopener,noreferrer');
 };
 </script>
 
@@ -1980,9 +1978,6 @@ const openListBillButton = () => {
 }
 .bg-white {
   background-color: #ffffff;
-}
-.bg-[#053855] {
-  background-color: #053855;
 }
 .dark .bg-slate-900 {
   background-color: #0f172a;

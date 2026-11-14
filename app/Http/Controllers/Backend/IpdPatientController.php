@@ -8,18 +8,19 @@ use App\Services\AdminService;
 use App\Services\BedGroupService;
 use App\Services\BedService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use App\Services\IpdPatientService;
 use App\Services\PatientService;
 use App\Services\IpdAutoChargeService;
 use App\Services\IpdDischargeBillingService;
 use App\Services\ActivityLogService;
-use App\Services\MedicineInventoryService;
 use Illuminate\Support\Facades\Schema;
 
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Gate;
 use Exception;
 use App\Models\IpdPrescription;
 use App\Models\IpdPrescriptionMedicine;
@@ -28,7 +29,6 @@ use App\Models\Admin;
 use App\Models\InvoiceDesign;
 use App\Models\WebSetting;
 use App\Models\Payment;
-use App\Models\DueCollection;
 use App\Models\Bed;
 use App\Models\IpdNote;
 use App\Models\IpdPatient;
@@ -38,6 +38,8 @@ use App\Models\Department;
 use App\Models\Specialist;
 use App\Models\Billing;
 use App\Models\BillItem;
+use App\Models\PharmacyBill;
+use App\Models\DueCollection;
 use App\Models\Charge;
 use App\Models\ChargeType;
 use App\Models\ChargeCategory;
@@ -49,6 +51,7 @@ use Illuminate\Support\Facades\Storage;
 use Milon\Barcode\DNS1D;
 use Milon\Barcode\DNS2D;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Validation\ValidationException;
 
 
 class IpdPatientController extends Controller
@@ -56,12 +59,11 @@ class IpdPatientController extends Controller
     use SystemTrait;
 
     protected $ipdpatientService, $patientService, $adminService, $bedGroupService, $bedService;
-    protected $medicineInventoryService;
     protected IpdAutoChargeService $ipdAutoChargeService;
     protected IpdDischargeBillingService $ipdDischargeBillingService;
     protected $chargeService;
 
-    public function __construct(IpdPatientService $ipdpatientService, PatientService $patientService, AdminService $adminService, BedGroupService $bedGroupService, BedService $bedService, IpdAutoChargeService $ipdAutoChargeService, IpdDischargeBillingService $ipdDischargeBillingService, \App\Services\ChargeService $chargeService, MedicineInventoryService $medicineInventoryService)
+    public function __construct(IpdPatientService $ipdpatientService, PatientService $patientService, AdminService $adminService, BedGroupService $bedGroupService, BedService $bedService, IpdAutoChargeService $ipdAutoChargeService, IpdDischargeBillingService $ipdDischargeBillingService, \App\Services\ChargeService $chargeService)
 
     {
         $this->ipdpatientService = $ipdpatientService;
@@ -72,11 +74,11 @@ class IpdPatientController extends Controller
         $this->ipdAutoChargeService = $ipdAutoChargeService;
         $this->ipdDischargeBillingService = $ipdDischargeBillingService;
         $this->chargeService = $chargeService;
-        $this->medicineInventoryService = $medicineInventoryService;
 
 
         $this->middleware('auth:admin');
         $this->middleware('permission:ipd-patient-list');
+        $this->middleware('permission:billing-due-collect', ['only' => ['collectPharmacyDue']]);
         $this->middleware('permission:ipd-patient-status', ['only' => ['changeStatus', 'regenerateDischargeBilling']]);
         $this->middleware('permission:ipd-patient-create', ['only' => ['create', 'store']]);
         $this->middleware('permission:ipd-patient-edit', ['only' => ['edit', 'update', 'addHospitalCharges']]);
@@ -90,6 +92,7 @@ class IpdPatientController extends Controller
         if (in_array($g, ['male', 'm'], true)) {
             return 'Male';
         }
+
         if (in_array($g, ['female', 'f'], true)) {
             return 'Female';
         }
@@ -97,46 +100,107 @@ class IpdPatientController extends Controller
         return 'Others';
     }
 
+    public function searchHospitalMedicines(Request $request)
+    {
+        $validated = $request->validate([
+            'search' => ['required', 'string', 'min:2', 'max:100'],
+        ]);
+        $search = trim($validated['search']);
+        $tokens = preg_split('/\s+/u', $search, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $fullTextTokens = array_values(array_filter(array_map(
+            static fn (string $token): string => preg_replace('/[^\p{L}\p{N}]+/u', '', $token) ?? '',
+            $tokens
+        ), static fn (string $token): bool => mb_strlen($token) >= 3));
+        $booleanSearch = implode(' ', array_map(static fn (string $token): string => '+' . $token . '*', $fullTextTokens));
+        $escapedPrefix = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $search) . '%';
+
+        $baseQuery = MedicineInventory::query()
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->select('id', 'medicine_name', 'medicine_unit_selling_price');
+        $results = collect();
+
+        if ($booleanSearch !== '' && DB::connection()->getDriverName() === 'mysql') {
+            $results = (clone $baseQuery)
+                ->whereRaw('MATCH (medicine_name) AGAINST (? IN BOOLEAN MODE)', [$booleanSearch])
+                ->orderBy('medicine_name')
+                ->limit(30)
+                ->get();
+        }
+
+        if ($results->count() < 30) {
+            $prefixQuery = (clone $baseQuery)
+                ->whereRaw("medicine_name LIKE ? ESCAPE '!'", [$escapedPrefix]);
+            if ($results->isNotEmpty()) {
+                $prefixQuery->whereNotIn('id', $results->modelKeys());
+            }
+            $results = $results->concat(
+                $prefixQuery->orderBy('medicine_name')->limit(30 - $results->count())->get()
+            )->values();
+        }
+
+        return response()->json($results->map(fn ($medicine) => [
+            'id' => 'medicine-' . $medicine->id,
+            'sourceId' => $medicine->id,
+            'name' => $medicine->medicine_name,
+            'category' => 'Medicine',
+            'unitPrice' => (float) $medicine->medicine_unit_selling_price,
+            'type' => 'medicine',
+        ])->values());
+    }
+
     protected function mapBillItemCategory(?string $name): string
     {
-        $n = strtolower(trim((string) $name));
+        // Keywords are matched against whole words only. Substring matching used to
+        // read "Doctor" and "Injection" as the "ct" radiology keyword, and any word
+        // containing "ot" (Others, Antibiotic) as an operation theatre charge.
+        $words = preg_split(
+            '/[^a-z0-9]+/',
+            strtolower(trim((string) $name)),
+            -1,
+            PREG_SPLIT_NO_EMPTY
+        ) ?: [];
 
-        if ($n === '') {
+        if (empty($words)) {
             return 'IPD';
         }
 
-        if (str_contains($n, 'path')) {
+        $hasAny = static fn(array $keywords) => count(array_intersect($words, $keywords)) > 0;
+
+        if ($hasAny(['path', 'pathology', 'pathological'])) {
             return 'Pathology';
         }
-        if (str_contains($n, 'radio') || str_contains($n, 'xray') || str_contains($n, 'ct') || str_contains($n, 'mri')) {
+
+        if ($hasAny(['radio', 'radiology', 'xray', 'ray', 'ct', 'mri'])) {
             return 'Radiology';
         }
-        if (str_contains($n, 'med') || str_contains($n, 'pharm') || str_contains($n, 'drug') || str_contains($n, 'medicine')) {
+
+        if ($hasAny(['med', 'meds', 'medical', 'medicine', 'medicines', 'pharm', 'pharma', 'pharmacy', 'drug', 'drugs'])) {
             return 'Medicine';
         }
 
         // Map bed/room/ot/visit/doctor charges to explicit DB enum values
-        if (str_contains($n, 'room') || str_contains($n, 'rent')) {
+        if ($hasAny(['room', 'rooms', 'rent', 'rents'])) {
             return 'Room Rent';
         }
 
-        if (str_contains($n, 'bed')) {
+        if ($hasAny(['bed', 'beds'])) {
             return 'Bed Charge';
         }
 
-        if (str_contains($n, 'ot')) {
+        if ($hasAny(['ot', 'operation', 'operations', 'theatre', 'theater'])) {
             return 'OT';
         }
 
-        if (str_contains($n, 'doctor') || str_contains($n, 'visit')) {
+        if ($hasAny(['doctor', 'doctors', 'visit', 'visits'])) {
             return 'Doctor Visit';
         }
 
-        if (str_contains($n, 'ipd') || str_contains($n, 'admission') || str_contains($n, 'indoor')) {
+        if ($hasAny(['ipd', 'admission', 'admissions', 'indoor'])) {
             return 'IPD';
         }
 
-        if (str_contains($n, 'opd') || str_contains($n, 'outdoor')) {
+        if ($hasAny(['opd', 'outdoor'])) {
             return 'OPD';
         }
 
@@ -217,7 +281,6 @@ class IpdPatientController extends Controller
             $customData->phone = $data?->patient?->phone;
             $customData->consultant_doctor_id = $data?->doctor?->name ?? '';
             $customData->bed_id = $data?->bed?->name ?? '';
-            $customData->is_antenatal = $data->is_antenatal ?? 'No';
             $customData->credit_limit = $data->credit_limit;
                         $customData->status = $data->status === 'Inactive'
                 ? 'Discharged'
@@ -278,7 +341,7 @@ class IpdPatientController extends Controller
                         $customData->links[] = [
                             'linkClass' => 'bg-cyan-700 text-white semi-bold',
                             'link' => $data->status === 'Inactive'
-                                ? route('backend.print.ipd.final-bill', ['id' => $data->id, 'auto_print' => 1, 'fast_open' => 1])
+                                ? route('backend.print.ipd.final-bill', ['id' => $data->id, 'fast_open' => 1])
                                 : route('backend.ipdpatient.running-bill.print', $data->id),
                             'linkLabel' => getLinkLabel($data->status === 'Inactive' ? 'Final Bill' : 'Running Bill', null, null),
                             'target' => '_blank',
@@ -320,7 +383,6 @@ class IpdPatientController extends Controller
             ['fieldName' => 'phone', 'class' => 'text-center'],
             ['fieldName' => 'consultant_doctor_id', 'class' => 'text-center'],
             ['fieldName' => 'bed_id', 'class' => 'text-center'],
-            ['fieldName' => 'is_antenatal', 'class' => 'text-center'],
             ['fieldName' => 'credit_limit', 'class' => 'text-center'],
             ['fieldName' => 'status', 'class' => 'text-center'],
         ];
@@ -335,17 +397,20 @@ class IpdPatientController extends Controller
             'Phone',
             'Consultant Doctor',
             'Bed',
-            'Is Antenatal',
             'Credit Limit',
             'Status',
             'Action',
         ];
     }
 
-    public function create()
+    /**
+     * Items that can be picked in the "Hospital Charge Items" table of the
+     * admission form. Both create and edit need the same list.
+     */
+    protected function chargeItemOptions(): array
     {
         // Get all active tests (include IPD tests so Item Charge IPD items are available in IPD form)
-        $pathologyAndRadiologyTests = Test::whereIn('category_type', ['Pathology', 'Radiology', 'ECG', 'Ultrasound', 'IPD', 'Disposable', 'OPD', 'Appointment'])
+        $pathologyAndRadiologyTests = Test::query()
             ->where('status', 'Active')
             ->select('id', 'category_type', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount', 'referral_percentage')
             ->orderBy('test_name')
@@ -363,10 +428,10 @@ class IpdPatientController extends Controller
                     'amount' => $test->amount,
                     'referral_percentage' => $test->referral_percentage ?? 0,
                 ];
-            });
+            })
+            ->values()
+            ->all();
 
-        $medicineInventories = $this->medicineInventoryService->activeList();
-        
         // Prepare hospital charges with a normalized `module` value
         $hospitalChargesEnv = env('HOSPITAL_CHARGES_ENABLED', null);
         $hospitalChargesEnabled = true;
@@ -417,22 +482,71 @@ class IpdPatientController extends Controller
             ];
         }
 
+        return [
+            'pathologyAndRadiologyTests' => $pathologyAndRadiologyTests,
+            'hospitalCharges' => $hospitalCharges,
+        ];
+    }
+
+    protected function rememberSymptomType(?string $name): void
+    {
+        $name = trim((string) $name);
+        if ($name === '') {
+            return;
+        }
+
+        $symptomType = SymptomType::query()->firstOrCreate(
+            ['name' => $name],
+            ['status' => 'Active']
+        );
+
+        if ($symptomType->status !== 'Active') {
+            $symptomType->status = 'Active';
+            $symptomType->save();
+        }
+    }
+
+    protected function symptomTitleOptions(): array
+    {
+        return IpdPatient::query()
+            ->whereNotNull('symptom_title')
+            ->where('symptom_title', '<>', '')
+            ->distinct()
+            ->orderBy('symptom_title')
+            ->pluck('symptom_title')
+            ->all();
+    }
+
+    /**
+     * Shared props for the admission form (create + edit).
+     */
+    protected function formProps(): array
+    {
+        $itemOptions = $this->chargeItemOptions();
+
+        return [
+            'patients' => fn() => $this->patientService->activeList(),
+            'doctors' => fn() => $this->adminService->activeDoctors(),
+            'designations' => fn() => Designation::query()->where('status', 'Active')->orderBy('name')->get(),
+            'departments' => fn() => Department::query()->where('status', 'Active')->orderBy('name')->get(),
+            'specialists' => fn() => Specialist::query()->where('status', 'Active')->orderBy('name')->get(),
+            'bedGroups' => fn() => $this->bedGroupService->activeList(),
+            'beds' => fn() => $this->bedService->activeList()->load('bedGroup'),
+            'symptomTypes' => fn() => SymptomType::query()->where('status', 'Active')->orderBy('name')->get(),
+            'symptomTitles' => fn() => $this->symptomTitleOptions(),
+            'pathologyAndRadiologyTests' => $itemOptions['pathologyAndRadiologyTests'],
+            'hospitalCharges' => $itemOptions['hospitalCharges'],
+        ];
+    }
+
+    public function create()
+    {
         return Inertia::render(
             'Backend/IpdPatient/Form',
-            [
-                'pageTitle' => fn() => 'IpdPatient Create',
-                'patients' => fn() => $this->patientService->activeList(),
-                'doctors' => fn() => $this->adminService->activeDoctors(),
-                'designations' => fn() => Designation::query()->where('status', 'Active')->orderBy('name')->get(),
-                'departments' => fn() => Department::query()->where('status', 'Active')->orderBy('name')->get(),
-                'specialists' => fn() => Specialist::query()->where('status', 'Active')->orderBy('name')->get(),
-                'bedGroups' => fn() => $this->bedGroupService->activeList(),
-                'beds' => fn() => $this->bedService->activeList()->load('bedGroup'),
-                'symptomTypes' => fn() => SymptomType::query()->where('status', 'Active')->orderBy('name')->get(),
-                'pathologyAndRadiologyTests' => fn() => $pathologyAndRadiologyTests,
-                'medicineInventories' => fn() => $medicineInventories,
-                'hospitalCharges' => fn() => $hospitalCharges,
-            ]
+            array_merge(
+                ['pageTitle' => fn() => 'IpdPatient Create'],
+                $this->formProps()
+            )
         );
     }
 
@@ -474,6 +588,7 @@ class IpdPatientController extends Controller
             unset($data['advance_amount']);
             unset($data['hospital_charge_items']);
 
+            $this->rememberSymptomType($data['symptom_type'] ?? null);
             $dataInfo = $this->ipdpatientService->create($data);
 
             if ($dataInfo) {
@@ -481,7 +596,6 @@ class IpdPatientController extends Controller
                 $this->ipdAutoChargeService->syncAdmissionCharges($dataInfo, auth('admin')->id());
 
                 // If an advance was provided during admission, record it as a Payment
-                $advance = (float) ($request->input('advance_amount') ?? 0);
                 if ($advance > 0) {
                     \App\Models\Payment::create([
                         'ipd_patient_id' => $dataInfo->id,
@@ -579,6 +693,21 @@ class IpdPatientController extends Controller
 
                         $dataInfo->billing_id = $billing->id;
                         $dataInfo->save();
+
+                        // The advance was attached after the billing was created with
+                        // paid_amt 0, so the paid/due figures need recalculating.
+                        $paymentsSum = (float) $this->paymentQuery()
+                            ->where('status', 'Active')
+                            ->where('billing_id', $billing->id)
+                            ->sum('amount');
+
+                        $billing->fill([
+                            'paid_amt' => $paymentsSum,
+                            'receiving_amt' => $paymentsSum,
+                            'due_amount' => max(0, $total - $paymentsSum),
+                            'payment_status' => ($paymentsSum >= $total) ? 'Paid' : ($paymentsSum > 0 ? 'Partial' : 'Pending'),
+                        ]);
+                        $billing->save();
                     }
                 }
 
@@ -729,21 +858,14 @@ class IpdPatientController extends Controller
 
         return Inertia::render(
             'Backend/IpdPatient/Form',
-            [
-                'pageTitle' => fn() => 'IpdPatient Edit',
-                'ipdpatient' => fn() => $ipdpatient,
-                'id' => fn() => $id,
-                'patients' => fn() => $this->patientService->activeList(),
-                'doctors' => fn() => $this->adminService->activeDoctors(),
-                'designations' => fn() => Designation::query()->where('status', 'Active')->orderBy('name')->get(),
-                'departments' => fn() => Department::query()->where('status', 'Active')->orderBy('name')->get(),
-                'specialists' => fn() => Specialist::query()->where('status', 'Active')->orderBy('name')->get(),
-
-                // needed by the Form (bed group + bed dropdowns)
-                'bedGroups' => fn() => $this->bedGroupService->activeList(),
-                'beds' => fn() => $this->bedService->activeList()->load('bedGroup'),
-                'symptomTypes' => fn() => SymptomType::query()->where('status', 'Active')->orderBy('name')->get(),
-            ]
+            array_merge(
+                [
+                    'pageTitle' => fn() => 'IpdPatient Edit',
+                    'ipdpatient' => fn() => $ipdpatient,
+                    'id' => fn() => $id,
+                ],
+                $this->formProps()
+            )
         );
     }
 
@@ -902,7 +1024,7 @@ class IpdPatientController extends Controller
                     // recalc totals
                     $billing->loadMissing('billItems');
                     $newTotal = (float) ($billing->billItems?->sum('net_amount') ?? 0);
-                    $paymentsSum = (float) $this->paymentQuery()->where('billing_id', $billing->id)->sum('amount');
+                    $paymentsSum = (float) $this->paymentQuery()->where('status', 'Active')->where('billing_id', $billing->id)->sum('amount');
                     $dueAmount = max(0, $newTotal - $paymentsSum);
                     $billing->fill([
                         'total' => $newTotal,
@@ -1103,7 +1225,7 @@ class IpdPatientController extends Controller
             // update billing totals
             $billing->loadMissing('billItems');
             $newTotal = (float) ($billing->billItems?->sum('net_amount') ?? 0);
-            $paymentsSum = (float) Payment::where('billing_id', $billing->id)->sum('amount');
+            $paymentsSum = (float) $this->paymentQuery()->where('status', 'Active')->where('billing_id', $billing->id)->sum('amount');
             $dueAmount = max(0, $newTotal - $paymentsSum);
             $billing->fill([
                 'total' => $newTotal,
@@ -1270,7 +1392,7 @@ class IpdPatientController extends Controller
             // update billing totals
             $billing->loadMissing('billItems');
             $newTotal = (float) ($billing->billItems?->sum('net_amount') ?? 0);
-            $paymentsSum = (float) Payment::where('billing_id', $billing->id)->sum('amount');
+            $paymentsSum = (float) $this->paymentQuery()->where('status', 'Active')->where('billing_id', $billing->id)->sum('amount');
             $dueAmount = max(0, $newTotal - $paymentsSum);
             $billing->fill([
                 'total' => $newTotal,
@@ -1324,22 +1446,301 @@ class IpdPatientController extends Controller
                 ->with('errorMessage', 'IPD patient not found.');
         }
 
-        $ipdpatient->loadMissing(['patient', 'doctor', 'bed']);
+        $ipdpatient->loadMissing(['patient', 'doctor', 'bed', 'billing']);
 
         $prescription = IpdPrescription::where('ipd_patient_id', $id)
             ->with(['medicines', 'tests'])
             ->latest()
             ->first();
 
-                return Inertia::render(
+        $pharmacyHistory = PharmacyBill::query()
+            ->where(function ($query) use ($ipdpatient) {
+                $query->where('ipd_patient_id', $ipdpatient->id);
+                if ($ipdpatient->patient_id) {
+                    $query->orWhere('patient_id', $ipdpatient->patient_id);
+                }
+            })
+            ->with('billing:id,bill_number,payment_status,paid_amt,due_amount')
+            ->latest('date')
+            ->latest('id')
+            ->get(['id', 'pharmacy_no', 'bill_no', 'date', 'patient_id', 'ipd_patient_id', 'billing_id', 'products', 'net_amount', 'payment_amount', 'return_amount']);
+        $legacyBillings = Billing::query()
+            ->whereIn('bill_number', $pharmacyHistory->pluck('bill_no')->filter()->unique())
+            ->get(['id', 'bill_number', 'payment_status', 'paid_amt', 'due_amount'])
+            ->keyBy('bill_number');
+        $pharmacyHistory->each(function ($bill) use ($ipdpatient, $legacyBillings) {
+            if (!$bill->billing) {
+                $bill->setRelation('billing', $legacyBillings->get($bill->bill_no));
+            }
+                $bill->is_current_admission = (int) $bill->ipd_patient_id === (int) $ipdpatient->id;
+        });
+        $historyBillingIds = $pharmacyHistory->pluck('billing_id')->filter()->unique();
+        $legacyBillingIds = $legacyBillings->pluck('id');
+        $historyBillingIds = $historyBillingIds->merge($legacyBillingIds)->unique()->values();
+        $pharmacyPaymentHistory = Payment::query()
+            ->whereIn('billing_id', $historyBillingIds)
+            ->where(function ($query) {
+                $query->where('status', 'Active')
+                    ->orWhereIn('payment_status', ['Paid', 'Partial']);
+            })
+            ->when(Schema::hasColumn('payments', 'deleted_at'), fn ($query) => $query->whereNull('deleted_at'))
+            ->with('billing:id,bill_number,case_number')
+            ->latest('id')
+            ->get(['id', 'billing_id', 'ipd_patient_id', 'amount', 'payment_method', 'payment_status', 'created_at']);
+        $pharmacyDueHistory = DueCollection::query()
+            ->whereIn('billing_id', $historyBillingIds)
+            ->where(function ($query) {
+                $query->whereNull('note')->orWhere('note', 'not like', '%Collected via IPD payment%');
+            })
+            ->when(Schema::hasColumn('due_collections', 'deleted_at'), fn ($query) => $query->whereNull('deleted_at'))
+            ->with('billing:id,bill_number,case_number')
+            ->latest('id')
+            ->get(['id', 'billing_id', 'collected_amount', 'payment_method', 'collected_at', 'note']);
+
+        $currentAdmissionBills = $pharmacyHistory
+            ->filter(fn ($bill) => (int) $bill->ipd_patient_id === (int) $ipdpatient->id);
+        $currentAdmissionBilling = $ipdpatient->billing ?: $currentAdmissionBills->first()?->billing;
+        $medicineDueByBill = $this->getPharmacyBillDueAmounts($currentAdmissionBills);
+        $billingIds = $currentAdmissionBills->pluck('billing_id')
+            ->push($ipdpatient->billing_id)
+            ->filter()
+            ->unique()
+            ->values();
+        $billingMap = $billingIds->isEmpty()
+            ? collect()
+            : Billing::query()->whereIn('id', $billingIds)->get()->keyBy('id');
+        $medicineDebtByBilling = $currentAdmissionBills
+            ->groupBy(fn ($bill) => (int) ($bill->billing_id ?: $ipdpatient->billing_id))
+            ->map(fn ($bills) => (float) $bills->sum(fn ($bill) => $medicineDueByBill[$bill->id] ?? 0));
+        $medicineDue = round((float) $medicineDebtByBilling->reduce(function ($total, $debt, $billingId) use ($billingMap) {
+            $billingDue = max((float) ($billingMap->get((int) $billingId)?->due_amount ?? 0), 0);
+
+            return $total + min((float) $debt, $billingDue);
+        }, 0), 2);
+        $pharmacyDueSummary = [
+            'invoice_count' => $currentAdmissionBills->count(),
+            'medicine_total' => round((float) $currentAdmissionBills->sum('net_amount'), 2),
+            'due_amount' => $medicineDue,
+            'collect_url' => $currentAdmissionBilling
+                && $medicineDue > 0
+                && Gate::allows('billing-due-collect')
+                    ? route('backend.ipdpatient.pharmacy-due-collect', $ipdpatient->id)
+                    : null,
+        ];
+
+        return Inertia::render(
             'Backend/IpdPatient/Prescription',
             [
                 'pageTitle' => fn() => 'IPD Prescription',
                 'ipdpatient' => fn() => $ipdpatient,
                 'prescription' => fn() => $prescription,
                 'doctors' => fn() => $this->adminService->activeDoctors(),
+                'pharmacyHistory' => fn() => $pharmacyHistory,
+                'pharmacyPaymentHistory' => fn() => $pharmacyPaymentHistory,
+                'pharmacyDueHistory' => fn() => $pharmacyDueHistory,
+                'pharmacyDueSummary' => fn() => $pharmacyDueSummary,
             ]
         );
+    }
+
+    public function collectPharmacyDue(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'amount' => 'required|numeric|min:0.01',
+            'payment_method' => 'required|string|in:Cash,Card,Bank,Mobile Banking',
+            'submission_token' => 'required|string|max:120',
+        ]);
+
+        $collectedAmount = round((float) $validated['amount'], 2);
+        $cacheKey = 'ipd_pharmacy_due.' . $id . '.' . $validated['submission_token'];
+        if (Cache::has($cacheKey)) {
+            return redirect()->back()->withErrors([
+                'amount' => 'This due collection has already been submitted. Please refresh the page and try again.',
+            ])->withInput();
+        }
+
+        $result = DB::transaction(function () use ($id, $collectedAmount, $validated) {
+            $ipdpatient = IpdPatient::query()
+                ->with('billing')
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            $pharmacyBills = PharmacyBill::query()
+                ->where('ipd_patient_id', $ipdpatient->id)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            if ($pharmacyBills->isEmpty()) {
+                throw ValidationException::withMessages([
+                    'amount' => 'No pharmacy invoices were found for this IPD admission.',
+                ]);
+            }
+
+            $billingIds = $pharmacyBills->pluck('billing_id')
+                ->push($ipdpatient->billing_id)
+                ->filter()
+                ->unique()
+                ->values();
+            $billings = Billing::query()
+                ->whereIn('id', $billingIds)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+            $dueByBill = $this->getPharmacyBillDueAmounts($pharmacyBills);
+            $billingDueRemaining = $billings->mapWithKeys(fn ($billing) => [
+                $billing->id => max((float) $billing->due_amount, 0),
+            ])->all();
+
+            $medicineDebtByBilling = [];
+            foreach ($pharmacyBills as $pharmacyBill) {
+                $billingId = (int) ($pharmacyBill->billing_id ?: $ipdpatient->billing_id);
+                if (!$billings->has($billingId)) {
+                    continue;
+                }
+                $medicineDebtByBilling[$billingId] = ($medicineDebtByBilling[$billingId] ?? 0)
+                    + (float) ($dueByBill[$pharmacyBill->id] ?? 0);
+            }
+            $collectableDue = array_sum(array_map(
+                fn ($medicineDebt, $billingId) => min((float) $medicineDebt, (float) ($billingDueRemaining[$billingId] ?? 0)),
+                $medicineDebtByBilling,
+                array_keys($medicineDebtByBilling)
+            ));
+
+            if ($collectedAmount > round($collectableDue, 2)) {
+                throw ValidationException::withMessages([
+                    'amount' => 'The collection cannot exceed the current medicine due of ' . number_format($collectableDue, 2) . '.',
+                ]);
+            }
+
+            $remainingAmount = $collectedAmount;
+            $billingAllocations = [];
+            foreach ($pharmacyBills as $pharmacyBill) {
+                if ($remainingAmount <= 0) {
+                    break;
+                }
+
+                $billingId = (int) ($pharmacyBill->billing_id ?: $ipdpatient->billing_id);
+                if (!$billings->has($billingId)) {
+                    continue;
+                }
+                $availableDue = min(
+                    (float) ($dueByBill[$pharmacyBill->id] ?? 0),
+                    (float) ($billingDueRemaining[$billingId] ?? 0)
+                );
+                $allocation = min($availableDue, $remainingAmount);
+                if ($allocation <= 0) {
+                    continue;
+                }
+
+                DueCollection::query()->create([
+                    'billing_id' => $billingId,
+                    'pharmacy_bill_id' => $pharmacyBill->id,
+                    'collected_amount' => $allocation,
+                    'collected_at' => now(),
+                    'payment_method' => $validated['payment_method'],
+                    'note' => 'Pharmacy due collection for IPD #' . $ipdpatient->id,
+                    'created_by' => auth('admin')->id(),
+                ]);
+
+                $billing = $billings->get($billingId);
+                $billing->paid_amt = (float) ($billing->paid_amt ?? 0) + $allocation;
+                $billing->due_amount = max(0, (float) ($billing->due_amount ?? 0) - $allocation);
+                $billing->payment_status = $billing->due_amount <= 0
+                    ? 'Paid'
+                    : ((float) $billing->paid_amt > 0 ? 'Partial' : 'Pending');
+                $billing->save();
+
+                $billingAllocations[$billingId] = ($billingAllocations[$billingId] ?? 0) + $allocation;
+                $dueByBill[$pharmacyBill->id] = max(0, (float) ($dueByBill[$pharmacyBill->id] ?? 0) - $allocation);
+                $billingDueRemaining[$billingId] = max(0, (float) ($billingDueRemaining[$billingId] ?? 0) - $allocation);
+                $remainingAmount -= $allocation;
+            }
+
+            if ($remainingAmount > 0.009) {
+                throw ValidationException::withMessages([
+                    'amount' => 'The full collection could not be allocated to the IPD pharmacy invoices.',
+                ]);
+            }
+
+            $ledgerService = app(\App\Services\LedgerService::class);
+            foreach ($billingAllocations as $billingId => $allocation) {
+                try {
+                    $ledgerService->recordArCollection(
+                        $ledgerService->resolvePaymentAccountCode($validated['payment_method']),
+                        (float) $allocation,
+                        'Pharmacy due collection for IPD #' . $ipdpatient->id,
+                        now()->toDateString(),
+                        'DueCollection',
+                        (int) $billingId,
+                        auth('admin')->id()
+                    );
+                } catch (\Throwable $exception) {
+                    report($exception);
+                }
+            }
+
+            ActivityLogService::log(
+                'Due Collection',
+                'COLLECT',
+                'Collected pharmacy due for IPD #' . $ipdpatient->id,
+                [
+                    'ipd_patient_id' => $ipdpatient->id,
+                    'collected_amount' => $collectedAmount,
+                    'payment_method' => $validated['payment_method'],
+                ]
+            );
+
+            return $collectedAmount;
+        });
+        Cache::put($cacheKey, true, now()->addMinutes(30));
+
+        return redirect()->back()->with(
+            'successMessage',
+            'Pharmacy due collected: ' . number_format($result, 2)
+        );
+    }
+
+    private function getPharmacyBillDueAmounts($pharmacyBills): array
+    {
+        $pharmacyBills = collect($pharmacyBills);
+        $billIds = $pharmacyBills->pluck('id')->filter()->unique()->values();
+        if ($billIds->isEmpty()) {
+            return [];
+        }
+
+        $paymentsQuery = Payment::query()
+            ->whereIn('pharmacy_bill_id', $billIds)
+            ->where(function ($query) {
+                $query->whereNull('status')->orWhere('status', 'Active');
+            });
+        if (Schema::hasColumn('payments', 'deleted_at')) {
+            $paymentsQuery->whereNull('deleted_at');
+        }
+        $paymentsByBill = $paymentsQuery->get(['pharmacy_bill_id', 'amount'])->groupBy('pharmacy_bill_id');
+
+        $collectionsQuery = DueCollection::query()->whereIn('pharmacy_bill_id', $billIds);
+        if (Schema::hasColumn('due_collections', 'deleted_at')) {
+            $collectionsQuery->whereNull('deleted_at');
+        }
+        $collectionsByBill = $collectionsQuery
+            ->get(['pharmacy_bill_id', 'collected_amount'])
+            ->groupBy('pharmacy_bill_id');
+
+        $amounts = [];
+        foreach ($pharmacyBills as $bill) {
+            $payments = $paymentsByBill->get($bill->id, collect());
+            $paid = $payments->isNotEmpty()
+                ? (float) $payments->sum('amount')
+                : max((float) ($bill->payment_amount ?? 0) - (float) ($bill->return_amount ?? 0), 0);
+            $collected = (float) $collectionsByBill->get($bill->id, collect())->sum('collected_amount');
+            $amounts[$bill->id] = max(
+                round((float) ($bill->net_amount ?? 0) - $paid - $collected, 2),
+                0
+            );
+        }
+
+        return $amounts;
     }
 
     public function storePrescription(Request $request, $id)
@@ -1347,7 +1748,12 @@ class IpdPatientController extends Controller
         $validated = $request->validate([
             'doctor_id' => 'nullable|exists:admins,id',
             'doctor_designation' => 'nullable|string|max:255',
+            'nibp' => 'nullable|string|max:255',
+            'weight' => 'nullable|string|max:255',
+            'pulse' => 'nullable|string|max:255',
+            'temperature' => 'nullable|string|max:255',
             'complaints' => 'nullable|string',
+            'examinations' => 'nullable|string',
             'diagnosis' => 'nullable|string',
             'advice' => 'nullable|string',
             'follow_up_date' => 'nullable|date',
@@ -1355,6 +1761,8 @@ class IpdPatientController extends Controller
             'doctor_seal' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
             'medicines' => 'nullable|array',
             'medicines.*.medicine_name' => 'nullable|string|max:255',
+            'medicines.*.generic_name' => 'nullable|string|max:255',
+            'medicines.*.quantity' => 'nullable|integer|min:1|max:100000',
             'medicines.*.dose' => 'nullable|string|max:255',
             'medicines.*.frequency' => 'nullable|string|max:255',
             'medicines.*.duration' => 'nullable|string|max:255',
@@ -1366,6 +1774,10 @@ class IpdPatientController extends Controller
         $medicineItems = collect($validated['medicines'] ?? [])
             ->filter(function ($item) {
                 return trim((string) ($item['medicine_name'] ?? '')) !== '';
+            })
+            ->unique(function ($item) {
+                $name = preg_replace('/\s+/', ' ', trim((string) ($item['medicine_name'] ?? '')));
+                return strtolower($name);
             })
             ->values();
 
@@ -1418,7 +1830,12 @@ class IpdPatientController extends Controller
                 $prescription = $existingPrescription;
                 $prescription->doctor_id = $doctorId;
                 $prescription->doctor_designation = trim((string) ($validated['doctor_designation'] ?? '')) ?: null;
+                $prescription->nibp = trim((string) ($validated['nibp'] ?? '')) ?: null;
+                $prescription->weight = trim((string) ($validated['weight'] ?? '')) ?: null;
+                $prescription->pulse = trim((string) ($validated['pulse'] ?? '')) ?: null;
+                $prescription->temperature = trim((string) ($validated['temperature'] ?? '')) ?: null;
                 $prescription->complaints = $validated['complaints'] ?? null;
+                $prescription->examinations = $validated['examinations'] ?? null;
                 $prescription->diagnosis = $validated['diagnosis'] ?? null;
                 $prescription->advice = $validated['advice'] ?? null;
                 $prescription->follow_up_date = $validated['follow_up_date'] ?? null;
@@ -1447,7 +1864,12 @@ class IpdPatientController extends Controller
                     'patient_id' => $ipdpatient->patient_id,
                     'doctor_id' => $doctorId,
                     'doctor_designation' => trim((string) ($validated['doctor_designation'] ?? '')) ?: null,
+                    'nibp' => trim((string) ($validated['nibp'] ?? '')) ?: null,
+                    'weight' => trim((string) ($validated['weight'] ?? '')) ?: null,
+                    'pulse' => trim((string) ($validated['pulse'] ?? '')) ?: null,
+                    'temperature' => trim((string) ($validated['temperature'] ?? '')) ?: null,
                     'complaints' => $validated['complaints'] ?? null,
+                    'examinations' => $validated['examinations'] ?? null,
                     'diagnosis' => $validated['diagnosis'] ?? null,
                     'advice' => $validated['advice'] ?? null,
                     'follow_up_date' => $validated['follow_up_date'] ?? null,
@@ -1462,6 +1884,8 @@ class IpdPatientController extends Controller
                 IpdPrescriptionMedicine::create([
                     'ipd_prescription_id' => $prescription->id,
                     'medicine_name' => trim((string) ($item['medicine_name'] ?? '')),
+                    'generic_name' => trim((string) ($item['generic_name'] ?? '')) ?: null,
+                    'quantity' => (int) ($item['quantity'] ?? 1),
                     'dose' => trim((string) ($item['dose'] ?? '')) ?: null,
                     'frequency' => trim((string) ($item['frequency'] ?? '')) ?: null,
                     'duration' => trim((string) ($item['duration'] ?? '')) ?: null,
@@ -1534,21 +1958,13 @@ class IpdPatientController extends Controller
 
             $payment = Payment::create($paymentData);
 
-            // If billing present, record a DueCollection (so it appears in billing invoice)
+            // The Payment row is the single record for this money. It must not be
+            // mirrored into due_collections, because paid totals are calculated as
+            // payments + due collections and a mirror would count the amount twice.
             if ($billingId) {
                 try {
                     $billing = Billing::query()->find($billingId);
                     if ($billing) {
-                        // create due collection entry (records date/time + creator)
-                        DueCollection::create([
-                            'billing_id' => $billing->id,
-                            'collected_amount' => (float) $validated['amount'],
-                            'collected_at' => now(),
-                            'payment_method' => $validated['payment_method'] ?? 'Cash',
-                            'note' => $validated['notes'] ?? ('Collected via IPD payment id:' . ($payment->id ?? '')),
-                            'created_by' => auth('admin')->id(),
-                        ]);
-
                         // ensure bed charges are present in billing; regenerate if missing
                         $hasBed = (bool) $billing->billItems()->whereRaw('LOWER(category) LIKE ?', ['%bed%'])->exists();
                         if (! $hasBed) {
@@ -1559,7 +1975,7 @@ class IpdPatientController extends Controller
                             }
                         }
 
-                        // refresh billing totals to reflect payment + due collection
+                        // refresh billing totals to reflect the new payment
                         try {
                             $this->ipdDischargeBillingService->refreshBillingTotals($ipdpatient, auth('admin')->id());
                         } catch (Exception $_e) {
@@ -1567,7 +1983,7 @@ class IpdPatientController extends Controller
                         }
                     }
                 } catch (Exception $_e) {
-                    Log::warning('Failed to attach due collection or refresh billing after payment', ['err' => $_e->getMessage()]);
+                    Log::warning('Failed to refresh billing after IPD payment', ['err' => $_e->getMessage()]);
                 }
             }
 
@@ -1629,7 +2045,9 @@ class IpdPatientController extends Controller
             if (array_key_exists('payment_method', $validated)) $payment->payment_method = $validated['payment_method'];
             if (array_key_exists('transaction_id', $validated)) $payment->transaction_id = $validated['transaction_id'];
             if (array_key_exists('notes', $validated)) $payment->notes = $validated['notes'];
-            $payment->updated_by = auth('admin')->id();
+            if (Schema::hasColumn($payment->getTable(), 'updated_by')) {
+                $payment->updated_by = auth('admin')->id();
+            }
             $payment->save();
 
             // refresh billing totals if needed
@@ -1807,6 +2225,11 @@ class IpdPatientController extends Controller
         // Build a compatibility view-model (`$vm`) expected by the
         // canonical final-invoice template and its partials.
         $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
+        $invoiceDesign = InvoiceDesign::resolveForModule('ipd_final', ['billing']);
+
+        $designImageUrl = static function (?string $path): string {
+            return $path ? Storage::disk('public')->url(ltrim($path, '/')) : '';
+        };
 
         $ipdpatient->loadMissing(['patient', 'doctor', 'bed', 'billing']);
         $patient = $ipdpatient->patient;
@@ -1922,6 +2345,15 @@ class IpdPatientController extends Controller
                 'logo_url' => trim((string) ($websetting?->getRawOriginal('logo') ?? $websetting?->logo ?? '')),
                 'bin_vat_no' => $websetting?->bin_vat_no ?? '',
                 'tax_reg_no' => $websetting?->tax_reg_no ?? '',
+            ],
+            'design' => [
+                'header_image' => $designImageUrl($invoiceDesign?->header_photo_path),
+                'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
+                'footer_image' => $designImageUrl($invoiceDesign?->footer_photo_path),
+                'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
+                'footer_content' => (string) ($invoiceDesign?->footer_content ?? ''),
+                'footer_content_position' => (string) ($invoiceDesign?->footer_content_position ?? 'above'),
+                'model' => $invoiceDesign,
             ],
             'invoice' => [
                 'invoice_no' => $billing?->invoice_number ?? '',
@@ -2152,6 +2584,7 @@ class IpdPatientController extends Controller
             ->map(function ($item) use ($safeText) {
                 return [
                     'medicine_name' => $safeText($item->medicine_name),
+                    'generic_name' => $safeText($item->generic_name, ''),
                     'dose' => $safeText($item->dose),
                     'duration' => $safeText($item->duration),
                     'frequency' => $safeText($item->frequency, ''),
@@ -2220,9 +2653,14 @@ class IpdPatientController extends Controller
             'doctorDesignation' => $doctorDesignation,
             'doctorSealImage' => $doctorSealImage,
             'doctorSignatureImage' => $doctorSignatureImage,
+            'nibp' => $safeText($prescription->nibp, ''),
+            'weight' => $safeText($prescription->weight, ''),
+            'pulse' => $safeText($prescription->pulse, ''),
+            'temperature' => $safeText($prescription->temperature, ''),
             'bedName' => $safeText($ipdpatient?->bed?->name),
             'caseType' => $safeText($ipdpatient?->case),
             'complaints' => $complaints,
+            'examinations' => $safeText($prescription->examinations, ''),
             'diagnosis' => $diagnosis,
             'adviceNotes' => $adviceNotes,
             'followUpDate' => $followUpDate,
@@ -2420,6 +2858,7 @@ class IpdPatientController extends Controller
             ->map(function ($item) use ($safeText) {
                 return [
                     'medicine_name' => $safeText($item->medicine_name),
+                    'generic_name' => $safeText($item->generic_name, ''),
                     'dose' => $safeText($item->dose),
                     'duration' => $safeText($item->duration),
                     'frequency' => $safeText($item->frequency, ''),
@@ -2487,6 +2926,7 @@ class IpdPatientController extends Controller
             'headerImage' => $headerImageBase64,
             'footerImage' => $footerImageBase64,
             'footerContent' => $invoiceDesign->footer_content ?? '',
+            'footerContentOffset' => max(-50, min(50, (int) ($invoiceDesign?->footer_content_offset ?? 0))),
             'certificateCode' => $certificateCode,
             'printedAt' => $printedAt,
             'qrCodeImage' => $qrCodeImage,

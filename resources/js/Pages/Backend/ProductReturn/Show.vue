@@ -10,6 +10,10 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  canManageStatus: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const returnData = computed(() => props.return ?? {});
@@ -20,6 +24,10 @@ const approveReturn = () => {
 
 const processReturn = () => {
   router.post(route('backend.productreturn.process', returnData.value.id), {}, { preserveScroll: true });
+};
+
+const reopenReturn = () => {
+  router.post(route('backend.productreturn.reopen', returnData.value.id), {}, { preserveScroll: true });
 };
 
 const formatReturnDate = (value) => {
@@ -44,22 +52,30 @@ const formatReturnDate = (value) => {
         <h1 class="text-xl font-semibold text-gray-800">{{ returnData.return_type === 'supplier' ? 'Supplier Product Return Details' : 'Customer Product Return Details' }}</h1>
         <div class="flex flex-wrap items-center gap-2">
           <button
+            v-if="props.canManageStatus && returnData.status === 'pending'"
             type="button"
-            class="px-3 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-60"
-            :disabled="returnData.status !== 'pending'"
+            class="px-3 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700"
             @click="approveReturn"
           >
             Approve
           </button>
           <button
+            v-if="props.canManageStatus && returnData.status === 'approved'"
             type="button"
-            class="px-3 py-2 text-sm text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:opacity-60"
-            :disabled="returnData.status !== 'approved'"
+            class="px-3 py-2 text-sm text-white bg-emerald-600 rounded hover:bg-emerald-700"
             @click="processReturn"
           >
             Process
           </button>
-          <Link :href="route('backend.productreturn.index', { return_type: returnData.return_type || 'supplier' })" class="px-3 py-2 text-sm text-white bg-gray-600 rounded hover:bg-gray-700">
+          <button
+            v-if="props.canManageStatus && returnData.status === 'processed'"
+            type="button"
+            class="px-3 py-2 text-sm text-white bg-amber-600 rounded hover:bg-amber-700"
+            @click="reopenReturn"
+          >
+            Reopen for Approval
+          </button>
+          <Link :href="route('backend.productreturn.index', { return_type: returnData.return_type || 'supplier' })" class="px-3 py-2 text-sm !text-white bg-gray-600 rounded hover:bg-gray-700">
             Back
           </Link>
         </div>

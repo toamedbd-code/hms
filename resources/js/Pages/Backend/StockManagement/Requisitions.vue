@@ -6,6 +6,7 @@ import BackendLayout from '@/Layouts/BackendLayout.vue';
 const props = defineProps({
   pageTitle: { type: String, default: 'Department Requisitions' },
   requisitions: { type: Object, default: () => ({ data: [] }) },
+  timezone: { type: String, default: 'Asia/Dhaka' },
   filters: { type: Object, default: () => ({}) },
 });
 
@@ -25,7 +26,14 @@ const formatDateTime = (value) => {
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
+    timeZone: props.timezone,
   });
+};
+
+const formatDate = (value) => {
+  if (!value) return '-';
+  const [year, month, day] = String(value).slice(0, 10).split('-');
+  return year && month && day ? `${day}/${month}/${year}` : String(value);
 };
 
 const applyFilter = () => {
@@ -37,6 +45,10 @@ const applyFilter = () => {
 };
 
 const decide = (id, action) => {
+  if (action === 'approve' && !window.confirm('Confirm the requested items have been physically issued. Approving will immediately deduct the quantities from Central Store and add them to the department balance.')) {
+    return;
+  }
+
   router.post(route('backend.stock.requisition.decision', id), { action }, {
     preserveScroll: true,
   });
@@ -51,6 +63,7 @@ const decide = (id, action) => {
         <div class="flex gap-2">
           <a :href="route('backend.stock.index')" class="px-3 py-2 text-sm font-semibold text-white bg-red-600 rounded hover:bg-red-700">Back</a>
           <a :href="route('backend.stock.requisition.create')" class="px-3 py-2 text-sm font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700">Create Requisition</a>
+          <a :href="route('backend.stock.requisition.create', { reagent_only: 1 })" class="px-3 py-2 text-sm font-semibold text-white bg-teal-600 rounded hover:bg-teal-700">Create Reagent Indent</a>
         </div>
       </div>
 
@@ -64,6 +77,10 @@ const decide = (id, action) => {
         </select>
       </div>
 
+      <div class="p-3 mt-3 text-sm border border-sky-200 rounded-lg bg-sky-50 text-sky-900">
+        Approving a department indent reduces Central Store stock and transfers the issued quantity to the department balance. Every transfer is recorded in the movement ledger; department usage is recorded from Department Inventory.
+      </div>
+
       <div class="w-full mt-3 overflow-x-auto">
         <table class="w-full text-sm border border-gray-200">
           <thead class="bg-gray-50">
@@ -71,6 +88,8 @@ const decide = (id, action) => {
               <th class="px-3 py-2 border">Req No</th>
               <th class="px-3 py-2 border">Department</th>
               <th class="px-3 py-2 border">Needed Date</th>
+              <th class="px-3 py-2 border">Requested At / By</th>
+              <th class="px-3 py-2 border">Issued At / By</th>
               <th class="px-3 py-2 border">Items</th>
               <th class="px-3 py-2 border">Status</th>
               <th class="px-3 py-2 border">Action</th>
@@ -80,7 +99,15 @@ const decide = (id, action) => {
             <tr v-for="row in rows" :key="row.id" class="hover:bg-gray-50 align-top">
               <td class="px-3 py-2 border text-center">{{ row.requisition_no }}</td>
               <td class="px-3 py-2 border">{{ row.department }}</td>
-              <td class="px-3 py-2 border text-center">{{ formatDateTime(row.needed_date) }}</td>
+              <td class="px-3 py-2 border text-center">{{ formatDate(row.needed_date) }}</td>
+              <td class="px-3 py-2 border text-center">
+                {{ formatDateTime(row.created_at) }}
+                <span class="block text-xs text-slate-500">{{ row.requested_by_admin?.name || '-' }}</span>
+              </td>
+              <td class="px-3 py-2 border text-center">
+                {{ row.status === 'Approved' ? formatDateTime(row.approved_at) : '-' }}
+                <span v-if="row.status === 'Approved'" class="block text-xs text-slate-500">{{ row.approved_by_admin?.name || '-' }}</span>
+              </td>
               <td class="px-3 py-2 border">
                 <ul class="space-y-1">
                   <li v-for="line in row.items" :key="line.id" class="text-xs">
@@ -95,7 +122,7 @@ const decide = (id, action) => {
               </td>
               <td class="px-3 py-2 border text-center">
                 <div v-if="row.status === 'Pending'" class="flex flex-wrap items-center justify-center gap-1">
-                  <button type="button" class="px-2 py-1 text-xs text-white bg-emerald-600 rounded hover:bg-emerald-700" @click="decide(row.id, 'approve')">Approve</button>
+                  <button type="button" class="px-2 py-1 text-xs text-white bg-emerald-600 rounded hover:bg-emerald-700" @click="decide(row.id, 'approve')">Confirm Issue</button>
                   <button type="button" class="px-2 py-1 text-xs text-white bg-rose-600 rounded hover:bg-rose-700" @click="decide(row.id, 'reject')">Reject</button>
                   <a :href="route('backend.stock.requisition.print', row.id)" class="px-2 py-1 text-xs text-white bg-sky-600 rounded hover:bg-sky-700">Print</a>
                   <a :href="route('backend.stock.requisition.issue-slip', row.id)" class="px-2 py-1 text-xs text-white bg-indigo-600 rounded hover:bg-indigo-700">Issue Slip</a>
@@ -108,7 +135,7 @@ const decide = (id, action) => {
               </td>
             </tr>
             <tr v-if="rows.length === 0">
-              <td colspan="6" class="px-3 py-6 text-center text-gray-500 border">No requisition found.</td>
+              <td colspan="8" class="px-3 py-6 text-center text-gray-500 border">No requisition found.</td>
             </tr>
           </tbody>
         </table>

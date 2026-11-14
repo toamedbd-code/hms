@@ -7,7 +7,7 @@ use Tests\TestCase;
 
 class BkashCreatePaymentPayloadTest extends TestCase
 {
-    public function test_create_payment_includes_payer_reference_for_live_gateway(): void
+    public function test_create_payment_includes_configured_payer_reference_for_live_gateway(): void
     {
         config([
             'bkash.app_key' => 'app-key',
@@ -55,7 +55,8 @@ class BkashCreatePaymentPayloadTest extends TestCase
             $body = $request->data();
 
             return $request->url() === 'https://tokenized.pay.bka.sh/v1.2.0-beta/tokenized/checkout/create'
-                && ($body['payerReference'] ?? null) === '01410592638';
+                && array_key_exists('payerReference', $body)
+                && $body['payerReference'] === '01410592638';
         });
     }
 }

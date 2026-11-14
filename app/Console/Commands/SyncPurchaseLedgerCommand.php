@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Account;
 use App\Models\LedgerTransaction;
 use App\Models\MedicinePurchase;
+use App\Models\SupplierPayment;
 use App\Services\LedgerService;
 use Illuminate\Console\Command;
 
@@ -12,7 +13,7 @@ class SyncPurchaseLedgerCommand extends Command
 {
     protected $signature = 'accounts:sync-purchase-ledger {--from=} {--to=}';
 
-    protected $description = 'Sync medicine purchases into ledger transactions for complete asset and payable tracking';
+    protected $description = 'Sync medicine purchases, supplier payments, inventory, payables and purchase expenses into the ledger';
 
     public function handle(LedgerService $ledgerService): int
     {
@@ -58,16 +59,17 @@ class SyncPurchaseLedgerCommand extends Command
             $cashCode = $this->ensureSystemAccount('CASH', 'Cash', 'asset', 'ASSET', false);
             $payableCode = $this->ensureSystemAccount('AP_SUPPLIER', 'Supplier Payable', 'liability', 'LIABILITY', false);
 
-            $lines = [
-                ['account_code' => $inventoryCode, 'entry_type' => 'debit', 'amount' => $totalAmount],
-            ];
-
-            if ($paidAmount > 0) {
-                $lines[] = ['account_code' => $cashCode, 'entry_type' => 'credit', 'amount' => $paidAmount];
-            }
-
+            $expenseCode = $this->ensureSystemAccount('PHARM_PURCHASE_EXP', 'Pharmacy Purchase Expense', 'expense', 'EXPENSE', true);
+            $lines = [];
             if ($dueAmount > 0) {
+                $lines[] = ['account_code' => $inventoryCode, 'entry_type' => 'debit', 'amount' => $dueAmount];
                 $lines[] = ['account_code' => $payableCode, 'entry_type' => 'credit', 'amount' => $dueAmount];
+            }
+            if ($paidAmount > 0) {
+                $lines[] = ['account_code' => $payableCode, 'entry_type' => 'debit', 'amount' => $paidAmount];
+                $lines[] = ['account_code' => $expenseCode, 'entry_type' => 'debit', 'amount' => $paidAmount];
+                $lines[] = ['account_code' => $inventoryCode, 'entry_type' => 'credit', 'amount' => $paidAmount];
+                $lines[] = ['account_code' => $cashCode, 'entry_type' => 'credit', 'amount' => $paidAmount];
             }
 
             $ledgerService->recordTransaction(
@@ -82,7 +84,54 @@ class SyncPurchaseLedgerCommand extends Command
             $synced++;
         }
 
-        $this->info('Synced: ' . $synced . ', Skipped: ' . $skipped);
+        $supplierPayments = SupplierPayment::query()
+            ->where('paid_amount', '>', 0)
+            ->when(!empty($from), fn ($query) => $query->whereDate('payment_date', '>=', $from))
+            ->when(!empty($to), fn ($query) => $query->whereDate('payment_date', '<=', $to))
+            ->where(function ($query) {
+                $query->whereNull('notes')
+                    ->orWhere(function ($notesQuery) {
+                        $notesQuery->where('notes', 'not like', 'Initial payment from purchase %')
+                            ->where('notes', 'not like', 'Initial payment from site purchase %');
+                    });
+            })
+            ->orderBy('id')
+            ->get();
+
+        $directPaymentCount = 0;
+        foreach ($supplierPayments as $payment) {
+            $existing = LedgerTransaction::query()
+                ->where('reference_type', 'SupplierPayment')
+                ->where('reference_id', $payment->id)
+                ->first();
+            if ($existing) {
+                $ledgerService->deleteTransaction($existing->id);
+            }
+
+            $paidAmount = round((float) $payment->paid_amount, 2);
+            if ($paidAmount <= 0) {
+                continue;
+            }
+
+            $expenseCode = $this->ensureSystemAccount('PHARM_PURCHASE_EXP', 'Pharmacy Purchase Expense', 'expense', 'EXPENSE', true);
+            $cashAccountCode = Account::query()->whereKey($payment->payment_account_id)->value('code');
+            $cashCode = $cashAccountCode ?: $this->ensureSystemAccount('CASH', 'Cash', 'asset', 'ASSET', false);
+
+            $ledgerService->recordTransaction(
+                [
+                    ['account_code' => $expenseCode, 'entry_type' => 'debit', 'amount' => $paidAmount],
+                    ['account_code' => $cashCode, 'entry_type' => 'credit', 'amount' => $paidAmount],
+                ],
+                'Supplier payment #' . $payment->id,
+                optional($payment->payment_date)->format('Y-m-d') ?? now()->toDateString(),
+                'SupplierPayment',
+                $payment->id,
+                null
+            );
+            $directPaymentCount++;
+        }
+
+        $this->info('Synced purchases: ' . $synced . ', direct supplier payments: ' . $directPaymentCount . ', skipped: ' . $skipped);
 
         return self::SUCCESS;
     }

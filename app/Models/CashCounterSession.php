@@ -24,6 +24,7 @@ class CashCounterSession extends Model
         'closed_at',
         'status',
         'created_by',
+        'ledger_close_transaction_id',
     ];
 
     protected $casts = [

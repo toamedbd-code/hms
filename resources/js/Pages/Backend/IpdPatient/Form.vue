@@ -33,7 +33,32 @@ const getCurrentDateTimeForInput = () => {
     return `${getPart('year')}-${getPart('month')}-${getPart('day')}T${getPart('hour')}:${getPart('minute')}`;
 };
 
-const props = defineProps(['ipdpatient', 'id', 'patients', 'doctors', 'bedGroups', 'beds', 'symptomTypes', 'designations', 'departments', 'specialists', 'pathologyAndRadiologyTests', 'medicineInventories', 'hospitalCharges']);
+const props = defineProps({
+    ipdpatient: { type: Object, default: null },
+    id: { type: [String, Number], default: null },
+    patients: { type: Array, default: () => [] },
+    doctors: { type: Array, default: () => [] },
+    bedGroups: { type: Array, default: () => [] },
+    beds: { type: Array, default: () => [] },
+    symptomTypes: { type: Array, default: () => [] },
+    designations: { type: Array, default: () => [] },
+    departments: { type: Array, default: () => [] },
+    specialists: { type: Array, default: () => [] },
+    symptomTitles: { type: Array, default: () => [] },
+    pathologyAndRadiologyTests: { type: Array, default: () => [] },
+    hospitalCharges: { type: Array, default: () => [] },
+    tpas: { type: Array, default: () => [] },
+});
+
+// `datetime-local` only accepts `YYYY-MM-DDTHH:MM`, while the server sends
+// `YYYY-MM-DD HH:MM:SS`. Without this the saved date shows up blank on edit.
+const toDateTimeInput = (value) => {
+    if (!value) return '';
+
+    const text = String(value).trim().replace(' ', 'T');
+
+    return text.slice(0, 16);
+};
 
 const form = useForm({
     patient_id: props.ipdpatient?.patient_id ?? '',
@@ -46,7 +71,7 @@ const form = useForm({
     note: props.ipdpatient?.note ?? '',
 
     // Right side fields
-    admission_date: props.ipdpatient?.admission_date ?? '',
+    admission_date: toDateTimeInput(props.ipdpatient?.admission_date),
     case: props.ipdpatient?.case ?? '',
     tpa: props.ipdpatient?.tpa ?? '',
     casualty: props.ipdpatient?.casualty ?? 'no',
@@ -154,10 +179,6 @@ const autoGrowTextarea = (event) => {
     textarea.style.height = (textarea.scrollHeight) + 'px';
 };
 
-const applyGrandTotalToAdvance = () => {
-    form.advance_amount = Number(hospitalChargeGrandTotal.value.toFixed(2));
-};
-
 // Normalize for matching: remove non-alphanumeric, collapse spaces, lowercase
 const normalizeForMatch = (v) => {
     if (v == null) return '';
@@ -200,193 +221,245 @@ const smartSortSearchResults = (items, queryString, getDisplayText = (item) => i
     });
 };
 
+const toList = (value) => {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === 'object') return Object.values(value);
+    return [];
+};
+
 // Build combined items list for searching
 const allAvailableHospitalItems = computed(() => {
     const items = [];
 
-    // Add tests
-    if (Array.isArray(props.pathologyAndRadiologyTests)) {
-        console.log('✓ Tests available:', props.pathologyAndRadiologyTests.length);
-        props.pathologyAndRadiologyTests.forEach((test) => {
-            items.push({
-                id: test.id,
-                name: test.test_name || '',
-                category: test.category_type || '',
-                unitPrice: test.amount ?? 0,
-                type: 'test',
-                alt: [test.test_name, test.test_short_name ?? '', test.charge_name ?? ''].filter(Boolean).join(' | '),
-            });
+    toList(props.pathologyAndRadiologyTests).forEach((test) => {
+        items.push({
+            id: `test-${test.id}`,
+            sourceId: test.id,
+            name: test.test_name || '',
+            category: test.category_type || '',
+            unitPrice: Number(test.amount ?? test.standard_charge ?? 0),
+            type: 'test',
+            alt: [test.test_name, test.test_short_name ?? '', test.charge_name ?? ''].filter(Boolean).join(' | '),
         });
-    } else {
-        console.warn('✗ Tests not available or not an array');
-    }
+    });
 
-    // Add medicines
-    if (Array.isArray(props.medicineInventories)) {
-        console.log('✓ Medicines available:', props.medicineInventories.length);
-        props.medicineInventories.forEach((medicine) => {
-            items.push({
-                id: medicine.id,
-                name: medicine.medicine_name || '',
-                category: 'Medicine',
-                unitPrice: medicine.medicine_unit_selling_price ?? 0,
-                type: 'medicine',
-                alt: [medicine.medicine_name, medicine.medicine_code ?? ''].filter(Boolean).join(' | '),
-            });
+    toList(props.hospitalCharges).forEach((charge) => {
+        items.push({
+            id: `charge-${charge.id}`,
+            sourceId: charge.id,
+            name: charge.name || '',
+            category: charge.module || '',
+            unitPrice: Number(charge.amount ?? charge.standard_charge ?? 0),
+            type: 'charge',
+            alt: [charge.name, charge.short_name ?? ''].filter(Boolean).join(' | '),
         });
-    } else {
-        console.warn('✗ Medicines not available or not an array');
-    }
+    });
 
-    // Add hospital charges
-    if (Array.isArray(props.hospitalCharges)) {
-        console.log('✓ Charges available:', props.hospitalCharges.length);
-        props.hospitalCharges.forEach((charge) => {
-            items.push({
-                id: charge.id,
-                name: charge.name || '',
-                category: charge.module || '',
-                unitPrice: charge.amount ?? 0,
-                type: 'charge',
-                alt: [charge.name, charge.short_name ?? ''].filter(Boolean).join(' | '),
-            });
-        });
-    } else {
-        console.warn('✗ Charges not available or not an array');
-    }
-
-    console.log('📋 Total items for search:', items.length);
     return items;
 });
 
-// Filter items based on search query
-// Use BillingPage's smart sorter and limit results for best UX
 const getFilteredHospitalItems = (searchQuery) => {
     const rawQuery = String(searchQuery || '').trim();
-    if (!rawQuery) return [];
+    const source = allAvailableHospitalItems.value;
+
+    if (!rawQuery) {
+        return source.slice(0, 50);
+    }
 
     const tokens = rawQuery.split(/\s+/).filter(Boolean);
-    const normalizedTokens = tokens.map(t => normalizeForMatch(t)).filter(Boolean);
+    const normalizedTokens = tokens.map((t) => normalizeForMatch(t)).filter(Boolean);
 
-    const filtered = allAvailableHospitalItems.value.filter((item) => {
-        try {
-            const hay = normalizeForMatch(((item.name || '') + ' ' + (item.alt || '')));
-            if (!normalizedTokens.length) return false;
-            return normalizedTokens.every((tok) => hay.includes(tok));
-        } catch (e) {
-            return false;
-        }
+    const filtered = source.filter((item) => {
+        const hay = normalizeForMatch(`${item.name || ''} ${item.alt || ''} ${item.category || ''}`);
+        return normalizedTokens.every((tok) => hay.includes(tok));
     });
 
-    const sorted = smartSortSearchResults(filtered, rawQuery, (i) => i.name || '');
-    return sorted.slice(0, 50);
+    return smartSortSearchResults(filtered, rawQuery, (i) => i.name || '').slice(0, 50);
 };
 
-
-const hospitalItemSearchResults = ref([]);
-const hospitalItemOptions = ref([]);
-
-onMounted(() => {
-    // Initialize with all items when component mounts, so they're always available
-    console.log('📍 Component mounted, initializing search options...');
-    hospitalItemOptions.value = allAvailableHospitalItems.value;
-    console.log('✓ Initialized with', hospitalItemOptions.value.length, 'items');
-});
 const activeHospitalItemRowForSearch = ref(null);
+const suppressHospitalItemSearch = ref(false);
+const hospitalItemDropdownStyle = ref({});
+const hospitalItemInputEls = new Map();
+const hospitalMedicineResults = ref([]);
+const hospitalMedicineSearchLoading = ref(false);
+let hospitalMedicineSearchTimer = null;
+let hospitalMedicineSearchController = null;
+let hospitalMedicineSearchQuery = '';
 
-const onHospitalItemSearch = (searchQuery) => {
-    const q = typeof searchQuery === 'string' ? searchQuery : (searchQuery?.query || '');
-    
-    // When empty, restore full option list so dropdown can show suggestions on focus
-    if (!q || String(q).trim().length < 1) {
-        hospitalItemOptions.value = allAvailableHospitalItems.value;
+const setHospitalItemInputEl = (index, el) => {
+    if (el) {
+        hospitalItemInputEls.set(index, el);
+    } else {
+        hospitalItemInputEls.delete(index);
+    }
+};
+
+const hospitalItemOptions = computed(() => {
+    const rowIndex = activeHospitalItemRowForSearch.value;
+    if (rowIndex === null || rowIndex === undefined) return [];
+
+    const row = form.hospital_charge_items[rowIndex];
+    const query = String(row?.item_name || '').trim();
+    const localResults = getFilteredHospitalItems(query);
+    const remoteMedicines = hospitalMedicineResults.value.filter((item) =>
+        item.name.toLowerCase().includes(query.toLowerCase())
+    );
+
+    return [...remoteMedicines, ...localResults.filter((item) => item.type !== 'medicine')].slice(0, 50);
+});
+
+const positionHospitalItemDropdown = (rowIndex) => {
+    nextTick(() => {
+        const input = hospitalItemInputEls.get(rowIndex);
+        if (!input) return;
+
+        const rect = input.getBoundingClientRect();
+        const width = Math.max(rect.width, 280);
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const openUp = spaceBelow < 220 && rect.top > 220;
+
+        hospitalItemDropdownStyle.value = {
+            position: 'fixed',
+            left: `${rect.left}px`,
+            width: `${width}px`,
+            zIndex: 99999,
+            ...(openUp
+                ? { bottom: `${window.innerHeight - rect.top + 4}px`, top: 'auto' }
+                : { top: `${rect.bottom + 4}px`, bottom: 'auto' }),
+        };
+    });
+};
+
+const rowHasSelectedHospitalItem = (rowIndex) => {
+    const row = form.hospital_charge_items[rowIndex];
+    return Boolean(String(row?.item_name || '').trim()) && Number(row?.unit_price || 0) > 0;
+};
+
+const openHospitalItemSearch = (rowIndex, fromFocus = false) => {
+    if (suppressHospitalItemSearch.value) return;
+    if (fromFocus && rowHasSelectedHospitalItem(rowIndex)) return;
+
+    activeHospitalItemRowForSearch.value = rowIndex;
+    positionHospitalItemDropdown(rowIndex);
+};
+
+const closeHospitalItemSearch = () => {
+    activeHospitalItemRowForSearch.value = null;
+};
+
+const onHospitalItemQuery = (rowIndex) => {
+    if (suppressHospitalItemSearch.value) return;
+
+    activeHospitalItemRowForSearch.value = rowIndex;
+    positionHospitalItemDropdown(rowIndex);
+    const query = String(form.hospital_charge_items[rowIndex]?.item_name || '').trim();
+    hospitalMedicineSearchQuery = query;
+    clearTimeout(hospitalMedicineSearchTimer);
+    hospitalMedicineSearchController?.abort();
+    hospitalMedicineResults.value = [];
+
+    if (query.length < 2) {
+        hospitalMedicineSearchLoading.value = false;
         return;
     }
 
-    hospitalItemOptions.value = getFilteredHospitalItems(q);
-};
+    hospitalMedicineSearchLoading.value = true;
+    hospitalMedicineSearchTimer = setTimeout(async () => {
+        const controller = new AbortController();
+        hospitalMedicineSearchController = controller;
 
-// Positioning helpers: place appended multiselect dropdown exactly under the input
-const _positioningHandles = new Map();
-
-const positionDropdownForRow = (rowIndex) => {
-    nextTick(() => {
         try {
-            const input = document.querySelector(`[data-hospital-item-multiselect="${rowIndex}"] .multiselect__input`);
-            if (!input) return;
-
-            const wrappers = Array.from(document.querySelectorAll('.multiselect__content-wrapper'));
-            if (!wrappers.length) return;
-
-            const wrapper = wrappers[wrappers.length - 1];
-
-            const rect = input.getBoundingClientRect();
-            wrapper.style.position = 'fixed';
-            wrapper.style.left = `${rect.left}px`;
-            wrapper.style.top = `${rect.bottom + 4}px`;
-            wrapper.style.minWidth = `${rect.width}px`;
-            wrapper.style.zIndex = '99999';
-        } catch (e) {
-            // ignore
+            const response = await fetch(route('backend.ipdpatient.medicines.search', { search: query }), {
+                headers: { Accept: 'application/json' },
+                signal: controller.signal,
+            });
+            if (!response.ok) throw new Error(`Medicine search failed (${response.status}).`);
+            const results = await response.json();
+            if (hospitalMedicineSearchQuery === query && Array.isArray(results)) {
+                hospitalMedicineResults.value = results;
+            }
+        } catch (error) {
+            if (error.name !== 'AbortError' && hospitalMedicineSearchQuery === query) {
+                hospitalMedicineResults.value = [];
+                console.error('Unable to search medicines for IPD charges.', error);
+            }
+        } finally {
+            if (hospitalMedicineSearchQuery === query) {
+                hospitalMedicineSearchLoading.value = false;
+            }
         }
-    });
-};
-
-const onHospitalMultiselectOpen = (rowIndex) => {
-    // Ensure options populated so suggestions show immediately on open
-    hospitalItemOptions.value = allAvailableHospitalItems.value;
-    activeHospitalItemRowForSearch.value = rowIndex;
-
-    // initial position
-    positionDropdownForRow(rowIndex);
-
-    const handle = () => positionDropdownForRow(rowIndex);
-    window.addEventListener('scroll', handle, { passive: true });
-    window.addEventListener('resize', handle);
-    _positioningHandles.set(rowIndex, handle);
-};
-
-const onHospitalMultiselectClose = (rowIndex) => {
-    const handle = _positioningHandles.get(rowIndex);
-    if (handle) {
-        window.removeEventListener('scroll', handle);
-        window.removeEventListener('resize', handle);
-        _positioningHandles.delete(rowIndex);
-    }
+    }, 180);
 };
 
 const selectHospitalItemForRow = (item, rowIndex) => {
     if (!item || rowIndex < 0 || !form.hospital_charge_items[rowIndex]) return;
 
-    form.hospital_charge_items[rowIndex].item_name = item.name || item.test_name || item.charge_name || '';
-    form.hospital_charge_items[rowIndex].unit_price = Number(item.unitPrice ?? item.amount ?? item.standard_charge ?? 0);
+    suppressHospitalItemSearch.value = true;
+    closeHospitalItemSearch();
+
+    form.hospital_charge_items[rowIndex].item_name = item.name || '';
+    form.hospital_charge_items[rowIndex].unit_price = Number(item.unitPrice ?? 0);
     if (!Number(form.hospital_charge_items[rowIndex].quantity || 0)) {
         form.hospital_charge_items[rowIndex].quantity = 1;
     }
-};
 
-const onHospitalItemSelected = (item, rowIndex) => {
-    if (!item) return;
-    selectHospitalItemForRow(item, rowIndex);
-    
-    // Move to next row on selection
+    hospitalItemInputEls.get(rowIndex)?.blur();
+
     nextTick(() => {
-        if (rowIndex < form.hospital_charge_items.length - 1) {
-            const nextRowInput = document.querySelector(`[data-hospital-item-multiselect="${rowIndex + 1}"] .multiselect__input`);
-            if (nextRowInput) {
-                nextRowInput.focus();
-            }
-        } else {
+        const shouldAddRow = rowIndex >= form.hospital_charge_items.length - 1;
+        if (shouldAddRow) {
             addHospitalChargeItem();
-            nextTick(() => {
-                const newRowInput = document.querySelector(`[data-hospital-item-multiselect="${rowIndex + 1}"] .multiselect__input`);
-                if (newRowInput) {
-                    newRowInput.focus();
-                }
-            });
         }
+
+        nextTick(() => {
+            if (shouldAddRow) {
+                hospitalItemInputEls.get(rowIndex + 1)?.focus();
+            }
+
+            requestAnimationFrame(() => {
+                suppressHospitalItemSearch.value = false;
+            });
+        });
     });
 };
+
+const handleHospitalItemKeydown = (event, rowIndex) => {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeHospitalItemSearch();
+        return;
+    }
+
+    if (event.key === 'Enter' && hospitalItemOptions.value.length === 1) {
+        event.preventDefault();
+        selectHospitalItemForRow(hospitalItemOptions.value[0], rowIndex);
+    }
+};
+
+const handleHospitalItemDocumentClick = (event) => {
+    if (activeHospitalItemRowForSearch.value === null) return;
+
+    const input = hospitalItemInputEls.get(activeHospitalItemRowForSearch.value);
+    if (input && input.contains(event.target)) return;
+    if (event.target?.closest?.('.hospital-item-dropdown')) return;
+
+    closeHospitalItemSearch();
+};
+
+onMounted(() => {
+    document.addEventListener('click', handleHospitalItemDocumentClick);
+    window.addEventListener('resize', () => {
+        if (activeHospitalItemRowForSearch.value !== null) {
+            positionHospitalItemDropdown(activeHospitalItemRowForSearch.value);
+        }
+    });
+
+    onBeforeUnmount(() => {
+        clearTimeout(hospitalMedicineSearchTimer);
+        hospitalMedicineSearchController?.abort();
+    });
+});
 
 const allBeds = computed(() => props.beds ?? []);
 const filteredBeds = ref(allBeds.value);
@@ -401,7 +474,7 @@ watch(() => form.bed_group_id, (newBedGroupId) => {
         filteredBeds.value = [];
     }
 
-    form.bed_id = 0;
+    form.bed_id = '';
 });
 
 if (props.ipdpatient?.bed_group_id) {
@@ -488,6 +561,8 @@ const isPatientModalOpen = ref(false);
 const patientsList = ref([...(props.patients || [])]);
 const symptomTypes = ref([...(props.symptomTypes || [])]);
 const showSymptomTypeModal = ref(false);
+const showSymptomTypeSuggestions = ref(false);
+const showSymptomTitleSuggestions = ref(false);
 const openPatientModal = () => {
     isPatientModalOpen.value = true;
 };
@@ -496,6 +571,7 @@ const closePatientModal = () => {
 };
 
 const openSymptomTypeModal = () => {
+    showSymptomTypeSuggestions.value = false;
     showSymptomTypeModal.value = true;
 };
 
@@ -506,6 +582,9 @@ const closeSymptomTypeModal = () => {
 const handleSymptomTypeCreated = (createdName) => {
     if (createdName) {
         form.symptom_type = createdName;
+        if (!symptomTypes.value.some((type) => String(type.name) === createdName)) {
+            symptomTypes.value = [{ id: `custom-${createdName}`, name: createdName }, ...symptomTypes.value];
+        }
     }
 
     router.reload({
@@ -518,16 +597,29 @@ const handleSymptomTypeCreated = (createdName) => {
     });
 };
 
-const normalizedSymptomTypes = computed(() => {
-    const types = [...symptomTypes.value];
-    const current = String(form.symptom_type || '').trim();
+const handleSymptomTypeSelect = (type) => {
+    form.symptom_type = type?.name ?? '';
+    showSymptomTypeSuggestions.value = false;
+};
 
-    if (current && !types.some((type) => String(type.name) === current)) {
-        types.unshift({ id: `custom-${current}`, name: current });
-    }
-
-    return types;
+const filteredSymptomTypes = computed(() => {
+    const query = String(form.symptom_type || '').trim().toLowerCase();
+    return symptomTypes.value
+        .filter((type) => !query || String(type.name).toLowerCase().includes(query))
+        .slice(0, 10);
 });
+
+const filteredSymptomTitles = computed(() => {
+    const query = String(form.symptom_title || '').trim().toLowerCase();
+    return (props.symptomTitles || [])
+        .filter((title) => !query || String(title).toLowerCase().includes(query))
+        .slice(0, 10);
+});
+
+const selectSymptomTitle = (title) => {
+    form.symptom_title = title;
+    showSymptomTitleSuggestions.value = false;
+};
 const handlePatientCreated = (newPatient) => {
     if (!newPatient) return;
 
@@ -546,47 +638,7 @@ const handlePatientCreated = (newPatient) => {
     });
 };
 
-const patientSearchQuery = ref('');
-const filteredPatients = ref([]);
-const showPatientDropdown = ref(false);
-const selectedPatientIndex = ref(-1);
-
-// Watch for changes in the search query
-const filterPatients = () => {
-    if (patientSearchQuery.value.length > 0) {
-
-        filteredPatients.value = props.patients.filter(patient =>
-            patient.name.toLowerCase().includes(patientSearchQuery.value.toLowerCase()) ||
-            (patient.phone && patient.phone.includes(patientSearchQuery.value))
-        );
-    } else {
-        filteredPatients.value = props.patients.slice(0, 10);
-    }
-
-    selectedPatientIndex.value = -1;
-};
-
-const shouldShowNoResults = computed(() => {
-    return patientSearchQuery.value.length > 0 && filteredPatients.value.length === 0;
-});
-
-const selectPatient = (patient) => {
-    form.patient_id = patient.id;
-    patientSearchQuery.value = patient.name;
-    showPatientDropdown.value = false;
-    selectedPatientIndex.value = -1;
-};
-
-const handleBlur = () => {
-    setTimeout(() => {
-        showPatientDropdown.value = false;
-        selectedPatientIndex.value = -1;
-    }, 200);
-};
-
-// Initialize with first few patients
 onMounted(() => {
-    filteredPatients.value = props.patients.slice(0, 10);
     loadBedAvailability();
 });
 
@@ -627,49 +679,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
     eventBus.off('bedSelected', handleBedSelected);
     window.removeEventListener('ipd-bed-selected', handleBedSelectedEvent);
+    document.removeEventListener('click', handleHospitalItemDocumentClick);
     window.__ipdBedSelectReady = false;
-});
-
-// Keyboard navigation handler
-const handleKeyDown = (event) => {
-    if (!showPatientDropdown.value || filteredPatients.value.length === 0) return;
-
-    switch (event.key) {
-        case 'ArrowDown':
-            event.preventDefault();
-            selectedPatientIndex.value = selectedPatientIndex.value < filteredPatients.value.length - 1
-                ? selectedPatientIndex.value + 1
-                : 0;
-            break;
-
-        case 'ArrowUp':
-            event.preventDefault();
-            selectedPatientIndex.value = selectedPatientIndex.value > 0
-                ? selectedPatientIndex.value - 1
-                : filteredPatients.value.length - 1;
-            break;
-
-        case 'Enter':
-            event.preventDefault();
-            if (selectedPatientIndex.value >= 0 && selectedPatientIndex.value < filteredPatients.value.length) {
-                selectPatient(filteredPatients.value[selectedPatientIndex.value]);
-            } else if (filteredPatients.value.length === 1) {
-                selectPatient(filteredPatients.value[0]);
-            }
-            break;
-
-        case 'Escape':
-            event.preventDefault();
-            showPatientDropdown.value = false;
-            selectedPatientIndex.value = -1;
-            break;
-    }
-};
-
-watch(patientSearchQuery, (newValue) => {
-    if (newValue === '') {
-        form.patient_id = '';
-    }
 });
 
 //select auto date time on click
@@ -775,13 +786,42 @@ const handleDoctorSelect = (selectedDoctor) => {
                             <div>
                                 <InputLabel for="symptom_type" value="Symptoms Type" />
                                 <div class="flex items-center space-x-2">
-                                    <select id="symptom_type" v-model="form.symptom_type"
-                                        class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
-                                        <option value="">Select</option>
-                                        <option v-for="type in normalizedSymptomTypes" :key="type.id" :value="type.name">
-                                            {{ type.name }}
-                                        </option>
-                                    </select>
+                                    <div class="relative w-full">
+                                        <input
+                                            id="symptom_type"
+                                            v-model="form.symptom_type"
+                                            type="text"
+                                            autocomplete="off"
+                                            role="combobox"
+                                            aria-autocomplete="list"
+                                            :aria-expanded="showSymptomTypeSuggestions"
+                                            placeholder="Search or type a symptom type"
+                                            class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                            @focus="showSymptomTypeSuggestions = true"
+                                            @input="showSymptomTypeSuggestions = true"
+                                            @keydown.esc="showSymptomTypeSuggestions = false"
+                                            @blur="showSymptomTypeSuggestions = false"
+                                        />
+                                        <div
+                                            v-if="showSymptomTypeSuggestions"
+                                            class="absolute z-30 mt-1 w-full overflow-auto bg-white border rounded-md shadow-lg border-slate-200 max-h-52 dark:bg-slate-800 dark:border-slate-600"
+                                            role="listbox"
+                                        >
+                                            <button
+                                                v-for="type in filteredSymptomTypes"
+                                                :key="type.id"
+                                                type="button"
+                                                class="block w-full px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700"
+                                                role="option"
+                                                @mousedown.prevent="handleSymptomTypeSelect(type)"
+                                            >
+                                                {{ type.name }}
+                                            </button>
+                                            <p v-if="filteredSymptomTypes.length === 0" class="px-3 py-2 text-sm text-slate-500">
+                                                No saved symptom types. The entered type will be saved with this admission.
+                                            </p>
+                                        </div>
+                                    </div>
                                     <button type="button" @click="openSymptomTypeModal"
                                         class="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
                                         title="Add Symptoms Type">
@@ -797,9 +837,42 @@ const handleDoctorSelect = (selectedDoctor) => {
 
                             <div>
                                 <InputLabel for="symptom_title" value="Symptoms Title" />
-                                <input id="symptom_title" v-model="form.symptom_title" type="text"
-                                    class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
-                                    placeholder="Enter symptom title" />
+                                <div class="relative">
+                                    <input
+                                        id="symptom_title"
+                                        v-model="form.symptom_title"
+                                        type="text"
+                                        autocomplete="off"
+                                        role="combobox"
+                                        aria-autocomplete="list"
+                                        :aria-expanded="showSymptomTitleSuggestions"
+                                        class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                                        placeholder="Enter symptom title"
+                                        @focus="showSymptomTitleSuggestions = true"
+                                        @input="showSymptomTitleSuggestions = true"
+                                        @keydown.esc="showSymptomTitleSuggestions = false"
+                                        @blur="showSymptomTitleSuggestions = false"
+                                    />
+                                    <div
+                                        v-if="showSymptomTitleSuggestions"
+                                        class="absolute z-30 mt-1 w-full overflow-auto bg-white border rounded-md shadow-lg border-slate-200 max-h-52 dark:bg-slate-800 dark:border-slate-600"
+                                        role="listbox"
+                                    >
+                                        <button
+                                            v-for="(title, index) in filteredSymptomTitles"
+                                            :key="`${title}-${index}`"
+                                            type="button"
+                                            class="block w-full px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700"
+                                            role="option"
+                                            @mousedown.prevent="selectSymptomTitle(title)"
+                                        >
+                                            {{ title }}
+                                        </button>
+                                        <p v-if="filteredSymptomTitles.length === 0" class="px-3 py-2 text-sm text-slate-500">
+                                            No saved symptom titles. This title will be saved with the admission.
+                                        </p>
+                                    </div>
+                                </div>
                                 <InputError class="mt-1" :message="form.errors.symptom_title" />
                             </div>
                         </div>
@@ -961,8 +1034,8 @@ const handleDoctorSelect = (selectedDoctor) => {
                             </div>
                         </div>
 
-                        <!-- Advance Amount -->
-                        <div>
+                        <!-- Advance Amount (admission only; later money is taken from the patient overview) -->
+                        <div v-if="!props.id">
                             <InputLabel for="advance_amount" value="Advance Amount (Tk)" />
                             <input id="advance_amount" v-model="form.advance_amount" type="number" step="0.01"
                                 class="block w-full p-1.5 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" placeholder="0.00" />
@@ -997,39 +1070,18 @@ const handleDoctorSelect = (selectedDoctor) => {
                             </thead>
                             <tbody>
                                 <tr v-for="(item, index) in form.hospital_charge_items" :key="index" class="border-t border-slate-200">
-                                    <td class="px-3 py-2 relative" :data-hospital-item-multiselect="index">
-                                        <Multiselect
-                                            id="hospital-multiselect-" :class="`hospital-item-multiselect hospital-item-multiselect-${index} item-name-multiselect w-full text-sm rounded-md border border-slate-300`"
-                                            :modelValue="hospitalItemOptions.find(opt => opt.name === item.item_name) || null"
-                                            @update:modelValue="(val) => { if (val) { item.item_name = val.name; item.unit_price = val.unitPrice; } else { item.item_name = ''; } }"
-                                            @search-input="onHospitalItemSearch"
-                                            @search-change="onHospitalItemSearch"
-                                            :options="hospitalItemOptions"
-                                            :track-by="'id'"
-                                            :label="'name'"
-                                            
-                                            @open="() => onHospitalMultiselectOpen(index)"
-                                            @close="() => onHospitalMultiselectClose(index)"
-                                            :searchable="true"
-                                            :close-on-select="true"
-                                            :clear-on-select="false"
-                                            :allow-empty="true"
-                                            :preserve-search="true"
-                                            :max-height="300"
-                                            :show-labels="false"
+                                    <td class="px-3 py-2">
+                                        <input
+                                            :ref="(el) => setHospitalItemInputEl(index, el)"
+                                            v-model="item.item_name"
+                                            type="text"
+                                            autocomplete="off"
+                                            class="block w-full p-1.5 text-sm rounded-md border-slate-300"
                                             placeholder="Search and select item"
-                                            @select="(item) => { onHospitalItemSelected(item, index); }"
-                                        >
-                                            <template #option="{ option }">
-                                                <div class="text-xs">
-                                                    <div class="font-medium">{{ option.name }}</div>
-                                                    <div class="text-slate-600">Tk {{ Number(option.unitPrice ?? 0).toFixed(2) }}</div>
-                                                </div>
-                                            </template>
-                                            <template #singleLabel="{ option }">
-                                                {{ typeof option === 'object' ? (option.name) : option }}
-                                            </template>
-                                        </Multiselect>
+                                            @focus="openHospitalItemSearch(index, true)"
+                                            @input="onHospitalItemQuery(index)"
+                                            @keydown="handleHospitalItemKeydown($event, index)"
+                                        />
                                     </td>
                                     <td class="px-3 py-2">
                                         <input
@@ -1078,6 +1130,34 @@ const handleDoctorSelect = (selectedDoctor) => {
                     <InputError class="mt-1" :message="form.errors.hospital_charge_items" />
                 </div>
 
+                <Teleport to="body">
+                    <div
+                        v-if="activeHospitalItemRowForSearch !== null"
+                        class="hospital-item-dropdown overflow-auto bg-white border rounded-md shadow-lg border-slate-200 max-h-60"
+                        :style="hospitalItemDropdownStyle"
+                    >
+                        <button
+                            v-for="option in hospitalItemOptions"
+                            :key="option.id"
+                            type="button"
+                            class="flex items-center justify-between w-full px-3 py-2 text-left border-b border-slate-100 last:border-b-0 hover:bg-slate-50"
+                            @mousedown.prevent="selectHospitalItemForRow(option, activeHospitalItemRowForSearch)"
+                        >
+                            <span>
+                                <span class="block text-sm font-medium text-slate-800">{{ option.name }}</span>
+                                <span class="block text-xs text-slate-500">{{ option.category || option.type }}</span>
+                            </span>
+                            <span class="text-xs font-semibold text-slate-600">{{ formatTk(option.unitPrice) }}</span>
+                        </button>
+                        <div
+                            v-if="hospitalItemOptions.length === 0"
+                            class="px-3 py-2 text-sm text-slate-500"
+                        >
+                            {{ hospitalMedicineSearchLoading ? 'Searching medicines...' : 'No matching items' }}
+                        </div>
+                    </div>
+                </Teleport>
+
                 <!-- Form Actions -->
                 <div class="flex items-center justify-end mt-3">
                     <PrimaryButton type="submit" class="ms-3" :class="{ 'opacity-25': form.processing }"
@@ -1102,18 +1182,5 @@ const handleDoctorSelect = (selectedDoctor) => {
 
 :deep(.doctor-multiselect .multiselect__content) {
     max-height: 260px !important;
-}
-
-:deep(.item-name-multiselect .multiselect__content-wrapper) {
-    max-height: 160px !important;
-}
-
-:deep(.item-name-multiselect .multiselect__content) {
-    max-height: 140px !important;
-}
-
-:deep(.item-name-multiselect .multiselect__option) {
-    padding: 6px 12px !important;
-    font-size: 0.875rem !important;
 }
 </style>

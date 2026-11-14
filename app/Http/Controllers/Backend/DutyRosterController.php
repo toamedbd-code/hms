@@ -182,14 +182,14 @@ class DutyRosterController extends Controller
             }
         });
 
-        return back()->with('successMessage', 'Duty roster saved.');
+        return back()->with('successMessage', 'Duty roster saved successfully.');
     }
 
     public function destroy($id)
     {
         $row = DutyRoster::findOrFail($id);
         $row->delete();
-        return back()->with('successMessage', 'Roster removed.');
+        return back()->with('successMessage', 'Duty roster removed successfully.');
     }
 
     /**

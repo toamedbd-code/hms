@@ -102,4 +102,136 @@ class IpdPatientAddHospitalChargesTest extends TestCase
             'item_name' => 'Test Consultation',
         ]);
     }
+
+    public function test_ipd_form_charge_item_options_include_active_tests(): void
+    {
+        $this->withoutMiddleware();
+
+        $doctor = Admin::create([
+            'first_name' => 'Doc',
+            'last_name' => 'Search',
+            'email' => 'doctor.search@example.test',
+            'phone' => '01900000012',
+            'password' => bcrypt('password'),
+            'status' => 'Active',
+        ]);
+        $this->actingAs($doctor, 'admin');
+
+        \App\Models\Test::create([
+            'test_name' => 'CBC',
+            'test_short_name' => 'CBC',
+            'category_type' => 'Pathology',
+            'amount' => 400,
+            'standard_charge' => 400,
+            'status' => 'Active',
+        ]);
+
+        $controller = $this->app->make(\App\Http\Controllers\Backend\IpdPatientController::class);
+        $method = new \ReflectionMethod($controller, 'chargeItemOptions');
+        $method->setAccessible(true);
+        $options = $method->invoke($controller);
+
+        $this->assertNotEmpty($options['pathologyAndRadiologyTests']);
+        $this->assertSame('CBC', $options['pathologyAndRadiologyTests'][0]['test_name']);
+        $this->assertSame(400.0, (float) $options['pathologyAndRadiologyTests'][0]['amount']);
+    }
+
+    public function test_ipd_patient_create_form_loads(): void
+    {
+        $this->withoutMiddleware();
+
+        $doctor = Admin::create([
+            'first_name' => 'Doc',
+            'last_name' => 'Create',
+            'email' => 'doctor.create@example.test',
+            'phone' => '01900000013',
+            'password' => bcrypt('password'),
+            'status' => 'Active',
+        ]);
+        $this->actingAs($doctor, 'admin');
+
+        $this->get(route('backend.ipdpatient.create'))->assertOk();
+    }
+
+    public function test_ipd_symptom_type_is_saved_for_the_next_admission_form(): void
+    {
+        $this->withoutMiddleware();
+
+        $controller = $this->app->make(\App\Http\Controllers\Backend\IpdPatientController::class);
+        $method = new \ReflectionMethod($controller, 'rememberSymptomType');
+        $method->setAccessible(true);
+
+        $method->invoke($controller, ' Persistent symptom ');
+        $method->invoke($controller, 'Persistent symptom');
+
+        $this->assertDatabaseHas('symptom_types', [
+            'name' => 'Persistent symptom',
+            'status' => 'Active',
+        ]);
+        $this->assertSame(1, \App\Models\SymptomType::query()
+            ->where('name', 'Persistent symptom')
+            ->count());
+
+        $inactiveType = \App\Models\SymptomType::create([
+            'name' => 'Previously inactive symptom',
+            'status' => 'Inactive',
+        ]);
+        $method->invoke($controller, $inactiveType->name);
+
+        $this->assertDatabaseHas('symptom_types', [
+            'id' => $inactiveType->id,
+            'status' => 'Active',
+        ]);
+    }
+
+    public function test_symptom_title_suggestions_use_saved_distinct_titles(): void
+    {
+        $this->withoutMiddleware();
+
+        $patient = Patient::create([
+            'name' => 'Symptom Title Patient',
+            'phone' => '0123456788',
+            'gender' => 'Male',
+        ]);
+        $doctor = Admin::create([
+            'first_name' => 'Title',
+            'last_name' => 'Doctor',
+            'email' => 'symptom.title@example.test',
+            'phone' => '01900000014',
+            'password' => bcrypt('password'),
+            'status' => 'Active',
+        ]);
+        $floor = Floor::create(['name' => 'Title Floor', 'description' => '', 'status' => 'Active']);
+        $bedGroup = BedGroup::create(['name' => 'Title Group', 'floor_id' => $floor->id, 'status' => 'Active']);
+        $bedType = BedType::create([
+            'name' => 'Title Bed Type',
+            'room_rent_rate_per_day' => 0,
+            'bed_charge_rate_per_day' => 0,
+            'status' => 'Active',
+        ]);
+        $bed = Bed::create([
+            'name' => 'Title Bed',
+            'bed_type_id' => $bedType->id,
+            'bed_group_id' => $bedGroup->id,
+            'status' => 'Active',
+        ]);
+
+        foreach (['Persistent title', 'Persistent title', 'Another title', ''] as $title) {
+            IpdPatient::create([
+                'patient_id' => $patient->id,
+                'consultant_doctor_id' => $doctor->id,
+                'symptom_title' => $title,
+                'admission_date' => now(),
+                'bed_group_id' => $bedGroup->id,
+                'bed_id' => $bed->id,
+                'status' => 'Active',
+            ]);
+        }
+
+        $controller = $this->app->make(\App\Http\Controllers\Backend\IpdPatientController::class);
+        $method = new \ReflectionMethod($controller, 'symptomTitleOptions');
+        $method->setAccessible(true);
+
+        $this->assertSame(['Another title', 'Persistent title'], $method->invoke($controller));
+    }
 }

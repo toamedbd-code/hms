@@ -8,17 +8,27 @@ import PrimaryButton from '@/Components/PrimaryButton.vue';
 import AlertMessage from '@/Components/AlertMessage.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 
-const props = defineProps(['pathologycategory', 'id', 'categories']);
+const props = defineProps({
+    pathologycategory: { type: Object, default: null },
+    mainCategory: { type: Object, default: null },
+    id: { type: [String, Number], default: null },
+    categories: { type: Array, default: () => [] },
+    isMainCategory: { type: Boolean, default: false },
+});
+const categoryRecord = props.mainCategory || props.pathologycategory;
 
 const form = useForm({
-    parent_id: props.pathologycategory?.parent_id ?? '',
-    name: props.pathologycategory?.name ?? '',
+    parent_id: categoryRecord?.parent_id ?? '',
+    name: categoryRecord?.name ?? '',
 
-    _method: props.pathologycategory?.id ? 'put' : 'post',
+    _method: categoryRecord?.id ? 'put' : 'post',
+    is_main_category: props.isMainCategory ? true : false,
 });
 
 const submit = () => {
-    const routeName = props.id ? route('backend.pathologycategory.update', props.id) : route('backend.pathologycategory.store');
+    const routeName = props.isMainCategory
+        ? (props.id ? route('backend.maincategory.update', props.id) : route('backend.maincategory.store'))
+        : (props.id ? route('backend.pathologycategory.update', props.id) : route('backend.pathologycategory.store'));
     form.transform(data => ({
         ...data,
         remember: '',
@@ -67,7 +77,7 @@ const treeOptions = computed(() => {
 //     router.visit(route('backend.pathologycategory.index'));
 // };
 const goToTestCategoryList = () => {
-    router.get(route('backend.pathologycategory.index'));
+    router.get(route(props.isMainCategory ? 'backend.maincategory.index' : 'backend.pathologycategory.index'));
 };
 
 const goBack = () => {
@@ -75,7 +85,7 @@ const goBack = () => {
         window.history.back();
         return;
     }
-    router.visit(route('backend.pathologycategory.index'));
+    router.visit(route(props.isMainCategory ? 'backend.maincategory.index' : 'backend.pathologycategory.index'));
 };
 
 </script>
@@ -108,7 +118,7 @@ const goBack = () => {
                                     d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z">
                                 </path>
                             </svg>
-                            Item Category List
+                            {{ props.isMainCategory ? 'Main Category List' : 'Item Category List' }}
                         </button>
                     </div>
                 </div>
@@ -129,17 +139,6 @@ const goBack = () => {
                         <InputError class="mt-2" :message="form.errors.name" />
                     </div>
 
-                    <div class="col-span-1 md:col-span-1">
-                        <InputLabel for="parent_id" value="Parent Category (optional)" />
-                        <select id="parent_id" v-model="form.parent_id"
-                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
-                            <option value="">-- No Parent (Top Level) --</option>
-                            <option v-for="option in treeOptions" :key="option.id" :value="option.id">
-                                {{ option.name }}
-                            </option>
-                        </select>
-                        <InputError class="mt-2" :message="form.errors.parent_id" />
-                    </div>
                 </div>
 
                 <div class="flex items-center justify-end mt-4">

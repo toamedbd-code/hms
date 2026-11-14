@@ -3,11 +3,17 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { progress, router, useForm, usePage } from '@inertiajs/vue3';
 import { useModalSubmissionGuard } from '@/Composables/useModalSubmissionGuard';
+import {
+    formatOfflineBillReference,
+    getOfflineBillingEncryptionStatus,
+    getOfflineBillingRequests,
+} from '@/offlineBillingQueue.js';
 
 let props = defineProps({
     filters: Object,
+    isDeveloper: Boolean,
 });
 
 const filters = ref({
@@ -15,6 +21,7 @@ const filters = ref({
     numOfData: props.filters?.numOfData ?? 10,
     user: props.filters?.user ?? '',
     ipd: props.filters?.ipd ?? '',
+    category: props.filters?.category ?? '',
 });
 
 const showUserStats = ref(false);
@@ -25,6 +32,68 @@ const page = usePage();
 const userStats = computed(() => page.props.userStats || []);
 const totalUserCount = computed(() => (userStats.value || []).reduce((s, r) => s + (r.count || 0), 0));
 const isIpdBillingPage = computed(() => filters.value.ipd && String(filters.value.ipd) !== '0');
+const csvInput = ref(null);
+const csvForm = useForm({ csv_file: null });
+const offlinePendingBills = ref([]);
+const offlineQueueLocked = ref(false);
+const offlineQueueError = ref('');
+const offlineAdminId = computed(() => Number(page.props.auth?.admin?.id || 0));
+
+const loadOfflinePendingBills = async () => {
+    if (!offlineAdminId.value) return;
+
+    try {
+        const encryptionStatus = await getOfflineBillingEncryptionStatus(offlineAdminId.value);
+        const requests = await getOfflineBillingRequests(offlineAdminId.value);
+        offlineQueueLocked.value = !encryptionStatus.unlocked && requests.some(
+            (entry) => ['queued', 'syncing', 'needs_review'].includes(entry.status)
+        );
+        if (!encryptionStatus.unlocked) {
+            offlinePendingBills.value = [];
+            offlineQueueError.value = '';
+            return;
+        }
+
+        const search = String(filters.value.search || '').trim().toLowerCase();
+        const category = String(filters.value.category || '').trim().toLowerCase();
+        const creator = String(page.props.auth?.admin?.name || '').toLowerCase();
+
+        offlinePendingBills.value = requests
+            .filter((entry) => (
+                entry.routeName === 'backend.billing.store'
+                && ['queued', 'syncing', 'needs_review'].includes(entry.status)
+                && entry.data
+                && !entry.data.ipd_patient_id
+            ))
+            .filter((entry) => {
+                const patientName = String(entry.data.patient_name || 'Walk-in Patient').toLowerCase();
+                const billReference = formatOfflineBillReference(entry.id).toLowerCase();
+                const matchesSearch = !search || billReference.includes(search) || patientName.includes(search);
+                const matchesCategory = !category || entry.data.items?.some(
+                    (item) => String(item.category || '').toLowerCase() === category
+                );
+                const matchesCreator = !filters.value.user || creator.includes(String(filters.value.user).toLowerCase());
+                return matchesSearch && matchesCategory && matchesCreator;
+            })
+            .reverse()
+            .map((entry) => ({
+                id: entry.id,
+                reference: formatOfflineBillReference(entry.id),
+                patientName: entry.data.patient_name || 'Walk-in Patient',
+                payable: Number(entry.data.payable_amount || 0),
+                paid: Number(entry.data.paid_amt || 0),
+                due: Number(entry.data.due_amount || 0),
+                createdAt: new Date(entry.createdAt).toLocaleString(),
+                status: entry.status,
+                lastError: entry.lastError || '',
+            }));
+        offlineQueueError.value = '';
+    } catch (error) {
+        offlineQueueError.value = error instanceof Error
+            ? error.message
+            : 'Could not load the offline bill queue.';
+    }
+};
 
 const applyFilter = () => {
     if (isIpdBillingPage.value) {
@@ -33,31 +102,55 @@ const applyFilter = () => {
     } else {
         filters.value.ipd = '';
     }
+    loadOfflinePendingBills();
+    if (!navigator.onLine) return;
     router.get(route('backend.billing.list'), filters.value, { preserveState: true });
 };
 
 const clearFilters = () => {
     filters.value.search = '';
     filters.value.user = '';
+    filters.value.category = '';
     applyFilter();
 };
 
 const goToBillingAdd = () => {
-    if (isIpdBillingPage.value) {
-        router.visit(route('backend.ipdpatient.create'));
-        return;
-    }
-
-    router.visit(route('backend.billing.view'));
+    const url = isIpdBillingPage.value
+        ? route('backend.ipdpatient.create')
+        : route('backend.billing.view');
+    window.open(url, '_blank', 'noopener,noreferrer');
 };
 
 const goBack = () => {
     if (window.history.length > 1) {
+        progress.start();
+        window.setTimeout(() => progress.finish(), 800);
         window.history.back();
         return;
     }
 
-    router.visit(route('backend.billing.list', { ipd: filters.value.ipd || '' }));
+    router.visit(isIpdBillingPage.value
+        ? route('backend.ipdpatient.index')
+        : route('backend.billing.view'));
+};
+
+const openCsvPicker = () => {
+    csvInput.value?.click();
+};
+
+const uploadBillsCsv = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    csvForm.csv_file = file;
+    csvForm.post(route('backend.billing.import-csv'), {
+        forceFormData: true,
+        preserveScroll: true,
+        onFinish: () => {
+            csvForm.reset('csv_file');
+            event.target.value = '';
+        },
+    });
 };
 
 // page is defined above to compute user stats
@@ -116,6 +209,28 @@ const submitDueCollect = () => {
     const routeName = dueForm.value.rowType === 'opd'
         ? 'backend.opd.due.collect.store'
         : 'backend.due.collect.store';
+    const invoiceRoute = dueForm.value.rowType === 'opd'
+        ? 'backend.download.opd.bill'
+        : 'backend.download.invoice';
+    const invoiceParams = dueForm.value.rowType === 'opd'
+        ? { id: dueForm.value.rowId, module: 'opd', auto_print: 0 }
+        : { id: dueForm.value.rowId, module: 'billing', fast_open: 1, auto_print: 0 };
+    const invoiceWindow = navigator.onLine
+        ? window.open(route(invoiceRoute, invoiceParams), '_blank')
+        : null;
+    if (invoiceWindow) invoiceWindow.opener = null;
+    const closeInvoiceWindow = () => {
+        if (invoiceWindow && !invoiceWindow.closed) invoiceWindow.close();
+    };
+    const openCollectedInvoice = () => {
+        if (!invoiceWindow || invoiceWindow.closed) {
+            window.toast?.('Collection was saved, but the invoice print window was blocked. Allow pop-ups and try printing the invoice again.', { type: 'warning' });
+            return;
+        }
+
+        invoiceWindow.location.replace(route(invoiceRoute, { ...invoiceParams, auto_print: 1 }));
+        invoiceWindow.focus();
+    };
 
     beginSubmission();
 
@@ -127,8 +242,10 @@ const submitDueCollect = () => {
         preserveScroll: true,
         onSuccess: () => {
             closeDueModal(true);
+            openCollectedInvoice();
             router.reload({ only: ['datas'] });
         },
+        onError: () => closeInvoiceWindow(),
         onFinish: () => {
             endSubmission();
         }
@@ -180,14 +297,19 @@ const handleBillingListSameTab = () => {
     try { router.reload({ only: ['datas'] }); } catch (e) {}
 };
 
+const handleOfflineQueueUpdated = () => loadOfflinePendingBills();
+
 onMounted(() => {
     window.addEventListener('storage', handleBillingListStorage);
     window.addEventListener('billing:list:refresh', handleBillingListSameTab);
+    window.addEventListener('offline-billing:queue-updated', handleOfflineQueueUpdated);
+    loadOfflinePendingBills();
 });
 
 onUnmounted(() => {
     window.removeEventListener('storage', handleBillingListStorage);
     window.removeEventListener('billing:list:refresh', handleBillingListSameTab);
+    window.removeEventListener('offline-billing:queue-updated', handleOfflineQueueUpdated);
 });
 
 </script>
@@ -216,6 +338,31 @@ onUnmounted(() => {
                             </svg>
                             Back
                         </button>
+                        <template v-if="isDeveloper && !isIpdBillingPage">
+                            <a
+                                :href="route('backend.billing.export-all-csv')"
+                                class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold !text-white rounded-md shadow-lg active:scale-95 transition-all duration-150"
+                                style="background: linear-gradient(to right, #059669, #34d399); color: #ffffff !important;"
+                            >
+                                Download All Bill List
+                            </a>
+                            <input
+                                ref="csvInput"
+                                type="file"
+                                accept=".csv,text/csv"
+                                class="hidden"
+                                @change="uploadBillsCsv"
+                            />
+                            <button
+                                type="button"
+                                :disabled="csvForm.processing"
+                                @click="openCsvPicker"
+                                class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white rounded-md shadow-lg disabled:opacity-50 active:scale-95 transition-all duration-150"
+                                style="background: linear-gradient(to right, #4f46e5, #818cf8);"
+                            >
+                                {{ csvForm.processing ? 'Uploading...' : 'Upload CSV' }}
+                            </button>
+                        </template>
                         <button @click="goToBillingAdd"
                             class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out"
                             style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
@@ -231,6 +378,9 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
+            <p v-if="csvForm.errors.csv_file" class="mb-2 px-3 py-2 text-sm text-red-700 bg-red-100 rounded-md">
+                {{ csvForm.errors.csv_file }}
+            </p>
             <div class="flex justify-between w-full p-2 py-3 text-gray-700 rounded-md bg-slate-300 shadow-gray-800/50 dark:bg-gray-700 dark:text-gray-200">
                 <div class="w-full">
                     <div class="flex flex-col md:flex-row md:items-center md:gap-2">
@@ -258,14 +408,16 @@ onUnmounted(() => {
 
                         <div class="w-full md:w-auto flex items-center justify-end space-x-2 md:ml-2">
                             <select v-model="filters.numOfData" @change="applyFilter"
-                                class="p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
+                                class="w-24 p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600">
                                 <option value="10">show 10</option>
                                 <option value="20">show 20</option>
-                                <option value="30">show 30</option>
                                 <option value="40">show 40</option>
+                                <option value="50">show 50</option>
                                 <option value="100">show 100</option>
-                                <option value="150">show 150</option>
+                                <option value="200">show 200</option>
+                                <option value="250">show 250</option>
                                 <option value="500">show 500</option>
+                                <option value="all">show all</option>
                             </select>
 
                             <button
@@ -308,8 +460,50 @@ onUnmounted(() => {
                 </div>
             </div>
 
-            <div class="w-full my-3 overflow-x-auto">
-                <BaseTable @action="handleAction" />
+            <section v-if="offlinePendingBills.length || offlineQueueLocked || offlineQueueError" class="my-3 rounded-md border border-amber-300 bg-amber-50 p-3">
+                <h2 class="mb-2 text-sm font-semibold text-amber-900">Offline bills waiting to synchronize</h2>
+                <p v-if="offlineQueueLocked" class="mb-2 text-sm text-amber-800">
+                    Unlock Offline Billing from the billing page to view this browser's unsynchronized bills.
+                </p>
+                <p v-if="offlineQueueError" class="mb-2 text-sm text-red-700">{{ offlineQueueError }}</p>
+                <div v-if="offlinePendingBills.length" class="overflow-x-auto">
+                    <table class="w-full min-w-[700px] border-collapse text-xs text-gray-800">
+                        <thead class="bg-amber-100">
+                            <tr>
+                                <th class="border px-3 py-2 text-left">Bill Reference</th>
+                                <th class="border px-3 py-2 text-left">Patient</th>
+                                <th class="border px-3 py-2 text-right">Payable</th>
+                                <th class="border px-3 py-2 text-right">Paid</th>
+                                <th class="border px-3 py-2 text-right">Due</th>
+                                <th class="border px-3 py-2 text-left">Status</th>
+                                <th class="border px-3 py-2 text-left">Saved</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="bill in offlinePendingBills" :key="bill.id">
+                                <td class="border px-3 py-2 font-mono">{{ bill.reference }}</td>
+                                <td class="border px-3 py-2">{{ bill.patientName }}</td>
+                                <td class="border px-3 py-2 text-right">{{ bill.payable.toFixed(2) }}</td>
+                                <td class="border px-3 py-2 text-right">{{ bill.paid.toFixed(2) }}</td>
+                                <td class="border px-3 py-2 text-right">{{ bill.due.toFixed(2) }}</td>
+                                <td class="border px-3 py-2">
+                                    <span v-if="bill.status === 'needs_review'" class="font-semibold text-red-700">Needs review</span>
+                                    <span v-else-if="bill.status === 'syncing'" class="font-semibold text-blue-700">Synchronizing</span>
+                                    <span v-else class="font-semibold text-amber-800">Waiting to sync</span>
+                                    <span v-if="bill.lastError" class="mt-1 block text-red-700">{{ bill.lastError }}</span>
+                                </td>
+                                <td class="border px-3 py-2">{{ bill.createdAt }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p v-if="offlinePendingBills.length" class="mt-2 text-xs text-amber-800">
+                    These are local provisional references, not server bill numbers. They move into the regular bill list after synchronization.
+                </p>
+            </section>
+
+            <div class="my-3 w-full overflow-x-auto">
+                <BaseTable class="min-w-[1400px]" @action="handleAction" />
             </div>
             <Pagination />
         </div>

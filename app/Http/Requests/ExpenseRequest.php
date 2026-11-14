@@ -12,14 +12,38 @@ class ExpenseRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $departmentName = trim((string) ($this->input('department_name') ?? ''));
+        if ($this->missing('department_id') && $departmentName !== '') {
+            $department = \App\Models\Department::whereRaw('LOWER(name) = ?', [strtolower($departmentName)])
+                ->first();
+
+            if ($department) {
+                $this->merge(['department_id' => $department->id]);
+            }
+        }
+
+        $expenseHeadName = trim((string) ($this->input('expense_head_name') ?? ''));
+        if ($this->missing('expense_header_id') && $expenseHeadName !== '') {
+            $expenseHead = \App\Models\ExpenseHead::whereRaw('LOWER(name) = ?', [strtolower($expenseHeadName)])
+                ->first();
+
+            if ($expenseHead) {
+                $this->merge(['expense_header_id' => $expenseHead->id]);
+            }
+        }
+    }
+
     public function rules()
     {
         $expenseId = $this->route('id') ?? $this->route('expense');
-        
+
         switch ($this->method()) {
             case 'POST':
                 return [
-                    'expense_header_id' => 'required|exists:expenseheads,id',
+                    'expense_header_id' => ['nullable', 'integer', Rule::exists('expenseheads', 'id')],
+                    'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')],
                     'bill_number' => 'nullable|string|unique:expenses,bill_number|max:255',
                     'name' => 'required|string|max:255',
                     'document' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240',
@@ -31,7 +55,8 @@ class ExpenseRequest extends FormRequest
             case 'PUT':
             case 'PATCH':
                 return [
-                    'expense_header_id' => 'required|exists:expenseheads,id',
+                    'expense_header_id' => ['nullable', 'integer', Rule::exists('expenseheads', 'id')],
+                    'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')],
                     // 'invoice_number' => [
                     //     'nullable',
                     //     'string',
@@ -60,6 +85,23 @@ class ExpenseRequest extends FormRequest
             default:
                 return [];
         }
+    }
+
+    public function withValidator($validator)
+    {
+        $validator->after(function ($validator) {
+            $departmentId = $this->input('department_id');
+            $departmentName = trim((string) ($this->input('department_name') ?? ''));
+            if (empty($departmentId) && $departmentName === '') {
+                $validator->errors()->add('department_id', 'Please select a department.');
+            }
+
+            $expenseHeadId = $this->input('expense_header_id');
+            $expenseHeadName = trim((string) ($this->input('expense_head_name') ?? ''));
+            if (empty($expenseHeadId) && $expenseHeadName === '') {
+                $validator->errors()->add('expense_header_id', 'Please select an expense head.');
+            }
+        });
     }
 
     public function messages()

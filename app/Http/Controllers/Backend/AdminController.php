@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AdminRequest;
 use App\Http\Requests\UserRequest;
+use App\Models\Admin;
 use App\Models\AdminDetail;
 use Illuminate\Support\Facades\DB;
 use App\Services\AdminService;
@@ -17,7 +18,9 @@ use App\Traits\SystemTrait;
 use App\Support\DefaultDeveloperManager;
 use Exception;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 
 class AdminController extends Controller
 {
@@ -37,7 +40,7 @@ class AdminController extends Controller
         $this->middleware('permission:admin-list', ['only' => ['index']]);
         $this->middleware('permission:admin-list-status', ['only' => ['changeStatus']]);
         $this->middleware('permission:admin-list-create', ['only' => ['create', 'store']]);
-        $this->middleware('permission:admin-list-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:admin-list-edit', ['only' => ['edit', 'update', 'editModules', 'updateModules']]);
         $this->middleware('permission:admin-list-delete', ['only' => ['destroy']]);
     }
 
@@ -52,7 +55,9 @@ class AdminController extends Controller
                 'dataFields' => fn() => $this->dataFields(),
                 'datas' => fn() => $this->getDatas(),
                 'roles' => fn() => (function () use ($user) {
-                    $roles = $this->roleService->all();
+                    $roles = collect($this->roleService->all())
+                        ->where('guard_name', 'admin')
+                        ->values();
                     if (DefaultDeveloperManager::isDeveloper($user)) {
                         return $roles;
                     }
@@ -67,8 +72,288 @@ class AdminController extends Controller
                 })(),
                 'filters' => request()->only(['numOfData', 'name', 'division', 'district', 'upazila', 'union']),
                 'permissions' => fn() => $user->getAllPermissions()->pluck('name'),
+                'isDeveloper' => fn() => DefaultDeveloperManager::isDeveloper($user),
             ]
         );
+    }
+
+    public function exportCsv()
+    {
+        $this->ensureDeveloperStaffCsvAccess();
+
+        return response()->streamDownload(function () {
+            $output = fopen('php://output', 'w');
+            fputcsv($output, [
+                'Staff ID',
+                'Email',
+                'Primary Role',
+                'Admin Data JSON',
+                'Staff Details JSON',
+                'Roles JSON',
+                'Permissions JSON',
+                'Modules JSON',
+            ], ',', '"', '');
+
+            Admin::query()
+                ->whereNull('deleted_at')
+                ->with(['details', 'roles', 'permissions', 'modules'])
+                ->orderBy('id')
+                ->chunkById(250, function ($admins) use ($output) {
+                    foreach ($admins as $admin) {
+                        $adminData = $admin->getAttributes();
+                        unset($adminData['id'], $adminData['remember_token']);
+
+                        $details = $admin->details?->getAttributes() ?? [];
+                        unset($details['id'], $details['admin_id']);
+
+                        $primaryRole = $admin->role()->value('name');
+                        $roles = $admin->roles
+                            ->where('guard_name', 'admin')
+                            ->pluck('name')
+                            ->when($primaryRole, fn ($names) => $names->push($primaryRole))
+                            ->unique()
+                            ->values()
+                            ->all();
+
+                        fputcsv($output, [
+                            $details['staff_id'] ?? '',
+                            $admin->email,
+                            $primaryRole ?? '',
+                            json_encode($adminData, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                            json_encode($details, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                            json_encode($roles, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                            json_encode($admin->permissions->where('guard_name', 'admin')->pluck('name')->values()->all(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                            json_encode($admin->modules->pluck('slug')->values()->all(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                        ], ',', '"', '');
+                    }
+                });
+
+            fclose($output);
+        }, 'staff-list-' . now()->format('Ymd-His') . '.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    public function importCsv(Request $request)
+    {
+        $this->ensureDeveloperStaffCsvAccess();
+
+        $validator = Validator::make($request->all(), [
+            'csv_file' => ['required', 'file', 'mimes:csv,txt', 'max:51200'],
+        ], [
+            'csv_file.max' => 'Staff CSV file must be 50 MB or smaller.',
+        ]);
+        if ($validator->fails()) {
+            return redirect()->route('backend.admin.index')
+                ->withErrors($validator);
+        }
+
+        $handle = fopen($validator->validated()['csv_file']->getRealPath(), 'r');
+        if ($handle === false) {
+            return redirect()->route('backend.admin.index')
+                ->withErrors(['csv_file' => 'The uploaded CSV file could not be opened.']);
+        }
+
+        $expectedHeaders = [
+            'Staff ID', 'Email', 'Primary Role', 'Admin Data JSON',
+            'Staff Details JSON', 'Roles JSON', 'Permissions JSON', 'Modules JSON',
+        ];
+        $headers = fgetcsv($handle, 0, ',', '"', '');
+        if (!is_array($headers)) {
+            fclose($handle);
+            return redirect()->route('backend.admin.index')
+                ->withErrors(['csv_file' => 'The CSV file is empty or invalid.']);
+        }
+        $headers[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $headers[0]);
+        if ($headers !== $expectedHeaders) {
+            fclose($handle);
+            return redirect()->route('backend.admin.index')
+                ->withErrors(['csv_file' => 'Please upload a CSV downloaded from the Staff List page.']);
+        }
+
+        $rows = [];
+        $seenEmails = [];
+        $seenStaffIds = [];
+        $lineNumber = 1;
+        while (($columns = fgetcsv($handle, 0, ',', '"', '')) !== false) {
+            $lineNumber++;
+            if (count(array_filter($columns, static fn ($value) => trim((string) $value) !== '')) === 0) {
+                continue;
+            }
+            if (count($columns) !== count($expectedHeaders)) {
+                fclose($handle);
+                return redirect()->route('backend.admin.index')
+                    ->withErrors(['csv_file' => "CSV row {$lineNumber} has an invalid number of columns."]);
+            }
+
+            try {
+                $adminData = json_decode((string) $columns[3], true, 512, JSON_THROW_ON_ERROR);
+                $details = json_decode((string) $columns[4], true, 512, JSON_THROW_ON_ERROR);
+                $roleNames = json_decode((string) $columns[5], true, 512, JSON_THROW_ON_ERROR);
+                $permissionNames = json_decode((string) $columns[6], true, 512, JSON_THROW_ON_ERROR);
+                $moduleSlugs = json_decode((string) $columns[7], true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $exception) {
+                fclose($handle);
+                return redirect()->route('backend.admin.index')
+                    ->withErrors(['csv_file' => "CSV row {$lineNumber} contains invalid staff data."]);
+            }
+
+            if (
+                !is_array($adminData) || !is_array($details) || !is_array($roleNames)
+                || !is_array($permissionNames) || !is_array($moduleSlugs)
+                || trim((string) ($adminData['email'] ?? '')) === ''
+                || trim((string) $columns[1]) !== trim((string) $adminData['email'])
+                || trim((string) ($details['staff_id'] ?? '')) !== trim((string) $columns[0])
+            ) {
+                fclose($handle);
+                return redirect()->route('backend.admin.index')
+                    ->withErrors(['csv_file' => "CSV row {$lineNumber} is incomplete or inconsistent."]);
+            }
+
+            $email = strtolower(trim((string) $adminData['email']));
+            $staffId = trim((string) $columns[0]);
+            if (isset($seenEmails[$email]) || ($staffId !== '' && isset($seenStaffIds[$staffId]))) {
+                fclose($handle);
+                return redirect()->route('backend.admin.index')
+                    ->withErrors(['csv_file' => "CSV row {$lineNumber} repeats an email or Staff ID."]);
+            }
+            $seenEmails[$email] = true;
+            if ($staffId !== '') {
+                $seenStaffIds[$staffId] = true;
+            }
+
+            $passwordHash = $adminData['password'] ?? null;
+            if ($passwordHash !== null && $passwordHash !== '' && !preg_match('/^\$(2y|2a|argon2i|argon2id)\$/', (string) $passwordHash)) {
+                fclose($handle);
+                return redirect()->route('backend.admin.index')
+                    ->withErrors(['csv_file' => "CSV row {$lineNumber} contains an invalid password hash."]);
+            }
+
+            $primaryRoleName = trim((string) $columns[2]);
+            $rows[] = compact('adminData', 'details', 'roleNames', 'permissionNames', 'moduleSlugs', 'staffId', 'email', 'primaryRoleName', 'lineNumber');
+            if (count($rows) > 5000) {
+                fclose($handle);
+                return redirect()->route('backend.admin.index')
+                    ->withErrors(['csv_file' => 'A maximum of 5,000 staff records can be imported at a time.']);
+            }
+        }
+        fclose($handle);
+
+        if ($rows === []) {
+            return redirect()->route('backend.admin.index')
+                ->withErrors(['csv_file' => 'The CSV file contains no staff records.']);
+        }
+
+        $imported = 0;
+        $skipped = 0;
+        try {
+            DB::transaction(function () use ($rows, &$imported, &$skipped) {
+                $adminColumns = array_flip(Schema::getColumnListing('admins'));
+                $detailColumns = Schema::hasTable('admin_details')
+                    ? array_flip(Schema::getColumnListing('admin_details'))
+                    : [];
+                $rolesByName = \Spatie\Permission\Models\Role::query()
+                    ->where('guard_name', 'admin')
+                    ->get()
+                    ->keyBy('name');
+                $permissionsByName = \Spatie\Permission\Models\Permission::query()
+                    ->where('guard_name', 'admin')
+                    ->get()
+                    ->keyBy('name');
+                $modulesBySlug = Schema::hasTable('modules')
+                    ? DB::table('modules')->get()->keyBy('slug')
+                    : collect();
+
+                foreach ($rows as $row) {
+                    $existingEmail = DB::table('admins')->whereRaw('LOWER(email) = ?', [$row['email']])->exists();
+                    $existingStaffId = $row['staffId'] !== '' && Schema::hasTable('admin_details')
+                        ? DB::table('admin_details')->where('staff_id', $row['staffId'])->exists()
+                        : false;
+                    if ($existingEmail || $existingStaffId) {
+                        $skipped++;
+                        continue;
+                    }
+
+                    $roleNames = array_values(array_unique(array_filter(array_map('strval', $row['roleNames']))));
+                    $primaryRoleName = $row['primaryRoleName'];
+                    if ($primaryRoleName !== '') {
+                        $roleNames[] = $primaryRoleName;
+                    }
+                    $roleNames = array_values(array_unique($roleNames));
+                    $roles = collect($roleNames)->map(function ($name) use ($rolesByName, $row) {
+                        $role = $rolesByName->get($name);
+                        if (!$role) {
+                            throw new \UnexpectedValueException("CSV row {$row['lineNumber']} references a role that does not exist: {$name}.");
+                        }
+                        return $role;
+                    });
+
+                    $primaryRole = $primaryRoleName !== '' ? $rolesByName->get($primaryRoleName) : null;
+
+                    $adminData = array_intersect_key($row['adminData'], $adminColumns);
+                    unset($adminData['id'], $adminData['remember_token']);
+                    $adminData['email'] = $row['email'];
+                    if (isset($adminColumns['role_id'])) {
+                        $adminData['role_id'] = $primaryRole?->id;
+                    }
+                    $adminId = DB::table('admins')->insertGetId($adminData);
+                    $admin = Admin::query()->findOrFail($adminId);
+
+                    if ($roles->isNotEmpty()) {
+                        $admin->syncRoles($roles);
+                    }
+
+                    $permissionNames = array_values(array_unique(array_filter(array_map('strval', $row['permissionNames']))));
+                    $permissions = collect($permissionNames)->map(function ($name) use ($permissionsByName, $row) {
+                        $permission = $permissionsByName->get($name);
+                        if (!$permission) {
+                            throw new \UnexpectedValueException("CSV row {$row['lineNumber']} references a permission that does not exist: {$name}.");
+                        }
+                        return $permission;
+                    });
+                    if ($permissions->isNotEmpty()) {
+                        $admin->syncPermissions($permissions);
+                    }
+
+                    if (Schema::hasTable('admin_module') && $modulesBySlug->isNotEmpty()) {
+                        $moduleIds = collect($row['moduleSlugs'])->map(function ($slug) use ($modulesBySlug, $row) {
+                            $module = $modulesBySlug->get((string) $slug);
+                            if (!$module) {
+                                throw new \UnexpectedValueException("CSV row {$row['lineNumber']} references a module that does not exist: {$slug}.");
+                            }
+                            return $module->id;
+                        })->all();
+                        $admin->modules()->sync($moduleIds);
+                    }
+
+                    if ($detailColumns !== []) {
+                        $details = array_intersect_key($row['details'], $detailColumns);
+                        unset($details['id'], $details['admin_id']);
+                        if (isset($detailColumns['staff_id']) && $row['staffId'] !== '') {
+                            $details['staff_id'] = $row['staffId'];
+                        }
+                        $details['admin_id'] = $adminId;
+                        DB::table('admin_details')->insert($details);
+                    }
+
+                    $imported++;
+                }
+
+                app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+            });
+        } catch (\Throwable $exception) {
+            report($exception);
+            return redirect()->route('backend.admin.index')
+                ->withErrors(['csv_file' => $exception->getMessage()]);
+        }
+
+        return redirect()->route('backend.admin.index')
+            ->with('successMessage', "Imported {$imported} staff; skipped {$skipped} staff already present.");
+    }
+
+    private function ensureDeveloperStaffCsvAccess(): void
+    {
+        abort_unless(DefaultDeveloperManager::isDeveloper(auth('admin')->user()), 403);
     }
 
     private function getDatas()
@@ -161,6 +446,14 @@ class AdminController extends Controller
                 ];
             }
 
+            if (\App\Support\DefaultDeveloperManager::isDeveloper($user) || $user->can('admin-list-edit')) {
+                $customData->links[] = [
+                    'linkClass' => 'bg-indigo-600 text-white semi-bold',
+                    'link' => route('backend.admin.modules.edit', $data->id),
+                    'linkLabel' => getLinkLabel('Modules', null, null)
+                ];
+            }
+
             if ($user->can('admin-list-delete')) {
                 $customData->links[] = [
                     'linkClass' => 'deleteButton bg-red-500 text-white semi-bold',
@@ -216,7 +509,9 @@ class AdminController extends Controller
                 'pageTitle' => fn() => 'Basic Information',
                 'roles' => fn() => (function () {
                     $user = auth()->guard('admin')->user();
-                    $roles = $this->roleService->all();
+                    $roles = collect($this->roleService->all())
+                        ->where('guard_name', 'admin')
+                        ->values();
                     try {
                         if ($user) {
                             $isDeveloper = (method_exists($user, 'hasRole') && $user->hasRole('developer'));
@@ -290,45 +585,15 @@ class AdminController extends Controller
                 }
             } catch (\Throwable $_) { /* ignore logging failures */ }
 
-            // Safely assign role: only when a valid role_id exists and the role can be found.
-            try {
-                $roleToAssign = null;
-                if (!empty($adminData['role_id'])) {
-                    $roleToAssign = \Spatie\Permission\Models\Role::find($adminData['role_id']);
-                }
-
-                if ($roleToAssign) {
-                    try {
-                        // Use role name when syncing roles to avoid id/name ambiguity
-                        $admin->syncRoles([$roleToAssign->name]);
-
-                        // Remove any direct permissions so the user's effective
-                        // permissions come only from the role.
-                        try { $admin->syncPermissions([]); } catch (\Throwable $_) { /* ignore */ }
-
-                        // Persist role_id on the admins table so UI listing shows the assigned role
-                        try { $admin->role_id = $roleToAssign->id; $admin->save(); } catch (\Throwable $_) { /* ignore */ }
-
-                        // Clear Spatie permission cache so changes are immediate
-                        try { app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions(); } catch (\Throwable $_) { /* ignore */ }
-
-                        // Reload relations for immediate consistency
-                        try { $admin->load('roles', 'permissions'); } catch (\Throwable $_) { /* ignore */ }
-
-                        \Log::info('AdminController@store: assigned role', ['admin_id' => $admin->id, 'role_id' => $roleToAssign->id, 'role_name' => $roleToAssign->name]);
-                    } catch (\Throwable $_) {
-                        // fallback to best-effort assign using role name
-                        try { $admin->assignRole($roleToAssign->name); } catch (\Throwable $__e) { /* ignore */ }
-                        try { $admin->role_id = $roleToAssign->id; $admin->save(); } catch (\Throwable $__e) { /* ignore */ }
-                    }
-                }
-            } catch (\Throwable $e) {
-                // ignore role assignment failures to avoid breaking the create flow
-            }
-
             if (!$admin) {
                 throw new Exception("Failed to create admin record");
             }
+
+            $roleToAssign = \Spatie\Permission\Models\Role::query()
+                ->whereKey($adminData['role_id'])
+                ->where('guard_name', 'admin')
+                ->firstOrFail();
+            $this->syncAdminRole($admin, $roleToAssign);
 
             $adminDetailsData = [
                 'admin_id' => $admin->id,
@@ -396,8 +661,7 @@ class AdminController extends Controller
 
             return redirect()
                 ->back()
-                ->with('successMessage', $message)
-                ->with('savedPassword', (string) ($data['password'] ?? ''));
+                ->with('successMessage', $message);
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'AdminController', 'store', $err->getMessage());
@@ -427,7 +691,9 @@ class AdminController extends Controller
                 })(),
                 'roles' => fn() => (function () {
                     $user = auth()->guard('admin')->user();
-                    $roles = $this->roleService->all();
+                    $roles = collect($this->roleService->all())
+                        ->where('guard_name', 'admin')
+                        ->values();
                     try {
                         if ($user) {
                             $isDeveloper = (method_exists($user, 'hasRole') && $user->hasRole('developer'));
@@ -446,7 +712,6 @@ class AdminController extends Controller
                 'departments' => fn() => $this->departmentService->activeList(),
                 'specialists' => fn() => $this->specialistService->activeList(),
                 'adminDetails' => fn() => $this->adminService->adminDetails($id),
-                'hasPassword' => fn() => !empty($user?->getRawOriginal('password')),
             ]
         );
     }
@@ -522,34 +787,15 @@ class AdminController extends Controller
                 \Log::info('AdminController@update: after update', ['admin_id' => $adminUpdated->id ?? null, 'role_id' => $adminUpdated->role_id ?? null]);
             } catch (\Throwable $_) { /* ignore */ }
 
-            // Safely assign updated role if applicable
-            try {
-                $roleToAssign = null;
-                if (!empty($adminData['role_id'])) {
-                    $roleToAssign = \Spatie\Permission\Models\Role::find($adminData['role_id']);
-                }
-
-                if ($roleToAssign) {
-                    try {
-                        // Sync by name to avoid ambiguity, then persist the role_id field
-                        $adminUpdated->syncRoles([$roleToAssign->name]);
-                        try { $adminUpdated->syncPermissions([]); } catch (\Throwable $_) { /* ignore */ }
-                        try { $adminUpdated->role_id = $roleToAssign->id; $adminUpdated->save(); } catch (\Throwable $_) { /* ignore */ }
-                        try { app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions(); } catch (\Throwable $_) { /* ignore */ }
-                        try { $adminUpdated->load('roles', 'permissions'); } catch (\Throwable $_) { /* ignore */ }
-                        \Log::info('AdminController@update: assigned role', ['admin_id' => $adminUpdated->id, 'role_id' => $roleToAssign->id, 'role_name' => $roleToAssign->name]);
-                    } catch (\Throwable $_) {
-                        try { $adminUpdated->assignRole($roleToAssign->name); } catch (\Throwable $__e) { /* ignore */ }
-                        try { $adminUpdated->role_id = $roleToAssign->id; $adminUpdated->save(); } catch (\Throwable $__e) { /* ignore */ }
-                    }
-                }
-            } catch (\Throwable $e) {
-                // ignore role assignment failures
-            }
-
             if (!$adminUpdated) {
                 throw new Exception("Failed to update staff record");
             }
+
+            $roleToAssign = \Spatie\Permission\Models\Role::query()
+                ->whereKey($adminData['role_id'])
+                ->where('guard_name', 'admin')
+                ->firstOrFail();
+            $this->syncAdminRole($adminUpdated, $roleToAssign);
 
             $adminDetailsData = [
                 'staff_id' => $data['staff_id'],
@@ -628,8 +874,7 @@ class AdminController extends Controller
 
             return redirect()
                 ->back()
-                ->with('successMessage', $message)
-                ->with('savedPassword', isset($data['password']) ? (string) $data['password'] : '');
+                ->with('successMessage', $message);
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'AdminController', 'update', $err->getMessage());
@@ -811,5 +1056,16 @@ class AdminController extends Controller
                 abort(403, 'You are not allowed to access this user.');
             }
         }
+    }
+
+    private function syncAdminRole(\App\Models\Admin $admin, \Spatie\Permission\Models\Role $role): void
+    {
+        $admin->syncRoles([$role->name]);
+        $admin->syncPermissions([]);
+        $admin->role_id = $role->id;
+        $admin->save();
+
+        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+        $admin->load('roles', 'permissions');
     }
 }

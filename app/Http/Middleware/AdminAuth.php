@@ -24,14 +24,6 @@ class AdminAuth
             // will use the admin guard for backend routes.
             Auth::shouldUse('admin');
 
-            // Share admin side menus with Inertia while admin guard is active.
-            Inertia::share('auth.sideMenus', function () {
-                try {
-                    return getSideMenus(auth()->guard('admin')->user());
-                } catch (\Throwable $e) {
-                    return [];
-                }
-            });
             return $next($request);
         } else {
             if ($request->header('X-Inertia')) {

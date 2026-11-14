@@ -269,6 +269,9 @@ class PathologyController extends Controller
                     ->back()
                     ->with('errorMessage', $message);
             }
+        } catch (\Illuminate\Validation\ValidationException $err) {
+            DB::rollBack();
+            throw $err;
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'PathologyController', 'store', substr($err->getMessage(), 0, 1000));
@@ -449,6 +452,9 @@ class PathologyController extends Controller
                     ->back()
                     ->with('errorMessage', $message);
             }
+        } catch (\Illuminate\Validation\ValidationException $err) {
+            DB::rollBack();
+            throw $err;
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'PathologyController', 'update', substr($err->getMessage(), 0, 1000));
@@ -655,7 +661,8 @@ class PathologyController extends Controller
 
             // Update bill items if tests exist
             if (isset($data['tests']) && !empty($data['tests'])) {
-                BillItem::where('billing_id', $billing->id)->delete();
+                    app(\App\Services\ReagentConsumptionService::class)->restoreForBilling((int) $billing->id);
+                    BillItem::where('billing_id', $billing->id)->delete();
                 $this->createBillItems($billing, json_decode($data['tests'], true));
             }
         }
@@ -693,7 +700,7 @@ class PathologyController extends Controller
                     $isDisposable = true;
                 }
 
-                BillItem::create([
+                $billItem = BillItem::create([
                     'billing_id' => $billing->id,
                     'item_id' => $test['testId'],
                     'item_name' => $testInfo->test_name,
@@ -710,6 +717,8 @@ class PathologyController extends Controller
                     'commission_rate' => $testInfo->commission_rate ?? null,
                     'status' => 'Active',
                 ]);
+
+                app(\App\Services\ReagentConsumptionService::class)->consumeForBillItem($billItem);
             }
         }
     }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ReferralPersonRequest;
 use App\Services\ReferralCategoryService;
+use App\Services\TestCategoryService;
 use Illuminate\Support\Facades\DB;
 use App\Services\ReferralPersonService;
 use Illuminate\Http\Request;
@@ -18,12 +19,13 @@ class ReferralPersonController extends Controller
 {
     use SystemTrait;
 
-    protected $referralpersonService, $referralCategoryService;
+    protected $referralpersonService, $referralCategoryService, $testCategoryService;
 
-    public function __construct(ReferralPersonService $referralpersonService, ReferralCategoryService $referralCategoryService)
+    public function __construct(ReferralPersonService $referralpersonService, ReferralCategoryService $referralCategoryService, TestCategoryService $testCategoryService)
     {
         $this->referralpersonService = $referralpersonService;
         $this->referralCategoryService = $referralCategoryService;
+        $this->testCategoryService = $testCategoryService;
 
         $this->middleware('auth:admin');
         $this->middleware('permission:referral-person-list');
@@ -175,7 +177,8 @@ class ReferralPersonController extends Controller
             'Backend/ReferralPerson/Form',
             [
                 'pageTitle' => fn() => 'Referral Create',
-                'categories' => fn() => $this->referralCategoryService->activeList()
+                'categories' => fn() => $this->referralCategoryService->activeList(),
+                'mainCategories' => fn() => $this->getDynamicCategoryTypes(),
             ]
         );
     }
@@ -232,7 +235,8 @@ class ReferralPersonController extends Controller
                 'pageTitle' => fn() => 'Referral Edit',
                 'referralperson' => fn() => $referralperson,
                 'id' => fn() => $id,
-                'categories' => fn() => $this->referralCategoryService->activeList()
+                'categories' => fn() => $this->referralCategoryService->activeList(),
+                'mainCategories' => fn() => $this->getDynamicCategoryTypes(),
             ]
         );
     }
@@ -344,5 +348,18 @@ class ReferralPersonController extends Controller
                 ->back()
                 ->with('errorMessage', $message);
         }
+    }
+
+    private function getDynamicCategoryTypes(): array
+    {
+        // Category names that already have dedicated hardcoded commission columns
+        $hardcoded = ['opd', 'ipd', 'pathology', 'radiology', 'ecg', 'ultrasound', 'blood bank', 'ambulance'];
+
+        return $this->testCategoryService->activeNames()
+            ? collect($this->testCategoryService->activeNames())
+                ->filter(fn($name) => !in_array(strtolower(trim($name)), $hardcoded))
+                ->values()
+                ->all()
+            : [];
     }
 }

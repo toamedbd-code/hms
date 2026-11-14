@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\AttendanceDevice;
-use App\Models\WebSetting;
 use App\Services\AttendanceDeviceService;
 
 class AttendanceDeviceController extends Controller
@@ -59,6 +58,11 @@ class AttendanceDeviceController extends Controller
     // Device webhook endpoint (no auth by default, can use secret header)
     public function webhook(Request $request)
     {
+        $integration = $this->service->integrationSettings();
+        if (!$integration['enabled']) {
+            return response()->json(['message' => 'Attendance device integration is disabled.'], 403);
+        }
+
         $webhookOptions = $this->resolveWebhookOptions();
         $signatureAlgorithm = strtolower((string) ($webhookOptions['signature_algorithm'] ?? 'sha256'));
         if (!in_array($signatureAlgorithm, hash_algos(), true)) {
@@ -102,6 +106,18 @@ class AttendanceDeviceController extends Controller
         $this->normalizePayloadByWebhookOptions($payload, $webhookOptions);
 
         if (!$device) {
+            $settingsIdentifier = $integration['identifier'];
+            $payloadIdentifier = $payload['device_id'] ?? $payload['identifier'] ?? $identifier;
+            if ($settingsIdentifier !== '' && $payloadIdentifier && hash_equals($settingsIdentifier, (string) $payloadIdentifier)) {
+                $settingsSecret = (string) ($integration['secret'] ?? '');
+                $requestSecret = (string) ($request->header($secretHeaderName) ?: $request->header('X-Device-Secret') ?: '');
+                if ($settingsSecret === '' || ($requestSecret !== '' && hash_equals($settingsSecret, $requestSecret))) {
+                    $device = $this->service->ensureSettingsDevice($integration);
+                }
+            }
+        }
+
+        if (!$device) {
             return response()->json(['message' => 'Unknown device'], 403);
         }
 
@@ -112,6 +128,15 @@ class AttendanceDeviceController extends Controller
     // ZKTeco ADMS/iClock compatibility endpoint (uFace/K40 style devices)
     public function admsWebhook(Request $request)
     {
+        $integration = $this->service->integrationSettings();
+        $zktecoEnabled = array_key_exists('enabled', $integration['zkteco'])
+            ? (bool) $integration['zkteco']['enabled']
+            : true;
+
+        if (!$integration['enabled'] || !$zktecoEnabled) {
+            return response('OK', 200)->header('Content-Type', 'text/plain');
+        }
+
         $payload = $request->all();
         $identifier = $payload['SN']
             ?? $payload['sn']
@@ -130,6 +155,10 @@ class AttendanceDeviceController extends Controller
             ->where('status', 'Active')
             ->first();
 
+        if (!$device && $integration['identifier'] !== '' && hash_equals($integration['identifier'], (string) $identifier)) {
+            $device = $this->service->ensureSettingsDevice($integration);
+        }
+
         if (!$device) {
             return response('OK', 200)->header('Content-Type', 'text/plain');
         }
@@ -144,19 +173,7 @@ class AttendanceDeviceController extends Controller
 
     private function resolveWebhookOptions(): array
     {
-        $setting = WebSetting::query()->select('attendance_device_options')->latest('id')->first();
-        $options = $setting?->attendance_device_options;
-
-        if (is_string($options)) {
-            $decoded = json_decode($options, true);
-            $options = is_array($decoded) ? $decoded : [];
-        }
-
-        if (!is_array($options)) {
-            $options = [];
-        }
-
-        $webhookOptions = $options['webhook'] ?? [];
+        $webhookOptions = $this->service->integrationSettings()['webhook'] ?? [];
         return is_array($webhookOptions) ? $webhookOptions : [];
     }
 

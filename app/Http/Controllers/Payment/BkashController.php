@@ -26,14 +26,14 @@ class BkashController extends Controller
 
     protected function credential(string $key): ?string
     {
-        $dbValue = $this->bkashSetting()?->{$key} ?? null;
-        if (is_string($dbValue) && trim($dbValue) !== '') {
-            return trim($dbValue);
-        }
-
         $configValue = config("bkash.{$key}");
         if (is_string($configValue) && trim($configValue) !== '') {
             return trim($configValue);
+        }
+
+        $dbValue = $this->bkashSetting()?->{$key} ?? null;
+        if (is_string($dbValue) && trim($dbValue) !== '') {
+            return trim($dbValue);
         }
 
         return null;
@@ -53,24 +53,26 @@ class BkashController extends Controller
 
     protected function productionBaseUrl(): string
     {
-        $configured = rtrim((string) config('bkash.production_base_url', 'https://tokenized.pay.bka.sh/v1.2.0-beta'), '/');
-        $host = parse_url($configured, PHP_URL_HOST) ?: '';
+        return rtrim((string) config('bkash.production_base_url', 'https://tokenized.pay.bka.sh/v1.2.0-beta'), '/');
+    }
 
-        if ($configured === '' || $host === 'bka.sh' || $host === 'sandbox.bka.sh' || $host === 'tokenized.sandbox.bka.sh' || str_ends_with($configured, '/v2')) {
-            return self::SANDBOX_BASE_URL;
+    protected function isLiveMode(): bool
+    {
+        if (filter_var(config('bkash.use_production', false), FILTER_VALIDATE_BOOLEAN)) {
+            return true;
         }
 
-        return $configured;
+        $setting = $this->bkashSetting();
+        if ($setting && $setting->is_sandbox === false) {
+            return true;
+        }
+
+        return app()->environment('production');
     }
 
     protected function activeBaseUrl(): string
     {
-        $setting = $this->bkashSetting();
-        if ($setting && $setting->is_sandbox === false) {
-            return $this->productionBaseUrl();
-        }
-
-        if (filter_var(config('bkash.use_production', false), FILTER_VALIDATE_BOOLEAN) || app()->environment('production')) {
+        if ($this->isLiveMode()) {
             return $this->productionBaseUrl();
         }
 
@@ -115,6 +117,22 @@ class BkashController extends Controller
         return $this->isLocalCallbackHost($host);
     }
 
+    /**
+     * When callback URL points to another host (e.g. production domain while testing on hms.test),
+     * the app must confirm payment manually via the waiting page.
+     */
+    protected function needsManualPaymentConfirmation(): bool
+    {
+        if ($this->usesLocalCallbackPlaceholder()) {
+            return true;
+        }
+
+        $appHost = strtolower((string) (parse_url((string) config('app.url'), PHP_URL_HOST) ?: ''));
+        $callbackHost = strtolower((string) (parse_url($this->callbackUrl(), PHP_URL_HOST) ?: ''));
+
+        return $appHost !== '' && $callbackHost !== '' && $appHost !== $callbackHost;
+    }
+
     protected function isLocalCallbackHost(string $host): bool
     {
         $host = strtolower($host);
@@ -136,7 +154,12 @@ class BkashController extends Controller
             ->asJson()
             ->timeout((int) config('bkash.http_timeout', 30));
 
-        if (! config('bkash.http_verify_ssl', false)) {
+        $verifySsl = config('bkash.http_verify_ssl');
+        if ($verifySsl === null) {
+            $verifySsl = $this->isLiveMode();
+        }
+
+        if (! filter_var($verifySsl, FILTER_VALIDATE_BOOLEAN)) {
             $request = $request->withoutVerifying();
         }
 
@@ -236,11 +259,7 @@ class BkashController extends Controller
         }
 
         $callbackUrl = $this->callbackUrl($callbackUrl);
-        // Only send a payerReference when an explicit merchant number is configured.
-        // Do NOT fall back to `username` because that causes the hosted checkout
-        // to pre-fill the payer field with internal identifiers.
         $payerReference = $this->credential('merchant_number');
-
         $payload = [
             'mode' => '0011',
             'callbackURL' => $callbackUrl,
@@ -380,17 +399,29 @@ class BkashController extends Controller
         return url('/payment/bkash/simulate-public/' . $payment->id);
     }
 
+    protected function addGatewayFee(float $baseAmount): float
+    {
+        $feePercent = (float) config('subscription.gateway_fee_percent', 1.5);
+
+        return round($baseAmount * (1 + ($feePercent / 100)), 2);
+    }
+
     protected function activateSubscription(Payment $payment, ?string $providerPaymentId = null): Subscription
     {
         $period = data_get($payment->metadata, 'period', 'monthly');
+        $months = max(1, (int) data_get($payment->metadata, 'months', 1));
         $sub = Subscription::ensureExists();
-        $sub->is_active = true;
-        $sub->expires_at = $period === 'yearly' ? now()->addYear() : now()->addMonth();
+        $sub->extendForPeriod($period, $months);
         $sub->last_payment_id = $providerPaymentId ?: $payment->provider_payment_id;
         $sub->save();
         Subscription::clearCurrentCache();
 
         return $sub;
+    }
+
+    protected function invoiceUrl(Payment $payment): string
+    {
+        return url('/payment/bkash/invoice/' . $payment->id);
     }
 
     protected function isValidPendingPayment(?Payment $payment): bool
@@ -425,11 +456,11 @@ class BkashController extends Controller
         $statusMessage = trim((string) (data_get($data, 'statusMessage') ?: data_get($data, 'status_message')));
 
         if ($trxStatus !== '') {
-            return in_array($trxStatus, ['Completed', 'Success', 'Successful', 'completed', 'success', 'successful'], true);
+            return in_array(strtolower($trxStatus), ['completed', 'success', 'successful', 'paid', 'done'], true);
         }
 
-        if ($statusCode === '0000' && $statusMessage !== '') {
-            return str_contains(strtolower($statusMessage), 'success');
+        if ($statusCode === '0000') {
+            return $statusMessage === '' || (bool) preg_match('/success|complete|paid|approved/i', $statusMessage);
         }
 
         return false;
@@ -443,6 +474,7 @@ class BkashController extends Controller
 
         $setting = BkashSetting::first();
         $amount = $request->input('amount', $setting?->monthly_amount ?? 0);
+        $renewalMonths = 1;
 
         if (! config('payment.enabled')) {
             return redirect()->back()->with('errorMessage', 'Payments are disabled by system configuration.');
@@ -454,9 +486,12 @@ class BkashController extends Controller
         }
 
         $subscription = Subscription::getCurrent();
-        if ($subscription && $subscription->expires_at && Carbon::now()->lt($subscription->expires_at)) {
+        if ($subscription && ! $request->boolean('admin_test') && ! $subscription->canRenew()) {
             return redirect()->back()->with('errorMessage', 'Renewal is available after ' . $subscription->expires_at->toDateString() . '.');
         }
+        $renewalMonths = $subscription ? $subscription->renewalMonthsDue() : 1;
+        $baseAmount = (float) config('subscription.monthly_amount', $setting?->monthly_amount ?? 0) * $renewalMonths;
+        $amount = $this->addGatewayFee($baseAmount);
         if ((float) $amount <= 0) {
             return redirect()->back()->with('errorMessage', 'Invalid amount.');
         }
@@ -466,7 +501,13 @@ class BkashController extends Controller
             'amount' => $amount,
             'payment_method' => 'bkash',
             'status' => 'initiated',
-            'metadata' => ['approval_token' => \Illuminate\Support\Str::random(40)],
+            'metadata' => [
+                'period' => 'monthly',
+                'months' => $renewalMonths,
+                'base_amount' => round($baseAmount, 2),
+                'gateway_fee_percent' => (float) config('subscription.gateway_fee_percent', 1.5),
+                'approval_token' => \Illuminate\Support\Str::random(40),
+            ],
         ]);
 
         try {
@@ -482,7 +523,7 @@ class BkashController extends Controller
             }
 
             if (! empty($result['redirect_url'])) {
-                if ($this->usesLocalCallbackPlaceholder()) {
+                if ($this->needsManualPaymentConfirmation()) {
                     return redirect()->route('backend.payment.bkash.waiting', ['payment' => $payment->id]);
                 }
 
@@ -517,8 +558,8 @@ class BkashController extends Controller
         $payment->save();
 
         $sub = Subscription::ensureExists();
-        $sub->is_active = true;
-        $sub->expires_at = now()->addMonth();
+        $months = max(1, (int) data_get($payment->metadata, 'months', 1));
+        $sub->extendForPeriod('monthly', $months);
         $sub->last_payment_id = $payment->provider_payment_id;
         $sub->save();
         Subscription::clearCurrentCache();
@@ -538,33 +579,26 @@ class BkashController extends Controller
 
         $setting = BkashSetting::first();
         $period = $request->input('period', config('subscription.default_period', 'monthly'));
+        $period = in_array($period, ['monthly', 'yearly'], true) ? $period : 'monthly';
 
         $pendingPaymentId = $request->session()->get('bkash_pending_payment_id');
         if ($pendingPaymentId) {
             $pendingPayment = Payment::find($pendingPaymentId);
 
-            if (! $this->isValidPendingPayment($pendingPayment)) {
-                $request->session()->forget('bkash_pending_payment_id');
-            } else {
-                $waitingRoute = Route::has('backend.payment.bkash.waiting')
-                    ? 'backend.payment.bkash.waiting'
-                    : (Route::has('payment.bkash.waiting') ? 'payment.bkash.waiting' : null);
-
-                if ($waitingRoute) {
-                    return redirect()->route($waitingRoute, ['payment' => $pendingPayment->id])
-                        ->with('successMessage', 'A pending subscription payment is already in progress. Please complete that payment before starting a new one.');
-                }
+            // A hosted checkout can become invalid after its tab is closed or
+            // the user returns to Login. Always start a fresh session on Pay Now.
+            if ($pendingPayment && in_array($pendingPayment->status, ['initiated', 'pending'], true)) {
+                $pendingPayment->status = 'failed';
+                $pendingPayment->metadata = array_merge($pendingPayment->metadata ?? [], [
+                    'cancelled_reason' => 'replaced_by_new_checkout',
+                ]);
+                $pendingPayment->save();
             }
+            $request->session()->forget('bkash_pending_payment_id');
         }
 
         if ($request->filled('amount')) {
-            $amount = $request->input('amount');
-        } else {
-            if ($period === 'yearly') {
-                $amount = config('subscription.yearly_amount', $setting?->monthly_amount ?? 0);
-            } else {
-                $amount = config('subscription.monthly_amount', $setting?->monthly_amount ?? 0);
-            }
+            // Client amount is ignored — always compute server-side to prevent tampering.
         }
 
         $loginRoute = \Illuminate\Support\Facades\Route::has('backend.auth.login2') ? 'backend.auth.login2' : (\Illuminate\Support\Facades\Route::has('auth.login2') ? 'auth.login2' : 'home');
@@ -580,12 +614,18 @@ class BkashController extends Controller
 
         // Block only when subscription is currently active (sandbox testing can pay when inactive).
         $subscription = Subscription::getCurrent();
-        if ($subscription && $subscription->isActive()) {
+        if ($subscription && ! $subscription->canRenew()) {
             return redirect()->route($loginRoute)->with(
                 'successMessage',
                 'Subscription is already active until ' . optional($subscription->expires_at)->toDateString() . '. You can log in now.'
             );
         }
+
+        $renewalMonths = $period === 'monthly' && $subscription ? $subscription->renewalMonthsDue() : 1;
+        $baseAmount = $period === 'yearly'
+            ? (float) config('subscription.yearly_amount', $setting?->monthly_amount ?? 0)
+            : (float) config('subscription.monthly_amount', $setting?->monthly_amount ?? 0) * $renewalMonths;
+        $amount = $this->addGatewayFee($baseAmount);
 
         if ((float) $amount <= 0) {
             return redirect()->route($loginRoute)->with('errorMessage', 'Invalid amount.');
@@ -596,7 +636,13 @@ class BkashController extends Controller
             'amount' => $amount,
             'payment_method' => 'bkash',
             'status' => 'initiated',
-            'metadata' => array_merge(['period' => $period], ['approval_token' => \Illuminate\Support\Str::random(40)]),
+            'metadata' => [
+                'period' => $period,
+                'months' => $renewalMonths,
+                'base_amount' => round($baseAmount, 2),
+                'gateway_fee_percent' => (float) config('subscription.gateway_fee_percent', 1.5),
+                'approval_token' => \Illuminate\Support\Str::random(40),
+            ],
         ]);
 
         $request->session()->put('bkash_pending_payment_id', $payment->id);
@@ -614,22 +660,24 @@ class BkashController extends Controller
             }
 
             if (! empty($result['redirect_url'])) {
-                // Local *.test cannot receive bKash callback — keep the pending payment id
-                // and open the actual bKash checkout URL directly in the new tab.
-                if ($this->usesLocalCallbackPlaceholder()) {
+                if ($this->needsManualPaymentConfirmation()) {
                     $request->session()->put('bkash_pending_payment_id', $payment->id);
+
+                    return redirect()->route('backend.payment.bkash.waiting', ['payment' => $payment->id]);
                 }
 
                 return redirect()->away($result['redirect_url']);
             }
 
-            $simulateRoute = Route::has('backend.payment.bkash.simulate.public.page')
-                ? 'backend.payment.bkash.simulate.public.page'
-                : (Route::has('payment.bkash.simulate.public.page') ? 'payment.bkash.simulate.public.page' : null);
+            if (! $this->isLiveMode()) {
+                $simulateRoute = Route::has('backend.payment.bkash.simulate.public.page')
+                    ? 'backend.payment.bkash.simulate.public.page'
+                    : (Route::has('payment.bkash.simulate.public.page') ? 'payment.bkash.simulate.public.page' : null);
 
-            if ($simulateRoute) {
-                return redirect()->route($simulateRoute, ['payment' => $payment->id])
-                    ->with('successMessage', 'bKash checkout is not available right now, so the local payment simulation page was opened instead.');
+                if ($simulateRoute) {
+                    return redirect()->route($simulateRoute, ['payment' => $payment->id])
+                        ->with('successMessage', 'bKash checkout is not available right now, so the local payment simulation page was opened instead.');
+                }
             }
 
             return redirect()->route($loginRoute)->with('errorMessage', 'No redirect URL returned from bKash service');
@@ -638,16 +686,20 @@ class BkashController extends Controller
             $payment->metadata = array_merge($payment->metadata ?? [], ['error' => $e->getMessage()]);
             $payment->save();
 
-            $simulateRoute = Route::has('backend.payment.bkash.simulate.public.page')
-                ? 'backend.payment.bkash.simulate.public.page'
-                : (Route::has('payment.bkash.simulate.public.page') ? 'payment.bkash.simulate.public.page' : null);
+            report($e);
 
-            if ($simulateRoute) {
-                return redirect()->route($simulateRoute, ['payment' => $payment->id])
-                    ->with('successMessage', 'bKash checkout could not be started, so the local payment simulation page was opened instead.');
+            if (! $this->isLiveMode()) {
+                $simulateRoute = Route::has('backend.payment.bkash.simulate.public.page')
+                    ? 'backend.payment.bkash.simulate.public.page'
+                    : (Route::has('payment.bkash.simulate.public.page') ? 'payment.bkash.simulate.public.page' : null);
+
+                if ($simulateRoute) {
+                    return redirect()->route($simulateRoute, ['payment' => $payment->id])
+                        ->with('successMessage', 'bKash checkout could not be started, so the local payment simulation page was opened instead.');
+                }
             }
 
-            return redirect()->route($loginRoute)->with('errorMessage', 'Payment initiation failed: ' . $e->getMessage());
+            return redirect()->route($loginRoute)->with('errorMessage', 'Payment gateway could not be opened. Check bKash settings and try again.');
         }
     }
 
@@ -712,6 +764,11 @@ class BkashController extends Controller
                 ]);
             }
 
+            // Non-JSON: redirect to invoice if available, otherwise login
+            if (! empty($data['invoiceUrl'])) {
+                return redirect($data['invoiceUrl']);
+            }
+
             return redirect()->route($loginRoute)->with('successMessage', $data['message'] ?? 'Payment successful. You can log in now.');
         }
 
@@ -740,7 +797,8 @@ class BkashController extends Controller
             : 'auth.login2';
 
         if ($payment->status === 'success') {
-            return redirect()->route($loginRoute)->with('successMessage', 'Payment already completed. You can log in now.');
+            // Show invoice instead of login page
+            return redirect($this->invoiceUrl($payment));
         }
 
         if ($payment->status === 'failed') {
@@ -864,7 +922,8 @@ class BkashController extends Controller
         }
 
         if ($payment->status === 'success') {
-            return redirect()->route($loginRoute)->with('successMessage', 'Payment already completed.');
+            $request->session()->forget('bkash_pending_payment_id');
+            return redirect($this->invoiceUrl($payment));
         }
 
         $token = $request->input('approval_token');
@@ -875,21 +934,22 @@ class BkashController extends Controller
 
         $payment->status = 'success';
         $payment->provider_payment_id = $payment->provider_payment_id ?: ('SIM-' . $payment->id);
-        // remove token to avoid re-use
         $meta = $payment->metadata ?? [];
         unset($meta['approval_token']);
+        $invoiceNumber = 'TOAMED-INV-' . str_pad((string) $payment->id, 6, '0', STR_PAD_LEFT);
+        $meta['invoice_number'] = $invoiceNumber;
         $payment->metadata = $meta;
         $payment->save();
 
         $period = $payment->metadata['period'] ?? ($meta['period'] ?? 'monthly');
         $sub = Subscription::ensureExists();
-        $sub->is_active = true;
-        $sub->expires_at = $period === 'yearly' ? now()->addYear() : now()->addMonth();
+        $months = max(1, (int) data_get($payment->metadata, 'months', 1));
+        $sub->extendForPeriod($period, $months);
         $sub->last_payment_id = $payment->provider_payment_id;
         $sub->save();
         Subscription::clearCurrentCache();
 
-        return redirect()->route($loginRoute)->with('successMessage', 'Simulated payment applied. Transaction ID: ' . $payment->provider_payment_id . '. Subscription active until ' . $sub->expires_at->toDateString());
+        return redirect($this->invoiceUrl($payment));
     }
 
     public function publicUnsubscribe(Request $request)
@@ -931,22 +991,17 @@ class BkashController extends Controller
 
     public function paymentInvoice(Payment $payment)
     {
-        $loginRoute = \Illuminate\Support\Facades\Route::has('backend.auth.login2')
-            ? 'backend.auth.login2'
-            : 'auth.login2';
-
         $invoiceNumber = data_get($payment->metadata, 'invoice_number')
             ?: 'TOAMED-INV-' . str_pad((string) $payment->id, 6, '0', STR_PAD_LEFT);
-
-        $meta = $payment->metadata ?? [];
-        $meta['invoice_number'] = $invoiceNumber;
-        $payment->metadata = $meta;
-        $payment->save();
+        $transactionId = data_get($payment->metadata, 'trx_id')
+            ?: data_get($payment->metadata, 'bkash_response.trxID')
+            ?: data_get($payment->metadata, 'bkash_response.trxId');
 
         return view('payment.bkash.invoice', [
             'payment' => $payment,
             'invoiceNumber' => $invoiceNumber,
-            'loginRoute' => $loginRoute,
+            'transactionId' => $transactionId,
+            'loginUrl' => url('/login'),
         ]);
     }
 
@@ -1001,7 +1056,9 @@ class BkashController extends Controller
         $request->session()->put('bkash_pending_payment_id', $payment->id);
 
         if ($payment->status === 'success') {
-            return redirect()->route($loginRoute)->with('successMessage', 'Payment already completed.');
+            $request->session()->forget('bkash_pending_payment_id');
+
+            return redirect($this->invoiceUrl($payment));
         }
 
         if (in_array($status, ['cancel', 'failure', 'failed'], true)) {
@@ -1015,15 +1072,17 @@ class BkashController extends Controller
 
         $raw = null;
 
+        $executeId = $providerPaymentId ?: $payment->provider_payment_id;
+
         try {
-            $exec = $this->executePayment($providerPaymentId);
+            $exec = $this->executePayment((string) $executeId);
             $raw = $exec['raw'] ?? [];
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             try {
-                $query = $this->queryPayment($providerPaymentId);
+                $query = $this->queryPayment((string) $executeId);
                 $raw = $query['raw'] ?? [];
-            } catch (\Exception $queryError) {
-                $payment->status = 'failed';
+            } catch (\Throwable $queryError) {
+                report($queryError);
                 $payment->metadata = array_merge($payment->metadata ?? [], [
                     'bkash_callback' => $request->all(),
                     'error' => $e->getMessage(),
@@ -1031,7 +1090,7 @@ class BkashController extends Controller
                 ]);
                 $payment->save();
 
-                return redirect()->route($loginRoute)->with('errorMessage', 'Unable to confirm bKash payment: ' . $e->getMessage());
+                return redirect()->route($loginRoute)->with('errorMessage', 'Unable to confirm bKash payment. Please contact support with Payment ID ' . $payment->id . '.');
             }
         }
 
@@ -1047,19 +1106,20 @@ class BkashController extends Controller
         } else {
             $payment->status = 'success';
             $payment->provider_payment_id = data_get($raw, 'paymentID') ?: $providerPaymentId;
+            $invoiceNumber = 'TOAMED-INV-' . str_pad((string) $payment->id, 6, '0', STR_PAD_LEFT);
             $payment->metadata = array_merge($payment->metadata ?? [], [
                 'trx_id' => data_get($raw, 'trxID') ?: data_get($raw, 'trxId'),
                 'bkash_response' => $raw,
+                'invoice_number' => $invoiceNumber,
             ]);
             $payment->save();
 
-            $sub = $this->activateSubscription($payment, $payment->provider_payment_id);
+            $this->activateSubscription($payment, $payment->provider_payment_id);
+            $request->session()->forget('bkash_pending_payment_id');
 
-            return redirect()->route($loginRoute)->with(
-                'successMessage',
-                'Payment successful. Transaction ID: ' . ($payment->metadata['trx_id'] ?? $payment->provider_payment_id)
-                    . '. Subscription active until ' . $sub->expires_at->toDateString() . '.'
-            );
+            // Redirect to invoice page. The invoice page notifies the opener (login tab)
+            // to reload and auto-closes after print.
+            return redirect($this->invoiceUrl($payment));
         }
     }
 
@@ -1089,9 +1149,9 @@ class BkashController extends Controller
             $payment->save();
 
             $period = $payment->metadata['period'] ?? 'monthly';
+            $months = max(1, (int) data_get($payment->metadata, 'months', 1));
             $sub = Subscription::ensureExists();
-            $sub->is_active = true;
-            $sub->expires_at = $period === 'yearly' ? now()->addYear() : now()->addMonth();
+            $sub->extendForPeriod($period, $months);
             $sub->last_payment_id = $payment->provider_payment_id;
             $sub->save();
 
@@ -1118,9 +1178,9 @@ class BkashController extends Controller
         $payment->save();
 
         $period = $payment->metadata['period'] ?? 'monthly';
+        $months = max(1, (int) data_get($payment->metadata, 'months', 1));
         $sub = Subscription::ensureExists();
-        $sub->is_active = true;
-        $sub->expires_at = $period === 'yearly' ? now()->addYear() : now()->addMonth();
+        $sub->extendForPeriod($period, $months);
         $sub->last_payment_id = $payment->provider_payment_id;
         $sub->save();
 

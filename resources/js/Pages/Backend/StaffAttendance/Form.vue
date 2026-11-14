@@ -64,10 +64,10 @@ const fetchAttendanceRecords = async (date) => {
         if (response.ok) {
             form.records = data.records.length ? data.records : initialRecords;
         } else {
-            displayWarning(data.message || "Failed to fetch records.");
+            displayWarning(data.message || "Failed to load attendance records.");
         }
     } catch (error) {
-        displayWarning("An error occurred while fetching records.");
+        displayWarning("Could not load attendance records. Please try again.");
     }
 };
 
@@ -156,8 +156,8 @@ const goBack = () => {
                     class="w-full grid-cols-1 gap-3 text-xs text-gray-700 border border-gray-300 rid sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-4">
                     <thead class="bg-gray-200">
                         <tr>
-                            <th class="px-2 py-2 border border-gray-400">Sl/No</th>
-                            <th class="px-2 py-2 border border-gray-400">Staff Id</th>
+                            <th class="px-2 py-2 border border-gray-400">SL</th>
+                            <th class="px-2 py-2 border border-gray-400">Staff ID</th>
                             <th class="px-2 py-2 border border-gray-400">Name</th>
                             <th class="px-2 py-2 border border-gray-400">Attendance Status</th>
                             <th class="px-2 py-2 border border-gray-400">In Time</th>
@@ -175,7 +175,7 @@ const goBack = () => {
                                     <select
                                         class="w-full block p-2 mb-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
                                         v-model="record.attendance_status">
-                                        <option value="">Select Attendance</option>
+                                        <option value="">Select Status</option>
                                         <option value="Present">Present</option>
                                         <option value="Late">Late</option>
                                         <option value="Absent">Absent</option>

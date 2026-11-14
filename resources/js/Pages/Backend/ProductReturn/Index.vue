@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 
@@ -12,7 +12,7 @@ const props = defineProps({
   },
   returnType: {
     type: String,
-    default: 'supplier',
+    default: 'all',
   },
   filters: {
     type: Object,
@@ -25,7 +25,9 @@ const rows = props.returns?.data ?? [];
 const filterForm = ref({
   search: props.filters?.search ?? '',
   numOfData: props.filters?.numOfData ?? props.returns?.per_page ?? 10,
-  return_type: props.returnType,
+  return_type: props.filters?.return_type ?? props.returnType,
+  date_from: props.filters?.date_from ?? '',
+  date_to: props.filters?.date_to ?? '',
 });
 
 const applyFilter = () => {
@@ -36,10 +38,12 @@ const applyFilter = () => {
   });
 };
 
-const isSupplierMode = props.returnType === 'supplier';
+const isSupplierMode = computed(() => filterForm.value.return_type === 'supplier');
 
 const clearSearch = () => {
   filterForm.value.search = '';
+  filterForm.value.date_from = '';
+  filterForm.value.date_to = '';
   applyFilter();
 };
 
@@ -138,24 +142,51 @@ const getReturnDateTime = (item) => {
   if (item?.return_datetime_local) return item.return_datetime_local;
   return formatReturnDateTime(item?.return_date, item?.created_at);
 };
+
+const printList = () => {
+  const url = route('backend.productreturn.print', {
+    return_type: filterForm.value.return_type,
+    search: filterForm.value.search || undefined,
+    date_from: filterForm.value.date_from || undefined,
+    date_to: filterForm.value.date_to || undefined,
+  });
+  window.open(url, '_blank', 'noopener');
+};
 </script>
 
 <template>
   <BackendLayout>
     <div class="w-full p-4 mt-3 bg-white rounded shadow-md">
       <div class="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-100 rounded">
-        <h1 class="text-xl font-semibold text-gray-800">{{ isSupplierMode ? 'Supplier Product Return List' : 'Customer Product Return List' }}</h1>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <Link :href="route('backend.dashboard')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">
+            Back
+          </Link>
+          <h1 class="text-xl font-semibold text-gray-800">{{ filterForm.return_type === 'all' ? 'Product Return List' : isSupplierMode ? 'Supplier Product Return List' : 'Customer Product Return List' }}</h1>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <select v-model="filterForm.return_type" class="px-2 py-2 text-sm border border-gray-300 rounded" @change="applyFilter">
+            <option value="all">All Returns</option>
+            <option value="customer">Customer Returns</option>
+            <option value="supplier">Supplier Returns</option>
+          </select>
           <input
             v-model="filterForm.search"
             type="text"
-            :placeholder="isSupplierMode ? 'Search return no, supplier, status' : 'Search return no, customer, status'"
+            :placeholder="filterForm.return_type === 'all' ? 'Search return no, supplier, customer, status' : isSupplierMode ? 'Search return no, supplier, status' : 'Search return no, customer, status'"
             class="px-3 py-2 text-sm border border-gray-300 rounded w-72 max-w-full"
             @input="applyFilter"
           >
+          <input v-model="filterForm.date_from" type="date" aria-label="From date"
+            class="px-2 py-2 text-sm border border-gray-300 rounded" @change="applyFilter">
+          <input v-model="filterForm.date_to" type="date" aria-label="To date"
+            class="px-2 py-2 text-sm border border-gray-300 rounded" @change="applyFilter">
+          <button type="button" class="px-3 py-2 text-sm font-semibold text-white bg-sky-700 rounded hover:bg-sky-800" @click="printList">
+            Print List
+          </button>
           <button
             type="button"
-            class="px-3 py-2 text-sm text-gray-700 bg-gray-200 rounded hover:bg-gray-300"
+            class="px-3 py-2 text-sm font-semibold !text-white bg-emerald-600 rounded hover:bg-emerald-700"
             @click="clearSearch"
           >
             Clear
@@ -167,9 +198,18 @@ const getReturnDateTime = (item) => {
             <option value="50">Show 50</option>
             <option value="100">Show 100</option>
           </select>
-          <Link :href="route('backend.productreturn.create', { return_type: props.returnType })" class="px-3 py-2 text-sm text-white bg-indigo-600 rounded hover:bg-indigo-700">
+          <Link
+            v-if="filterForm.return_type !== 'all'"
+            :href="route('backend.productreturn.create', { return_type: filterForm.return_type })"
+            class="px-3 py-2 text-sm rounded"
+            :class="isSupplierMode ? '!text-white bg-emerald-600 hover:bg-emerald-700' : 'text-white bg-indigo-600 hover:bg-indigo-700'"
+          >
             {{ isSupplierMode ? 'Add Supplier Return' : 'Add Customer Return' }}
           </Link>
+          <template v-else>
+            <Link :href="route('backend.productreturn.create', { return_type: 'customer' })" class="px-3 py-2 text-sm text-white bg-indigo-600 rounded hover:bg-indigo-700">Add Customer Return</Link>
+            <Link :href="route('backend.productreturn.create', { return_type: 'supplier' })" class="px-3 py-2 text-sm !text-white bg-emerald-600 rounded hover:bg-emerald-700">Add Supplier Return</Link>
+          </template>
         </div>
       </div>
 
@@ -179,12 +219,14 @@ const getReturnDateTime = (item) => {
             <tr>
               <th class="px-3 py-2 border">Return No</th>
               <th class="px-3 py-2 border">Type</th>
-              <th class="px-3 py-2 border">Supplier</th>
+              <th class="px-3 py-2 border">{{ filterForm.return_type === 'customer' ? 'Customer' : filterForm.return_type === 'all' ? 'Supplier / Customer' : 'Supplier' }}</th>
               <th class="px-3 py-2 border">Reference</th>
               <th class="px-3 py-2 border">Date & Time</th>
               <th class="px-3 py-2 border">Total</th>
-              <th class="px-3 py-2 border">Paid / Due</th>
-              <th class="px-3 py-2 border">Status</th>
+              <th class="px-3 py-2 border">Paid</th>
+              <th class="px-3 py-2 border">Due</th>
+              <th class="px-3 py-2 border">Return Status</th>
+              <th class="px-3 py-2 border">Payment Status</th>
               <th class="px-3 py-2 border">Action</th>
             </tr>
           </thead>
@@ -192,39 +234,35 @@ const getReturnDateTime = (item) => {
             <tr v-for="item in rows" :key="item.id" class="hover:bg-gray-50">
               <td class="px-3 py-2 border">{{ item.return_number }}</td>
               <td class="px-3 py-2 border capitalize">{{ item.return_type }}</td>
-              <td class="px-3 py-2 border">{{ item.supplier?.name ?? 'N/A' }}</td>
+              <td class="px-3 py-2 border">{{ item.return_type === 'customer' ? (item.customer_name || 'N/A') : (item.supplier?.name ?? 'N/A') }}</td>
               <td class="px-3 py-2 border">{{ item.source_bill_no ?? item.customer_name ?? '-' }}</td>
               <td class="px-3 py-2 border">{{ getReturnDateTime(item) }}</td>
               <td class="px-3 py-2 border">{{ formatMoney(item.total_amount) }}</td>
+              <td class="px-3 py-2 border">{{ formatMoney(getPaidAmount(item)) }}</td>
+              <td class="px-3 py-2 border">{{ formatMoney(getDueAmount(item)) }}</td>
               <td class="px-3 py-2 border">
-                <div class="leading-5">
-                  <div>Paid: {{ formatMoney(getPaidAmount(item)) }}</div>
-                  <div>Due: {{ formatMoney(getDueAmount(item)) }}</div>
-                </div>
+                <span
+                  class="inline-flex px-2 py-1 text-xs rounded capitalize"
+                  :class="item.status === 'processed'
+                    ? 'text-emerald-700 bg-emerald-100'
+                    : item.status === 'approved'
+                      ? 'text-blue-700 bg-blue-100'
+                      : 'text-amber-700 bg-amber-100'"
+                >
+                  {{ item.status }}
+                </span>
               </td>
               <td class="px-3 py-2 border">
-                <div class="flex flex-wrap gap-1">
-                  <span
-                    class="px-2 py-1 text-xs rounded capitalize"
-                    :class="item.status === 'processed'
-                      ? 'text-emerald-700 bg-emerald-100'
-                      : item.status === 'approved'
-                        ? 'text-blue-700 bg-blue-100'
-                        : 'text-amber-700 bg-amber-100'"
-                  >
-                    {{ item.status }}
-                  </span>
-                  <span
-                    class="px-2 py-1 text-xs rounded capitalize"
-                    :class="(item.payment_status ?? 'unpaid') === 'paid'
-                      ? 'text-emerald-700 bg-emerald-100'
-                      : (item.payment_status ?? 'unpaid') === 'partial'
-                        ? 'text-blue-700 bg-blue-100'
-                        : 'text-red-700 bg-red-100'"
-                  >
-                    {{ item.payment_status ?? 'unpaid' }}
-                  </span>
-                </div>
+                <span
+                  class="inline-flex px-2 py-1 text-xs rounded capitalize"
+                  :class="(item.payment_status ?? 'unpaid') === 'paid'
+                    ? 'text-emerald-700 bg-emerald-100'
+                    : (item.payment_status ?? 'unpaid') === 'partial'
+                      ? 'text-blue-700 bg-blue-100'
+                      : 'text-red-700 bg-red-100'"
+                >
+                  {{ item.payment_status ?? 'unpaid' }}
+                </span>
               </td>
               <td class="px-3 py-2 border">
                 <div class="flex flex-wrap gap-2">
@@ -238,7 +276,7 @@ const getReturnDateTime = (item) => {
                     Delete
                   </button>
                   <button
-                    v-if="!isSupplierMode && getDueAmount(item) > 0"
+                    v-if="item.return_type === 'customer' && getDueAmount(item) > 0"
                     type="button"
                     class="px-2 py-1 text-xs text-white bg-indigo-600 rounded hover:bg-indigo-700"
                     @click="openPayModal(item)"
@@ -249,7 +287,7 @@ const getReturnDateTime = (item) => {
               </td>
             </tr>
             <tr v-if="rows.length === 0">
-              <td colspan="9" class="px-3 py-6 text-center text-gray-500 border">No returns found.</td>
+              <td colspan="11" class="px-3 py-6 text-center text-gray-500 border">No returns found.</td>
             </tr>
           </tbody>
         </table>

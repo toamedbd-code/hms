@@ -24,9 +24,14 @@ const props = defineProps([
 ]);
 
 const form = useForm({
-    patient_id: props.appoinment?.patient_id ?? '',
-    doctor_id: props.appoinment?.doctor_id ?? '',
+    patient_id: props.patients?.find((patient) => Number(patient.id) === Number(props.appoinment?.patient_id))
+        ?? props.appoinment?.patient
+        ?? '',
+    doctor_id: props.doctors?.find((doctor) => Number(doctor.id) === Number(props.appoinment?.doctor_id))
+        ?? props.appoinment?.admin
+        ?? '',
     doctor_fee: props.appoinment?.doctor_fee ?? '',
+    amount_received: 0,
     shift: props.appoinment?.shift ?? '',
     appoinment_date: props.appoinment?.appoinment_date ?? '',
     slot: props.appoinment?.slot ?? '',
@@ -116,11 +121,11 @@ watch(() => form.doctor_id, (newDoctorId) => {
             doctor.id === (typeof newDoctorId === 'object' ? newDoctorId.id : newDoctorId)
         );
         
-        if (selectedDoctor && selectedDoctor.doctor_charge) {
+        if (selectedDoctor?.doctor_charge && Number(form.doctor_fee || 0) <= 0) {
             form.doctor_fee = selectedDoctor.doctor_charge;
         }
     }
-}, { deep: true });
+}, { deep: true, immediate: true });
 
 const setCurrentDateTime = () => {
     if (!form.appoinment_date) {
@@ -149,6 +154,12 @@ const submit = () => {
         doctor_id: typeof form.doctor_id === 'object' ? form.doctor_id.id : form.doctor_id,
     };
 
+    if (props.id) delete formData.amount_received;
+    const receiptWindow = !props.id
+        ? window.open(window.location.href, '_blank')
+        : null;
+    if (receiptWindow) receiptWindow.opener = null;
+
     const routeName = props.id ? route('backend.appoinment.update', props.id) : route('backend.appoinment.store');
     
     form.transform(data => ({
@@ -157,11 +168,25 @@ const submit = () => {
         isDirty: false,
     })).post(routeName, {
         onSuccess: (response) => {
+            const receiptUrl = response?.props?.flash?.appointmentInvoiceUrl;
+            if (receiptUrl) {
+                if (receiptWindow) {
+                    receiptWindow.location.replace(receiptUrl);
+                } else {
+                    const invoiceWindow = window.open(receiptUrl, '_blank');
+                    if (!invoiceWindow) {
+                        window.location.assign(receiptUrl);
+                    }
+                }
+            } else {
+                receiptWindow?.close();
+            }
             if (!props.id)
                 form.reset();
             displayResponse(response);
         },
         onError: (errorObject) => {
+            receiptWindow?.close();
             displayWarning(errorObject);
         },
     });
@@ -324,6 +349,17 @@ const goBack = () => {
                             <option value="Other">Other</option>
                         </select>
                         <InputError class="mt-2" :message="form.errors.payment_mode" />
+                    </div>
+
+                    <div v-if="!props.id" class="col-span-1">
+                        <InputLabel for="amount_received" value="Amount Received Now" />
+                        <input id="amount_received" v-model="form.amount_received"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 focus:border-indigo-300"
+                            type="number" min="0" step="0.01"
+                            :max="Math.max(0, Number(form.doctor_fee || 0) * (1 - Number(form.discount_percentage || 0) / 100)).toFixed(2)"
+                            placeholder="0.00" />
+                        <InputError class="mt-2" :message="form.errors.amount_received" />
+                        <p class="mt-1 text-xs text-gray-500">Enter the amount collected now. A receipt opens after saving.</p>
                     </div>
 
                     <div class="col-span-1">

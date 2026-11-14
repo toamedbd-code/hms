@@ -248,12 +248,12 @@ watch(filters, applyFilter, { deep: true });
           </caption>
           <thead class="bg-gray-200 dark:bg-gray-700">
             <tr>
-              <th class="text-sm text-center border border-slate-700">Staff Id</th>
+              <th class="text-sm text-center border border-slate-700">Staff ID</th>
               <th class="text-sm text-center border border-slate-700">Staff Name</th>
               <th class="text-sm text-center border border-slate-700">Total Days</th>
               <th class="text-sm text-center border border-slate-700">Present</th>
               <th class="text-sm text-center border border-slate-700">Absent</th>
-              <th class="text-sm text-center border border-slate-700">Lates</th>
+              <th class="text-sm text-center border border-slate-700">Late</th>
               <th class="text-sm text-center border border-slate-700">Holidays</th>
               <th class="text-sm text-center border border-slate-700">Paid Days</th>
               <th class="text-sm text-center border border-slate-700">Unpaid Days</th>

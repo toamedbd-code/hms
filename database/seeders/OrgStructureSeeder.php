@@ -15,10 +15,10 @@ class OrgStructureSeeder extends Seeder
 
         if ($companies->isEmpty()) {
             $companyId = DB::table('companies')->insertGetId([
-                'name' => 'Default Company',
-                'short_name' => 'Default',
+                'name' => 'ToaMed',
+                'short_name' => 'TM',
                 'phone' => null,
-                'email' => 'default-company@example.com',
+                'email' => 'toamedbd@gmail.com',
                 'logo' => null,
                 'favicon' => null,
                 'address' => null,
@@ -32,6 +32,21 @@ class OrgStructureSeeder extends Seeder
         }
 
         foreach ($companies as $company) {
+            $legacyBranchId = DB::table('branches')
+                ->whereNull('company_id')
+                ->where('code', 'MAIN')
+                ->orderBy('id')
+                ->value('id');
+
+            if ($legacyBranchId) {
+                DB::table('branches')
+                    ->where('id', $legacyBranchId)
+                    ->update([
+                        'company_id' => $company->id,
+                        'updated_at' => $now,
+                    ]);
+            }
+
             $branchId = DB::table('branches')
                 ->where('company_id', $company->id)
                 ->where('code', 'MAIN')

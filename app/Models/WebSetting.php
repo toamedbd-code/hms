@@ -102,4 +102,21 @@ class WebSetting extends Model
 
         return asset(ltrim($value, '/'));
     }
+
+    public function getPwaAppIconAttribute($value)
+    {
+        if (!is_string($value) || $value === '') {
+            return null;
+        }
+
+        if (Str::startsWith($value, ['http://', 'https://', 'data:'])) {
+            return $value;
+        }
+
+        if (strpos($value, 'webSetting/') !== false) {
+            return publicStorageUrl($value);
+        }
+
+        return asset(ltrim($value, '/'));
+    }
 }

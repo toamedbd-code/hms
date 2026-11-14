@@ -92,6 +92,9 @@
             @endif
         @endif
         @php
+            $invoiceDesign = $invoiceDesign ?? null;
+            $fullPagePadImage = $fullPagePadImage ?? '';
+
             // Determine whether to show header/footer; prefer controller-provided variable
             $__inv_show = isset($showHeaderFooter) ? (bool) $showHeaderFooter : (isset($show_header_footer) ? (bool) $show_header_footer : null);
             if ($__inv_show === null) {
@@ -153,6 +156,18 @@
                 $__inv_footer_h = 0;
                 $__inv_footer_reserved_h = 0;
             }
+
+            $__invoiceFullPagePad = ($invoiceDesign?->active_pad_type ?? 'header') === 'institution'
+                && !empty($fullPagePadImage)
+                && $__inv_show;
+            if ($__invoiceFullPagePad) {
+                $__inv_footer_h = 0;
+                $__inv_footer_extra_h = 0;
+                $__inv_footer_reserved_h = 0;
+            }
+            $__invoicePadContentOffset = max(0, min(100, (int) ($invoiceDesign?->full_page_pad_content_offset ?? 0)));
+            $__invoiceFooterContentOffset = max(0, min(50, (int) ($invoiceDesign?->footer_content_offset ?? 0)));
+            $__invoiceFooterContentTranslate = -$__invoiceFooterContentOffset;
         @endphp
         * {
             margin: 0;
@@ -179,6 +194,92 @@
         .invoice-container {
             width: 100%;
         }
+
+        @if($__invoiceFullPagePad)
+        .invoice-container.with-institution-pad {
+            position: relative;
+            border: 0 !important;
+            outline: 0 !important;
+            box-shadow: none !important;
+        }
+
+        .invoice-container.with-institution-pad .print-shared-header {
+            display: none !important;
+        }
+
+        .invoice-container.with-institution-pad .footer-section {
+            display: block !important;
+            position: absolute !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            z-index: 10001 !important;
+        }
+
+        @media print {
+            .invoice-container.with-institution-pad .footer-section {
+                position: fixed !important;
+                bottom: 0 !important;
+            }
+        }
+
+        .invoice-container.with-institution-pad .footer-section .footer-image {
+            display: none !important;
+        }
+
+        .invoice-container.with-institution-pad .content-section {
+            position: relative;
+            z-index: 1;
+            padding-top: {{ $__invoicePadContentOffset }}mm !important;
+        }
+
+        .invoice-institution-pad {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: fill;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        @media screen {
+            .invoice-container.with-institution-pad {
+                background: transparent !important;
+                overflow: visible !important;
+            }
+        }
+
+        @media print {
+            .invoice-institution-pad {
+                position: fixed;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                max-width: none;
+                margin: 0;
+                object-fit: fill;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            .invoice-container.with-institution-pad {
+                border: 0 !important;
+                outline: 0 !important;
+                box-shadow: none !important;
+                background: transparent !important;
+                overflow: visible !important;
+            }
+
+            .invoice-container.with-institution-pad .content-section {
+                padding-bottom: 0 !important;
+            }
+        }
+        @endif
 
         /* Header Section */
         .header-section {
@@ -232,6 +333,23 @@
 
         .title-cell-center {
             width: 60%;
+            text-align: center;
+        }
+
+        .receipt-title-wrap {
+            position: relative;
+            display: inline-block;
+        }
+
+        .pharmacy-tax-number-title {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            width: 100%;
+            margin-top: 1px;
+            font-size: 9px !important;
+            line-height: 1;
+            white-space: nowrap;
             text-align: center;
         }
 
@@ -513,6 +631,19 @@
             width: 40%;
         }
 
+        .totals-table .due-collect-line {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .totals-table .due-collect-label,
+        .totals-table .due-collect-amount {
+            white-space: nowrap;
+        }
+
         /* Amount in words */
         .amount-words {
             margin-top: 8px;
@@ -540,9 +671,10 @@
         }
 
         .portal-qr img {
-            width: 92px;
-            height: 92px;
+            width: 128px;
+            height: 128px;
             background: #fff;
+            image-rendering: pixelated;
         }
 
         /* Footer Section - fixed at bottom of page */
@@ -624,16 +756,17 @@
             position: absolute;
             left: 0;
             right: 0;
-            bottom: {{ $__inv_footer_h }}px;
+            bottom: 0;
             width: 100%;
             padding: 0 20px;
             margin-bottom: 0;
             z-index: 10000;
             pointer-events: auto;
+            transform: translateY({{ $__invoiceFooterContentTranslate }}mm);
         }
 
         .footer-meta-wrap.with-image {
-            bottom: calc({{ $__inv_footer_h }}px - 36px);
+            bottom: 0;
         }
 
         .footer-meta-wrap.no-image {
@@ -644,61 +777,99 @@
             font-size: 13px;
             text-align: left;
             margin-top: 0;
-            color: #000000ff;
+            color: #111;
             width: 100%;
             padding: 0;
             margin-bottom: 0;
             line-height: 1.15;
         }
 
+        .footer-meta-wrap.with-image .footer-date-time {
+            color: #000;
+            text-shadow: none;
+        }
+
         .footer-custom-line {
+            display: block;
             text-align: center;
             padding: 0;
             font-size: {{ $__inv_footer_font_size }}px !important;
             line-height: 1.15;
             white-space: normal;
             word-break: normal;
-            overflow-wrap: normal;
-            word-wrap: normal;
+            overflow-wrap: anywhere;
+            word-wrap: break-word;
             hyphens: none;
             margin: 0;
+            max-width: 100%;
+            overflow: visible;
         }
 
         .footer-custom-item {
-            display: inline-block;
-            white-space: nowrap;
+            display: inline;
+            white-space: normal;
             margin-bottom: 0;
         }
 
         .footer-separator {
-            display: inline-block;
-            white-space: nowrap;
+            display: inline;
+            white-space: normal;
             margin: 0 4px 0 0;
         }
 
         .footer-meta-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
             width: 100%;
-            border-collapse: collapse;
-            table-layout: fixed;
+            white-space: nowrap;
         }
 
         .footer-meta-left {
+            flex: 1 1 auto;
             text-align: left;
             white-space: nowrap;
-            padding: 0 8px 0 0;
+            padding: 0;
             vertical-align: middle;
         }
 
         .footer-meta-right {
+            flex: 0 0 auto;
             text-align: right;
             white-space: nowrap;
-            padding: 0 0 0 8px;
+            padding: 0;
             vertical-align: middle;
         }
 
         .footer-meta-left,
         .footer-meta-right {
+            font-size: 9px !important;
             line-height: 1.1;
+        }
+
+        .footer-date-time,
+        .footer-meta-row {
+            max-width: 100%;
+        }
+
+        .invoice-container.with-institution-pad .footer-meta-wrap .footer-date-time {
+            color: #000 !important;
+            text-shadow: none !important;
+        }
+
+        .invoice-container.with-institution-pad .footer-meta-wrap.no-image {
+            bottom: 10mm;
+            padding: 0 4mm;
+            z-index: 10001;
+        }
+
+        .invoice-container.with-institution-pad .footer-meta-wrap,
+        .invoice-container.with-institution-pad .footer-meta-wrap.with-image,
+        .invoice-container.with-institution-pad .footer-meta-wrap.no-image {
+            bottom: 0 !important;
+            padding: 0 4mm !important;
+            z-index: 10002 !important;
         }
 
         @if(!empty($solaimanDataUri) || !empty($solaimanSrc))
@@ -734,6 +905,11 @@
                 overflow: hidden;
             }
 
+            .invoice-container.with-institution-pad {
+                height: 297mm;
+                min-height: 297mm;
+            }
+
             .content-section {
                 padding-bottom: {{ max(26, (int) ($__inv_footer_reserved_h + 6)) }}px !important;
             }
@@ -756,9 +932,10 @@
                 position: absolute !important;
                 left: 0 !important;
                 right: 0 !important;
-                bottom: calc({{ $__inv_footer_h }}px - 36px + 3.5mm) !important;
+                bottom: 0 !important;
                 margin: 0 !important;
-                padding: 0 20px !important;
+                padding: 0 4mm !important;
+                z-index: 10000 !important;
             }
 
             .footer-meta-wrap.no-image {
@@ -773,8 +950,8 @@
                 width: 100% !important;
                 height: {{ $__inv_footer_h }}px !important;
                 max-height: {{ $__inv_footer_h }}px !important;
-                object-fit: contain;
-                object-position: bottom center;
+                object-fit: contain !important;
+                object-position: bottom center !important;
                 display: block;
             }
         }
@@ -808,7 +985,6 @@
             .header-section,
             .header-placeholder,
             .header-image {
-                /* avoid fixed positioning for mPDF */
                 position: static;
                 top: auto;
                 left: auto;
@@ -824,8 +1000,8 @@
                 display: none;
             }
 
-            .footer-date-time {
-                color: #000;
+            .footer-meta-wrap.with-image .footer-date-time {
+                color: #000 !important;
             }
 
             /* Ensure proper alignment in print */
@@ -836,7 +1012,7 @@
 
         @page {
             size: auto;
-            margin: 0;
+            margin: 5mm;
         }
 
         /* A4 Print Settings */
@@ -881,6 +1057,15 @@
                 border: 1px solid #bdbdbd !important;
             }
 
+            .items-table thead {
+                display: table-header-group;
+            }
+
+            .items-table tr {
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
+
             .items-table th {
                 border: 1px solid #b8b8b8 !important;
                 background-color: #f2f2f2 !important;
@@ -914,22 +1099,22 @@
 
             .footer-image {
                 position: absolute !important;
-                height: auto !important;
-                max-height: none !important;
+                height: {{ $__inv_footer_h }}px !important;
+                max-height: {{ $__inv_footer_h }}px !important;
                 left: 0 !important;
                 right: 0 !important;
                 width: 100% !important;
-                bottom: 2mm !important;
-                object-fit: initial !important;
-                object-position: initial !important;
+                bottom: 0 !important;
+                object-fit: contain !important;
+                object-position: bottom center !important;
             }
 
             .footer-date-time {
-                font-size: 14px !important;
+                font-size: clamp(6px, 1.5vw, 11px) !important;
             }
 
             .footer-meta-wrap.with-image {
-                bottom: calc({{ $__inv_footer_h }}px - 36px + 3.5mm) !important;
+                bottom: 0 !important;
             }
 
             .footer-meta-wrap.no-image {
@@ -980,7 +1165,11 @@
 
             .content-section {
                 padding: 0 5mm !important;
-                padding-bottom: {{ max(24, (int) ($__inv_footer_h + 2)) }}px !important;
+                padding-bottom: {{ empty($footer_image) ? max(24, (int) ($__inv_footer_extra_h + 4)) : max(24, (int) ($__inv_footer_h + 2)) }}px !important;
+            }
+
+            .invoice-container.with-institution-pad .content-section {
+                padding-top: {{ round($__invoicePadContentOffset * 0.75, 2) }}mm !important;
             }
 
             .items-table,
@@ -1071,31 +1260,31 @@
 
             .footer-image {
                 position: absolute !important;
-                height: auto !important;
-                max-height: none !important;
+                height: {{ $__inv_footer_h }}px !important;
+                max-height: {{ $__inv_footer_h }}px !important;
                 left: 0 !important;
                 right: 0 !important;
                 width: 100% !important;
-                bottom: 2mm !important;
-                object-fit: initial !important;
-                object-position: initial !important;
+                bottom: 0 !important;
+                object-fit: contain !important;
+                object-position: bottom center !important;
             }
 
-            .footer-content {
-                font-size: 11px !important;
+            .footer-custom-line {
+                font-size: {{ $__inv_footer_font_size }}px !important;
             }
 
             .footer-date-time {
-                font-size: 9px !important;
+                font-size: clamp(6px, 1.5vw, 9px) !important;
             }
 
             .footer-meta-wrap {
                 margin-bottom: 0 !important;
-                padding: 0 20px !important;
+                padding: 0 4mm !important;
             }
 
             .footer-meta-wrap.with-image {
-                bottom: calc({{ $__inv_footer_h }}px - 36px) !important;
+                bottom: 0 !important;
             }
 
             .footer-custom-line {
@@ -1108,13 +1297,17 @@
             .detail-label {
                 min-width: 70px;
             }
-            
         }
+
     </style>
 </head>
 
 <body>
-    <div class="invoice-container">
+    <div class="invoice-container{{ $__invoiceFullPagePad ? ' with-institution-pad' : '' }}">
+        @if($__invoiceFullPagePad)
+            <img src="{{ $fullPagePadImage }}" alt="" aria-hidden="true" class="invoice-institution-pad">
+        @endif
+
         {{-- Use shared header partial for consistent header across prints --}}
         @includeIf('prints.partials._header', [
             'header_image' => $header_image ?? null,
@@ -1122,6 +1315,8 @@
             'footerHeight' => $__inv_footer_h,
             'printed_at' => $invoiceDateTime ?? ($printed_at ?? null),
             'showHeaderFooter' => $__inv_show,
+            'fullPagePadImage' => $fullPagePadImage ?? null,
+            'renderFullPagePadAsBackground' => $__invoiceFullPagePad,
         ])
 
         <div class="content-section">
@@ -1131,7 +1326,14 @@
                         {!! DNS1D::getBarcodeHTML(isset($bill) ? $bill->bill_no : $bill_number, 'C128', 1, 30) !!}
                     </td>
                     <td class="title-cell-center">
-                        <div class="receipt-title">MONEY RECEIPT</div>
+                        <div class="receipt-title-wrap">
+                            <div class="receipt-title">MONEY RECEIPT</div>
+                            @if(!empty($is_pharmacy_bill) && !empty($pharmacy_tax_number))
+                            <div class="pharmacy-tax-number-title">
+                                <strong>VAT/Mushak No.:</strong> {{ $pharmacy_tax_number }}
+                            </div>
+                            @endif
+                        </div>
                     </td>
                     <td class="barcode-cell-right">
                         {!! DNS1D::getBarcodeHTML(isset($bill) ? $bill->bill_no : $bill_number, 'C128', 1, 30) !!}
@@ -1312,8 +1514,23 @@ if ($portalPatientId > 0) {
 $portalLoginUrl = $portalToken !== ''
     ? route('backend.patient.portal.login', ['token' => $portalToken])
     : '';
-$portalQrCode = $portalLoginUrl !== ''
-    ? 'data:image/png;base64,' . (new \Milon\Barcode\DNS2D())->getBarcodePNG($portalLoginUrl, 'QRCODE', 5, 5)
+$pharmacyInvoiceQr = !empty($is_pharmacy_bill) && !empty($invoice_qr_url);
+$qrUrl = $pharmacyInvoiceQr ? $invoice_qr_url : $portalLoginUrl;
+if ($qrUrl !== '') {
+    $targetPath = parse_url($qrUrl, PHP_URL_PATH) ?: '/';
+    $targetQuery = parse_url($qrUrl, PHP_URL_QUERY);
+    $shortQrToken = \Illuminate\Support\Str::random(10);
+    $shortQrTarget = $targetPath . ($targetQuery !== null ? '?' . $targetQuery : '');
+
+    \Illuminate\Support\Facades\Cache::put(
+        'invoice_qr_short:' . $shortQrToken,
+        $shortQrTarget,
+        now()->addYears(5)
+    );
+    $qrUrl = route('backend.invoice.qr.resolve', ['token' => $shortQrToken]);
+}
+$portalQrCode = $qrUrl !== ''
+    ? 'data:image/png;base64,' . (new \Milon\Barcode\DNS2D())->getBarcodePNG($qrUrl, 'QRCODE,M', 8, 8)
     : '';
 $showReturnAmount = isset($show_return_amount) ? (bool) $show_return_amount : true;
 // Compute Medicine and Laboratory subtotals if bill items provide category
@@ -1325,9 +1542,11 @@ $labTotal = $billItemsCollection->filter(function($it){
     $c = strtolower(trim($it->category ?? ''));
     return in_array($c, ['pathology','radiology']);
 })->sum('total_amount');
-// detect if any bill item is an IPD item (category 'IPD')
 $hasIpdItem = $billItemsCollection->contains(function($it){
     return strtolower(trim($it->category ?? '')) === 'ipd';
+});
+$hasNonIpdItem = $billItemsCollection->contains(function($it){
+    return strtolower(trim($it->category ?? '')) !== 'ipd';
 });
 @endphp
 
@@ -1363,7 +1582,7 @@ if (request()->boolean('debug_invoice')) {
 @endphp
 
 
-@if (!isset($ipd_id) && !$hasIpdItem && $delivery_date)
+@if (empty($is_pharmacy_bill) && !isset($ipd_id) && (!$hasIpdItem || $hasNonIpdItem) && $delivery_date)
 <div class="delivery-date">
     Delivery Date & Time:
     {{ Carbon::parse($delivery_date)->format('d-M-Y, h:i A') }}
@@ -1396,7 +1615,10 @@ if (request()->boolean('debug_invoice')) {
 
             @if($portalQrCode !== '')
             <div class="portal-qr">
-                <img src="{{ $portalQrCode }}" alt="Patient Portal QR" />
+                <img src="{{ $portalQrCode }}" alt="{{ $pharmacyInvoiceQr ? 'Scan to print pharmacy invoice' : 'Patient Portal QR' }}" />
+                @if($pharmacyInvoiceQr)
+                <div>Scan to print invoice</div>
+                @endif
             </div>
             @endif
         </td>
@@ -1430,7 +1652,7 @@ if (request()->boolean('debug_invoice')) {
                     $baseTotal = round((float) ($base_total ?? $total_amount ?? 0), 2);
                     $discountableBase = collect($bill_items ?? [])->reject(function ($item) {
                         $category = strtolower((string) (is_object($item) ? ($item->category ?? '') : ($item['category'] ?? '')));
-                        return $category === 'disposable';
+                        return $category === 'disposable' || (bool) (is_object($item) ? ($item->discount_exempt ?? false) : ($item['discount_exempt'] ?? false));
                     })->sum(function ($item) {
                         return (float) (is_object($item) ? ($item->total_amount ?? $item->net_amount ?? 0) : ($item['total_amount'] ?? $item['net_amount'] ?? 0));
                     });
@@ -1440,12 +1662,19 @@ if (request()->boolean('debug_invoice')) {
                     $extraDiscountAmount = round((float) ($extra_flat_discount ?? 0), 2);
 
                     if (strtolower((string) ($discount_type ?? 'flat')) === 'percentage') {
-                        $discountPercentLocal = round((float) ($discount ?? 0), 2);
-                        $discountComputed = round(($discountableBase * $discountPercentLocal) / 100, 2);
+                        $discountComputed = $discountableBase > 0
+                            ? round((float) ($discount ?? 0), 2)
+                            : 0.00;
+                        $discountPercentLocal = $discountableBase > 0
+                            ? round(($discountComputed / $discountableBase) * 100, 2)
+                            : 0.00;
                     } else {
                         $discountPercentLocal = null;
                         $discountComputed = round((float) ($discount ?? 0), 2);
                     }
+                    $appliedDiscountPercent = $discountableBase > 0
+                        ? round(($discountComputed / $discountableBase) * 100, 2)
+                        : 0;
 
                     $totalWithVat = round($baseTotal + $vatComputed, 2);
                     $netComputed = round(max(0, $totalWithVat - $discountComputed - $extraDiscountAmount), 2);
@@ -1463,21 +1692,12 @@ if (request()->boolean('debug_invoice')) {
                 @endif
 
                 @if ($discountComputed != 0)
-                    @if ($discountPercentLocal !== null)
                     <tr>
-                        <td class="label-col">
-                            Discount ({{ number_format($discountPercentLocal, 2) }}%)
-                        </td>
+                        <td class="label-col">{{ $discountPercentLocal !== null ? 'Discount (' . number_format($appliedDiscountPercent, 2) . '%)' : 'Flat Discount' }}</td>
                         <td class="amount-col">
                             {{ priceFormat($discountComputed) }}
                         </td>
                     </tr>
-                    @else
-                    <tr>
-                        <td class="label-col">Discount Tk.</td>
-                        <td class="amount-col">{{ priceFormat($discountComputed) }}</td>
-                    </tr>
-                    @endif
                 @endif
 
                 @if ($extraDiscountAmount != 0)
@@ -1521,11 +1741,11 @@ if (request()->boolean('debug_invoice')) {
                 {{-- Due Collect History --}}
                 @foreach($dueCollections as $dc)
                 <tr>
-                    <td class="label-col" style="white-space: nowrap;">
-                        {{ \Carbon\Carbon::parse($dc->collected_at)->format('d-M-Y h:i A') }} - Due Collect
-                    </td>
-                    <td class="amount-col" style="text-align:right;">
-                        {{ priceFormat($dc->collected_amount) }}
+                    <td colspan="2" class="due-collect-row">
+                        <div class="due-collect-line">
+                            <span class="due-collect-label">{{ \Carbon\Carbon::parse($dc->collected_at)->format('d-M-Y h:i A') }} - Due Collect</span>
+                            <span class="due-collect-amount">{{ priceFormat($dc->collected_amount) }}</span>
+                        </div>
                     </td>
                 </tr>
                 @endforeach
@@ -1582,7 +1802,7 @@ if (request()->boolean('debug_invoice')) {
         <div class="footer-section">
             @php
                 $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638'));
-                $footerPrintedAt = trim((string) ($printed_at ?? ''));
+                $footerPrintedAt = trim((string) ($printed_at ?? now()->timezone('Asia/Dhaka')->format('d-M-Y h:i:s A')));
                 $footerContentPlain = trim((string) preg_replace('/\s+/u', ' ', strip_tags((string) ($footer_content ?? ''))));
                 $footerContentPlain = (string) preg_replace('/[\x{200B}-\x{200D}\x{FEFF}]/u', '', $footerContentPlain);
                 $footerContentPlain = (string) preg_replace('/রুম\s*(নং|নম্বর|নাম্বার)\s*/u', 'রুম নং ', $footerContentPlain);
@@ -1601,10 +1821,9 @@ if (request()->boolean('debug_invoice')) {
                     $renderedFooterParts = [];
                     foreach ($footerParts as $footerItem) {
                         $safeFooterItem = e((string) $footerItem);
-                        $safeFooterItem = str_replace(' ', '&nbsp;', $safeFooterItem);
                         $renderedFooterParts[] = '<span class="footer-custom-item">' . $safeFooterItem . '</span>';
                     }
-                    $footerPartsHtml = implode('<span class="footer-separator">,&nbsp;</span>', $renderedFooterParts);
+                    $footerPartsHtml = implode('<span class="footer-separator">, </span>', $renderedFooterParts);
                 }
                 $hasCustomFooterContent = $footerPartsHtml !== '';
                 $showFooterMetaRow = ($footerFallbackLine !== '' || $footerPrintedAt !== '');
@@ -1612,60 +1831,26 @@ if (request()->boolean('debug_invoice')) {
 
             @if(!empty($footer_image))
                 @if($showFooterMetaRow || $hasCustomFooterContent)
-                <div class="footer-meta-wrap with-image">
-                    <div class="footer-date-time">
-                        @if($hasCustomFooterContent)
-                            <div class="footer-custom-line">
-                                {!! $footerPartsHtml !!}
-                            </div>
-                        @endif
-
-                        <table class="footer-meta-row">
-                            <tr>
-                                <td class="footer-meta-left">
-                                @if($footerFallbackLine !== '')
-                                    {{ $footerFallbackLine }}
-                                @endif
-                                </td>
-                                <td class="footer-meta-right">
-                                @if($footerPrintedAt !== '')
-                                    Printing Date: {{ $footerPrintedAt }}
-                                @endif
-                                </td>
-                            </tr>
-                        </table>
-                    </div>
-                </div>
+                    @include('frontend.invoice.partials._footer-meta', [
+                        'footerMetaClass' => 'with-image',
+                        'footerPartsHtml' => $footerPartsHtml,
+                        'hasCustomFooterContent' => $hasCustomFooterContent,
+                        'footerFallbackLine' => $footerFallbackLine,
+                        'footerPrintedAt' => $footerPrintedAt,
+                    ])
                 @endif
 
                 <img src="{{ $footer_image }}" alt="Footer" class="footer-image">
             @else
                 <div class="footer-placeholder"></div>
                 @if($showFooterMetaRow || $hasCustomFooterContent)
-                    <div class="footer-meta-wrap no-image">
-                        <div class="footer-date-time">
-                            @if($hasCustomFooterContent)
-                                <div class="footer-custom-line">
-                                    {!! $footerPartsHtml !!}
-                                </div>
-                            @endif
-
-                            <table class="footer-meta-row">
-                                <tr>
-                                    <td class="footer-meta-left">
-                                    @if($footerFallbackLine !== '')
-                                        {{ $footerFallbackLine }}
-                                    @endif
-                                    </td>
-                                    <td class="footer-meta-right">
-                                    @if($footerPrintedAt !== '')
-                                        Printing Date: {{ $footerPrintedAt }}
-                                    @endif
-                                    </td>
-                                </tr>
-                            </table>
-                        </div>
-                    </div>
+                    @include('frontend.invoice.partials._footer-meta', [
+                        'footerMetaClass' => 'no-image',
+                        'footerPartsHtml' => $footerPartsHtml,
+                        'hasCustomFooterContent' => $hasCustomFooterContent,
+                        'footerFallbackLine' => $footerFallbackLine,
+                        'footerPrintedAt' => $footerPrintedAt,
+                    ])
                 @endif
             @endif
         </div>
@@ -1708,17 +1893,16 @@ if (request()->boolean('debug_invoice')) {
                 });
             } catch (e) { /* ignore */ }
             var attemptPrint = function() {
-                setTimeout(doPrint, 600);
-                setTimeout(doPrint, 1400);
+                window.requestAnimationFrame(doPrint);
             };
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            if (document.readyState === 'complete') {
                 attemptPrint();
             } else {
-                window.addEventListener('DOMContentLoaded', function() { attemptPrint(); }, { once: true });
                 window.addEventListener('load', function() { attemptPrint(); }, { once: true });
             }
         })();
     </script>
     @endif
+    @include('prints.partials._responsive_invoice_print')
 </body>
 </html>

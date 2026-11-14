@@ -52,5 +52,8 @@ return [
 
     // bKash requires 30s timeout for all APIs
     'http_timeout' => (int) env('BKASH_HTTP_TIMEOUT', 30),
-    'http_verify_ssl' => filter_var(env('BKASH_HTTP_VERIFY_SSL', false), FILTER_VALIDATE_BOOLEAN),
+    'http_verify_ssl' => filter_var(
+        env('BKASH_HTTP_VERIFY_SSL', env('BKASH_USE_PRODUCTION', false)),
+        FILTER_VALIDATE_BOOLEAN
+    ),
 ];

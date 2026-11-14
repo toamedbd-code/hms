@@ -8,7 +8,10 @@ use App\Models\DueCollection;
 use App\Models\InvoiceDesign;
 use App\Models\IpdPatient;
 use App\Models\Payment;
+use App\Models\OpdPatient;
+use App\Models\PharmacyBill;
 use App\Models\ProductReturn;
+use App\Models\Test;
 use App\Models\WebSetting;
 use Illuminate\Http\Request;
 use App\Services\AdminService;
@@ -28,6 +31,7 @@ use Milon\Barcode\DNS2D;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\URL;
 use ValueError;
 use Throwable;
 
@@ -59,15 +63,116 @@ class InvoiceController extends Controller
 
     public function downloadInvoice(Request $request)
     {
+        if ($request->query->has('signature') && !$request->hasValidSignature()) {
+            abort(403, 'Invalid invoice link.');
+        }
+
         $printToken = trim((string) ($request->input('print_token') ?? ''));
         $fastOpen = $request->boolean('fast_open');
         $autoPrint = $request->boolean('auto_print') || ($fastOpen && $printToken !== '');
+
+        if ($fastOpen && $printToken !== '' && !$request->headers->has('X-Invoice-Render')) {
+            $shell = <<<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Invoice</title>
+    <style>
+        html,body{height:100%;margin:0;background:#fff}
+        .error{max-width:440px;margin:48px auto;padding:24px;color:#991b1b;font:14px Arial,sans-serif;text-align:center}
+    </style>
+</head>
+<body>
+    <script>
+        (async function () {
+            try {
+                const url = window.location.href;
+                while (true) {
+                    const response = await fetch(url, {
+                        credentials: 'same-origin',
+                        headers: { Accept: 'text/html', 'X-Invoice-Render': '1' },
+                    });
+                    if (response.status === 202) {
+                        await new Promise(resolve => setTimeout(resolve, 400));
+                        continue;
+                    }
+                    if (response.status === 204) {
+                        const billId = response.headers.get('X-Invoice-Bill-Id');
+                        if (!billId) {
+                            throw new Error('The saved bill could not be identified.');
+                        }
+                        const invoiceUrl = new URL(window.location.href);
+                        invoiceUrl.pathname = '/download-invoice';
+                        invoiceUrl.searchParams.delete('print_token');
+                        invoiceUrl.searchParams.delete('_ts');
+                        invoiceUrl.searchParams.delete('_r');
+                        invoiceUrl.searchParams.set('id', billId);
+                        invoiceUrl.searchParams.set('fast_open', '1');
+                        invoiceUrl.searchParams.set('auto_print', '1');
+                        const pharmacyBillId = response.headers.get('X-Pharmacy-Bill-Id');
+                        if (pharmacyBillId) {
+                            invoiceUrl.searchParams.set('pharmacy_bill_id', pharmacyBillId);
+                        }
+                        window.location.replace(invoiceUrl.href);
+                        return;
+                    }
+                    if (!response.ok) {
+                        throw new Error('Invoice could not be loaded (' + response.status + ').');
+                    }
+                    const html = await response.text();
+                    document.open();
+                    document.write(html);
+                    document.close();
+                    return;
+                }
+            } catch (error) {
+                const message = document.createElement('div');
+                message.className = 'error';
+                message.textContent = error instanceof Error ? error.message : 'Invoice could not be loaded.';
+                document.body.replaceChildren(message);
+            }
+        })();
+    </script>
+</body>
+</html>
+HTML;
+
+            return response($shell, 200, [
+                'Content-Type' => 'text/html; charset=UTF-8',
+                'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+                'Pragma' => 'no-cache',
+                'Expires' => '0',
+            ]);
+        }
 
         if (!$request->filled('id') && $printToken !== '') {
             $resolvedBillId = Cache::get('print_token_' . $printToken);
             if ($resolvedBillId) {
                 $request->merge(['id' => (int) $resolvedBillId]);
+                $resolvedPharmacyBillId = Cache::get('print_token_pharmacy_bill_' . $printToken);
+                if ($resolvedPharmacyBillId) {
+                    $request->merge(['pharmacy_bill_id' => (int) $resolvedPharmacyBillId]);
+                }
+                if ($request->headers->has('X-Invoice-Render')) {
+                    $headers = [
+                        'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+                        'X-Invoice-Bill-Id' => (string) $resolvedBillId,
+                    ];
+                    if ($resolvedPharmacyBillId) {
+                        $headers['X-Pharmacy-Bill-Id'] = (string) $resolvedPharmacyBillId;
+                    }
+
+                    return response('', 204, $headers);
+                }
             } else {
+                if ($request->headers->has('X-Invoice-Render')) {
+                    return response('', 202, [
+                        'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+                    ]);
+                }
+
                 $module = (string) ($request->input('module') ?? 'billing');
                 $safeModule = in_array($module, self::ALLOWED_BILLING_MODULES, true) ? $module : 'billing';
                 $refreshUrl = route('backend.download.invoice', [
@@ -118,6 +223,39 @@ class InvoiceController extends Controller
                 'admin',
             ])
             ->findOrFail($validated['id']);
+        $isPharmacyBill = $module === 'pharmacy' || PharmacyBill::query()
+            ->where(function ($query) use ($billing) {
+                $query->where('billing_id', $billing->id)
+                    ->orWhere('bill_no', $billing->bill_number);
+            })
+            ->exists();
+        $pharmacyBill = null;
+        if ($module === 'pharmacy') {
+            $requestedPharmacyBillId = filter_var(
+                $request->input('pharmacy_bill_id'),
+                FILTER_VALIDATE_INT
+            );
+            if ($requestedPharmacyBillId !== false && $requestedPharmacyBillId > 0) {
+                $pharmacyBill = PharmacyBill::query()
+                    ->whereKey($requestedPharmacyBillId)
+                    ->where(function ($query) use ($billing) {
+                        $query->where('billing_id', $billing->id)
+                            ->orWhere('bill_no', $billing->bill_number);
+                    })
+                    ->first();
+                if (!$pharmacyBill) {
+                    abort(404);
+                }
+            } else {
+                $pharmacyBill = PharmacyBill::query()
+                    ->where(function ($query) use ($billing) {
+                        $query->where('billing_id', $billing->id)
+                            ->orWhere('bill_no', $billing->bill_number);
+                    })
+                    ->orderByDesc('id')
+                    ->first();
+            }
+        }
 
         // If this billing was generated from an IPD discharge, ensure any
         // payments recorded against the IPD (but not yet linked to billing)
@@ -146,43 +284,49 @@ class InvoiceController extends Controller
             ? $billing->created_at->format('d-M-Y h:i:s A')
             : now()->format('d-M-Y h:i:s A');
 
-        // If active bill items are missing but there are trashed IPD items
-        // (Admission, surgeon fees etc.), restore those trashed IPD items
-        // so they appear on the invoice rather than being hidden.
-        try {
-            // If there are trashed IPD-type bill items but no active IPD items,
-            // restore only the trashed IPD items. This handles the case where
-            // bed charges exist (active) but admission/surgeon IPD lines are
-            // soft-deleted and therefore missing from the invoice.
-            $activeIpdCount = $billing->billItems()->whereNull('deleted_at')
-                ->whereRaw('LOWER(COALESCE(category, "")) = ?', ['ipd'])
-                ->count();
+        // Only IPD bills can contain the trashed IPD lines that need restoration.
+        $isIpdBilling = str_starts_with((string) ($billing->case_number ?? ''), 'IPD-')
+            || preg_match('/IPD#(\d+)/i', (string) ($billing->remarks ?? ''));
+        if ($isIpdBilling) {
+            try {
+                // Restore trashed IPD lines only when no active IPD lines remain.
+                $activeIpdCount = $billing->billItems()->whereNull('deleted_at')
+                    ->whereRaw('LOWER(COALESCE(category, "")) = ?', ['ipd'])
+                    ->count();
 
-            $trashedIpd = \App\Models\BillItem::withTrashed()
-                ->where('billing_id', $billing->id)
-                ->whereNotNull('deleted_at')
-                ->whereRaw('LOWER(COALESCE(category, "")) = ?', ['ipd'])
-                ->get();
+                $trashedIpd = \App\Models\BillItem::withTrashed()
+                    ->where('billing_id', $billing->id)
+                    ->whereNotNull('deleted_at')
+                    ->whereRaw('LOWER(COALESCE(category, "")) = ?', ['ipd'])
+                    ->get();
 
-            if ($trashedIpd->isNotEmpty() && $activeIpdCount === 0) {
-                foreach ($trashedIpd as $t) {
-                    try {
-                        $t->restore();
-                    } catch (\Throwable $inner) {
-                        // ignore restore failures for individual rows
+                if ($trashedIpd->isNotEmpty() && $activeIpdCount === 0) {
+                    foreach ($trashedIpd as $t) {
+                        try {
+                            $t->restore();
+                        } catch (\Throwable $inner) {
+                            // ignore restore failures for individual rows
+                        }
                     }
-                }
 
-                // Reload bill items after restore
-                $billing->loadMissing(['billItems']);
+                    $billing->loadMissing(['billItems']);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('InvoiceController::downloadInvoice - failed to restore trashed IPD bill items', ['err' => $e->getMessage(), 'billing_id' => $billing->id]);
             }
-        } catch (\Throwable $e) {
-            Log::warning('InvoiceController::downloadInvoice - failed to restore trashed IPD bill items', ['err' => $e->getMessage(), 'billing_id' => $billing->id]);
         }
 
         // For display prefer active (non-deleted) bill items so duplicates
         // from previous regenerations (soft-deleted) don't appear multiple times.
         $rawBillItems = $billing->billItems()->whereNull('deleted_at')->get() ?? collect();
+        if ($pharmacyBill) {
+            $currentPharmacyItems = $rawBillItems->filter(
+                fn ($item) => (int) ($item->pharmacy_bill_id ?? 0) === (int) $pharmacyBill->id
+            );
+            if ($currentPharmacyItems->isNotEmpty()) {
+                $rawBillItems = $currentPharmacyItems;
+            }
+        }
 
         $billItems = $this->filterBillItemsByModule($rawBillItems, $module);
 
@@ -204,6 +348,8 @@ class InvoiceController extends Controller
                     'total_amount' => $totalAmount,
                     'room_no' => $first->room_no ?? $first->roomNo ?? '',
                     'category' => $first->category ?? '',
+                    'discount_exempt' => $group->every(fn ($g) => (bool) ($g->discount_exempt ?? false)),
+                    'discount' => (float) $group->sum(fn ($g) => (float) ($g->discount ?? 0)),
                 ];
             })->values();
 
@@ -213,7 +359,7 @@ class InvoiceController extends Controller
         $patient = $billing->patient;
 
         $invoiceDesign = $this->resolveInvoiceDesign($module);
-        $designAssets = $this->getInvoiceDesignAssets($invoiceDesign);
+        $designAssets = $this->getInvoiceDesignAssets($invoiceDesign, $fastOpen);
 
         $barcode = '';
         if ($billing) {
@@ -224,6 +370,97 @@ class InvoiceController extends Controller
         }
 
         $totals = $this->calculateFilteredTotals($billItems, $billing, $module);
+        $pharmacyPayments = collect();
+        $pharmacyDueCollections = collect();
+        if ($pharmacyBill) {
+            $pharmacyPayments = Payment::query()
+                ->where('pharmacy_bill_id', $pharmacyBill->id)
+                ->where(function ($query) {
+                    $query->whereNull('status')->orWhere('status', 'Active');
+                })
+                ->when(
+                    \Illuminate\Support\Facades\Schema::hasColumn('payments', 'deleted_at'),
+                    fn ($query) => $query->whereNull('deleted_at')
+                )
+                ->get();
+            $pharmacyDueCollections = DueCollection::query()
+                ->where('pharmacy_bill_id', $pharmacyBill->id)
+                ->when(
+                    \Illuminate\Support\Facades\Schema::hasColumn('due_collections', 'deleted_at'),
+                    fn ($query) => $query->whereNull('deleted_at')
+                )
+                ->get();
+
+            $pharmacySubtotal = round((float) ($pharmacyBill->subtotal ?? 0), 2);
+            if ($pharmacySubtotal <= 0) {
+                $pharmacySubtotal = round((float) collect($billItems)->sum(
+                    fn ($item) => (float) ($item->total_amount ?? $item->net_amount ?? 0)
+                ), 2);
+            }
+            $pharmacyDiscount = round((float) ($pharmacyBill->discount_amount ?? 0), 2);
+            $pharmacyExtraDiscount = round((float) ($pharmacyBill->extra_discount ?? 0), 2);
+            $pharmacyVatPercentage = round((float) ($pharmacyBill->vat_percentage ?? 0), 2);
+            $pharmacyVat = round((float) ($pharmacyBill->vat_amount ?? 0), 2);
+            $pharmacyNetPayable = round((float) ($pharmacyBill->net_amount ?? 0), 2);
+            if ($pharmacyNetPayable <= 0) {
+                $pharmacyNetPayable = round(max(
+                    0,
+                    $pharmacySubtotal + $pharmacyVat - $pharmacyDiscount - $pharmacyExtraDiscount
+                ), 2);
+            }
+
+            $invoiceCreatedAt = $pharmacyBill->created_at ?? now();
+            $paymentsAtInvoice = (float) $pharmacyPayments
+                ->filter(fn ($payment) => $payment->created_at && $payment->created_at <= $invoiceCreatedAt)
+                ->sum('amount');
+            $collectionsAtInvoice = (float) $pharmacyDueCollections
+                ->filter(fn ($collection) => $collection->created_at && $collection->created_at <= $invoiceCreatedAt)
+                ->sum('collected_amount');
+            $paidAtInvoice = round($paymentsAtInvoice + $collectionsAtInvoice, 2);
+            $totalPaid = round((float) $pharmacyPayments->sum('amount') + (float) $pharmacyDueCollections->sum('collected_amount'), 2);
+            $fallbackPaid = max(
+                (float) ($pharmacyBill->payment_amount ?? 0) - (float) ($pharmacyBill->return_amount ?? 0),
+                0
+            );
+            if ($totalPaid <= 0 && $fallbackPaid > 0) {
+                $totalPaid = round($fallbackPaid, 2);
+                $paidAtInvoice = $totalPaid;
+            }
+
+            // Standalone Pharmacy bills show the linked Billing aggregates in the
+            // bill list, so use those same values on the invoice. IPD bills remain
+            // pharmacy-bill scoped because their linked Billing record is shared.
+            if (empty($pharmacyBill->ipd_patient_id)) {
+                $totalPaid = round(max(0, (float) ($billing->paid_amt ?? 0)), 2);
+                $paidAtInvoice = $totalPaid;
+            }
+
+            $totals = [
+                'total_amount' => $pharmacySubtotal,
+                'discount' => $pharmacyDiscount,
+                'vat' => $pharmacyVat,
+                'net_payable' => $pharmacyNetPayable,
+                'paid_at_invoice' => $paidAtInvoice,
+                'paid' => $totalPaid,
+                'due' => empty($pharmacyBill->ipd_patient_id)
+                    ? round(max(0, (float) ($billing->due_amount ?? max(0, $pharmacyNetPayable - $totalPaid))), 2)
+                    : round(max(0, $pharmacyNetPayable - $totalPaid), 2),
+            ];
+            $billing->setRelation('payments', $pharmacyPayments);
+            $billing->setRelation('dueCollections', $pharmacyDueCollections);
+            $billing->discount = $pharmacyDiscount;
+            $billing->discount_type = (float) ($pharmacyBill->discount_percentage ?? 0) > 0
+                ? 'percentage'
+                : 'flat';
+            $billing->extra_flat_discount = $pharmacyExtraDiscount;
+            $billing->total = $pharmacySubtotal;
+            $billing->vat_amount = $pharmacyVat;
+            $billing->vat_percentage = $pharmacyVatPercentage;
+            $billing->payable_amount = $pharmacyNetPayable;
+            $billing->paid_amt = $totalPaid;
+            $billing->receiving_amt = (float) ($pharmacyBill->payment_amount ?? $totalPaid);
+            $billing->return_amt = (float) ($pharmacyBill->return_amount ?? 0);
+        }
 
         // Compute a deterministic base total derived from the rendered bill items so
         // invoice templates can always display the pre-discount/pre-vat item sum.
@@ -238,6 +475,9 @@ class InvoiceController extends Controller
         }
 
         $baseTotalFromItems = round($baseTotalFromItems, 2);
+        if ($pharmacyBill && $baseTotalFromItems <= 0) {
+            $baseTotalFromItems = round((float) ($pharmacyBill->subtotal ?? 0), 2);
+        }
 
         $productReturnAmount = (float) ProductReturn::query()
             ->where('billing_id', $billing->id)
@@ -251,6 +491,10 @@ class InvoiceController extends Controller
             $returnAmount = round($productReturnAmount + max(0, $receivingAmount - $correctedPayable), 2);
         }
         $adjustedDue = max(0, (float) $totals['due'] - $returnAmount);
+        if ($pharmacyBill) {
+            $returnAmount = round((float) ($pharmacyBill->return_amount ?? 0), 2);
+            $adjustedDue = (float) $totals['due'];
+        }
 
         // Respect global VAT enable/disable setting: if VAT is disabled in WebSetting,
         // do not expose VAT values even if they are stored on the billing record.
@@ -259,6 +503,22 @@ class InvoiceController extends Controller
 
         $vatPercentage = $globalVatEnabled ? (float) ($billing->vat_percentage ?? 0) : 0.0;
         $vatAmount = $globalVatEnabled ? (float) ($billing->vat_amount ?? 0) : 0.0;
+        if ($pharmacyBill) {
+            $vatPercentage = (float) ($pharmacyBill->vat_percentage ?? 0);
+            $vatAmount = (float) ($pharmacyBill->vat_amount ?? 0);
+        }
+
+        $pharmacyTaxNumber = '';
+        if ($pharmacyBill) {
+            $webSetting = get_cached_web_setting();
+            $attendanceOptions = $webSetting?->attendance_device_options ?? [];
+            if (is_string($attendanceOptions)) {
+                $attendanceOptions = json_decode($attendanceOptions, true);
+            }
+            if (is_array($attendanceOptions) && ($attendanceOptions['pharmacy_tax_number_enabled'] ?? true)) {
+                $pharmacyTaxNumber = trim((string) ($webSetting?->pharmacy_tax_number ?? ''));
+            }
+        }
 
         $data = [
             'billing' => $billing,
@@ -286,11 +546,18 @@ class InvoiceController extends Controller
             'return_amount' => round($returnAmount, 2),
             'adjusted_due' => round($adjustedDue, 2),
             'delivery_date' => $billing->delivery_date,
+            'is_pharmacy_bill' => $isPharmacyBill,
+            'pharmacy_tax_number' => $pharmacyTaxNumber,
+            'invoice_qr_url' => $isPharmacyBill && $pharmacyBill
+                ? $this->pharmacyInvoiceQrUrl((int) $billing->id, (int) $pharmacyBill->id)
+                : '',
             'remarks' => $billing->remarks ?? '',
             'prepared_by' => $billing?->admin?->name ?? '',
             'amount_in_words' => $this->numberToWords($totals['net_payable']),
             'header_image' => $designAssets['header_image'],
             'footer_image' => $designAssets['footer_image'],
+            'invoiceDesign' => $invoiceDesign,
+            'fullPagePadImage' => $this->storageInvoiceImageToDataUri($invoiceDesign?->full_page_pad_path),
             'footer_content' => $designAssets['footer_content'],
                 'footer_content_position' => $designAssets['footer_content_position'] ?? 'above',
                 'footer_font_size' => $designAssets['footer_font_size'] ?? 14,
@@ -439,6 +706,27 @@ class InvoiceController extends Controller
         ]);
     }
 
+    protected function pharmacyInvoiceQrUrl(int $billingId, int $pharmacyBillId): string
+    {
+        return URL::signedRoute('backend.download.invoice', [
+            'id' => $billingId,
+            'pharmacy_bill_id' => $pharmacyBillId,
+            'module' => 'pharmacy',
+            'fast_open' => 1,
+            'auto_print' => 1,
+        ]);
+    }
+
+    public function resolveShortQr(string $token)
+    {
+        $target = Cache::get('invoice_qr_short:' . $token);
+        if (!is_string($target) || !str_starts_with($target, '/') || str_starts_with($target, '//')) {
+            abort(404);
+        }
+
+        return redirect()->to($target);
+    }
+
     private function buildInvoicePdf(array $data, string $defaultFont)
     {
         $pdf = Pdf::loadView('frontend.invoice.pdf', $data);
@@ -527,11 +815,36 @@ class InvoiceController extends Controller
                     : null;
                 $discountBase = $billing->discount_type === 'percentage'
                     ? (float) $billingItems
-                        ->reject(fn ($item) => $this->isDisposableInvoiceItem($item))
+                        ->reject(fn ($item) => $this->isDisposableInvoiceItem($item) || (bool) $item->discount_exempt)
                         ->sum('total_amount')
                     : $total;
+                if ($billing->discount_type === 'percentage' && $discountBase > 0) {
+                    $normalizedPercent = min(100, max(0, $discountPercent));
+                    if ($discountPercent > 100) {
+                        $normalizedPercent = min(100, max(0, ($discountPercent / $discountBase) * 100));
+                    }
+                    $discountPercent = $normalizedPercent;
+                }
+
                 $discountAmount = $billing->discount_type === 'percentage'
-                    ? max(0, ($discountBase * $discountPercent) / 100)
+                    ? (float) $billingItems->sum(function ($item) use ($discountPercent) {
+                        if ($this->isDisposableInvoiceItem($item) || (bool) $item->discount_exempt) {
+                            return 0;
+                        }
+
+                        $itemPercent = $discountPercent;
+                        $test = Test::query()->find($item->item_id);
+                        if ($test?->discount_rate_locked && (float) ($test->discount_percentage ?? 0) <= 0) {
+                            $itemPercent = 0.0;
+                        } elseif ($test && (float) ($test->discount_percentage ?? 0) > 0) {
+                            $itemLimit = max(0, min(100, (float) $test->discount_percentage));
+                            $itemPercent = $discountPercent > 0
+                                ? min((float) $discountPercent, $itemLimit)
+                                : $itemLimit;
+                        }
+
+                        return ((float) ($item->total_amount ?? 0) * max(0, min(100, $itemPercent))) / 100;
+                    })
                     : max(0, (float) ($billing->discount ?? 0));
 
                 // Round the discount before deriving the payable amount so the
@@ -541,6 +854,10 @@ class InvoiceController extends Controller
             } else {
                 if ($billing->discount_type === 'percentage') {
                     $discountPercent = (float) ($billing->discount ?? 0);
+                    if ($total > 0 && $discountPercent > 100) {
+                        $discountPercent = min(100, max(0, ($discountPercent / $total) * 100));
+                    }
+                    $discountPercent = min(100, max(0, $discountPercent));
                     $discountAmount = max(0, ($total * $discountPercent) / 100);
                 } else {
                     $discountPercent = null;
@@ -584,9 +901,11 @@ class InvoiceController extends Controller
             $totalPaid = max(0, round($grossPaid - $billingReturnAmt, 2));
             $computedDue = round(max(0, $netPayable - $totalPaid), 2);
 
-            // For display: show the billing-level discount value for clarity
+            // For percentage discounts, return the computed currency amount rather
+            // than the raw percentage value so invoice PDFs and reports reflect the
+            // actual discount applied to the bill.
             $displayDiscount = $billing->discount_type === 'percentage'
-                ? round((float) ($billing->discount ?? 0), 2)
+                ? round((float) $discountAmount, 2)
                 : round((float) ($billing->discount ?? $discountAmount), 2);
 
             return [
@@ -809,8 +1128,7 @@ class InvoiceController extends Controller
                     $sub->whereNotNull('note')
                         ->where(function ($noteQuery) use ($ipdpatient) {
                             $noteQuery->where('note', 'like', '%ipd_patient_id:' . $ipdpatient->id . '%')
-                                ->orWhere('note', 'like', '%ipd_patient_id: ' . $ipdpatient->id . '%')
-                                ->orWhere('note', 'like', '%Collected via IPD payment%');
+                                ->orWhere('note', 'like', '%ipd_patient_id: ' . $ipdpatient->id . '%');
                         });
                 });
             });
@@ -819,11 +1137,17 @@ class InvoiceController extends Controller
                 $q->whereNotNull('note')
                     ->where(function ($noteQuery) use ($ipdpatient) {
                         $noteQuery->where('note', 'like', '%ipd_patient_id:' . $ipdpatient->id . '%')
-                            ->orWhere('note', 'like', '%ipd_patient_id: ' . $ipdpatient->id . '%')
-                            ->orWhere('note', 'like', '%Collected via IPD payment%');
+                            ->orWhere('note', 'like', '%ipd_patient_id: ' . $ipdpatient->id . '%');
                     });
             });
         }
+
+        // Older releases mirrored every IPD payment into due_collections. Those rows
+        // are already covered by the IPD payment list, so listing them here would
+        // show the same money twice on the invoice.
+        $query->where(function ($q) {
+            $q->whereNull('note')->orWhere('note', 'not like', '%Collected via IPD payment%');
+        });
 
         if (\Illuminate\Support\Facades\Schema::hasColumn('due_collections', 'deleted_at')) {
             $query->whereNull('deleted_at');
@@ -889,32 +1213,9 @@ class InvoiceController extends Controller
         ];
     }
 
-    private function resolveInvoiceDesign(string $module): ?InvoiceDesign
+    protected function resolveInvoiceDesign(string $module, array $fallbackModules = []): ?InvoiceDesign
     {
-        $normalizedModule = strtolower(trim($module));
-
-        $design = InvoiceDesign::query()
-            ->where('status', 'Active')
-            ->whereRaw('LOWER(TRIM(module)) = ?', [$normalizedModule])
-            ->first();
-
-        if ($design) {
-            return $design;
-        }
-
-        $design = InvoiceDesign::query()
-            ->where('status', 'Active')
-            ->whereNull('module')
-            ->first();
-
-        if ($design) {
-            return $design;
-        }
-
-        return InvoiceDesign::query()
-            ->where('status', 'Active')
-            ->orderByRaw("CASE WHEN header_photo_path IS NOT NULL OR footer_photo_path IS NOT NULL THEN 0 ELSE 1 END")
-            ->first();
+        return InvoiceDesign::resolveForModule($module, $fallbackModules);
     }
 
     private function getInvoiceDesignAssets(?InvoiceDesign $invoiceDesign, bool $fastOpen = false): array
@@ -1061,6 +1362,9 @@ class InvoiceController extends Controller
         $gender = e((string) ($data['gender'] ?? 'N/A'));
         $refdBy = e((string) ($data['refd_by'] ?? 'N/A'));
         $deliveryDate = e((string) ($data['delivery_date'] ?? 'N/A'));
+        $deliveryBlock = !empty($data['is_pharmacy_bill'])
+            ? ''
+            : "<div class='delivery'>Delivery Date &amp; Time: {$deliveryDate}</div>";
         $preparedBy = e((string) ($data['prepared_by'] ?? 'N/A'));
         $amountWords = e((string) ($data['amount_in_words'] ?? 'N/A'));
         $printedAt = e((string) ($data['printed_at'] ?? $data['invoiceDateTime'] ?? 'N/A'));
@@ -1311,7 +1615,7 @@ class InvoiceController extends Controller
         <tbody>{$rows}</tbody>
     </table>
 
-    <div class='delivery'>Delivery Date &amp; Time: {$deliveryDate}</div>
+    {$deliveryBlock}
 
     <table class='summary-wrap'>
         <tr>
@@ -1541,16 +1845,7 @@ class InvoiceController extends Controller
 
         $module = 'opd';
 
-        $invoiceDesign = InvoiceDesign::where('status', 'Active')->where('module', $module)->first();
-
-        // Fallback to a default invoice design if module-specific one is not available
-        if (! $invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->whereNull('module')->first();
-        }
-
-        if (! $invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->first();
-        }
+        $invoiceDesign = $this->resolveInvoiceDesign($module);
 
         $headerImageBase64 = '';
         $footerImageBase64 = '';
@@ -1646,6 +1941,8 @@ class InvoiceController extends Controller
 
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
+            'invoiceDesign' => $invoiceDesign,
+            'fullPagePadImage' => $this->storageInvoiceImageToDataUri($invoiceDesign?->full_page_pad_path),
             'footer_content' => $invoiceDesign->footer_content ?? '',
                 'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
                 'footer_font_size' => max(6, min(72, (int) ($invoiceDesign?->footer_font_size ?? 14))),
@@ -1654,6 +1951,7 @@ class InvoiceController extends Controller
             'printed_at' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i:s a'),
             'barcode' => $barcode,
             'clinic_address' => 'Daulatur Master Para, Daulatur Kushita Mobile: 01796-302512',
+                'auto_print' => $request->boolean('auto_print'),
         ];
 
         // Prefer web-served Bengali font URL for OPD invoice view/pdf rendering.
@@ -1664,6 +1962,13 @@ class InvoiceController extends Controller
         }
 
         $data['banglaFontUrl'] = $banglaFontUrl;
+
+        if ($data['auto_print']) {
+            return response()->view('frontend.invoice.opd-pdf', $data, 200, [
+                'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+                'Pragma' => 'no-cache',
+            ]);
+        }
 
         $pdf = Pdf::loadView('frontend.invoice.opd-pdf', $data);
 
@@ -1694,20 +1999,15 @@ class InvoiceController extends Controller
         $appointment = $this->appoinmentService->find($requestData['id']);
         $patient = $this->patientService->find($appointment->patient_id ?? '');
         $doctor = $this->adminService->find($appointment->doctor_id ?? '');
+        $opdPatient = OpdPatient::query()->where('reference', $appointment->transaction_id)->first();
+        $appointmentNetAmount = max(0, (float) ($appointment->doctor_fee ?? 0) * (1 - (float) ($appointment->discount_percentage ?? 0) / 100));
+        $appointmentPaidAmount = (float) ($opdPatient?->paid_amount ?? 0);
 
         // dd($patient, $doctor);
 
         $module = 'appointment';
 
-        $invoiceDesign = InvoiceDesign::where('status', 'Active')->where('module', $module)->first();
-
-        if (!$invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->whereNull('module')->first();
-        }
-
-        if (!$invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->first();
-        }
+        $invoiceDesign = $this->resolveInvoiceDesign($module);
 
         $headerImageBase64 = '';
         $footerImageBase64 = '';
@@ -1738,6 +2038,8 @@ class InvoiceController extends Controller
             'appointment' => $appointment,
             'patient' => $patient,
             'doctor' => $doctor,
+            'paid_amount' => $appointmentPaidAmount,
+            'due_amount' => max(0, $appointmentNetAmount - $appointmentPaidAmount),
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
             'footer_content' => $invoiceDesign->footer_content ?? '',
@@ -1745,8 +2047,48 @@ class InvoiceController extends Controller
                 'footer_font_size' => max(6, min(72, (int) ($invoiceDesign?->footer_font_size ?? 14))),
                 'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
                 'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
+                'paperSize' => 'A4',
             'printed_at' => now()->timezone('Asia/Dhaka')->format('d F, Y h:i:s a'),
         ];
+
+        if ($request->boolean('auto_print')) {
+            $billingInvoiceDesign = $this->resolveInvoiceDesign('billing');
+            $activeWebSetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
+            $attendanceOptions = $activeWebSetting?->attendance_device_options ?? [];
+            if (!is_array($attendanceOptions)) {
+                $attendanceOptions = is_string($attendanceOptions) && trim($attendanceOptions) !== ''
+                    ? json_decode($attendanceOptions, true)
+                    : [];
+            }
+            $invoiceOptions = is_array($attendanceOptions) ? data_get($attendanceOptions, 'invoice', []) : [];
+            $invoiceOptions = is_array($invoiceOptions) ? $invoiceOptions : [];
+            $settingShowHeader = array_key_exists('show_header', $invoiceOptions) ? (bool) $invoiceOptions['show_header'] : null;
+            $settingShowFooter = array_key_exists('show_footer', $invoiceOptions) ? (bool) $invoiceOptions['show_footer'] : null;
+            $showHeaderFooter = true;
+            if ($settingShowHeader !== null || $settingShowFooter !== null) {
+                $showHeaderFooter = ($settingShowHeader ?? true) && ($settingShowFooter ?? true);
+            }
+
+            $invoiceLayout = data_get($invoiceOptions, 'layout', []);
+            $invoiceLayout = is_array($invoiceLayout) ? $invoiceLayout : [];
+            $reportHeaderHeight = max(0, (int) ($invoiceLayout['header_height'] ?? $billingInvoiceDesign?->header_height ?? $data['header_height']));
+            $reportFooterHeight = max(0, (int) ($invoiceLayout['footer_height'] ?? $billingInvoiceDesign?->footer_height ?? $data['footer_height']));
+            if (!$showHeaderFooter) {
+                $reportHeaderHeight = 0;
+                $reportFooterHeight = 0;
+            }
+
+            return response()->view('frontend.invoice.appointment-pdf', array_merge($data, [
+                'autoPrint' => true,
+                'paperSize' => 'A5',
+                'header_height' => $reportHeaderHeight,
+                'footer_height' => $reportFooterHeight,
+                'reportHeaderHeight' => $reportHeaderHeight,
+                'reportFooterHeight' => $reportFooterHeight,
+                'showHeaderFooter' => $showHeaderFooter,
+                'show_header_footer' => $showHeaderFooter,
+            ]));
+        }
 
         $pdf = Pdf::loadView('frontend.invoice.appointment-pdf', $data);
 
@@ -1842,18 +2184,7 @@ class InvoiceController extends Controller
 
         $patient = $this->patientService->find($billing->patient_id ?? '');
 
-        $invoiceDesign = InvoiceDesign::where('status', 'Active')
-            ->whereIn('module', ['ipd_final', 'billing'])
-            ->orderByRaw("CASE WHEN module = 'ipd_final' THEN 0 WHEN module = 'billing' THEN 1 ELSE 2 END")
-            ->first();
-
-        if (!$invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->whereNull('module')->first();
-        }
-
-        if (!$invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->first();
-        }
+        $invoiceDesign = $this->resolveInvoiceDesign('ipd_final', ['billing']);
 
         $headerImageBase64 = '';
         $footerImageBase64 = '';
@@ -2051,18 +2382,7 @@ class InvoiceController extends Controller
         });
         $patient = $this->patientService->find($billing->patient_id ?? '');
 
-        $invoiceDesign = InvoiceDesign::where('status', 'Active')
-            ->whereIn('module', ['ipd_final', 'billing'])
-            ->orderByRaw("CASE WHEN module = 'ipd_final' THEN 0 WHEN module = 'billing' THEN 1 ELSE 2 END")
-            ->first();
-
-        if (!$invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->whereNull('module')->first();
-        }
-
-        if (!$invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->first();
-        }
+        $invoiceDesign = $this->resolveInvoiceDesign('ipd_final', ['billing']);
 
         $headerImageBase64 = '';
         $footerImageBase64 = '';
@@ -2251,15 +2571,7 @@ class InvoiceController extends Controller
         $due_collections = $summary['due_collections'] ?? collect();
         $module = 'ipd';
 
-        $invoiceDesign = InvoiceDesign::where('status', 'Active')->where('module', $module)->first();
-
-        if (!$invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->whereNull('module')->first();
-        }
-
-        if (!$invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->first();
-        }
+        $invoiceDesign = $this->resolveInvoiceDesign($module);
 
         $headerImageBase64 = '';
         $footerImageBase64 = '';
@@ -2438,6 +2750,8 @@ class InvoiceController extends Controller
             'prepared_by' => $preparedBy,
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
+            'invoiceDesign' => $invoiceDesign,
+            'fullPagePadImage' => $this->storageInvoiceImageToDataUri($invoiceDesign?->full_page_pad_path),
             'footer_content' => $invoiceDesign->footer_content ?? '',
             'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
             'barcode' => $barcode,
@@ -2541,15 +2855,7 @@ class InvoiceController extends Controller
 
         $module = 'ipd';
 
-        $invoiceDesign = InvoiceDesign::where('status', 'Active')->where('module', $module)->first();
-
-        if (!$invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->whereNull('module')->first();
-        }
-
-        if (!$invoiceDesign) {
-            $invoiceDesign = InvoiceDesign::where('status', 'Active')->first();
-        }
+        $invoiceDesign = $this->resolveInvoiceDesign($module);
 
         $headerImageBase64 = '';
         $footerImageBase64 = '';
@@ -2688,6 +2994,8 @@ class InvoiceController extends Controller
             'prepared_by' => $preparedBy,
             'header_image' => $headerImageBase64,
             'footer_image' => $footerImageBase64,
+            'invoiceDesign' => $invoiceDesign,
+            'fullPagePadImage' => $this->storageInvoiceImageToDataUri($invoiceDesign?->full_page_pad_path),
             'footer_content' => $invoiceDesign->footer_content ?? '',
             'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
             'barcode' => $barcode,

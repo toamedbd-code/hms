@@ -19,13 +19,16 @@ class DatabaseSeeder extends Seeder
         // Default behavior for fresh databases: create a single developer account
         // with all permissions. Set SINGLE_DEVELOPER_SEED=false in your .env
         // if you want the original full seeding behavior.
-        if (env('SINGLE_DEVELOPER_SEED', true)) {
+        if (config('app.single_developer_seed', true)) {
             $this->call([
                 SingleDeveloperSeeder::class,
                 EnsureDefaultDeveloperSeeder::class,
                 OrgStructureSeeder::class,
+                DashboardCategoryPermissionSeeder::class,
                 ChartOfAccountsSeeder::class,
                 CurrencySeeder::class,
+                PharmacyPrescriptionModuleSeeder::class,
+                SidebarMenuDefaultOrderSeeder::class,
             ]);
 
             return;
@@ -39,9 +42,9 @@ class DatabaseSeeder extends Seeder
             QuickAccessMenuPermissionSyncSeeder::class,
             StoreManagementMenuSeeder::class,
             SalarySheetMenuSeeder::class,
-            MenuDeduplicateSeeder::class,
             RoleSeeder::class,
             PermissionSeeder::class,
+            LaboratoryMenuSeeder::class,
             PermissionFixSeeder::class,
             MenuPermissionCoverageSeeder::class,
             ReportManagementPermissionSeeder::class,
@@ -61,7 +64,9 @@ class DatabaseSeeder extends Seeder
 
             ChargeSystemSeeder::class,
             PathologySeeder::class,
+            CategoryStructureSeeder::class,
             TestSeeder::class,
+            DashboardCategoryPermissionSeeder::class,
             MedicineSeeder::class,
             WebSettingSeeder::class,
             AttendanceSeeder::class,
@@ -70,6 +75,11 @@ class DatabaseSeeder extends Seeder
             EnsureDefaultDeveloperSeeder::class,
             SidebarPermissionStabilitySeeder::class,
             SidebarMenuOrderPermissionSeeder::class,
+            PharmacyPrescriptionModuleSeeder::class,
+            SettingsMenuAccessForAllRolesSeeder::class,
+            // Run deduplication after every menu/permission sync has finished.
+            MenuDeduplicateSeeder::class,
+            SidebarMenuDefaultOrderSeeder::class,
 
         ]);
     }

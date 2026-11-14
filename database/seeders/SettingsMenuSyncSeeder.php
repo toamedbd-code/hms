@@ -112,25 +112,50 @@ class SettingsMenuSyncSeeder extends Seeder
             $keepIds = [];
 
             foreach ($desiredChildren as $child) {
-                $menu = Menu::query()->updateOrCreate(
-                    [
-                        'parent_id' => $settings->id,
-                        'route' => $child['route'],
-                    ],
-                    [
-                        'name' => $child['name'],
-                        'route' => $child['route'],
-                        'icon' => $child['icon'],
-                        'description' => null,
-                        'sorting' => $child['sorting'],
-                        'permission_name' => $child['permission_name'],
-                        'status' => 'Active',
-                        'deleted_at' => null,
-                    ]
-                );
+                $matches = Menu::query()
+                    ->where('parent_id', $settings->id)
+                    ->where(function ($query) use ($child) {
+                        $query->where('route', $child['route'])
+                            ->orWhere('name', $child['name'])
+                            ->orWhere('permission_name', $child['permission_name']);
+                    })
+                    ->orderBy('id')
+                    ->get();
+
+                $menu = $matches->first();
+                $payload = [
+                    'name' => $child['name'],
+                    'route' => $child['route'],
+                    'icon' => $child['icon'],
+                    'description' => null,
+                    'sorting' => $child['sorting'],
+                    'permission_name' => $child['permission_name'],
+                    'status' => 'Active',
+                    'deleted_at' => null,
+                    'parent_id' => $settings->id,
+                ];
+
+                if ($menu) {
+                    $menu->fill($payload);
+                    $menu->save();
+                } else {
+                    $menu = Menu::query()->create($payload);
+                }
+
+                foreach ($matches->skip(1) as $duplicate) {
+                    $duplicate->delete();
+                }
 
                 $keepIds[] = $menu->id;
             }
+
+            Menu::query()
+                ->whereNull('parent_id')
+                ->where(function ($query) {
+                    $query->where('name', 'InvoiceDesign Manage')
+                        ->orWhere('permission_name', 'invoicedesign-management');
+                })
+                ->delete();
 
             // Module Setting is managed through dedicated settings screens,
             // so remove it from Settings sidebar menu to avoid duplication.

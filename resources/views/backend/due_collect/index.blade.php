@@ -55,6 +55,15 @@
                     <input type="hidden" name="submission_token" value="{{ $submissionToken ?? '' }}">
 
                     <div class="mb-3">
+                        <label class="form-label fw-bold">Payment Mode</label>
+                        <select name="pay_mode" class="form-select" required>
+                            <option value="Cash" {{ old('pay_mode', $billing->pay_mode ?: 'Cash') === 'Cash' ? 'selected' : '' }}>Cash</option>
+                            <option value="Card" {{ old('pay_mode', $billing->pay_mode) === 'Card' ? 'selected' : '' }}>Card</option>
+                            <option value="Bank" {{ in_array(old('pay_mode', $billing->pay_mode), ['Bank', 'Mobile Banking'], true) ? 'selected' : '' }}>Bank</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
                         <label class="form-label fw-bold">Pay Amount</label>
                         <input
     type="number"

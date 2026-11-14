@@ -8,7 +8,6 @@ use App\Models\Admin;
 use App\Models\Billing;
 use App\Models\BillingDoctor;
 use App\Models\BillItem;
-use App\Models\CashCounterSession;
 use App\Models\Expense;
 use App\Models\MedicineInventory;
 use App\Models\Pathology;
@@ -18,25 +17,36 @@ use App\Models\Radiology;
 use App\Models\Referral;
 use App\Models\ReferralPerson;
 use App\Models\Test;
+use App\Models\TestCategory;
 use App\Models\OpdPrescription;
 use App\Models\IpdPrescription;
+use App\Models\Prescription;
 use App\Models\OpdPatient;
 use App\Models\IpdPatient;
 use App\Models\Charge;
 use App\Models\InvoiceDesign;
+use App\Models\DepartmentReagentStock;
+use App\Models\ReagentTestUsage;
+use App\Models\StoreItemLot;
 use App\Services\AdminService;
 use Illuminate\Support\Facades\DB;
 use App\Services\BillingService;
+use App\Services\BillingLedgerService;
 use App\Services\IpdDischargeBillingService;
 
 use App\Services\MedicineInventoryService;
 use App\Services\PatientService;
 use App\Services\ReferralPersonService;
+use App\Services\ReferralCommissionCalculator;
 use App\Services\LedgerService;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
+use App\Support\DefaultDeveloperManager;
 use Exception;
 use App\Models\PharmacyBill;
 use Carbon\Carbon;
@@ -49,8 +59,9 @@ class BillingController extends Controller
 
     protected $billingService, $medicineInventoryService, $adminService, $patientService, $referrerService;
     protected $ledgerService;
+    protected $billingLedgerService;
 
-    public function __construct(BillingService $billingService, MedicineInventoryService $medicineInventoryService, AdminService $adminService, PatientService $patientService, ReferralPersonService $referrerService, LedgerService $ledgerService)
+    public function __construct(BillingService $billingService, MedicineInventoryService $medicineInventoryService, AdminService $adminService, PatientService $patientService, ReferralPersonService $referrerService, LedgerService $ledgerService, BillingLedgerService $billingLedgerService)
     {
         $this->billingService = $billingService;
         $this->medicineInventoryService = $medicineInventoryService;
@@ -58,35 +69,326 @@ class BillingController extends Controller
         $this->patientService = $patientService;
         $this->referrerService = $referrerService;
         $this->ledgerService = $ledgerService;
+        $this->billingLedgerService = $billingLedgerService;
 
         $this->middleware('auth:admin');
 
         // Add permission middleware
         $this->middleware('permission:billing', ['only' => ['index']]);
-        $this->middleware('permission:billing|billing-create', ['only' => ['create', 'billing', 'billingPage', 'store', 'searchPrescription', 'searchPrescriptionSuggestions']]);
+        $this->middleware('permission:billing|billing-create|billing-add|pharmacy-bill-create', ['only' => ['create', 'billing', 'store', 'searchPrescription', 'searchPrescriptionSuggestions']]);
+        $this->middleware('permission:billing-create|billing-add|pharmacy-bill-create', ['only' => ['billingPage']]);
+        $this->middleware('permission:billing|billing-create|billing-add|billing-edit|pharmacy-bill-edit', ['only' => ['searchBillingMedicines']]);
         $this->middleware('permission:billing-delete', ['only' => ['destroy']]);
-        $this->middleware('permission:billing-edit', ['only' => ['edit', 'update']]);
+        $this->middleware('permission:billing-edit|pharmacy-bill-edit', ['only' => ['edit', 'update']]);
     }
 
 
 
     public function index(Request $request)
     {
-        $perPage = (int) ($request->get('numOfData') ?? 10);
+        if (user_is_pharmacy_only(auth('admin')->user())) {
+            $pharmacyFilters = array_filter([
+                'pharmacy_no' => $request->get('search'),
+                'numOfData' => $request->get('numOfData', 10),
+            ], static fn ($value) => $value !== null && $value !== '');
+
+            return redirect()->route('backend.pharmacybill.index', $pharmacyFilters);
+        }
+
+        $requestedPerPage = $request->get('numOfData', 10);
+        $perPage = strtolower((string) $requestedPerPage) === 'all'
+            ? 'all'
+            : max(1, (int) $requestedPerPage);
         $isIpdBilling = $request->filled('ipd');
 
         return Inertia::render('Backend/Billing/Index', [
-            'pageTitle' => fn () => $isIpdBilling ? 'IPD Billing List' : 'Billing List',
+            'pageTitle' => fn () => $isIpdBilling ? 'IPD Bill List' : 'Billing List',
             'tableHeaders' => fn() => $this->getTableHeaders($isIpdBilling),
             'dataFields' => fn() => $this->dataFields($isIpdBilling),
+            'actionColumnFirst' => false,
             'datas' => fn () => $this->getDatas($perPage),
-            'filters' => fn () => ['numOfData' => $perPage, 'user' => request()->user ?? '', 'ipd' => $request->ipd ?? ''],
+            'filters' => fn () => ['numOfData' => $perPage, 'user' => request()->user ?? '', 'ipd' => $request->ipd ?? '', 'category' => $request->category ?? ''],
             'isIpdBilling' => fn () => $isIpdBilling,
+            'isDeveloper' => fn () => DefaultDeveloperManager::isDeveloper(auth('admin')->user()),
             'userStats' => fn() => $this->getUserStats(request()),
         ]);
     }
 
-    private function getDatas(int $perPage)
+    public function exportAllBillsCsv()
+    {
+        $this->ensureDeveloperBillingCsvAccess();
+
+        return response()->streamDownload(function () {
+            $output = fopen('php://output', 'w');
+            fputcsv($output, [
+                'Bill Number',
+                'Patient',
+                'Total',
+                'Paid',
+                'Due',
+                'Payment Status',
+                'Billing Data JSON',
+                'Bill Items JSON',
+                'Payments JSON',
+                'Ledger JSON',
+            ], ',', '"', '');
+
+            Billing::query()
+                ->whereNull('deleted_at')
+                ->where('case_number', 'not like', 'IPD-%')
+                ->whereNotIn('id', PharmacyBill::query()
+                    ->whereNotNull('billing_id')
+                    ->select('billing_id'))
+                ->orderBy('id')
+                ->chunkById(250, function ($billings) use ($output) {
+                    $billIds = $billings->pluck('id')->all();
+                    $itemsByBill = DB::table('bill_items')->whereIn('billing_id', $billIds)->get()->groupBy('billing_id');
+                    $paymentsByBill = DB::table('payments')->whereIn('billing_id', $billIds)->get()->groupBy('billing_id');
+                    $transactions = DB::table('ledger_transactions')
+                        ->where('reference_type', 'Billing')
+                        ->whereIn('reference_id', $billIds)
+                        ->get()
+                        ->groupBy('reference_id');
+                    $transactionIds = $transactions->flatten()->pluck('id')->all();
+                    $entriesByTransaction = DB::table('ledger_entries')
+                        ->join('accounts', 'accounts.id', '=', 'ledger_entries.account_id')
+                        ->whereIn('ledger_entries.transaction_id', $transactionIds)
+                        ->select('ledger_entries.*', 'accounts.code as account_code')
+                        ->get()
+                        ->groupBy('transaction_id');
+
+                    foreach ($billings as $billing) {
+                        $patientName = (string) ($billing->patient_name ?? '');
+                        if (preg_match('/^[\t\r\n ]*[=+\-@]/', $patientName)) {
+                            $patientName = "'" . $patientName;
+                        }
+
+                        $ledgerData = ($transactions->get($billing->id) ?? collect())
+                            ->map(function ($transaction) use ($entriesByTransaction) {
+                                return [
+                                    'transaction' => (array) $transaction,
+                                    'entries' => ($entriesByTransaction->get($transaction->id) ?? collect())
+                                        ->map(static fn ($entry) => [
+                                            'account_code' => $entry->account_code,
+                                            'amount' => $entry->amount,
+                                            'entry_type' => $entry->entry_type,
+                                            'narration' => $entry->narration ?? null,
+                                        ])->values()->all(),
+                                ];
+                            })->values()->all();
+
+                        fputcsv($output, [
+                            $billing->bill_number,
+                            $patientName,
+                            $billing->total,
+                            $billing->paid_amt,
+                            $billing->due_amount,
+                            $billing->payment_status,
+                            json_encode($billing->getAttributes(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                            json_encode(($itemsByBill->get($billing->id) ?? collect())->map(static fn ($item) => (array) $item)->values()->all(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                            json_encode(($paymentsByBill->get($billing->id) ?? collect())->map(static fn ($payment) => (array) $payment)->values()->all(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                            json_encode($ledgerData, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                        ], ',', '"', '');
+                    }
+                });
+
+            fclose($output);
+        }, 'billing-list-' . now()->format('Ymd-His') . '.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    public function importBillsCsv(Request $request)
+    {
+        $this->ensureDeveloperBillingCsvAccess();
+
+        $validator = Validator::make($request->all(), [
+            'csv_file' => ['required', 'file', 'mimes:csv,txt', 'max:51200'],
+        ]);
+        if ($validator->fails()) {
+            return redirect()->route('backend.billing.list')
+                ->withErrors($validator)
+                ->withInput();
+        }
+        $validated = $validator->validated();
+
+        $handle = fopen($validated['csv_file']->getRealPath(), 'r');
+        if ($handle === false) {
+            return redirect()->route('backend.billing.list')
+                ->withErrors(['csv_file' => 'The uploaded CSV file could not be opened.']);
+        }
+
+        $headers = fgetcsv($handle, 0, ',', '"', '');
+        $expectedHeaders = [
+            'Bill Number', 'Patient', 'Total', 'Paid', 'Due', 'Payment Status',
+            'Billing Data JSON', 'Bill Items JSON', 'Payments JSON', 'Ledger JSON',
+        ];
+        if (!is_array($headers)) {
+            fclose($handle);
+            return redirect()->route('backend.billing.list')
+                ->withErrors(['csv_file' => 'The CSV file is empty or invalid.']);
+        }
+
+        $headers[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $headers[0]);
+        if ($headers !== $expectedHeaders) {
+            fclose($handle);
+            return redirect()->route('backend.billing.list')
+                ->withErrors(['csv_file' => 'Please upload a CSV downloaded from the Billing List page.']);
+        }
+
+        $rows = [];
+        $seenBillNumbers = [];
+        $lineNumber = 1;
+        while (($columns = fgetcsv($handle, 0, ',', '"', '')) !== false) {
+            $lineNumber++;
+            if (count(array_filter($columns, static fn ($value) => trim((string) $value) !== '')) === 0) {
+                continue;
+            }
+            if (count($columns) !== count($expectedHeaders)) {
+                fclose($handle);
+                return redirect()->route('backend.billing.list')
+                    ->withErrors(['csv_file' => "CSV row {$lineNumber} has an invalid number of columns."]);
+            }
+
+            try {
+                $billingData = json_decode((string) $columns[6], true, 512, JSON_THROW_ON_ERROR);
+                $billItems = json_decode((string) $columns[7], true, 512, JSON_THROW_ON_ERROR);
+                $payments = json_decode((string) $columns[8], true, 512, JSON_THROW_ON_ERROR);
+                $ledgerData = json_decode((string) $columns[9], true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $exception) {
+                fclose($handle);
+                return redirect()->route('backend.billing.list')
+                    ->withErrors(['csv_file' => "CSV row {$lineNumber} contains invalid bill data."]);
+            }
+
+            if (!is_array($billingData) || !is_array($billItems) || !is_array($payments) || !is_array($ledgerData)) {
+                fclose($handle);
+                return redirect()->route('backend.billing.list')
+                    ->withErrors(['csv_file' => "CSV row {$lineNumber} is incomplete or inconsistent."]);
+            }
+            $billNumber = trim((string) ($billingData['bill_number'] ?? ''));
+            $caseNumber = trim((string) ($billingData['case_number'] ?? ''));
+            if ($billNumber === '' || str_starts_with($caseNumber, 'IPD-') || $billNumber !== trim((string) $columns[0])) {
+                fclose($handle);
+                return redirect()->route('backend.billing.list')
+                    ->withErrors(['csv_file' => "CSV row {$lineNumber} is incomplete or inconsistent."]);
+            }
+            if (isset($seenBillNumbers[$billNumber])) {
+                fclose($handle);
+                return redirect()->route('backend.billing.list')
+                    ->withErrors(['csv_file' => "Bill {$billNumber} appears more than once in the CSV."]);
+            }
+
+            $seenBillNumbers[$billNumber] = true;
+            $rows[] = compact('billingData', 'billItems', 'payments', 'ledgerData', 'billNumber');
+            if (count($rows) > 5000) {
+                fclose($handle);
+                return redirect()->route('backend.billing.list')
+                    ->withErrors(['csv_file' => 'A maximum of 5,000 bills can be imported at a time.']);
+            }
+        }
+        fclose($handle);
+
+        if ($rows === []) {
+            return redirect()->route('backend.billing.list')
+                ->withErrors(['csv_file' => 'The CSV file contains no bill records.']);
+        }
+
+        $imported = 0;
+        $skipped = 0;
+        $importingAdminId = (int) auth('admin')->id();
+        DB::transaction(function () use ($rows, $importingAdminId, &$imported, &$skipped) {
+            $billingColumns = array_flip(Schema::getColumnListing('billings'));
+            $billItemColumns = array_flip(Schema::getColumnListing('bill_items'));
+            $paymentColumns = array_flip(Schema::getColumnListing('payments'));
+
+            foreach ($rows as $row) {
+                if (DB::table('billings')->where('bill_number', $row['billNumber'])->exists()) {
+                    $skipped++;
+                    continue;
+                }
+
+                $billingData = array_intersect_key($row['billingData'], $billingColumns);
+                unset($billingData['id']);
+                $billingData['created_by'] = $importingAdminId;
+                $billingData['updated_by'] = null;
+                $billingId = DB::table('billings')->insertGetId($billingData);
+
+                foreach ($row['billItems'] as $item) {
+                    if (!is_array($item)) {
+                        throw new \UnexpectedValueException("Bill {$row['billNumber']} contains an invalid item.");
+                    }
+                    $item = array_intersect_key($item, $billItemColumns);
+                    unset($item['id']);
+                    $item['billing_id'] = $billingId;
+                    foreach (['sample_collected_by', 'reported_by', 'delivered_by'] as $adminField) {
+                        if (array_key_exists($adminField, $item)) {
+                            $item[$adminField] = null;
+                        }
+                    }
+                    if (
+                        !empty($item['department_id'])
+                        && !DB::table('departments')->where('id', $item['department_id'])->exists()
+                    ) {
+                        $item['department_id'] = null;
+                    }
+                    DB::table('bill_items')->insert($item);
+                }
+
+                foreach ($row['payments'] as $payment) {
+                    if (!is_array($payment)) {
+                        throw new \UnexpectedValueException("Bill {$row['billNumber']} contains an invalid payment.");
+                    }
+                    $payment = array_intersect_key($payment, $paymentColumns);
+                    unset($payment['id']);
+                    $payment['billing_id'] = $billingId;
+                    if (array_key_exists('received_by', $payment)) {
+                        $payment['received_by'] = $importingAdminId;
+                    }
+                    DB::table('payments')->insert($payment);
+                }
+
+                foreach ($row['ledgerData'] as $ledgerRecord) {
+                    if (!is_array($ledgerRecord) || !is_array($ledgerRecord['transaction'] ?? null) || !is_array($ledgerRecord['entries'] ?? null)) {
+                        throw new \UnexpectedValueException("Bill {$row['billNumber']} contains invalid accounting data.");
+                    }
+                    $transaction = $ledgerRecord['transaction'];
+                    $lines = [];
+                    foreach ($ledgerRecord['entries'] as $entry) {
+                        if (!is_array($entry) || empty($entry['account_code'])) {
+                            throw new \UnexpectedValueException("Bill {$row['billNumber']} contains an invalid ledger entry.");
+                        }
+                        $lines[] = [
+                            'account_code' => $entry['account_code'],
+                            'amount' => $entry['amount'] ?? null,
+                            'entry_type' => $entry['entry_type'] ?? null,
+                            'narration' => $entry['narration'] ?? null,
+                        ];
+                    }
+                    app(LedgerService::class)->recordTransaction(
+                        $lines,
+                        (string) ($transaction['description'] ?? ''),
+                        $transaction['date'] ?? null,
+                        (string) ($transaction['reference_type'] ?? 'Billing'),
+                        $billingId,
+                        $importingAdminId
+                    );
+                }
+
+                $imported++;
+            }
+        });
+
+        return redirect()->route('backend.billing.list')
+            ->with('successMessage', "Imported {$imported} bills; skipped {$skipped} bills already present.");
+    }
+
+    private function ensureDeveloperBillingCsvAccess(): void
+    {
+        abort_unless(DefaultDeveloperManager::isDeveloper(auth('admin')->user()), 403);
+    }
+
+    private function getDatas(int|string $perPage)
     {
         $query = Billing::query()->with(['patient', 'creator']);
 
@@ -94,6 +396,9 @@ class BillingController extends Controller
             $query->where('case_number', 'like', 'IPD-%');
         } else {
             $query->where('case_number', 'not like', 'IPD-%');
+            $query->whereNotIn('id', PharmacyBill::query()
+                ->whereNotNull('billing_id')
+                ->select('billing_id'));
         }
 
         // Newest bills should appear first. `id desc` is more reliable for
@@ -107,12 +412,10 @@ class BillingController extends Controller
             $query->where(function ($q) use ($s) {
                 $q->where('bill_number', 'like', "%{$s}%")
                   ->orWhere('case_number', 'like', "%{$s}%")
-                  ->orWhere('patient_mobile', 'like', "%{$s}%");
-            });
-
-            // search related patient name
-            $query->orWhereHas('patient', function ($p) use ($s) {
-                $p->where('name', 'like', "%{$s}%");
+                  ->orWhere('patient_mobile', 'like', "%{$s}%")
+                  ->orWhereHas('patient', function ($p) use ($s) {
+                      $p->where('name', 'like', "%{$s}%");
+                  });
             });
         }
 
@@ -130,7 +433,35 @@ class BillingController extends Controller
             }
         }
 
-        $datas = $query->paginate(request()->numOfData ?? $perPage)->withQueryString();
+        if (request()->filled('category')) {
+            $category = trim((string) request()->category);
+            $query->whereHas('billItems', function ($itemQuery) use ($category) {
+                $itemQuery->whereRaw('LOWER(category) = ?', [strtolower($category)]);
+            });
+        }
+
+        if (request()->filled('main_category')) {
+            $mainCategory = \App\Models\MainCategory::query()
+                ->whereNull('deleted_at')
+                ->where('status', 'Active')
+                ->whereRaw('LOWER(name) = ?', [strtolower(trim((string) request()->main_category))])
+                ->first();
+
+            $testIds = $mainCategory
+                ? \App\Models\Test::query()
+                    ->where('main_category_id', $mainCategory->id)
+                    ->pluck('id')
+                : collect();
+
+            $query->whereHas('billItems', function ($itemQuery) use ($testIds) {
+                $itemQuery->whereIn('item_id', $testIds);
+            });
+        }
+
+        $pageSize = $perPage === 'all'
+            ? max(1, (clone $query)->count())
+            : max(1, $perPage);
+        $datas = $query->paginate($pageSize)->withQueryString();
 
         $ipdPatients = collect();
         $billingIds = $datas->pluck('id')->filter()->values()->all();
@@ -146,7 +477,14 @@ class BillingController extends Controller
             $row->index = ($datas->currentPage() - 1) * $datas->perPage() + $index + 1;
             $row->bill_number = $item->bill_number;
             $row->patient_id = $item->patient_name ?? ($item->patient?->name ?? 'N/A');
-            $row->total = number_format($item->total ?? 0, 2);
+            $grossTotal = (float) ($item->total ?? 0);
+            $row->gross_amount = number_format($grossTotal, 2);
+            $discount = strtolower((string) ($item->discount_type ?? '')) === 'percentage'
+                ? $grossTotal * (float) ($item->discount ?? 0) / 100
+                : (float) ($item->discount ?? 0);
+            $netPayable = $item->payable_amount
+                ?? max(0, $grossTotal - $discount - (float) ($item->extra_flat_discount ?? 0));
+            $row->total = number_format((float) $netPayable, 2);
             $row->paid_amt = number_format($item->paid_amt ?? 0, 2);
             // raw numeric due amount (for modal logic) and formatted display
             $row->due_amount = isset($item->due_amount) ? (float) $item->due_amount : 0.0;
@@ -190,7 +528,7 @@ class BillingController extends Controller
                         ? prefixed_serial('ipd_no_prefix', 'IPDN', $ipdpatient->id, 4)
                         : ('IPD' . str_pad((string) $ipdpatient->id, 4, '0', STR_PAD_LEFT));
 
-                    $row->ipd_invoice_number = '<a href="' . route('backend.print.ipd.invoice', ['id' => $ipdpatient->id, 'billing_id' => $item->id, 'auto_print' => 1]) . '" target="_blank" rel="noopener">' . e($ipdInvoiceNumber) . '</a>';
+                    $row->ipd_invoice_number = '<a href="' . route('backend.print.ipd.invoice', ['id' => $ipdpatient->id, 'billing_id' => $item->id]) . '" target="_blank" rel="noopener">' . e($ipdInvoiceNumber) . '</a>';
                 }
             }
 
@@ -220,10 +558,10 @@ class BillingController extends Controller
                 // For IPD bills, make the Invoice button open the IPD Final Bill print view
                 // so it behaves like the "Open in New Tab" print action.
                 try {
-                    $printUrl = route('backend.print.ipd.final-bill', ['id' => $row->ipd_patient_id, 'auto_print' => 1, 'fast_open' => 1]);
+                    $printUrl = route('backend.print.ipd.final-bill', ['id' => $row->ipd_patient_id, 'fast_open' => 1]);
                 } catch (\Throwable $e) {
                     // fallback to a robust URL using the public endpoint
-                    $printUrl = url('/print/ipd/final-bill?id=' . urlencode((string) $row->ipd_patient_id) . '&auto_print=1&fast_open=1');
+                    $printUrl = url('/print/ipd/final-bill?id=' . urlencode((string) $row->ipd_patient_id) . '&fast_open=1');
                 }
 
                 $row->links[] = [
@@ -302,7 +640,7 @@ class BillingController extends Controller
                 $q->where('case_number', 'not like', 'IPD-%');
             })
             ->selectRaw(
-                "DATE(created_at) as date, COUNT(*) as count, SUM(total) as total_amount, SUM(COALESCE(paid_amt, 0) - COALESCE(return_amt, 0)) as total_net_income, SUM(COALESCE(due_amount, 0)) as due_pending_income, SUM(CASE WHEN discount_type = 'percentage' THEN COALESCE(total, 0) * COALESCE(discount, 0) / 100 ELSE COALESCE(discount, 0) END + COALESCE(extra_flat_discount, 0)) as total_discount"
+                "DATE(created_at) as date, COUNT(*) as count, SUM(total) as total_amount, SUM(COALESCE(paid_amt, 0) - COALESCE(return_amt, 0)) as total_net_income, SUM(COALESCE(due_amount, 0)) as due_pending_income, SUM(CASE WHEN payable_amount IS NOT NULL THEN GREATEST(0, COALESCE(total, 0) - GREATEST(0, COALESCE(payable_amount, 0) - COALESCE(vat_amount, 0))) ELSE (CASE WHEN discount_type = 'percentage' THEN COALESCE(total, 0) * COALESCE(discount, 0) / 100 ELSE COALESCE(discount, 0) END + COALESCE(extra_flat_discount, 0)) END) as total_discount"
             )
             ->groupBy('date');
 
@@ -373,6 +711,105 @@ class BillingController extends Controller
             || str_contains($name, 'needle');
     }
 
+    private function isDiscountExemptBillingItem(array $item): bool
+    {
+        if ((bool) ($item['discount_exempt'] ?? false)) {
+            return true;
+        }
+
+        // Locked at 0% means Discount Off — never apply bill percentage discount.
+        return (bool) ($item['discount_rate_locked'] ?? false)
+            && (float) ($item['discount_percentage'] ?? 0) <= 0;
+    }
+
+    private function resolveBillingItemDiscountPercent(array $item, float $basePercent): float
+    {
+        if ($this->isDisposableBillingItem($item) || $this->isDiscountExemptBillingItem($item)) {
+            return 0.0;
+        }
+
+        $basePercent = max(0.0, min(100.0, $basePercent));
+        $itemLimit = max(0.0, min(100.0, (float) ($item['discount_percentage'] ?? 0)));
+
+        try {
+            $test = Test::find($item['id'] ?? null);
+            if ($test && (float) ($test->discount_percentage ?? 0) > 0) {
+                $itemLimit = max(0.0, min(100.0, (float) $test->discount_percentage));
+            }
+        } catch (\Throwable $e) {
+            // Keep payload-provided item limit when test lookup fails.
+        }
+
+        // Discount Off is handled above. Otherwise Item Discount % itself applies;
+        // a bill % can only lower it (cap), not replace a missing bill discount with 0.
+        $effectivePercent = $itemLimit > 0
+            ? ($basePercent > 0 ? min($basePercent, $itemLimit) : $itemLimit)
+            : $basePercent;
+
+        $categoryCap = $this->resolveCategoryBillingDiscountCap((string) ($item['category'] ?? ''));
+        if ($categoryCap !== null && $effectivePercent > 0) {
+            $effectivePercent = min($effectivePercent, $categoryCap);
+        }
+
+        return max(0.0, min(100.0, $effectivePercent));
+    }
+
+    private function resolveCategoryBillingDiscountCap(string $category): ?float
+    {
+        if (!function_exists('get_cached_web_setting')) {
+            return null;
+        }
+
+        $setting = get_cached_web_setting();
+        $options = $setting?->attendance_device_options ?? [];
+        if (is_string($options)) {
+            $options = json_decode($options, true);
+        }
+        if (!is_array($options) || !($options['billing_discount_cap_by_category_enabled'] ?? false)) {
+            return null;
+        }
+
+        $caps = $options['billing_category_discount_caps'] ?? [];
+        if (!is_array($caps)) {
+            return null;
+        }
+        foreach ($caps as $key => $value) {
+            if (strcasecmp(trim((string) $key), trim($category)) === 0 && is_numeric($value)) {
+                return max(0.0, min(100.0, (float) $value));
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveCategoryBillingRoomNo(string $category): ?string
+    {
+        if (!function_exists('get_cached_web_setting')) {
+            return null;
+        }
+
+        $options = get_cached_web_setting()?->attendance_device_options ?? [];
+        if (is_string($options)) {
+            $options = json_decode($options, true);
+        }
+        if (!is_array($options) || !($options['billing_room_no_by_category_enabled'] ?? false)) {
+            return null;
+        }
+
+        $roomNumbers = $options['billing_category_room_numbers'] ?? [];
+        if (!is_array($roomNumbers)) {
+            return null;
+        }
+        foreach ($roomNumbers as $key => $value) {
+            if (strcasecmp(trim((string) $key), trim($category)) === 0) {
+                $roomNumber = trim((string) $value);
+                return $roomNumber !== '' ? $roomNumber : null;
+            }
+        }
+
+        return null;
+    }
+
     private function dataFields(bool $includeIpdInvoice = false)
     {
         $fields = [
@@ -386,12 +823,13 @@ class BillingController extends Controller
 
         $fields = array_merge($fields, [
             ['fieldName' => 'patient_id', 'class' => 'text-center'],
+            ['fieldName' => 'gross_amount', 'class' => 'text-center'],
             ['fieldName' => 'total', 'class' => 'text-center'],
             ['fieldName' => 'paid_amt', 'class' => 'text-center'],
             ['fieldName' => 'due_amount_display', 'class' => 'text-center'],
+            ['fieldName' => 'payment_status', 'class' => 'text-center'],
             ['fieldName' => 'delivery_date', 'class' => 'text-center whitespace-nowrap'],
             ['fieldName' => 'created_by', 'class' => 'text-center'],
-            ['fieldName' => 'payment_status', 'class' => 'text-center'],
             ['fieldName' => 'created_at', 'class' => 'text-center whitespace-nowrap'],
         ]);
 
@@ -410,12 +848,13 @@ class BillingController extends Controller
 
         return array_merge($headers, [
             'Patient',
-            'Total',
+            'Total Amount',
+            'Payable Amount',
             'Paid Amount',
             'Due Amount',
+            'Payment Status',
             'Delivery Date',
             'Created By',
-            'Payment Status',
             'Created Date',
             'Action',
         ]);
@@ -532,29 +971,57 @@ class BillingController extends Controller
         );
     }
 
-    public function billingPage()
+    public function billingPage(Request $request)
     {
         $lastPathology = Pathology::latest()->first();
         $lastBillNumber = $lastPathology ? $lastPathology->bill_no : null;
 
-        $hospitalCharges = $this->getHospitalCharges();
         $authInfo = $this->adminService->getAuthInfo();
+        $invoiceModule = $request->boolean('pharmacy_mode') ? 'pharmacy' : 'billing';
+        $invoiceDesign = $this->resolveFastInvoiceDesign($invoiceModule);
 
         return Inertia::render(
             'Backend/Billing/BillingPage',
             [
-                'pageTitle' => fn() => 'Billing Page',
+                'pageTitle' => fn() => $request->boolean('pharmacy_mode') ? 'Pharmacy Billing' : 'Billing Page',
+                'prescriptionSearchValue' => fn() => $this->pharmacyPrescriptionSearchValue($request),
                 'billnumber' => fn() => $lastBillNumber,
-                'pathologyAndRadiologyTests' => Inertia::defer(fn() => $this->getBillingTests(
-                    ['Pathology', 'Radiology', 'ECG', 'Ultrasound', 'IPD', 'Disposable', 'OPD', 'Appointment'], 
-                    'billing:tests:all'
-                )),
-                'hospitalCharges' => fn() => $hospitalCharges,
-                'medicineInventories' => Inertia::defer(fn() => $this->getBillingMedicineInventories()),
-                'doctors' => Inertia::defer(fn() => $this->getBillingDoctors()),
-                'patients' => Inertia::defer(fn() => $this->getBillingPatients()),
-                'referrers' => Inertia::defer(fn() => $this->getBillingReferrers()),
+                'pathologyAndRadiologyTests' => Inertia::defer(fn() => $this->getBillingTests($this->getBillingCategoryTypes(), 'billing:tests:all:v2'), 'billing-catalog'),
+                'reagentTestAvailability' => Inertia::defer(fn() => $this->getBillingReagentAvailability(), 'billing-catalog'),
+                'hospitalCharges' => Inertia::defer(fn() => $this->getHospitalCharges(), 'billing-catalog'),
+                'departmentStoreItems' => Inertia::defer(fn() => $this->getBillingDepartmentStoreItems(), 'billing-catalog'),
+                'billingCatalogLoaded' => Inertia::defer(fn() => true, 'billing-catalog'),
+                'isPharmacyDepartment' => fn() => user_is_pharmacy_only(auth('admin')->user()) || $request->boolean('pharmacy_mode'),
+                'canAccessPharmacyBillList' => fn() => auth('admin')->user()->can('pharmacy-bill-list'),
+                'doctors' => Inertia::defer(fn() => $this->getBillingDoctors(), 'billing-support'),
+                'patients' => Inertia::defer(fn() => $this->getBillingPatients(), 'billing-support'),
+                'referrers' => Inertia::defer(fn() => $this->getBillingReferrers(), 'billing-support'),
                 'authInfo' => fn() => $authInfo,
+                'offlineInvoiceDesign' => fn() => [
+                    'header_image' => $this->fastInvoiceImageUrl($invoiceDesign?->header_photo_path),
+                    'footer_image' => $this->fastInvoiceImageUrl($invoiceDesign?->footer_photo_path),
+                    'full_page_pad_image' => $this->fastInvoiceImageUrl($invoiceDesign?->full_page_pad_path),
+                    'full_page_pad_content_offset' => (int) ($invoiceDesign?->full_page_pad_content_offset ?? 0),
+                    'footer_content' => (string) ($invoiceDesign?->footer_content ?? ''),
+                    'footer_content_offset' => (int) ($invoiceDesign?->footer_content_offset ?? 0),
+                    'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below'], true)
+                        ? strtolower((string) $invoiceDesign->footer_content_position)
+                        : 'above',
+                    'footer_font_size' => max(6, min(72, (int) ($invoiceDesign?->footer_font_size ?? 14))),
+                    'footer_fallback_line' => trim((string) config('app.invoice_footer_fallback_line', 'Powered By: www.toamedit.com Support: 01919-592638')),
+                    'header_height' => (int) ($invoiceDesign?->header_height ?? 115),
+                    'footer_height' => (int) ($invoiceDesign?->footer_height ?? 70),
+                    'active_pad_type' => (string) ($invoiceDesign?->active_pad_type ?? 'header'),
+                ],
+                'testCategories' => fn() => \App\Models\TestCategory::query()->whereNull('deleted_at')->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
+                'categoryTypeOptions' => fn() => app(\App\Services\TestCategoryService::class)->activeNames(),
+                'mainCategories' => fn() => \App\Models\MainCategory::query()->whereNull('deleted_at')->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
+                'pathologyUnits' => fn() => app(\App\Services\PathologyUnitService::class)->activeList(),
+                'testParameters' => fn() => app(\App\Services\PathologyParameterService::class)->activeList(),
+                'chargeTypes' => fn() => \App\Models\ChargeType::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
+                'chargeCategories' => fn() => \App\Models\ChargeCategory::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
+                'chargeUnits' => fn() => \App\Models\ChargeUnitType::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
+                'taxCategories' => fn() => \App\Models\ChargeTaxCategory::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
             ]
         );
     }
@@ -569,10 +1036,13 @@ class BillingController extends Controller
 
     private function getBillingTests(array $categories, string $cacheKey): array
     {
-        return Cache::remember($cacheKey, 30, function () use ($categories) {
+        $version = (int) Cache::get('billing:tests:cache_version', 1);
+        $cacheKey .= ':v' . $version . ':' . md5(implode('|', $categories));
+
+        return Cache::remember($cacheKey, 90, function () use ($categories) {
             return Test::whereIn('category_type', $categories)
                 ->where('status', 'Active')
-                ->select('id', 'category_type', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount', 'referral_percentage')
+                ->select('id', 'category_type', 'test_name', 'test_short_name', 'report_days', 'room_no', 'tax', 'standard_charge', 'amount', 'referral_percentage', 'discount_percentage', 'discount_rate_locked')
                 ->orderBy('test_name')
                 ->get()
                 ->map(function ($test) {
@@ -587,36 +1057,350 @@ class BillingController extends Controller
                         'standard_charge' => $test->standard_charge,
                         'amount' => $test->amount,
                         'referral_percentage' => $test->referral_percentage ?? 0,
+                        'discount_percentage' => (float) ($test->discount_percentage ?? 0),
+                        'discount_rate_locked' => (bool) $test->discount_rate_locked,
                     ];
                 })
                 ->toArray();
         });
     }
 
-    private function getBillingMedicineInventories(): array
+    private function getBillingReagentAvailability(): array
     {
-        return Cache::remember('billing:medicine_inventories', 30, function () {
-            return MedicineInventory::whereNull('deleted_at')
+        $testUsages = ReagentTestUsage::query()
+            ->with('storeItem:id,item_name,category,unit,status,stock_behavior')
+            ->whereHas('test', fn ($query) => $query->where('status', 'Active')->whereNull('deleted_at'))
+            ->get(['test_id', 'store_item_id', 'department_id', 'quantity_per_test'])
+            ->filter(fn ($usage) => $usage->storeItem && ($usage->storeItem->stock_behavior ?? 'consumable') !== 'reusable')
+            ->values();
+
+        $categoryUsages = \App\Models\ReagentCategoryUsage::query()
+            ->with('storeItem:id,item_name,category,unit,status,stock_behavior')
+            ->whereHas('storeItem', fn ($query) => $query->where('status', 'Active'))
+            ->get(['category_key', 'store_item_id', 'department_id', 'quantity_per_test'])
+            ->filter(fn ($usage) => $usage->storeItem
+                && ($usage->storeItem->stock_behavior ?? 'consumable') !== 'reusable')
+            ->values();
+
+        if ($categoryUsages->isNotEmpty()) {
+            $configuredTestItems = $testUsages
+                ->groupBy('test_id')
+                ->map(fn ($usages) => $usages->pluck('store_item_id')->map(fn ($id) => (int) $id)->all());
+            $configuredFilmTestIds = $testUsages
+                ->filter(fn ($usage) => $usage->storeItem && \App\Services\ReagentConsumptionService::isFilmItem($usage->storeItem))
+                ->pluck('test_id')
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->all();
+            $categoryUsagesByItem = $categoryUsages->groupBy('store_item_id');
+            $categoryService = app(\App\Services\ReagentConsumptionService::class);
+
+            Test::query()
+                ->with(['mainCategory:id,name', 'pathologyCategory:id,name'])
                 ->where('status', 'Active')
-                ->select('id', 'medicine_name', 'medicine_unit_selling_price', 'medicine_quantity', 'status')
+                ->get(['id', 'category_type', 'main_category_id', 'test_category_id'])
+                ->each(function (Test $test) use ($categoryUsagesByItem, $categoryService, $configuredTestItems, $configuredFilmTestIds, $testUsages) {
+                    $categoryKeys = $categoryService->categoryKeysForTest($test);
+                    foreach ($categoryUsagesByItem as $storeItemId => $itemUsages) {
+                        $configuredItem = $itemUsages->first()?->storeItem;
+                        if (
+                            in_array((int) $test->id, $configuredFilmTestIds, true)
+                            && $configuredItem
+                            && \App\Services\ReagentConsumptionService::isFilmItem($configuredItem)
+                        ) {
+                            continue;
+                        }
+                        if (in_array((int) $storeItemId, $configuredTestItems->get($test->id, []), true)) {
+                            continue;
+                        }
+
+                        $usage = collect($categoryKeys)
+                            ->map(fn ($categoryKey) => $itemUsages->firstWhere('category_key', $categoryKey))
+                            ->filter()
+                            ->first();
+                        if ($usage) {
+                            $categoryUsage = clone $usage;
+                            $categoryUsage->setAttribute('test_id', $test->id);
+                            $testUsages->push($categoryUsage);
+                        }
+                    }
+                });
+        }
+
+        $usages = $testUsages->values();
+
+        if ($usages->isEmpty()) {
+            return [];
+        }
+
+        $storeItemIds = $usages->pluck('store_item_id')->unique()->values();
+        $departmentIds = $usages->pluck('department_id')->filter()->unique()->values();
+        $stockKey = fn ($departmentId, $storeItemId) => $departmentId . ':' . $storeItemId;
+
+        $departmentStocks = DepartmentReagentStock::query()
+            ->whereIn('store_item_id', $storeItemIds)
+            ->whereIn('department_id', $departmentIds)
+            ->get(['department_id', 'store_item_id', 'current_stock'])
+            ->keyBy(fn ($stock) => $stockKey($stock->department_id, $stock->store_item_id));
+
+        $lotStocks = StoreItemLot::query()
+            ->selectRaw('department_id, store_item_id, COALESCE(SUM(quantity), 0) AS available_stock')
+            ->whereIn('store_item_id', $storeItemIds)
+            ->whereIn('department_id', $departmentIds)
+            ->where(fn ($query) => $query->whereNull('expiry_date')->orWhereDate('expiry_date', '>=', today()->toDateString()))
+            ->groupBy('department_id', 'store_item_id')
+            ->get()
+            ->keyBy(fn ($lot) => $stockKey($lot->department_id, $lot->store_item_id));
+
+        $availability = [];
+        foreach ($usages as $usage) {
+            $testId = (int) $usage->test_id;
+            $quantityPerTest = (float) $usage->quantity_per_test;
+            if ($quantityPerTest <= 0) {
+                continue;
+            }
+
+            $isFilm = \App\Services\ReagentConsumptionService::isFilmItem($usage->storeItem);
+            $effectiveQuantityPerTest = $isFilm ? 1 : $quantityPerTest;
+            $remainingTests = null;
+            $usableStock = 0;
+            if ($usage->department_id && $usage->storeItem->status === 'Active') {
+                $key = $stockKey($usage->department_id, $usage->store_item_id);
+                $departmentStock = (float) ($departmentStocks->get($key)?->current_stock ?? 0);
+                $unexpiredLotStock = (float) ($lotStocks->get($key)?->available_stock ?? 0);
+                $usableStock = min($departmentStock, $unexpiredLotStock);
+                if (!$isFilm) {
+                    $remainingTests = (int) floor(($usableStock + 0.000001) / $effectiveQuantityPerTest);
+                }
+            }
+
+            if (!isset($availability[$testId])) {
+                $availability[$testId] = [
+                    'configured' => true,
+                    'remaining_tests' => $isFilm ? null : $remainingTests,
+                    'stock_items' => [],
+                ];
+            } elseif (!$isFilm) {
+                $availability[$testId]['remaining_tests'] = min(
+                    $availability[$testId]['remaining_tests'] ?? $remainingTests,
+                    $remainingTests
+                );
+            }
+
+            $availability[$testId]['stock_items'][] = [
+                'id' => (int) $usage->store_item_id,
+                'name' => $usage->storeItem->item_name,
+                'unit' => $usage->storeItem->unit,
+                'available_quantity' => round($usableStock, 2),
+                'quantity_per_test' => round($effectiveQuantityPerTest, 2),
+                'remaining_tests' => $remainingTests,
+                'is_film' => $isFilm,
+            ];
+        }
+
+        $testsById = Test::query()
+            ->with(['mainCategory:id,name', 'pathologyCategory:id,name'])
+            ->whereIn('id', $usages->pluck('test_id')->unique())
+            ->get(['id', 'category_type', 'main_category_id', 'test_category_id'])
+            ->keyBy('id');
+        $filmStocksByCategory = [];
+        $countedFilmStocks = [];
+
+        foreach ($usages as $usage) {
+            if (!$usage->storeItem || !\App\Services\ReagentConsumptionService::isFilmItem($usage->storeItem)) {
+                continue;
+            }
+
+            $test = $testsById->get((int) $usage->test_id);
+            if (!$test || !$usage->department_id) {
+                continue;
+            }
+
+            $categoryKey = $usage->category_key
+                ?? (app(\App\Services\ReagentConsumptionService::class)->categoryKeysForTest($test)[0] ?? null);
+            if (!$categoryKey) {
+                continue;
+            }
+
+            $categoryLabel = $test->mainCategory?->name
+                ?: $test->pathologyCategory?->name
+                ?: $test->category_type;
+            $locationKey = $stockKey($usage->department_id, $usage->store_item_id);
+            $stock = min(
+                (float) ($departmentStocks->get($locationKey)?->current_stock ?? 0),
+                (float) ($lotStocks->get($locationKey)?->available_stock ?? 0)
+            );
+            $categoryStockKey = $categoryKey . ':' . $usage->store_item_id . ':' . $usage->department_id;
+
+            if (!isset($countedFilmStocks[$categoryStockKey])) {
+                $countedFilmStocks[$categoryStockKey] = true;
+                $filmStocksByCategory[$categoryKey] ??= [
+                    'key' => $categoryKey,
+                    'label' => $categoryLabel,
+                    'available_quantity' => 0,
+                    'unit' => $usage->storeItem->unit,
+                ];
+                $filmStocksByCategory[$categoryKey]['available_quantity'] += $stock;
+            }
+        }
+
+        foreach ($testsById as $testId => $test) {
+            $categoryKey = app(\App\Services\ReagentConsumptionService::class)
+                ->categoryKeysForTest($test)[0] ?? null;
+            if (!$categoryKey || !isset($filmStocksByCategory[$categoryKey], $availability[$testId])) {
+                continue;
+            }
+
+            $availability[$testId]['film_category'] = $filmStocksByCategory[$categoryKey];
+            $availability[$testId]['film_usage_quantity'] = 1;
+        }
+
+        return $availability;
+    }
+
+    private function getBillingCategoryTypes(): array
+    {
+        return TestCategory::query()
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->pluck('name')
+            ->map(fn ($name) => trim((string) $name))
+            ->filter()
+            ->unique(fn ($category) => strtolower($category))
+            ->sort()
+            ->values()
+            ->all();
+    }
+
+    private function requiresSampleCollection(array $item, string $category, bool $isDisposable): bool
+    {
+        if ($isDisposable || in_array($category, ['medicine', 'pharmacy', 'opd', 'ipd', 'appointment', 'service', 'store inventory', 'blood bank', 'ambulance'], true)) {
+            return false;
+        }
+
+        if (in_array($category, ['pathology', 'radiology', 'ecg', 'ultrasound', 'xray', 'ultrasonogram', 'ultrasonography'], true)) {
+            return true;
+        }
+
+        $master = Test::find($item['id'] ?? null);
+        if (!$master) {
+            return false;
+        }
+
+        $parameters = $master->test_parameters;
+        if (is_string($parameters)) {
+            $parameters = json_decode($parameters, true);
+        }
+
+        return is_array($parameters) && count(array_filter($parameters)) > 0;
+    }
+
+    public function searchBillingMedicines(Request $request)
+    {
+        $validated = $request->validate([
+            'search' => ['required', 'string', 'min:1', 'max:100'],
+        ]);
+        $search = trim($validated['search']);
+
+        if ($search === '') {
+            return response()->json([]);
+        }
+
+        $tokens = preg_split('/\s+/u', $search, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $fullTextTokens = array_values(array_filter(array_map(
+            static fn (string $token): string => preg_replace('/[^\p{L}\p{N}]+/u', '', $token) ?? '',
+            $tokens
+        ), static fn (string $token): bool => mb_strlen($token) >= 3));
+        $booleanSearch = implode(' ', array_map(static fn (string $token): string => '+' . $token . '*', $fullTextTokens));
+        $escapedPrefix = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $search) . '%';
+
+        $baseQuery = MedicineInventory::query()
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->select('id', 'medicine_name', 'medicine_unit_selling_price', 'medicine_quantity', 'status');
+        $results = collect();
+
+        if ($booleanSearch !== '' && DB::connection()->getDriverName() === 'mysql') {
+            $results = (clone $baseQuery)
+                ->whereRaw('MATCH (medicine_name) AGAINST (? IN BOOLEAN MODE)', [$booleanSearch])
                 ->orderBy('medicine_name')
-                ->get()
-                ->map(function ($medicine) {
-                    return [
-                        'id' => $medicine->id,
-                        'medicine_name' => $medicine->medicine_name,
-                        'medicine_unit_selling_price' => $medicine->medicine_unit_selling_price,
-                        'medicine_quantity' => $medicine->medicine_quantity,
-                        'status' => $medicine->status,
-                    ];
-                })
-                ->toArray();
-        });
+                ->limit(30)
+                ->get();
+        }
+
+        if ($results->count() < 30) {
+            $prefixQuery = (clone $baseQuery)
+                ->whereRaw("medicine_name LIKE ? ESCAPE '!'", [$escapedPrefix]);
+
+            if ($results->isNotEmpty()) {
+                $prefixQuery->whereNotIn('id', $results->modelKeys());
+            }
+
+            $prefixResults = $prefixQuery
+                ->orderBy('medicine_name')
+                ->limit(30 - $results->count())
+                ->get();
+            $results = $results->concat($prefixResults)->values();
+        }
+
+        return response()->json($results);
+    }
+
+    private function getBillingDepartmentStoreItems(): array
+    {
+        $adminId = (int) (auth('admin')->id() ?? 0);
+        if ($adminId <= 0) {
+            return [];
+        }
+
+        $departmentId = \App\Models\AdminDetail::query()
+            ->where('admin_id', $adminId)
+            ->value('department_id');
+        if (!$departmentId) {
+            return [];
+        }
+
+        return \App\Models\DepartmentReagentStock::query()
+            ->with(['storeItem', 'department:id,name'])
+            ->addSelect(['available_stock' => \App\Models\StoreItemLot::query()
+                ->selectRaw('COALESCE(SUM(quantity), 0)')
+                ->whereColumn('store_item_lots.store_item_id', 'department_reagent_stocks.store_item_id')
+                ->whereColumn('store_item_lots.department_id', 'department_reagent_stocks.department_id')
+                ->where(function ($query) {
+                    $query->whereNull('expiry_date')->orWhereDate('expiry_date', '>=', today()->toDateString());
+                })])
+            ->where('department_id', $departmentId)
+            ->where('current_stock', '>', 0)
+            ->whereHas('storeItem', function ($query) {
+                $query->where('status', 'Active')
+                    ->where('stock_behavior', 'consumable');
+            })
+            ->orderBy('store_item_id')
+            ->get()
+            ->map(function ($stock) use ($departmentId) {
+                $item = $stock->storeItem;
+
+                return [
+                    'id' => (int) $item->id,
+                    'name' => $item->item_name,
+                    'category' => 'Store Inventory',
+                    'stock_category' => $item->category,
+                    'unit_price' => (float) $item->unit_cost,
+                    'stock' => (float) ($stock->available_stock ?? 0),
+                    'stock_unit' => $item->unit,
+                    'department_id' => (int) $departmentId,
+                    'department_name' => $stock->department?->name,
+                    'type' => 'store',
+                ];
+            })
+            ->filter(fn ($item) => $item['stock'] > 0)
+            ->values()
+            ->all();
     }
 
     private function getBillingDoctors(): array
     {
-        return Cache::remember('billing:doctors_active', 30, function () {
+        return Cache::remember('billing:doctors_active', 90, function () {
             return Admin::whereNull('deleted_at')
                 ->where('status', 'Active')
                 ->whereHas('role', function ($query) {
@@ -636,7 +1420,7 @@ class BillingController extends Controller
 
     private function getBillingPatients(): array
     {
-        return Cache::remember('billing:patients_active', 30, function () {
+        return Cache::remember('billing:patients_active', 90, function () {
             return Patient::whereNull('deleted_at')
                 ->where('status', 'Active')
                 ->select('id', 'name', 'phone', 'gender', 'dob')
@@ -658,7 +1442,7 @@ class BillingController extends Controller
 
     private function getBillingReferrers(): array
     {
-        return Cache::remember('billing:referrers_active', 30, function () {
+        return Cache::remember('billing:referrers_active', 90, function () {
             return ReferralPerson::whereNull('deleted_at')
                 ->where('status', 'Active')
                 ->select('id', 'name', 'phone', 'standard_commission', 'pathology_commission', 'radiology_commission', 'pharmacy_commission', 'ecg_commission', 'ultrasound_commission', 'status')
@@ -694,7 +1478,7 @@ class BillingController extends Controller
             return [];
         }
 
-        return Cache::remember('billing:hospital_charges', 30, function () {
+        return Cache::remember('billing:hospital_charges', 90, function () {
             $rawCharges = Charge::with('chargeType:id,modules')
                 ->whereNull('deleted_at')
                 ->select('id', 'name', 'module', 'standard_charge', 'charge_type_id')
@@ -736,9 +1520,12 @@ class BillingController extends Controller
         });
     }
 
-    private function normalizeReferralCommissionCategory(?string $category): string
+    private function normalizeReferralCommissionCategory(?string $category, ?string $itemName = null): string
     {
         $cat = strtolower(trim((string) ($category ?? '')));
+        $name = strtolower(trim((string) ($itemName ?? '')));
+        $combined = trim($cat . ' ' . $name);
+
         if ($cat === '') {
             return '';
         }
@@ -753,6 +1540,10 @@ class BillingController extends Controller
 
         if (in_array($cat, ['ecg', 'ekg'], true)) {
             return 'ecg';
+        }
+
+        if (preg_match('/\b(usg|ultrasound|ultrasonogram|ultrasonography|sonography|sono)\b/', $combined) === 1) {
+            return 'ultrasound';
         }
 
         if (in_array($cat, ['ultrasound', 'ultrasonogram', 'ultrasonography', 'usg', 'sono'], true)) {
@@ -774,9 +1565,14 @@ class BillingController extends Controller
         return $cat;
     }
 
-    private function resolveReferrerCommissionRate($referrer, ?string $category, ?int $itemId = null): float
-    {
-        $normalizedCategory = $this->normalizeReferralCommissionCategory($category);
+    private function resolveReferrerCommissionRate(
+        $referrer,
+        ?string $category,
+        ?int $itemId = null,
+        ?string $itemName = null,
+        ?float $itemReferralRate = null
+    ): float {
+        $normalizedCategory = $this->normalizeReferralCommissionCategory($category, $itemName);
         $commissionRate = 0.0;
 
         switch ($normalizedCategory) {
@@ -802,6 +1598,10 @@ class BillingController extends Controller
             case 'ipd':
                 $commissionRate = (float) ($referrer->ipd_commission ?? 0);
                 break;
+        }
+
+        if ($itemReferralRate !== null) {
+            return $itemReferralRate > 0 ? $itemReferralRate : $commissionRate;
         }
 
         if ($itemId) {
@@ -832,16 +1632,67 @@ class BillingController extends Controller
 
     public function store(BillingRequest $request)
     {
+        $data = $request->validated();
+        $adminUser = auth('admin')->user();
+        $hasGeneralBillingAccess = $adminUser->can('billing')
+            || $adminUser->can('billing-create')
+            || $adminUser->can('billing-add');
+        $pharmacyMode = (bool) ($data['pharmacy_mode'] ?? false) || user_is_pharmacy_only($adminUser);
+
+        if (!$hasGeneralBillingAccess && !$pharmacyMode) {
+            abort(403);
+        }
+
+        if ($pharmacyMode && collect($data['items'])->contains(
+            fn ($item) => strtolower(trim((string) ($item['category'] ?? ''))) !== 'medicine'
+        )) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'items' => 'Pharmacy billing only supports medicine items.',
+            ]);
+        }
+
         DB::beginTransaction();
         try {
-            $data = $request->validated();
+            if ($request->header('X-Offline-Replay') === '1') {
+                $medicineItems = collect($data['items'] ?? [])
+                    ->filter(fn ($item) => strtolower(trim((string) ($item['category'] ?? ''))) === 'medicine')
+                    ->groupBy(fn ($item) => (string) ($item['id'] ?? ''));
+
+                foreach ($medicineItems as $medicineId => $items) {
+                    $medicine = MedicineInventory::query()
+                        ->whereKey($medicineId)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (!$medicine) {
+                        throw \Illuminate\Validation\ValidationException::withMessages([
+                            'items' => 'A medicine in this offline bill is no longer available. Review the bill before retrying.',
+                        ]);
+                    }
+
+                    $requestedQuantity = (float) $items->sum(fn ($item) => (float) ($item['quantity'] ?? 0));
+                    $currentPrice = round((float) $medicine->medicine_unit_selling_price, 2);
+                    $hasStalePrice = $items->contains(
+                        fn ($item) => round((float) ($item['unit_price'] ?? 0), 2) !== $currentPrice
+                    );
+
+                    if ($hasStalePrice || $requestedQuantity > (float) $medicine->medicine_quantity) {
+                        throw \Illuminate\Validation\ValidationException::withMessages([
+                            'items' => sprintf(
+                                'Medicine "%s" price or available stock changed while offline. Review the bill before retrying.',
+                                $medicine->medicine_name
+                            ),
+                        ]);
+                    }
+                }
+            }
+
             $expectsJsonResponse = $request->wantsJson()
                 || $request->ajax()
                 || $request->expectsJson()
                 || $request->hasHeader('X-Inertia')
                 || $request->header('X-Requested-With') === 'XMLHttpRequest';
 
-            $adminUser = auth('admin')->user();
             $adminId = (int) ($adminUser?->id ?? 0);
             $adminName = trim((string) ($adminUser?->name ?? ''));
             if (!$this->hasOpenCounterSessionForAdmin($adminId, $adminName)) {
@@ -855,23 +1706,6 @@ class BillingController extends Controller
                 }
 
                 return redirect()->back()->with('errorMessage', $message);
-            }
-
-            // Debug incoming billing datetime for troubleshooting backdate issues
-            try {
-                Log::debug('billing.store.received', [
-                    'billing_date' => $data['billing_date'] ?? null,
-                    'billing_time' => $data['billing_time'] ?? null,
-                ]);
-            } catch (\Throwable $e) {
-                // ignore logging failure
-            }
-
-            // Debug: log incoming items payload to help identify category/type issues
-            try {
-                Log::debug('billing.store.items', ['items' => $data['items'] ?? null]);
-            } catch (\Throwable $e) {
-                // ignore logging failure
             }
 
             $doctorInfo = $this->handleDoctor($data['doctor_name'] ?? null);
@@ -890,24 +1724,29 @@ class BillingController extends Controller
                     $cat = strtolower(trim((string) ($it['category'] ?? '')));
                     $name = strtolower(trim((string) ($it['name'] ?? '')));
 
-                    $radiologyKeywords = ['ecg', 'ecg of', 'ultrasound', 'ultrasonogram', 'usg'];
+                    foreach (['ultrasound', 'ultrasonogram', 'ultrasonography', 'usg', 'sono', 'sonography'] as $kw) {
+                        if (str_contains($cat, $kw) || str_contains($name, $kw)) {
+                            $it['category'] = 'Ultrasound';
+                            return $it;
+                        }
+                    }
 
-                    foreach ($radiologyKeywords as $kw) {
+                    foreach (['ecg', 'ekg', 'electrocardiogram'] as $kw) {
+                        if (str_contains($cat, $kw) || str_contains($name, $kw)) {
+                            $it['category'] = 'ECG';
+                            return $it;
+                        }
+                    }
+
+                    foreach (['radiology', 'xray', 'x-ray', 'x ray', 'imaging', 'ct', 'mri', 'radiolog'] as $kw) {
                         if (str_contains($cat, $kw) || str_contains($name, $kw)) {
                             $it['category'] = 'Radiology';
-                            break;
+                            return $it;
                         }
                     }
 
                     return $it;
                 }, $data['items']);
-            }
-
-            // Log normalized items to help debugging enum/insert issues
-            try {
-                Log::debug('billing.store.items.normalized', ['items' => $data['items'] ?? null]);
-            } catch (\Throwable $e) {
-                // ignore logging failure
             }
 
             // Allow multiple same-day bills for the same patient.
@@ -917,13 +1756,22 @@ class BillingController extends Controller
             $discountableBillAmount = (($data['discount_type'] ?? 'percentage') === 'percentage')
                 ? collect($data['items'])
                     ->reject(fn ($item) => $this->isDisposableBillingItem($item))
+                    ->reject(fn ($item) => $this->isDiscountExemptBillingItem($item))
                     ->sum('total_amount')
-                : $totalBillAmountBeforeDiscount;
+                : collect($data['items'])
+                    ->reject(fn ($item) => $this->isDisposableBillingItem($item))
+                    ->reject(fn ($item) => $this->isDiscountExemptBillingItem($item))
+                    ->sum('total_amount');
             $totalDiscountAmount = 0;
             if (($data['discount_type'] ?? 'percentage') === 'percentage') {
-                $totalDiscountAmount = $discountableBillAmount * (($data['discount'] ?? 0) / 100);
+                $totalDiscountAmount = collect($data['items'])->sum(
+                    fn ($item) => ((float) ($item['total_amount'] ?? 0) * $this->resolveBillingItemDiscountPercent($item, (float) ($data['discount'] ?? 0))) / 100
+                );
             } else {
-                $totalDiscountAmount = $data['discount'] ?? 0;
+                $totalDiscountAmount = min(
+                    max(0, (float) ($data['discount'] ?? 0)),
+                    $discountableBillAmount
+                );
             }
 
             $vatPercentage = 0.0;
@@ -1068,49 +1916,72 @@ class BillingController extends Controller
             $discountableBillAmount = ($data['discount_type'] === 'percentage')
                 ? collect($data['items'])
                     ->reject(fn ($item) => $this->isDisposableBillingItem($item))
+                    ->reject(fn ($item) => $this->isDiscountExemptBillingItem($item))
                     ->sum('total_amount')
-                : $totalBillAmountBeforeDiscount;
+                : collect($data['items'])
+                    ->reject(fn ($item) => $this->isDisposableBillingItem($item))
+                    ->reject(fn ($item) => $this->isDiscountExemptBillingItem($item))
+                    ->sum('total_amount');
             $totalDiscountAmount = 0;
 
             if ($data['discount_type'] === 'percentage') {
-                $totalDiscountAmount = $discountableBillAmount * ($data['discount'] / 100);
+                $totalDiscountAmount = collect($data['items'])->sum(
+                    fn ($item) => ((float) ($item['total_amount'] ?? 0) * $this->resolveBillingItemDiscountPercent($item, (float) ($data['discount'] ?? 0))) / 100
+                );
             } else {
-                $totalDiscountAmount = $data['discount'];
+                $totalDiscountAmount = min(
+                    max(0, (float) ($data['discount'] ?? 0)),
+                    $discountableBillAmount
+                );
             }
 
             $discountFactor = ($discountableBillAmount > 0) ? ($totalDiscountAmount / $discountableBillAmount) : 0;
+            $itemCollection = collect($data['items']);
+            $testIds = $itemCollection
+                ->filter(fn ($item) => in_array(strtolower((string) ($item['category'] ?? '')), ['pathology', 'radiology'], true))
+                ->pluck('id')
+                ->filter()
+                ->unique()
+                ->values();
+            $testMasters = Test::query()->whereKey($testIds)->get()->keyBy('id');
+            $medicineIds = $itemCollection
+                ->filter(fn ($item) => strtolower((string) ($item['category'] ?? '')) === 'medicine')
+                ->pluck('id')
+                ->filter()
+                ->unique()
+                ->values();
+            $medicineInventories = MedicineInventory::query()->whereKey($medicineIds)->get()->keyBy('id');
+            $reagentConsumptionService = app(\App\Services\ReagentConsumptionService::class);
+            $reagentConsumptionService->prepareForBillItems($data['items']);
 
             if ($data['referrer_id']) {
-                $totalCommission = 0;
-                $categoryCommissions = [];
+                $commissionResult = app(ReferralCommissionCalculator::class)->calculate(
+                    $data['items'],
+                    (float) $billingData['payable_amount'],
+                    function ($item) use ($referrer) {
+                        $category = $this->normalizeReferralCommissionCategory($item['category'] ?? '', $item['name'] ?? '');
 
-                foreach ($data['items'] as $item) {
-                    $category = $this->normalizeReferralCommissionCategory($item['category'] ?? '');
-                    $commissionRate = $this->resolveReferrerCommissionRate(
-                        $referrer,
-                        $category,
-                        isset($item['id']) ? (int) $item['id'] : null
-                    );
-
-                    $itemCommission = ($item['net_amount'] * $commissionRate) / 100;
-                    $totalCommission += $itemCommission;
-
-                    if (!isset($categoryCommissions[$category])) {
-                        $categoryCommissions[$category] = [
-                            'rate' => $commissionRate,
-                            'amount' => 0,
-                            'items' => []
+                        return [
+                            'category' => $category,
+                            'rate' => $this->resolveReferrerCommissionRate(
+                                $referrer,
+                                $category,
+                                isset($item['id']) ? (int) $item['id'] : null,
+                                (string) ($item['name'] ?? ''),
+                                array_key_exists('referral_percentage', $item)
+                                    ? (float) $item['referral_percentage']
+                                    : null
+                            ),
                         ];
                     }
-
-                    $categoryCommissions[$category]['amount'] += $itemCommission;
-                    $categoryCommissions[$category]['items'][] = [
-                        'item_id' => $item['id'],
-                        'item_name' => $item['name'],
-                        'amount' => $item['net_amount'],
-                        'commission' => $itemCommission
-                    ];
-                }
+                );
+                $totalCommission = $commissionResult['total'];
+                $categoryCommissions = $commissionResult['categories'];
+                $data['commission_total'] = $totalCommission;
+                $data['physyst_amt'] = $totalCommission;
+                $billing->commission_total = $totalCommission;
+                $billing->physyst_amt = $totalCommission;
+                $billing->save();
 
                 $refData = [
                     'billing_id' => $billing->id,
@@ -1118,7 +1989,7 @@ class BillingController extends Controller
                     'total_commission_amount' => $totalCommission,
                     'category_commissions' => $categoryCommissions,
                     'date' => ($billing->created_at ? Carbon::parse($billing->created_at)->toDateString() : now()->toDateString()),
-                    'total_bill_amount' => $data['total'],
+                    'total_bill_amount' => $billingData['payable_amount'],
                     'status' => 'Active'
                 ];
 
@@ -1128,25 +1999,23 @@ class BillingController extends Controller
 
                 Referral::create($refData);
 
-                if (empty($data['commission_total'])) {
-                    $data['commission_total'] = $totalCommission;
-                }
-                if (empty($data['physyst_amt'])) {
-                    $data['physyst_amt'] = $data['commission_total'] ?? 0;
-                }
             }
 
             foreach ($data['items'] as $item) {
-                $itemProportionalDiscount = ($data['discount_allocation'] ?? 'proportional') === 'equal'
-                    ? ($this->isDisposableBillingItem($item) ? 0 : (float) ($item['discount'] ?? 0))
-                    : (($data['discount_type'] === 'percentage' && $this->isDisposableBillingItem($item))
-                        ? 0
-                        : $item['total_amount'] * $discountFactor);
+                $itemProportionalDiscount = ($this->isDisposableBillingItem($item) || $this->isDiscountExemptBillingItem($item)
+                    || ((bool) ($item['discount_rate_locked'] ?? false) && (float) ($item['discount_percentage'] ?? 0) <= 0))
+                    ? 0
+                    : (($data['discount_allocation'] ?? 'proportional') === 'equal'
+                        ? (float) ($item['discount'] ?? 0)
+                        : (($data['discount_type'] === 'percentage')
+                            ? ($item['total_amount'] * $this->resolveBillingItemDiscountPercent($item, (float) $data['discount'])) / 100
+                            : (float) ($item['discount'] ?? 0)));
                 $itemNetAmount = $item['total_amount'] - $itemProportionalDiscount;
 
                 // snapshot item-level commission settings when available
                 $commissionable = null;
                 $commission_rate = null;
+                $master = null;
                 $catLower = strtolower($item['category'] ?? '');
                 $isDisposable = false;
                 $itemNameLower = strtolower($item['name'] ?? '');
@@ -1156,7 +2025,7 @@ class BillingController extends Controller
                     }
                 }
                 if (in_array($catLower, ['pathology', 'radiology'])) {
-                    $master = \App\Models\Test::find($item['id']);
+                    $master = $testMasters->get($item['id']);
                     if ($master) {
                         $commissionable = $master->commissionable ?? null;
                         $commission_rate = $master->commission_rate ?? null;
@@ -1170,38 +2039,29 @@ class BillingController extends Controller
                             // ignore and keep commission_rate
                         }
 
-                        // Log snapshot values for debugging
-                        try {
-                            \Illuminate\Support\Facades\Log::debug('billing.store.item.snapshot', [
-                                'item_id' => $item['id'] ?? null,
-                                'item_name' => $item['name'] ?? null,
-                                'category' => $item['category'] ?? null,
-                                'commissionable' => $commissionable,
-                                'commission_rate_snapshot' => $commission_rate,
-                            ]);
-                        } catch (\Throwable $logEx) {
-                            // ignore
-                        }
                     }
                 }
 
                 $isRadiologyItem = in_array($catLower, ['radiology', 'ecg', 'ultrasound', 'xray', 'ultrasonogram', 'ultrasonography']);
 
-                BillItem::create([
+                $billItem = BillItem::create([
                     'billing_id' => $billing->id,
+                    'department_id' => $item['department_id'] ?? null,
                     'item_id' => $item['id'],
                     'item_name' => $item['name'],
-                    'room_no' => $item['room_no'] ?? $item['roomNo'] ?? (isset($master) ? ($master->room_no ?? null) : null),
+                    'room_no' => $this->resolveCategoryBillingRoomNo((string) $item['category'])
+                        ?? ($item['room_no'] ?? $item['roomNo'] ?? (isset($master) ? ($master->room_no ?? null) : null)),
                     'category' => $item['category'],
                     'unit_price' => $item['unit_price'],
                     'quantity' => $item['quantity'],
                     'total_amount' => $item['total_amount'],
                     'discount' => $itemProportionalDiscount,
+                    'discount_exempt' => $this->isDiscountExemptBillingItem($item),
                     'rugound' => $item['rugound'] ?? 0,
                     'net_amount' => $itemNetAmount,
                     // Only pathology items require sample collection. Ensure
                     // radiology/other categories are not marked for sample.
-                    'requires_sample' => ($catLower === 'pathology') && ! $isDisposable,
+                    'requires_sample' => $this->requiresSampleCollection($item, $catLower, $isDisposable),
                     // For radiology-like items set sample_collected_at so they
                     // appear immediately in Reporting lists.
                     'sample_collected_at' => $isRadiologyItem ? ($billing->created_at ? Carbon::parse($billing->created_at)->toDateTimeString() : now()) : null,
@@ -1211,8 +2071,10 @@ class BillingController extends Controller
                     'commission_rate' => $commission_rate,
                 ]);
 
+                $reagentConsumptionService->consumeForBillItem($billItem);
+
                 if (strtolower($item['category']) === 'medicine') {
-                    $medicine = MedicineInventory::find($item['id']);
+                    $medicine = $medicineInventories->get($item['id']);
                     if ($medicine) {
                         $newQuantity = $medicine->medicine_quantity - $item['quantity'];
                         $medicine->update(['medicine_quantity' => max(0, $newQuantity)]);
@@ -1264,21 +2126,18 @@ class BillingController extends Controller
                 $paidAmount = (float) ($billing->paid_amt ?? 0);
                 $dueAmount = (float) ($billing->due_amount ?? 0);
                 $createdBy = auth('admin')->user()->id ?? null;
-                $refType = 'Billing';
-                $refId = $billing->id;
                 $date = $billing->created_at ? $billing->created_at->toDateString() : now()->toDateString();
 
-                if ($paidAmount > 0) {
-                    $counterAccount = 'CASH';
-                    if (!empty($data['pay_mode']) && strtolower($data['pay_mode']) !== 'cash') {
-                        $counterAccount = \App\Models\Account::where('code', 'BANK')->exists() ? 'BANK' : 'CASH';
-                    }
-                    $this->ledgerService->recordIncome('DIAG_INC', $counterAccount, $paidAmount, 'Billing paid amount for ' . ($billing->bill_number ?? $billing->id), $date, $refType, $refId, $createdBy);
-                }
-
-                if ($dueAmount > 0) {
-                    $this->ledgerService->recordIncome('DIAG_INC', 'AR', $dueAmount, 'Billing due amount for ' . ($billing->bill_number ?? $billing->id), $date, $refType, $refId, $createdBy);
-                }
+                $this->billingLedgerService->recordNewBill(
+                    $data['items'] ?? [],
+                    $paidAmount,
+                    $dueAmount,
+                    $data['pay_mode'] ?? null,
+                    (string) ($billing->bill_number ?? $billing->id),
+                    $date,
+                    (int) $billing->id,
+                    $createdBy
+                );
             } catch (\Exception $e) {
                 $this->storeSystemError('Backend', 'BillingController', 'store->ledger', substr($e->getMessage(), 0, 1000));
             }
@@ -1322,15 +2181,6 @@ class BillingController extends Controller
 
             $printToken = (string) ($request->input('print_token') ?? '');
 
-            // Map print_token -> billing id so preview tab can resolve invoice quickly.
-            try {
-                if ($printToken !== '') {
-                    Cache::put('print_token_' . $printToken, $billing->id, now()->addMinutes(10));
-                }
-            } catch (\Throwable $e) {
-                // ignore token mapping failures; normal invoice open path still works.
-            }
-
             $this->storeAdminWorkLog($billing->id, 'billings', $message);
                         ActivityLogService::logCreate(
                             'Billing',
@@ -1340,6 +2190,15 @@ class BillingController extends Controller
                         );
 
             DB::commit();
+
+            // Resolve the preview token only after the bill is visible to the invoice request.
+            try {
+                if ($printToken !== '') {
+                    Cache::put('print_token_' . $printToken, $billing->id, now()->addMinutes(10));
+                }
+            } catch (\Throwable $e) {
+                // ignore token mapping failures; normal invoice open path still works.
+            }
 
             // If request expects JSON (Inertia/AJAX), return JSON with billId so
             // the frontend can immediately navigate/open invoice without relying
@@ -1351,17 +2210,9 @@ class BillingController extends Controller
             if ($request->wantsJson() || $request->ajax() || $request->expectsJson() || $request->hasHeader('X-Inertia') || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                 $invoiceUrl = '';
                 try {
-                    if ($printToken !== '') {
-                        $invoiceUrl = route('backend.download.invoice', ['print_token' => $printToken, 'module' => 'billing', 'fast_open' => 1, 'auto_print' => 1]);
-                    } else {
-                        $invoiceUrl = route('backend.download.invoice', ['id' => $billing->id, 'module' => 'billing', 'fast_open' => 1, 'auto_print' => 1]);
-                    }
+                    $invoiceUrl = route('backend.download.invoice', ['id' => $billing->id, 'module' => 'billing', 'fast_open' => 1, 'auto_print' => 1]);
                 } catch (\Throwable $e) {
-                    if ($printToken !== '') {
-                        $invoiceUrl = url('/download-invoice?print_token=' . urlencode($printToken) . '&module=billing&fast_open=1&auto_print=1');
-                    } else {
-                        $invoiceUrl = url('/download-invoice?id=' . $billing->id . '&module=billing&fast_open=1&auto_print=1');
-                    }
+                    $invoiceUrl = url('/download-invoice?id=' . $billing->id . '&module=billing&fast_open=1&auto_print=1');
                 }
 
                 return response()->json([
@@ -1376,6 +2227,9 @@ class BillingController extends Controller
                 ->back()
                 ->with('successMessage', $message)
                 ->with('billId', $billing->id);
+        } catch (\Illuminate\Validation\ValidationException $err) {
+            DB::rollBack();
+            throw $err;
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'BillingController', 'store', substr($err->getMessage(), 0, 1000));
@@ -1396,9 +2250,9 @@ class BillingController extends Controller
 
     private function buildFastOpenInvoiceHtml(Billing $billing, Request $request): string
     {
-        $module = trim((string) ($request->input('module') ?? 'billing'));
+        $module = trim((string) $request->input('module', ''));
         if ($module === '') {
-            $module = 'billing';
+            $module = $request->boolean('pharmacy_mode') ? 'pharmacy' : 'billing';
         }
 
         $items = $request->input('items', []);
@@ -1509,6 +2363,8 @@ class BillingController extends Controller
             'amount_in_words' => 'In Words: ' . number_format($netPayable, 2) . ' Taka Only',
             'header_image' => $this->fastInvoiceImageUrl($invoiceDesign?->header_photo_path),
             'footer_image' => $this->fastInvoiceImageUrl($invoiceDesign?->footer_photo_path),
+            'invoiceDesign' => $invoiceDesign,
+            'fullPagePadImage' => $this->fastInvoiceImageUrl($invoiceDesign?->full_page_pad_path),
             'footer_content' => $footerContent,
             'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below'], true)
                 ? strtolower((string) $invoiceDesign->footer_content_position)
@@ -1531,20 +2387,7 @@ class BillingController extends Controller
 
     private function resolveFastInvoiceDesign(string $module): ?InvoiceDesign
     {
-        $normalizedModule = strtolower(trim($module));
-
-        $moduleDesign = InvoiceDesign::query()
-            ->where('status', 'Active')
-            ->whereRaw('LOWER(TRIM(module)) = ?', [$normalizedModule])
-            ->first();
-        if ($moduleDesign) {
-            return $moduleDesign;
-        }
-
-        return InvoiceDesign::query()
-            ->where('status', 'Active')
-            ->whereNull('module')
-            ->first();
+        return InvoiceDesign::resolveForModule($module);
     }
 
     private function fastInvoiceImageUrl(?string $publicStorageUrl): string
@@ -1562,12 +2405,22 @@ class BillingController extends Controller
             return $rawPath;
         }
 
+        $normalizedPath = ltrim(str_replace('\\', '/', $rawPath), '/');
+        $normalizedPath = preg_replace('#^(?:storage/app/public/|public/storage/|storage/)#', '', $normalizedPath);
+        $existsInPublicStorage = $normalizedPath !== ''
+            && (Storage::disk('public')->exists($normalizedPath)
+                || is_file(public_path('storage/' . $normalizedPath))
+                || is_file(public_path($normalizedPath)));
+
+        if (!$existsInPublicStorage) {
+            return '';
+        }
+
         $resolvedUrl = publicStorageUrl($rawPath);
         if ($resolvedUrl) {
             return $resolvedUrl;
         }
 
-        $normalizedPath = ltrim(str_replace('\\', '/', $rawPath), '/');
         return asset($normalizedPath);
     }
 
@@ -1600,12 +2453,97 @@ class BillingController extends Controller
             'prescription_id' => 'required|string',
         ]);
 
-        $prescriptionId = $this->parsePrescriptionId((string) $validated['prescription_id']);
+        $rawInput = trim((string) $validated['prescription_id']);
+        $prescriptionId = $this->parsePrescriptionId($rawInput);
         if (!$prescriptionId) {
             return response()->json([
-                'message' => 'Please provide a valid prescription id.',
+                'message' => 'Please provide a valid prescription, OPD, or IPD id.',
                 'tests' => [],
+                'medicines' => [],
             ], 422);
+        }
+
+        $isIpdPrescription = (bool) preg_match('/^IPD[\s:_-]*RX[\s:_-]*/i', $rawInput);
+        $isOpdPrescription = (bool) preg_match('/^OPD[\s:_-]*RX[\s:_-]*/i', $rawInput);
+        $isIpdAdmission = (bool) preg_match('/^IPD[\s:_-]*\d/i', $rawInput) && !$isIpdPrescription;
+        $isOpdAdmission = (bool) preg_match('/^OPD[\s:_-]*\d/i', $rawInput) && !$isOpdPrescription;
+
+        if ($isIpdAdmission) {
+            $ipdPatient = IpdPatient::query()->with(['patient', 'latestPrescription.medicines', 'latestPrescription.tests'])->find($prescriptionId);
+            if ($ipdPatient) {
+                $prescription = $ipdPatient->latestPrescription;
+                return $this->prescriptionBillingResponse(
+                    'IPD',
+                    $prescription?->id,
+                    $ipdPatient->patient,
+                    $prescription?->tests?->pluck('test_name') ?? collect(),
+                    $prescription?->medicines ?? collect(),
+                    $ipdPatient
+                );
+            }
+        }
+
+        if ($isOpdAdmission) {
+            $opdPatient = OpdPatient::query()->with(['patient', 'latestPrescription.items'])->find($prescriptionId);
+            if ($opdPatient) {
+                $prescription = $opdPatient->latestPrescription;
+                $items = $prescription?->items ?? collect();
+                return $this->prescriptionBillingResponse(
+                    'OPD',
+                    $prescription?->id,
+                    $opdPatient->patient,
+                    $items->pluck('test_name'),
+                    $items->whereNotNull('medicine_name')->where('medicine_name', '<>', '')->values(),
+                    null
+                );
+            }
+        }
+
+        if ($isIpdPrescription) {
+            $ipdPrescription = IpdPrescription::query()
+                ->with(['medicines', 'tests', 'ipdPatient.patient'])
+                ->find($prescriptionId);
+            if ($ipdPrescription) {
+                return $this->prescriptionBillingResponse(
+                    'IPD',
+                    $ipdPrescription->id,
+                    $ipdPrescription->ipdPatient?->patient,
+                    $ipdPrescription->tests->pluck('test_name'),
+                    $ipdPrescription->medicines,
+                    $ipdPrescription->ipdPatient
+                );
+            }
+        }
+
+        if ($isOpdPrescription) {
+            $opdPrescription = OpdPrescription::query()
+                ->with(['items', 'opdPatient.patient'])
+                ->find($prescriptionId);
+            if ($opdPrescription) {
+                $items = $opdPrescription->items;
+                return $this->prescriptionBillingResponse(
+                    'OPD',
+                    $opdPrescription->id,
+                    $opdPrescription->opdPatient?->patient,
+                    $items->pluck('test_name'),
+                    $items->whereNotNull('medicine_name')->where('medicine_name', '<>', '')->values()
+                );
+            }
+        }
+
+        if (preg_match('/^RX[\s:_-]*/i', $rawInput)) {
+            $standalone = Prescription::query()
+                ->with(['tests', 'medicines', 'patient'])
+                ->find($prescriptionId);
+            if ($standalone) {
+                return $this->prescriptionBillingResponse(
+                    'Prescription',
+                    $standalone->id,
+                    $standalone->patient,
+                    $standalone->tests->pluck('test_name'),
+                    $standalone->medicines
+                );
+            }
         }
 
         $opdPrescription = OpdPrescription::query()
@@ -1613,25 +2551,14 @@ class BillingController extends Controller
             ->find($prescriptionId);
 
         if ($opdPrescription) {
-            $testNames = collect($opdPrescription->items)
-                ->pluck('test_name')
-                ->map(fn ($name) => trim((string) $name))
-                ->filter(fn ($name) => $name !== '')
-                ->unique()
-                ->values();
-
-            return response()->json([
-                'source' => 'OPD',
-                'prescription_id' => $opdPrescription->id,
-                'patient' => [
-                    'id' => $opdPrescription->opdPatient?->patient?->id,
-                    'name' => $opdPrescription->opdPatient?->patient?->name,
-                    'phone' => $opdPrescription->opdPatient?->patient?->phone,
-                    'gender' => $opdPrescription->opdPatient?->patient?->gender,
-                    'dob' => $opdPrescription->opdPatient?->patient?->dob,
-                ],
-                'tests' => $testNames,
-            ]);
+            $items = $opdPrescription->items;
+            return $this->prescriptionBillingResponse(
+                'OPD',
+                $opdPrescription->id,
+                $opdPrescription->opdPatient?->patient,
+                $items->pluck('test_name'),
+                $items->whereNotNull('medicine_name')->where('medicine_name', '<>', '')->values()
+            );
         }
 
         $ipdPrescription = IpdPrescription::query()
@@ -1639,31 +2566,141 @@ class BillingController extends Controller
             ->find($prescriptionId);
 
         if ($ipdPrescription) {
-            $testNames = collect($ipdPrescription->tests)
-                ->pluck('test_name')
-                ->map(fn ($name) => trim((string) $name))
-                ->filter(fn ($name) => $name !== '')
-                ->unique()
-                ->values();
+            return $this->prescriptionBillingResponse(
+                'IPD',
+                $ipdPrescription->id,
+                $ipdPrescription->ipdPatient?->patient,
+                $ipdPrescription->tests->pluck('test_name'),
+                $ipdPrescription->medicines,
+                $ipdPrescription->ipdPatient
+            );
+        }
 
-            return response()->json([
-                'source' => 'IPD',
-                'prescription_id' => $ipdPrescription->id,
-                'patient' => [
-                    'id' => $ipdPrescription->ipdPatient?->patient?->id,
-                    'name' => $ipdPrescription->ipdPatient?->patient?->name,
-                    'phone' => $ipdPrescription->ipdPatient?->patient?->phone,
-                    'gender' => $ipdPrescription->ipdPatient?->patient?->gender,
-                    'dob' => $ipdPrescription->ipdPatient?->patient?->dob,
-                ],
-                'tests' => $testNames,
-            ]);
+        $standalone = Prescription::query()
+            ->with(['tests', 'medicines', 'patient'])
+            ->where(function ($query) use ($prescriptionId) {
+                $query->where('id', $prescriptionId)
+                    ->orWhere('prescription_no', 'like', '%' . $prescriptionId . '%');
+            })
+            ->first();
+
+        if ($standalone) {
+            return $this->prescriptionBillingResponse(
+                'Prescription',
+                $standalone->id,
+                $standalone->patient,
+                $standalone->tests->pluck('test_name'),
+                $standalone->medicines
+            );
+        }
+
+        $ipdPatient = IpdPatient::query()->with(['patient', 'latestPrescription.medicines', 'latestPrescription.tests'])->find($prescriptionId);
+        if ($ipdPatient) {
+            $prescription = $ipdPatient->latestPrescription;
+            return $this->prescriptionBillingResponse(
+                'IPD',
+                $prescription?->id,
+                $ipdPatient->patient,
+                $prescription?->tests?->pluck('test_name') ?? collect(),
+                $prescription?->medicines ?? collect(),
+                $ipdPatient
+            );
+        }
+
+        $opdPatient = OpdPatient::query()->with(['patient', 'latestPrescription.items'])->find($prescriptionId);
+        if ($opdPatient) {
+            $prescription = $opdPatient->latestPrescription;
+            $items = $prescription?->items ?? collect();
+            return $this->prescriptionBillingResponse(
+                'OPD',
+                $prescription?->id,
+                $opdPatient->patient,
+                $items->pluck('test_name'),
+                $items->whereNotNull('medicine_name')->where('medicine_name', '<>', '')->values()
+            );
         }
 
         return response()->json([
-            'message' => 'Prescription not found.',
+            'message' => 'Prescription, OPD, or IPD record not found.',
             'tests' => [],
+            'medicines' => [],
         ], 404);
+    }
+
+    private function prescriptionBillingResponse(string $source, ?int $prescriptionId, $patient, $tests, $prescribedMedicines, ?IpdPatient $ipdPatient = null)
+    {
+        $medicineRows = collect($prescribedMedicines)
+            ->map(function ($medicine) {
+                return [
+                    'medicine_name' => trim((string) ($medicine->medicine_name ?? '')),
+                    'generic_name' => $medicine->generic_name ?? null,
+                    'quantity' => max(1, (float) ($medicine->quantity ?? 1)),
+                ];
+            })
+            ->filter(fn ($medicine) => $medicine['medicine_name'] !== '')
+            ->values();
+
+        $medicineNames = $medicineRows->pluck('medicine_name')->unique()->values();
+        $inventoryByName = $medicineNames->isEmpty()
+            ? collect()
+            : MedicineInventory::query()
+                ->where('status', 'Active')
+                ->whereIn('medicine_name', $medicineNames)
+                ->get(['id', 'medicine_name', 'medicine_unit_selling_price', 'medicine_quantity'])
+                ->unique(fn ($item) => mb_strtolower(trim((string) $item->medicine_name)))
+                ->keyBy(fn ($item) => mb_strtolower(trim((string) $item->medicine_name)));
+
+        $formattedMedicines = $medicineRows->map(function ($medicine) use ($inventoryByName) {
+            $inventory = $inventoryByName->get(mb_strtolower($medicine['medicine_name']));
+
+            return [
+                ...$medicine,
+                'medicine_id' => $inventory?->id,
+                'sale_price' => (float) ($inventory?->medicine_unit_selling_price ?? 0),
+                'available_quantity' => (float) ($inventory?->medicine_quantity ?? 0),
+            ];
+        });
+
+        return response()->json([
+            'source' => $source,
+            'prescription_id' => $prescriptionId,
+            'ipd_patient_id' => $ipdPatient?->id,
+            'ipd_prescription_id' => $source === 'IPD' ? $prescriptionId : null,
+            'patient' => [
+                'id' => $patient?->id,
+                'name' => $patient?->name ?: trim((string) (($patient?->first_name ?? '') . ' ' . ($patient?->last_name ?? ''))),
+                'phone' => $patient?->phone,
+                'gender' => $patient?->gender,
+                'dob' => $patient?->dob,
+            ],
+            'tests' => collect($tests)
+                ->map(fn ($name) => trim((string) $name))
+                ->filter()
+                ->unique()
+                ->values(),
+            'medicines' => $formattedMedicines,
+        ]);
+    }
+
+    private function pharmacyPrescriptionSearchValue(Request $request): string
+    {
+        if ($request->filled('ipd_prescription_id')) {
+            return 'IPD-RX-' . (int) $request->input('ipd_prescription_id');
+        }
+
+        if ($request->filled('ipd_patient_id')) {
+            return 'IPD-' . (int) $request->input('ipd_patient_id');
+        }
+
+        if ($request->filled('opd_patient_id')) {
+            return 'OPD-' . (int) $request->input('opd_patient_id');
+        }
+
+        if ($request->filled('prescription_id')) {
+            return 'RX-' . (int) $request->input('prescription_id');
+        }
+
+        return '';
     }
 
     public function searchPrescriptionSuggestions(Request $request)
@@ -1687,7 +2724,8 @@ class BillingController extends Controller
                     'id' => $prescription->id,
                     'source' => 'OPD',
                     'patient_name' => $prescription->opdPatient?->patient?->name,
-                    'label' => 'OPD-' . $prescription->id,
+                    'label' => 'OPD-RX-' . $prescription->id,
+                    'search_value' => 'OPD-RX-' . $prescription->id,
                 ];
             });
 
@@ -1702,13 +2740,67 @@ class BillingController extends Controller
                     'id' => $prescription->id,
                     'source' => 'IPD',
                     'patient_name' => $prescription->ipdPatient?->patient?->name,
-                    'label' => 'IPD-' . $prescription->id,
+                    'label' => 'IPD-RX-' . $prescription->id,
+                    'search_value' => 'IPD-RX-' . $prescription->id,
                 ];
             });
+
+        $standalone = collect();
+        if (\Illuminate\Support\Facades\Schema::hasTable('prescriptions')) {
+            $standalone = Prescription::query()
+                ->with(['patient'])
+                ->where(function ($query) use ($search, $normalizedSearch) {
+                    $query->where('id', 'like', '%' . $normalizedSearch . '%')
+                        ->orWhere('prescription_no', 'like', '%' . $search . '%');
+                })
+                ->latest('id')
+                ->limit(8)
+                ->get()
+                ->map(function ($prescription) {
+                    return [
+                        'id' => $prescription->id,
+                        'source' => 'Prescription',
+                        'patient_name' => $prescription->patient?->name,
+                        'label' => $prescription->prescription_no ?: ('RX-' . $prescription->id),
+                        'search_value' => 'RX-' . $prescription->id,
+                    ];
+                });
+        }
+
+        $opdAdmissions = OpdPatient::query()
+            ->with('patient')
+            ->where('id', 'like', '%' . $normalizedSearch . '%')
+            ->latest('id')
+            ->limit(5)
+            ->get()
+            ->map(fn ($opdPatient) => [
+                'id' => $opdPatient->id,
+                'source' => 'OPD Patient',
+                'patient_name' => $opdPatient->patient?->name,
+                'label' => 'OPD-' . $opdPatient->id,
+                'search_value' => 'OPD-' . $opdPatient->id,
+            ]);
+
+        $ipdAdmissions = IpdPatient::query()
+            ->with('patient')
+            ->where('id', 'like', '%' . $normalizedSearch . '%')
+            ->latest('id')
+            ->limit(5)
+            ->get()
+            ->map(fn ($ipdPatient) => [
+                'id' => $ipdPatient->id,
+                'source' => 'IPD Patient',
+                'patient_name' => $ipdPatient->patient?->name,
+                'label' => 'IPD-' . $ipdPatient->id,
+                'search_value' => 'IPD-' . $ipdPatient->id,
+            ]);
 
         $suggestions = collect()
             ->merge($opd)
             ->merge($ipd)
+            ->merge($standalone)
+            ->merge($opdAdmissions)
+            ->merge($ipdAdmissions)
             ->sortByDesc('id')
             ->take(12)
             ->values();
@@ -1862,16 +2954,7 @@ class BillingController extends Controller
                 'doctor_name' => $billing->doctor_name,
                 'commission_percentage' => $data['commission_slider'] ?? 0,
                 'commission_amount' => $data['physyst_amt'] ?? 0,
-                'tests' => json_encode($pathologyItems->map(function ($item) {
-                    return [
-                        'test_id' => $item['id'],
-                        'test_name' => $item['name'],
-                        'unit_price' => $item['unit_price'],
-                        'quantity' => $item['quantity'],
-                        'total_amount' => $item['total_amount'],
-                        'net_amount' => $item['net_amount']
-                    ];
-                })->toArray()),
+                'tests' => json_encode($this->formatPathologyItemsForMachine($pathologyItems)),
                 'subtotal' => $pathologyItems->sum('total_amount'),
                 'discount_percentage' => $data['discount_type'] === 'percentage' ? $data['discount'] : 0,
                 'discount_amount' => $totalPathologyDiscount,
@@ -1899,16 +2982,7 @@ class BillingController extends Controller
                 'doctor_name' => $billing->doctor_name,
                 'commission_percentage' => $data['commission_slider'] ?? 0,
                 'commission_amount' => $data['physyst_amt'] ?? 0,
-                'tests' => json_encode($pathologyItems->map(function ($item) {
-                    return [
-                        'test_id' => $item['id'],
-                        'test_name' => $item['name'],
-                        'unit_price' => $item['unit_price'],
-                        'quantity' => $item['quantity'],
-                        'total_amount' => $item['total_amount'],
-                        'net_amount' => $item['net_amount']
-                    ];
-                })->toArray()),
+                'tests' => json_encode($this->formatPathologyItemsForMachine($pathologyItems)),
                 'subtotal' => $pathologyItems->sum('total_amount'),
                 'discount_percentage' => $data['discount_type'] === 'percentage' ? $data['discount'] : 0,
                 'discount_amount' => $totalPathologyDiscount,
@@ -1925,6 +2999,30 @@ class BillingController extends Controller
 
             return Pathology::create($pathologyData);
         }
+    }
+
+    private function formatPathologyItemsForMachine($pathologyItems): array
+    {
+        $testsById = Test::query()
+            ->whereIn('id', $pathologyItems->pluck('id')->filter()->unique())
+            ->get(['id', 'test_name', 'test_short_name'])
+            ->keyBy('id');
+
+        return $pathologyItems->map(function ($item) use ($testsById) {
+            $test = $testsById->get($item['id'] ?? null);
+            $testCode = trim((string) ($test?->test_short_name ?? ''));
+
+            return [
+                'test_id' => $item['id'],
+                'test_name' => $item['name'],
+                'test_short_name' => $testCode,
+                'test_code' => $testCode !== '' ? $testCode : (string) ($item['name'] ?? ''),
+                'unit_price' => $item['unit_price'],
+                'quantity' => $item['quantity'],
+                'total_amount' => $item['total_amount'],
+                'net_amount' => $item['net_amount'],
+            ];
+        })->values()->all();
     }
 
     private function generatePathologyNumber($lastPathology = null)
@@ -2083,8 +3181,43 @@ class BillingController extends Controller
         $billDate = $billing->created_at ? Carbon::parse($billing->created_at) : now();
         $totalMedicineDiscount = $medicineItems->sum('discount');
         $medicineNetAmount = $medicineItems->sum('net_amount');
-
         $existingPharmacyBill = PharmacyBill::withTrashed()->where('bill_no', $billing->bill_number)->first();
+        $ipdPatientQuery = IpdPatient::query()
+            ->where('patient_id', $billing->patient_id);
+
+        if (!empty($data['ipd_patient_id'])) {
+            $ipdPatientQuery->whereKey((int) $data['ipd_patient_id']);
+        } elseif ($existingPharmacyBill?->ipd_patient_id) {
+            $ipdPatientQuery->whereKey((int) $existingPharmacyBill->ipd_patient_id);
+        } else {
+            $ipdPatientQuery->where('status', 'Active');
+        }
+
+        $ipdPatient = $ipdPatientQuery->latest('id')->first();
+        $ipdPrescriptionId = null;
+        if ($ipdPatient) {
+            $preferredIpdPrescriptionId = $data['ipd_prescription_id']
+                ?? $existingPharmacyBill?->ipd_prescription_id;
+            $ipdPrescriptionQuery = IpdPrescription::query()
+                ->where('ipd_patient_id', $ipdPatient->id);
+            if ($preferredIpdPrescriptionId) {
+                $ipdPrescriptionQuery->whereKey((int) $preferredIpdPrescriptionId);
+            }
+
+            $ipdPrescriptionId = $ipdPrescriptionQuery->value('id');
+
+            if (!$ipdPrescriptionId) {
+                $ipdPrescriptionId = IpdPrescription::query()
+                    ->where('ipd_patient_id', $ipdPatient->id)
+                    ->latest('id')
+                    ->value('id');
+            }
+        }
+        $ipdLinkData = [
+            'ipd_patient_id' => $ipdPatient?->id,
+            'ipd_prescription_id' => $ipdPrescriptionId,
+            'billing_id' => $billing->id,
+        ];
 
         if ($existingPharmacyBill) {
             if ($existingPharmacyBill->trashed()) {
@@ -2092,6 +3225,7 @@ class BillingController extends Controller
             }
             $existingPharmacyBill->update([
                 'patient_id' => $billing->patient_id,
+                ...$ipdLinkData,
                 'doctor_id' => $billing->doctor_id,
                 'doctor_name' => $billing->doctor_name,
                 'products' => json_encode($medicineItems->map(function ($item) {
@@ -2117,8 +3251,7 @@ class BillingController extends Controller
 
             return $existingPharmacyBill;
         } else {
-            $lastPharmacyBill = PharmacyBill::orderby('id', 'desc')->first();
-            $pharmacyNo = $this->generatePharmacyNumber($lastPharmacyBill);
+            $pharmacyNo = $this->generatePharmacyNumber();
 
             $vatPercentage = 0.0;
             try {
@@ -2140,6 +3273,7 @@ class BillingController extends Controller
             $vatAmount = ($medicineNetAmount * $vatPercentage) / 100.0;
 
             $pharmacyBillData = [
+                ...$ipdLinkData,
                 'pharmacy_no' => $pharmacyNo,
                 'bill_no' => $billing->bill_number,
                 'case_id' => $billing->case_number,
@@ -2181,22 +3315,22 @@ class BillingController extends Controller
         }
     }
 
-    private function generatePharmacyNumber($lastPharmacyBill = null)
+    protected function generatePharmacyNumber()
     {
         $prefix = web_setting_prefix('pharmacy_bill_prefix', 'PHAB');
         $year = date('Y');
-
-        if ($lastPharmacyBill && $lastPharmacyBill->pharmacy_no) {
-            $lastNumber = (int) substr($lastPharmacyBill->pharmacy_no, -4);
-            $newNumber = str_pad($lastNumber + 1, 4, '0', STR_PAD_LEFT);
-        } else {
-            $newNumber = '0001';
-        }
+        $lastPharmacyNumber = PharmacyBill::withTrashed()
+            ->where('pharmacy_no', 'like', $prefix . $year . '%')
+            ->lockForUpdate()
+            ->orderByDesc('pharmacy_no')
+            ->value('pharmacy_no');
+        $lastNumber = $lastPharmacyNumber ? (int) substr((string) $lastPharmacyNumber, -4) : 0;
+        $newNumber = str_pad((string) ($lastNumber + 1), 4, '0', STR_PAD_LEFT);
 
         return $prefix . $year . $newNumber;
     }
 
-    public function edit($id)
+    public function edit(Request $request, $id)
     {
         $billing = $this->billingService->find($id);
 
@@ -2206,11 +3340,21 @@ class BillingController extends Controller
                 ->with('errorMessage', 'Billing not found.');
         }
 
+        $isPharmacyMode = $request->boolean('pharmacy_mode') || user_is_pharmacy_only(auth('admin')->user());
+        $hasGeneralBillingEdit = auth('admin')->user()->can('billing-edit');
+        $hasLinkedPharmacyBill = PharmacyBill::query()
+            ->where('billing_id', $billing->id)
+            ->orWhere('bill_no', $billing->bill_number)
+            ->exists();
+
+        if (($isPharmacyMode && !$hasLinkedPharmacyBill) || (!$hasGeneralBillingEdit && !$isPharmacyMode)) {
+            abort(403);
+        }
+
         $billing->load('billItems');
 
         $hospitalCharges = $this->getHospitalCharges();
 
-        $medicineInventories = $this->getBillingMedicineInventories();
         $doctors = $this->getBillingDoctors();
         $patients = $this->getBillingPatients();
         $referrers = $this->getBillingReferrers();
@@ -2242,6 +3386,14 @@ class BillingController extends Controller
             'commission_slider' => $billing->commission_slider,
             'referrer_id' => $billing->referrer_id,
             'items' => $billing->billItems->map(function ($item) {
+                $masterTest = Test::query()->find($item->item_id);
+                $isDiscountRateLocked = (bool) ($masterTest?->discount_rate_locked ?? false);
+                $lineTotal = (float) ($item->total_amount ?? 0);
+                $savedDiscount = (float) ($item->discount ?? 0);
+                $savedDiscountPercentage = $lineTotal > 0
+                    ? round(($savedDiscount / $lineTotal) * 100, 4)
+                    : 0;
+
                 return [
                     'id' => $item->item_id,
                     'name' => $item->item_name,
@@ -2252,6 +3404,11 @@ class BillingController extends Controller
                     'discount' => $item->discount,
                     'rugound' => $item->rugound,
                     'net_amount' => $item->net_amount,
+                    'discount_exempt' => (bool) $item->discount_exempt,
+                    'discount_percentage' => $isDiscountRateLocked
+                        ? (float) ($masterTest?->discount_percentage ?? $savedDiscountPercentage)
+                        : 0,
+                    'discount_rate_locked' => $isDiscountRateLocked,
                     'room_no' => $item->room_no,
                 ];
             })->toArray()
@@ -2280,7 +3437,7 @@ class BillingController extends Controller
         return Inertia::render(
             'Backend/Billing/BillingPage',
             [
-                'pageTitle' => fn() => 'Edit Billing - ' . $billing->bill_number,
+                'pageTitle' => fn() => ($isPharmacyMode ? 'Edit Pharmacy Bill - ' : 'Edit Billing - ') . $billing->bill_number,
                 'breadcrumbs' => fn() => [
                     ['link' => null, 'title' => 'Billing Manage'],
                     ['link' => route('backend.billing.list'), 'title' => 'Billing List'],
@@ -2288,16 +3445,26 @@ class BillingController extends Controller
                 ],
                 'billing' => fn() => $billing,
                 'editData' => fn() => $editData,
+                'isPharmacyDepartment' => fn() => $isPharmacyMode,
+                'canAccessPharmacyBillList' => fn() => auth('admin')->user()->can('pharmacy-bill-list'),
                 'pathologyAndRadiologyTests' => Inertia::defer(fn() => $this->getBillingTests(
                     ['Pathology', 'Radiology', 'ECG', 'Ultrasound'], 
-                    'billing:tests:edit'
-                )),
-                'medicineInventories' => Inertia::defer(fn() => $this->getBillingMedicineInventories()),
-                'doctors' => Inertia::defer(fn() => $this->getBillingDoctors()),
-                'patients' => Inertia::defer(fn() => $this->getBillingPatients()),
+                    'billing:tests:edit:v2'
+                ), 'billing-catalog'),
+                'billingCatalogLoaded' => Inertia::defer(fn() => true, 'billing-catalog'),
+                'doctors' => Inertia::defer(fn() => $this->getBillingDoctors(), 'billing-support'),
+                'patients' => Inertia::defer(fn() => $this->getBillingPatients(), 'billing-support'),
                 'id' => fn() => $id,
-                'referrers' => Inertia::defer(fn() => $referrers),
-
+                'referrers' => Inertia::defer(fn() => $referrers, 'billing-support'),
+                'testCategories' => fn() => \App\Models\TestCategory::query()->whereNull('deleted_at')->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
+                'categoryTypeOptions' => fn() => app(\App\Services\TestCategoryService::class)->activeNames(),
+                'mainCategories' => fn() => \App\Models\MainCategory::query()->whereNull('deleted_at')->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
+                'pathologyUnits' => fn() => app(\App\Services\PathologyUnitService::class)->activeList(),
+                'testParameters' => fn() => app(\App\Services\PathologyParameterService::class)->activeList(),
+                'chargeTypes' => fn() => \App\Models\ChargeType::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
+                'chargeCategories' => fn() => \App\Models\ChargeCategory::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
+                'chargeUnits' => fn() => \App\Models\ChargeUnitType::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
+                'taxCategories' => fn() => \App\Models\ChargeTaxCategory::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name']),
             ]
         );
     }
@@ -2334,13 +3501,32 @@ class BillingController extends Controller
         DB::beginTransaction();
         try {
             $data = $request->validated();
+            $adminUser = auth('admin')->user();
+            $pharmacyMode = (bool) ($data['pharmacy_mode'] ?? false) || user_is_pharmacy_only($adminUser);
+            $hasGeneralBillingEdit = $adminUser->can('billing-edit');
+            $linkedPharmacyBill = PharmacyBill::query()
+                ->where('billing_id', $id)
+                ->orWhereIn('bill_no', Billing::query()->whereKey($id)->select('bill_number'))
+                ->exists();
+
+            if (($pharmacyMode && !$linkedPharmacyBill) || (!$hasGeneralBillingEdit && !$pharmacyMode)) {
+                abort(403);
+            }
+
+            if ($pharmacyMode && collect($data['items'])->contains(
+                fn ($item) => strtolower(trim((string) ($item['category'] ?? ''))) !== 'medicine'
+            )) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'items' => 'Pharmacy billing only supports medicine items.',
+                ]);
+            }
+
             $expectsJsonResponse = $request->wantsJson()
                 || $request->ajax()
                 || $request->expectsJson()
                 || $request->hasHeader('X-Inertia')
                 || $request->header('X-Requested-With') === 'XMLHttpRequest';
 
-            $adminUser = auth('admin')->user();
             $adminId = (int) ($adminUser?->id ?? 0);
             $adminName = trim((string) ($adminUser?->name ?? ''));
             if (!$this->hasOpenCounterSessionForAdmin($adminId, $adminName)) {
@@ -2366,6 +3552,8 @@ class BillingController extends Controller
                     ->with('errorMessage', 'Billing not found.');
             }
 
+            $previousRefundBalance = (float) ($billing->return_amt ?? 0);
+
             // Use unified patient handler with existing billing
             $patientResult = $this->handlePatientData($data, $billing);
             $patientId = $patientResult['patient_id'];
@@ -2383,6 +3571,38 @@ class BillingController extends Controller
             }
 
             $data = array_merge($data, $this->normalizeBillingPaymentData($data));
+
+            // Keep radiology-related subtypes distinct so Ultrasound/ECG do not
+            // collapse into the Radiology bucket during bill edits.
+            if (!empty($data['items']) && is_array($data['items'])) {
+                $data['items'] = array_map(function ($it) {
+                    $cat = strtolower(trim((string) ($it['category'] ?? '')));
+                    $name = strtolower(trim((string) ($it['name'] ?? '')));
+
+                    foreach (['ultrasound', 'ultrasonogram', 'ultrasonography', 'usg', 'sono', 'sonography'] as $kw) {
+                        if (str_contains($cat, $kw) || str_contains($name, $kw)) {
+                            $it['category'] = 'Ultrasound';
+                            return $it;
+                        }
+                    }
+
+                    foreach (['ecg', 'ekg', 'electrocardiogram'] as $kw) {
+                        if (str_contains($cat, $kw) || str_contains($name, $kw)) {
+                            $it['category'] = 'ECG';
+                            return $it;
+                        }
+                    }
+
+                    foreach (['radiology', 'xray', 'x-ray', 'x ray', 'imaging', 'ct', 'mri', 'radiolog'] as $kw) {
+                        if (str_contains($cat, $kw) || str_contains($name, $kw)) {
+                            $it['category'] = 'Radiology';
+                            return $it;
+                        }
+                    }
+
+                    return $it;
+                }, $data['items']);
+            }
 
             // Store old quantities for medicine inventory rollback
             $oldBillItems = BillItem::where('billing_id', $id)->get();
@@ -2462,6 +3682,8 @@ class BillingController extends Controller
                 throw new Exception('Failed to update billing record');
             }
 
+            app(\App\Services\ReagentConsumptionService::class)->restoreForBilling((int) $id);
+
             // Delete existing billing items
             BillItem::where('billing_id', $id)->delete();
 
@@ -2470,13 +3692,22 @@ class BillingController extends Controller
             $discountableBillAmount = (($data['discount_type'] ?? '') === 'percentage')
                 ? collect($data['items'])
                     ->reject(fn ($item) => $this->isDisposableBillingItem($item))
+                    ->reject(fn ($item) => $this->isDiscountExemptBillingItem($item))
                     ->sum('total_amount')
-                : $totalBillAmountBeforeDiscount;
+                : collect($data['items'])
+                    ->reject(fn ($item) => $this->isDisposableBillingItem($item))
+                    ->reject(fn ($item) => $this->isDiscountExemptBillingItem($item))
+                    ->sum('total_amount');
             $totalDiscountAmount = 0;
             if (($data['discount_type'] ?? '') === 'percentage') {
-                $totalDiscountAmount = $discountableBillAmount * (($data['discount'] ?? 0) / 100);
+                $totalDiscountAmount = collect($data['items'])->sum(
+                    fn ($item) => ((float) ($item['total_amount'] ?? 0) * $this->resolveBillingItemDiscountPercent($item, (float) ($data['discount'] ?? 0))) / 100
+                );
             } else {
-                $totalDiscountAmount = $data['discount'] ?? 0;
+                $totalDiscountAmount = min(
+                    max(0, (float) ($data['discount'] ?? 0)),
+                    $discountableBillAmount
+                );
             }
 
             $discountFactor = ($discountableBillAmount > 0)
@@ -2544,13 +3775,14 @@ class BillingController extends Controller
                     }
 
                 $isRadiologyItem = in_array($catLower, ['radiology', 'ecg', 'ultrasound', 'xray', 'ultrasonogram', 'ultrasonography']);
-                $itemDiscount = ($data['discount_allocation'] ?? 'proportional') === 'equal'
-                    ? ($this->isDisposableBillingItem($item) ? 0 : (float) ($item['discount'] ?? 0))
-                    : (($data['discount_type'] ?? '') === 'percentage' && $this->isDisposableBillingItem($item)
-                        ? 0
+                $itemDiscount = ($this->isDisposableBillingItem($item) || $this->isDiscountExemptBillingItem($item)
+                    || ((bool) ($item['discount_rate_locked'] ?? false) && (float) ($item['discount_percentage'] ?? 0) <= 0))
+                    ? 0
+                    : (($data['discount_allocation'] ?? 'proportional') === 'equal'
+                        ? (float) ($item['discount'] ?? 0)
                         : (($data['discount_type'] ?? '') === 'percentage'
-                            ? ($item['total_amount'] * $discountFactor)
-                            : ($item['discount'] ?? 0)));
+                            ? ($item['total_amount'] * $this->resolveBillingItemDiscountPercent($item, (float) ($data['discount'] ?? 0))) / 100
+                            : (float) ($item['discount'] ?? 0)));
                 $itemNetAmount = ($data['discount_type'] ?? '') === 'percentage'
                     ? ($item['total_amount'] - $itemDiscount)
                     : ($item['net_amount'] ?? $item['total_amount']);
@@ -2562,19 +3794,22 @@ class BillingController extends Controller
                     'total_amount' => $item['total_amount'] ?? $item['net_amount'] ?? 0,
                 ];
 
-                BillItem::create([
+                $billItem = BillItem::create([
                     'billing_id' => $id,
+                    'department_id' => $item['department_id'] ?? null,
                     'item_id' => $item['id'],
                     'item_name' => $item['name'],
-                    'room_no' => $item['room_no'] ?? $item['roomNo'] ?? (isset($master) ? ($master->room_no ?? null) : null),
+                    'room_no' => $this->resolveCategoryBillingRoomNo((string) $item['category'])
+                        ?? ($item['room_no'] ?? $item['roomNo'] ?? (isset($master) ? ($master->room_no ?? null) : null)),
                     'category' => $item['category'],
                     'unit_price' => $item['unit_price'],
                     'quantity' => $item['quantity'],
                     'total_amount' => $item['total_amount'],
                     'discount' => $itemDiscount,
+                    'discount_exempt' => $this->isDiscountExemptBillingItem($item),
                     'rugound' => $item['rugound'] ?? 0,
                     'net_amount' => $itemNetAmount,
-                    'requires_sample' => ($catLower === 'pathology') && ! $isDisposable,
+                    'requires_sample' => $this->requiresSampleCollection($item, $catLower, $isDisposable),
                     'sample_collected_at' => $isRadiologyItem ? ($billing->created_at ? Carbon::parse($billing->created_at)->toDateTimeString() : now()) : null,
                     'sample_collected_by' => $isRadiologyItem ? auth('admin')->id() : null,
                     'created_at' => $billing->created_at ? Carbon::parse($billing->created_at)->toDateTimeString() : now(),
@@ -2582,6 +3817,8 @@ class BillingController extends Controller
                     'commissionable' => $commissionable,
                     'commission_rate' => $commission_rate,
                 ]);
+
+                app(\App\Services\ReagentConsumptionService::class)->consumeForBillItem($billItem);
 
                 // Update medicine inventory for new quantities
                 if (strtolower($item['category']) === 'medicine') {
@@ -2597,6 +3834,21 @@ class BillingController extends Controller
 
             $this->updatePaymentRecords($id, $data);
 
+            // When an already-paid bill is edited and an item is removed, the
+            // reduced payable amount becomes a pending refundable balance.
+            // It must not affect Net Income until Refund List processing.
+            $billing = Billing::findOrFail($id);
+            $processedRefundAmount = (float) DB::table('refund_transactions')
+                ->where('billing_id', $id)
+                ->sum('refund_amount');
+            $refundableBalance = max(
+                0,
+                round((float) ($billing->paid_amt ?? 0) - (float) ($billing->payable_amount ?? 0) - $processedRefundAmount, 2)
+            );
+            if (abs($refundableBalance - $previousRefundBalance) > 0.009) {
+                $billing->return_amt = $refundableBalance;
+                $billing->save();
+            }
             // Update related records (pathology, radiology, pharmacy)
             $pathologyItems = collect($data['items'])->where('category', 'Pathology');
             if ($pathologyItems->isNotEmpty()) {
@@ -2630,36 +3882,33 @@ class BillingController extends Controller
                 Referral::where('billing_id', $id)->delete();
 
                 $referrer = $this->referrerService->find($data['referrer_id']);
-                $totalCommission = 0;
-                $categoryCommissions = [];
+                $commissionResult = app(ReferralCommissionCalculator::class)->calculate(
+                    $data['items'],
+                    (float) $billingData['payable_amount'],
+                    function ($item) use ($referrer) {
+                        $category = $this->normalizeReferralCommissionCategory($item['category'] ?? '', $item['name'] ?? '');
 
-                foreach ($data['items'] as $item) {
-                    $category = $this->normalizeReferralCommissionCategory($item['category'] ?? '');
-                    $commissionRate = $this->resolveReferrerCommissionRate(
-                        $referrer,
-                        $category,
-                        isset($item['id']) ? (int) $item['id'] : null
-                    );
-
-                    $itemCommission = ($item['net_amount'] * $commissionRate) / 100;
-                    $totalCommission += $itemCommission;
-
-                    if (!isset($categoryCommissions[$category])) {
-                        $categoryCommissions[$category] = [
-                            'rate' => $commissionRate,
-                            'amount' => 0,
-                            'items' => []
+                        return [
+                            'category' => $category,
+                            'rate' => $this->resolveReferrerCommissionRate(
+                                $referrer,
+                                $category,
+                                isset($item['id']) ? (int) $item['id'] : null,
+                                (string) ($item['name'] ?? ''),
+                                array_key_exists('referral_percentage', $item)
+                                    ? (float) $item['referral_percentage']
+                                    : null
+                            ),
                         ];
                     }
-
-                    $categoryCommissions[$category]['amount'] += $itemCommission;
-                    $categoryCommissions[$category]['items'][] = [
-                        'item_id' => $item['id'],
-                        'item_name' => $item['name'],
-                        'amount' => $item['net_amount'],
-                        'commission' => $itemCommission
-                    ];
-                }
+                );
+                $totalCommission = $commissionResult['total'];
+                $categoryCommissions = $commissionResult['categories'];
+                $data['commission_total'] = $totalCommission;
+                $data['physyst_amt'] = $totalCommission;
+                $billing->commission_total = $totalCommission;
+                $billing->physyst_amt = $totalCommission;
+                $billing->save();
 
                 $refData = [
                     'billing_id' => $id,
@@ -2667,7 +3916,7 @@ class BillingController extends Controller
                     'total_commission_amount' => $totalCommission,
                     'category_commissions' => $categoryCommissions,
                     'date' => ($billing->created_at ? Carbon::parse($billing->created_at)->toDateString() : now()->toDateString()),
-                    'total_bill_amount' => $data['total'],
+                    'total_bill_amount' => $billingData['payable_amount'],
                     'status' => 'Active'
                 ];
 
@@ -2677,12 +3926,6 @@ class BillingController extends Controller
 
                 Referral::create($refData);
 
-                if (empty($data['commission_total'])) {
-                    $data['commission_total'] = $totalCommission;
-                }
-                if (empty($data['physyst_amt'])) {
-                    $data['physyst_amt'] = $data['commission_total'] ?? 0;
-                }
             } else {
                 Referral::where('billing_id', $id)->delete();
             }
@@ -2728,17 +3971,9 @@ class BillingController extends Controller
 
             if ($request->wantsJson() || $request->ajax() || $request->expectsJson() || $request->hasHeader('X-Inertia') || $request->header('X-Requested-With') === 'XMLHttpRequest') {
                 try {
-                    if ($printToken !== '') {
-                        $invoiceUrl = route('backend.download.invoice', ['print_token' => $printToken, 'module' => 'billing', 'fast_open' => 1, 'auto_print' => 1]);
-                    } else {
-                        $invoiceUrl = route('backend.download.invoice', ['id' => $billing->id, 'module' => 'billing', 'fast_open' => 1, 'auto_print' => 1]);
-                    }
+                    $invoiceUrl = route('backend.download.invoice', ['id' => $billing->id, 'module' => 'billing', 'fast_open' => 1, 'auto_print' => 1]);
                 } catch (\Throwable $e) {
-                    if ($printToken !== '') {
-                        $invoiceUrl = url('/download-invoice?print_token=' . urlencode($printToken) . '&module=billing&fast_open=1&auto_print=1');
-                    } else {
-                        $invoiceUrl = url('/download-invoice?id=' . $billing->id . '&module=billing&fast_open=1&auto_print=1');
-                    }
+                    $invoiceUrl = url('/download-invoice?id=' . $billing->id . '&module=billing&fast_open=1&auto_print=1');
                 }
 
                 return response()->json([
@@ -2753,6 +3988,9 @@ class BillingController extends Controller
                 ->route('backend.billing.list')
                 ->with('successMessage', $message)
                 ->with('billId', $billing->id);
+        } catch (\Illuminate\Validation\ValidationException $err) {
+            DB::rollBack();
+            throw $err;
         } catch (Exception $err) {
             DB::rollBack();
             $this->storeSystemError('Backend', 'BillingController', 'update', substr($err->getMessage(), 0, 1000));
@@ -2787,16 +4025,7 @@ class BillingController extends Controller
             'doctor_name' => $billing->doctor_name,
             'commission_percentage' => $data['commission_slider'] ?? 0,
             'commission_amount' => $data['physyst_amt'] ?? 0,
-            'tests' => json_encode($pathologyItems->map(function ($item) {
-                return [
-                    'test_id' => $item['id'],
-                    'test_name' => $item['name'],
-                    'unit_price' => $item['unit_price'],
-                    'quantity' => $item['quantity'],
-                    'total_amount' => $item['total_amount'],
-                    'net_amount' => $item['net_amount']
-                ];
-            })->toArray()),
+            'tests' => json_encode($this->formatPathologyItemsForMachine($pathologyItems)),
             'subtotal' => $pathologyItems->sum('total_amount'),
             'discount_percentage' => $data['discount_type'] === 'percentage' ? $data['discount'] : 0,
             'discount_amount' => $totalPathologyDiscount,
@@ -2834,33 +4063,35 @@ class BillingController extends Controller
     // Helper method for updating payment records
     private function updatePaymentRecords($billingId, $data)
     {
-        // The incoming `paid_amt` is the total paid on the billing record.
-        // To avoid creating duplicate payments when editing/printing,
-        // only create a new Payment for the positive difference (delta)
-        // between the requested total and already recorded payments.
+        // Edit mode must preserve the existing payment baseline. A new save request
+        // without a fresh receiving amount should not create duplicate payments or
+        // silently reset the bill to a different paid total.
         $incomingPaid = floatval($data['paid_amt'] ?? 0);
+        $billing = Billing::find($billingId);
+        $baselinePaid = $billing ? max(0, (float) ($billing->paid_amt ?? 0)) : 0;
+        $baselineReturn = $billing ? max(0, (float) ($billing->return_amt ?? 0)) : 0;
+        $baselineGrossReceived = max(0, $baselinePaid - $baselineReturn);
 
         if ($incomingPaid <= 0) {
+            if ($billing) {
+                $billing->paid_amt = $baselineGrossReceived;
+                $billing->payable_amount = max(0, (float) ($data['payable_amount'] ?? $billing->payable_amount ?? $billing->total ?? 0));
+                $billing->due_amount = max(0, round($billing->payable_amount - $billing->paid_amt, 2));
+                $billing->payment_status = $this->determinePaymentStatus($billing->paid_amt, $billing->payable_amount, $billing->total ?? 0, $data['receiving_amt'] ?? 0, $billing->return_amt ?? 0);
+                $billing->invoice_amount = $billing->paid_amt;
+                $billing->save();
+            }
             return;
         }
 
-        // Consider both Payments and DueCollections when computing what has
-        // already been paid for this billing. This avoids creating duplicate
-        // payment records when due collections exist.
         $existingPaymentsSum = (float) Payment::where('billing_id', $billingId)->whereNull('deleted_at')->sum('amount');
         $existingDueCollected = (float) \App\Models\DueCollection::where('billing_id', $billingId)->sum('collected_amount');
         $existingPaid = $existingPaymentsSum + $existingDueCollected;
         $delta = $incomingPaid - $existingPaid;
 
-        // Small epsilon to avoid floating point noise
         if ($delta > 0.0001) {
-            // Only create a Payment when there is an explicit receiving amount
-            // provided in the request. This prevents accidental payment records
-            // when editing unrelated patient info where `paid_amt` may differ
-            // on the client-side but no real payment was made.
             $receivingAmount = floatval($data['receiving_amt'] ?? 0);
             if ($receivingAmount > 0.0001) {
-                // Create payment for the amount actually received (cap by delta)
                 $paymentAmount = round(min($delta, $receivingAmount), 2);
                 if ($paymentAmount > 0.0001) {
                     $paymentData = [
@@ -2879,11 +4110,51 @@ class BillingController extends Controller
                     }
 
                     Payment::create($paymentData);
+
+                    try {
+                        $payableBefore = round(max(0, (float) ($data['payable_amount'] ?? $billing?->payable_amount ?? 0)), 2);
+                        $dueBefore = max(0, round($payableBefore - $existingPaid, 2));
+                        $counterAccount = $this->ledgerService->resolvePaymentAccountCode($data['pay_mode'] ?? null);
+                        $createdBy = auth('admin')->user()->id ?? null;
+                        $billLabel = $billing?->bill_number ?? $billingId;
+                        $ledgerDate = $billingForPayment?->created_at
+                            ? Carbon::parse($billingForPayment->created_at)->toDateString()
+                            : now()->toDateString();
+
+                        $arAmount = round(min($paymentAmount, $dueBefore), 2);
+                        $incomeAmount = round(max(0, $paymentAmount - $arAmount), 2);
+
+                        if ($arAmount > 0) {
+                            $this->ledgerService->recordArCollection(
+                                $counterAccount,
+                                $arAmount,
+                                'Billing due collection for ' . $billLabel,
+                                $ledgerDate,
+                                'Billing',
+                                $billingId,
+                                $createdBy
+                            );
+                        }
+
+                        if ($incomeAmount > 0) {
+                            $this->ledgerService->recordIncome(
+                                'DIAG_INC',
+                                $counterAccount,
+                                $incomeAmount,
+                                'Billing additional payment for ' . $billLabel,
+                                $ledgerDate,
+                                'Billing',
+                                $billingId,
+                                $createdBy
+                            );
+                        }
+                    } catch (\Exception $e) {
+                        $this->storeSystemError('Backend', 'BillingController', 'updatePaymentRecords->ledger', substr($e->getMessage(), 0, 1000));
+                    }
                 }
             }
         }
 
-        // Always refresh billing aggregates from DB (payments + due collections)
         $billing = Billing::find($billingId);
         if ($billing) {
             $paymentsSum = (float) Payment::where('billing_id', $billingId)->whereNull('deleted_at')->sum('amount');
@@ -3251,10 +4522,6 @@ class BillingController extends Controller
             ->where('total', '>', 0)
             ->whereNotNull('created_at')
             ->whereRaw("TRIM(COALESCE(bill_number, '')) <> ''")
-            ->whereHas('patient', function ($patientQuery) {
-                $patientQuery->whereNotNull('name')
-                    ->whereRaw("TRIM(name) <> ''");
-            })
             ->when($nameFilter !== '', function ($query) use ($nameFilter) {
                 $query->where(function ($q) use ($nameFilter) {
                     $q->where('bill_number', 'like', '%' . $nameFilter . '%')
@@ -3594,22 +4861,6 @@ class BillingController extends Controller
 
     private function hasOpenCounterSessionForAdmin(int $adminId, string $adminName = ''): bool
     {
-        if ($adminId <= 0) {
-            return false;
-        }
-
-        return CashCounterSession::query()
-            ->whereRaw('LOWER(status) = ?', ['open'])
-            ->where(function ($query) use ($adminId, $adminName) {
-                $query->where('created_by', $adminId);
-
-                if ($adminName !== '') {
-                    $query->orWhere(function ($subQuery) use ($adminName) {
-                        $subQuery->whereNull('created_by')
-                            ->where('user_name', $adminName);
-                    });
-                }
-            })
-            ->exists();
+        return app(\App\Services\CashCounterService::class)->findOpenSessionForAdmin($adminId, $adminName) !== null;
     }
 }

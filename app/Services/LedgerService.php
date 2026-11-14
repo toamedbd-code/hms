@@ -126,6 +126,61 @@ class LedgerService
     }
 
     /**
+     * Map hospital billing payment modes to chart-of-accounts asset codes.
+     * Subscription / developer bKash payments are intentionally excluded.
+     */
+    public function resolvePaymentAccountCode(?string $payMode): string
+    {
+        $mode = strtolower(trim((string) $payMode));
+
+        if ($mode === 'cash' || $mode === '') {
+            return 'CASH';
+        }
+
+        if (in_array($mode, ['bkash', 'nagad', 'mobile banking'], true)) {
+            if (Account::where('code', 'MOBILE_BANK')->exists()) {
+                return 'MOBILE_BANK';
+            }
+            if (Account::where('code', 'BANK')->exists()) {
+                return 'BANK';
+            }
+            return 'CASH';
+        }
+
+        if (Account::where('code', 'BANK')->exists()) {
+            return 'BANK';
+        }
+
+        return 'CASH';
+    }
+
+    /**
+     * Record due collection against accounts receivable.
+     */
+    public function recordArCollection(string $paymentAccountCode, float $amount, string $description = null, $date = null, string $referenceType = null, $referenceId = null, $createdBy = null): LedgerTransaction
+    {
+        $lines = [
+            ['account_code' => $paymentAccountCode, 'entry_type' => 'debit', 'amount' => $amount],
+            ['account_code' => 'AR', 'entry_type' => 'credit', 'amount' => $amount],
+        ];
+
+        return $this->recordTransaction($lines, $description, $date, $referenceType, $referenceId, $createdBy);
+    }
+
+    /**
+     * Reverse recognized income when refunding a patient payment.
+     */
+    public function recordIncomeRefund(string $incomeAccountCode, string $paymentAccountCode, float $amount, string $description = null, $date = null, string $referenceType = null, $referenceId = null, $createdBy = null): LedgerTransaction
+    {
+        $lines = [
+            ['account_code' => $incomeAccountCode, 'entry_type' => 'debit', 'amount' => $amount],
+            ['account_code' => $paymentAccountCode, 'entry_type' => 'credit', 'amount' => $amount],
+        ];
+
+        return $this->recordTransaction($lines, $description, $date, $referenceType, $referenceId, $createdBy);
+    }
+
+    /**
      * Convenience: record a simple income (debit counter account, credit income account)
      */
     public function recordIncome(string $incomeAccountCode, string $counterAccountCode, float $amount, string $description = null, $date = null, string $referenceType = null, $referenceId = null, $createdBy = null): LedgerTransaction

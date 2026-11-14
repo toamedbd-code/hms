@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Backend;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ReferralRequest;
 use App\Models\ReferralPerson;
+use App\Models\WebSetting;
 use App\Services\BillingService;
+use App\Services\ReferralCommissionCalculator;
 use App\Services\ReferralPersonService;
 use Illuminate\Support\Facades\DB;
 use App\Services\ReferralService;
@@ -81,17 +83,23 @@ class ReferralController extends Controller
             $customData = new \stdClass();
             $customData->index = $index + 1;
             $customData->payee_id = $first->payee_id;
-            $customData->payee_name = $first->payee->name ?? 'N/A';
-            $customData->payee_phone = $first->payee->phone ?? 'N/A';
+            $customData->payee_name = $first->payee?->name ?? 'N/A';
+            $customData->payee_phone = $first->payee?->phone ?? 'N/A';
             $customData->bill_count = $items->count();
             $billNumbers = $items->map(function ($item) {
-                return $item->billing->bill_number ?? null;
+                return $item->billing?->bill_number ?? null;
             })->filter()->values();
             $customData->bill_list = $billNumbers->isNotEmpty()
                 ? implode(', ', $billNumbers->all())
                 : 'N/A';
 
-            $totalCommission = (float) $items->sum('total_commission_amount');
+            $totalCommission = (float) $items->sum(function ($item) {
+                $billingCommission = (float) ($item->billing?->commission_total ?? 0);
+
+                return $billingCommission > 0
+                    ? $billingCommission
+                    : (float) $item->total_commission_amount;
+            });
             $paidAmount = (float) $items->sum('paid_amount');
             $pendingAmount = max(0, $totalCommission - $paidAmount);
             $actionId = $first->payee_id . '|' . number_format($pendingAmount, 2, '.', '');
@@ -527,6 +535,7 @@ class ReferralController extends Controller
                 ->with('errorMessage', 'Referral not found.');
         }
 
+        $referral->updateCommission();
         $totalCommission = (float) $referral->total_commission_amount;
         $paidAmount = (float) $referral->paid_amount;
         $pendingAmount = max(0, $totalCommission - $paidAmount);
@@ -581,7 +590,18 @@ class ReferralController extends Controller
                 ->with('errorMessage', 'Referral not found.');
         }
 
-        $payee = $referrals->first()->payee;
+        foreach ($referrals as $referral) {
+            $referral->updateCommission();
+        }
+
+        $payee = $referrals->first()?->payee;
+
+        if (!$payee) {
+            return redirect()
+                ->route('backend.referral.index')
+                ->with('errorMessage', 'Referral payee not found.');
+        }
+
         $totalCommission = (float) $referrals->sum('total_commission_amount');
         $paidAmount = (float) $referrals->sum('paid_amount');
         $pendingAmount = max(0, $totalCommission - $paidAmount);
@@ -599,10 +619,13 @@ class ReferralController extends Controller
         $search = trim($request->query('search', ''));
         $dateFrom = trim($request->query('date_from', ''));
         $dateTo = trim($request->query('date_to', ''));
+        $websetting = WebSetting::where('status', 'Active')->orderBy('id', 'desc')->first();
 
         $referralsQuery = $this->referralService->activeList()
             ->where('payee_id', $payeeId)
-            ->with(['billing', 'payee']);
+            ->with(['billing.patient', 'billing.billItems.itemable', 'payee'])
+            ->orderByDesc('date')
+            ->orderByDesc('id');
 
         if ($search !== '') {
             $referralsQuery->whereHas('billing', function ($query) use ($search) {
@@ -627,6 +650,12 @@ class ReferralController extends Controller
         }
 
         $referrals = $referralsQuery->get();
+        foreach ($referrals as $referral) {
+            $referral->updateCommission();
+        }
+        $referrals = $referralsQuery->get()->sortByDesc(function ($referral) {
+            return $referral->date ?? $referral->created_at ?? now();
+        })->values();
 
         if ($referrals->isEmpty()) {
             return redirect()
@@ -634,12 +663,19 @@ class ReferralController extends Controller
                 ->with('errorMessage', 'Referral not found.');
         }
 
-        $payee = $referrals->first()->payee;
+        $payee = $referrals->first()?->payee;
+
+        if (!$payee) {
+            return redirect()
+                ->route('backend.referral.index')
+                ->with('errorMessage', 'Referral payee not found.');
+        }
+
         $totalCommission = (float) $referrals->sum('total_commission_amount');
         $paidAmount = (float) $referrals->sum('paid_amount');
         $pendingAmount = max(0, $totalCommission - $paidAmount);
         $billList = $referrals->map(function ($referral) {
-            return $referral->billing->bill_number ?? null;
+            return $referral->billing?->bill_number ?? null;
         })->filter()->unique()->values()->implode(', ');
 
         $dateValues = $referrals->map(function ($referral) {
@@ -663,9 +699,18 @@ class ReferralController extends Controller
             $paidAmount = (float) ($referral->paid_amount ?? 0);
             $pendingAmount = max(0, $totalCommission - $paidAmount);
             $paidDateTime = $referral->last_paid_at ? Carbon::parse($referral->last_paid_at)->format('d-M-Y h:i A') : 'N/A';
+            $billing = $referral->billing;
+            $itemNames = $billing?->billItems
+                ->pluck('item_name')
+                ->filter(fn ($name) => filled($name) && $name !== 'N/A')
+                ->unique()
+                ->implode(', ');
             return [
-                'bill_no' => $referral->billing->bill_number ?? 'N/A',
+                'bill_no' => $referral->billing?->bill_number ?? 'N/A',
+                'patient_name' => $billing?->patient_name ?: $billing?->patient?->name ?: 'N/A',
+                'item_names' => $itemNames ?: 'N/A',
                 'date' => $referral->date ? Carbon::parse($referral->date)->format('d-M-Y') : 'N/A',
+                'bill_amount' => (float) ($referral->billing?->payable_amount ?? 0),
                 'commission' => $totalCommission,
                 'paid' => $paidAmount,
                 'paid_date_time' => $paidDateTime,
@@ -675,6 +720,7 @@ class ReferralController extends Controller
 
         return view('backend.referral.commission_payment_payee_print', [
             'payee' => $payee,
+            'websetting' => $websetting,
             'pendingAmount' => $pendingAmount,
             'totalCommission' => $totalCommission,
             'paidAmount' => $paidAmount,
@@ -698,7 +744,8 @@ class ReferralController extends Controller
         $referralsQuery = $this->referralService->activeList()
             ->where('payee_id', $payeeId)
             ->with(['billing', 'payee'])
-            ->orderBy('date');
+            ->orderByDesc('date')
+            ->orderByDesc('id');
 
         if ($search !== '') {
             $referralsQuery->whereHas('billing', function ($query) use ($search) {
@@ -723,6 +770,12 @@ class ReferralController extends Controller
         }
 
         $referrals = $referralsQuery->get();
+        foreach ($referrals as $referral) {
+            $referral->updateCommission();
+        }
+        $referrals = $referralsQuery->get()->sortByDesc(function ($referral) {
+            return $referral->date ?? $referral->created_at ?? now();
+        })->values();
 
         if ($referrals->isEmpty()) {
             return redirect()
@@ -730,7 +783,14 @@ class ReferralController extends Controller
                 ->with('errorMessage', 'Referral not found.');
         }
 
-        $payee = $referrals->first()->payee;
+        $payee = $referrals->first()?->payee;
+
+        if (!$payee) {
+            return redirect()
+                ->route('backend.referral.index')
+                ->with('errorMessage', 'Referral payee not found.');
+        }
+
         $totalCommission = (float) $referrals->sum('total_commission_amount');
         $paidAmount = (float) $referrals->sum('paid_amount');
         $pendingAmount = max(0, $totalCommission - $paidAmount);
@@ -740,13 +800,11 @@ class ReferralController extends Controller
             $paidAmount = (float) ($referral->paid_amount ?? 0);
             $pendingAmount = max(0, $totalCommission - $paidAmount);
             $paidDateTime = $referral->last_paid_at ? Carbon::parse($referral->last_paid_at)->format('d-M-Y h:i A') : 'N/A';
-
             return [
                 'id' => $referral->id,
-                'bill_number' => $referral->billing->bill_number ?? 'N/A',
+                'bill_number' => $referral->billing?->bill_number ?? 'N/A',
                 'date' => $referral->date ? Carbon::parse($referral->date)->format('d-M-Y') : 'N/A',
-                'commission_amount' => $totalCommission,
-                'paid_amount' => $paidAmount,
+                'commission_amount' => $totalCommission,                'paid_amount' => $paidAmount,
                 'pending_amount' => $pendingAmount,
                 'paid_date_time' => $paidDateTime,
                 'paid_status' => $referral->paid_status,
@@ -837,52 +895,64 @@ class ReferralController extends Controller
         }
 
         $billItems = $billing->billItems;
-        $categoryBreakdown = [];
-        $totalCommission = 0;
-        $totalBillAmount = 0;
+        $items = $billItems->map(function ($item) {
+            $itemReferralRate = $item->itemable->referral_percentage ?? null;
 
+            return [
+                'id' => $item->item_id,
+                'name' => $item->item_name,
+                'category' => strtolower($item->category ?? ''),
+                'net_amount' => $item->net_amount ?? $item->amount ?? 0,
+                'total_amount' => $item->total_amount ?? $item->amount ?? 0,
+                'referral_rate' => $itemReferralRate !== null && (float) $itemReferralRate > 0
+                    ? (float) $itemReferralRate
+                    : null,
+            ];
+        })->all();
 
-        foreach ($billItems as $item) {
-            $category = strtolower($item->category);
-            $itemAmount = $item->net_amount;
-            $totalBillAmount += $itemAmount;
+        $result = app(ReferralCommissionCalculator::class)->calculate(
+            $items,
+            (float) ($billing->payable_amount ?? $billing->total ?? 0),
+            function ($item) use ($payee) {
+                $rate = $item['referral_rate']
+                    ?? $this->getCommissionRateByCategory($payee, $item['category'], $item['name'] ?? '');
 
-            if (!isset($categoryBreakdown[$category])) {
-                $categoryBreakdown[$category] = [
-                    'amount' => 0,
-                    'commission_rate' => 0,
-                    'commission_amount' => 0
+                return [
+                    'category' => $item['category'],
+                    'rate' => $rate,
                 ];
             }
+        );
 
-            $categoryBreakdown[$category]['amount'] += $itemAmount;
-
-            // Prefer item-level referral percentage when available (fallback to payee/category rate)
-            $commissionRate = $this->getCommissionRateByCategory($payee, $category);
-            try {
-                if (isset($item->itemable) && isset($item->itemable->referral_percentage) && $item->itemable->referral_percentage > 0) {
-                    $commissionRate = (float) $item->itemable->referral_percentage;
-                }
-            } catch (\Exception $e) {
-                // ignore and keep category rate
-            }
-
-            $categoryBreakdown[$category]['commission_rate'] = $commissionRate;
-
-            $itemCommission = ($itemAmount * $commissionRate) / 100;
-            $categoryBreakdown[$category]['commission_amount'] += $itemCommission;
-            $totalCommission += $itemCommission;
+        $categoryBreakdown = [];
+        foreach ($result['categories'] as $category => $commission) {
+            $categoryBreakdown[$category] = [
+                'amount' => $commission['base_amount'],
+                'commission_rate' => $commission['rate'],
+                'commission_amount' => $commission['amount'],
+            ];
         }
 
         return response()->json([
-            'total_bill_amount' => round($totalBillAmount, 2),
-            'total_commission' => round($totalCommission, 2),
+            'total_bill_amount' => round((float) ($billing->payable_amount ?? $billing->total ?? 0), 2),
+            'total_commission' => $result['total'],
             'category_breakdown' => $categoryBreakdown,
         ]);
     }
 
-    private function getCommissionRateByCategory($payee, $category)
+    private function getCommissionRateByCategory($payee, $category, $itemName = '')
     {
+        $normalized = strtolower(trim((string) ($category ?? '')));
+        $itemNameLower = strtolower(trim((string) $itemName));
+        $combined = trim($normalized . ' ' . $itemNameLower);
+
+        if (preg_match('/\b(usg|ultrasound|ultrasonogram|ultrasonography|sonography|sono)\b/', $combined) === 1) {
+            $normalized = 'ultrasound';
+        }
+
+        $fallbackRadiologyRate = (float) ($payee->radiology_commission ?? 0);
+        $fallbackUltrasoundRate = (float) ($payee->ultrasound_commission ?? $fallbackRadiologyRate);
+
         $getRate = function ($value) {
             if ($value === null || $value === '' || $value === '0' || $value === '0.00') {
                 return 0;
@@ -890,18 +960,31 @@ class ReferralController extends Controller
             return (float) $value;
         };
 
-        switch (strtolower(trim($category))) {
+        switch ($normalized) {
             case 'pathology':
                 return $getRate($payee->pathology_commission);
 
             case 'radiology':
                 return $getRate($payee->radiology_commission);
 
+            case 'ecg':
+            case 'ekg':
+                return $getRate($payee->ecg_commission ?? $fallbackRadiologyRate);
+
+            case 'ultrasound':
+            case 'ultrasonogram':
+            case 'ultrasonography':
+            case 'usg':
+            case 'sono':
+            case 'sonography':
+                return $fallbackUltrasoundRate;
+
             case 'medicine':
             case 'pharmacy':
                 return $getRate($payee->pharmacy_commission);
 
             case 'opd':
+            case 'appointment':
                 return $getRate($payee->opd_commission);
 
             case 'ipd':

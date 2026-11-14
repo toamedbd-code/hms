@@ -2,11 +2,12 @@
 namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Notifications\Notifiable;
 
 class PharmacyBill extends Authenticatable
 {
-    use Notifiable,HasFactory;
+    use Notifiable, HasFactory, SoftDeletes;
 
     protected $table = 'pharmacybills';
 
@@ -27,5 +28,15 @@ class PharmacyBill extends Authenticatable
     public function patient()
     {
         return $this->belongsTo(Patient::class);
+    }
+
+    public function billing()
+    {
+        return $this->belongsTo(Billing::class, 'billing_id');
+    }
+
+    public function ipdPatient()
+    {
+        return $this->belongsTo(IpdPatient::class, 'ipd_patient_id');
     }
 }

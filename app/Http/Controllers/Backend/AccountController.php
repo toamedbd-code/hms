@@ -38,7 +38,7 @@ class AccountController extends Controller
     public function profitLoss()
     {
         return Inertia::render('Backend/Account/ProfitLoss', [
-            'pageTitle' => 'Profit & Loss'
+            'pageTitle' => 'Profit Management'
         ]);
     }
 

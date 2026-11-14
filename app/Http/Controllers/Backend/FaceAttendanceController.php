@@ -113,7 +113,7 @@ class FaceAttendanceController extends Controller
         $data = $request->only(['employee_code', 'descriptor']);
         if (empty($data['employee_code']) || empty($data['descriptor']) || !is_array($data['descriptor'])) {
             file_put_contents(storage_path('logs/face_register.log'), date('c') . " INVALID INPUT: " . json_encode($request->all()) . "\n", FILE_APPEND);
-            return response()->json(['message' => 'invalid input'], 422);
+            return response()->json(['message' => 'Invalid input.'], 422);
         }
         $fe = FaceEncoding::create([
             'employee_code' => $data['employee_code'],
@@ -134,7 +134,7 @@ class FaceAttendanceController extends Controller
         } elseif ($request->filled('descriptor')) {
             $incoming = $request->input('descriptor');
             if (!is_array($incoming)) {
-                return response()->json(['message' => 'Invalid descriptor'], 422);
+                return response()->json(['message' => 'Invalid face descriptor.'], 422);
             }
 
             // Use the latest encoding per employee code to avoid noisy duplicates.
@@ -151,15 +151,15 @@ class FaceAttendanceController extends Controller
             if ($best && $best['dist'] <= config('attendance.face_threshold')) {
                 $employeeCode = $best['code'];
             } else {
-                return response()->json(['message' => 'No match found', 'best' => $best], 422);
+                return response()->json(['message' => 'No matching face found.', 'best' => $best], 422);
             }
         } else {
-            return response()->json(['message' => 'employee_code or descriptor required'], 422);
+            return response()->json(['message' => 'Employee code or face descriptor is required.'], 422);
         }
 
         $employeeCode = trim((string) $employeeCode);
         if ($employeeCode === '') {
-            return response()->json(['message' => 'Invalid employee code'], 422);
+            return response()->json(['message' => 'Enter a valid employee code.'], 422);
         }
 
         // Auto IN/OUT toggle based on the latest record for today.
@@ -194,7 +194,7 @@ class FaceAttendanceController extends Controller
                     'marked_as' => $lastAction,
                     'employee_code' => $employeeCode,
                     'attendance' => $latestToday,
-                    'message' => "{$lastAction} already marked. Wait {$cooldownSeconds} seconds.",
+                    'message' => "Attendance already marked as {$lastAction}. Please wait {$cooldownSeconds} seconds.",
                 ], 200);
             }
         }
@@ -219,7 +219,7 @@ class FaceAttendanceController extends Controller
         ]);
 
         if (!$ok) {
-            return response()->json(['message' => 'Failed to mark attendance'], 500);
+            return response()->json(['message' => 'Failed to mark attendance.'], 500);
         }
 
         // Return the relevant attendance row

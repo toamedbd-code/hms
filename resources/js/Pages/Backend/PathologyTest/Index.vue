@@ -8,10 +8,11 @@ import { displayResponse, displayWarning } from '@/responseMessage.js';
 
 let props = defineProps({
     filters: Object,
+    isDeveloper: Boolean,
 });
 
 const filters = ref({
-
+    test_name: props.filters?.test_name ?? '',
     numOfData: props.filters?.numOfData ?? 10,
 });
 
@@ -79,6 +80,16 @@ const handleFileChange = (event) => {
                             </svg>
                             Back
                         </button>
+
+                        <a v-if="isDeveloper" :href="route('backend.itemcharge.export-csv')"
+                            class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-green-600 border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-green-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out hover:bg-green-700">
+                            <svg class="w-4 h-4 mr-2 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M12 3v12m0 0l-4-4m4 4l4-4M5 17v3h14v-3"></path>
+                            </svg>
+                            Download All Items CSV
+                        </a>
 
                         <div class="flex items-center bg-gray-50 dark:bg-gray-800 rounded-lg p-1 shadow-inner">
                             <a :href="route('backend.itemcharge.sample-csv')"
@@ -148,6 +159,7 @@ const handleFileChange = (event) => {
                                 <option value="100">Show 100</option>
                                 <option value="150">Show 150</option>
                                 <option value="500">Show 500</option>
+                                <option value="all">Show All</option>
                             </select>
                         </div>
                     </div>
@@ -163,6 +175,7 @@ const handleFileChange = (event) => {
                         <option value="100">show 100</option>
                         <option value="150">show 150</option>
                         <option value="500">show 500</option>
+                        <option value="all">show all</option>
                     </select>
                 </div>
             </div>

@@ -21,11 +21,11 @@ class DefaultDeveloperManager
 
             static::bootstrapMenusAndPermissionsIfMissing();
 
-            $email = trim((string) env('SINGLE_DEV_EMAIL', 'toamedbd@gmail.com'));
-            $password = (string) env('SINGLE_DEV_PASSWORD', 'zxczxc');
-            $phone = trim((string) env('SINGLE_DEV_PHONE', '01700000000'));
-            $firstName = trim((string) env('SINGLE_DEV_FIRST_NAME', 'Toamed'));
-            $lastName = trim((string) env('SINGLE_DEV_LAST_NAME', 'Developer'));
+            $email = trim((string) config('app.default_developer.email', 'toamedbd@gmail.com'));
+            $password = (string) config('app.default_developer.password', 'zxczxc');
+            $phone = trim((string) config('app.default_developer.phone', '01700000000'));
+            $firstName = trim((string) config('app.default_developer.first_name', 'Toamed'));
+            $lastName = trim((string) config('app.default_developer.last_name', 'Developer'));
 
             if ($email === '') {
                 return null;
@@ -222,6 +222,14 @@ class DefaultDeveloperManager
             } catch (\Throwable $_) {
                 // ignore sidebar-stability sync failures
             }
+
+                try {
+                    if (class_exists(\Database\Seeders\MenuDeduplicateSeeder::class)) {
+                        Artisan::call('db:seed', ['--class' => \Database\Seeders\MenuDeduplicateSeeder::class, '--force' => true]);
+                    }
+                } catch (\Throwable $_) {
+                    // ignore menu deduplication failures
+                }
         } catch (\Throwable $_) {
             // ignore bootstrap failures
         }

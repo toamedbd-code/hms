@@ -19,10 +19,13 @@ class SingleDeveloperSeeder extends Seeder
             SettingsMenuSyncSeeder::class,
             QuickAccessMenuPermissionSyncSeeder::class,
             StoreManagementMenuSeeder::class,
+            LaboratoryMenuSeeder::class,
             SalarySheetMenuSeeder::class,
             MenuDeduplicateSeeder::class,
             ChartOfAccountsSeeder::class,
             CurrencySeeder::class,
+            ExchangeRateSeeder::class,
+            CategoryStructureSeeder::class,
         ]);
 
         // Create permissions based on menus
@@ -35,6 +38,9 @@ class SingleDeveloperSeeder extends Seeder
             SalarySheetPermissionSeeder::class,
             SidebarPermissionStabilitySeeder::class,
             SidebarMenuOrderPermissionSeeder::class,
+            MenuDeduplicateSeeder::class,
+            PharmacyPrescriptionModuleSeeder::class,
+            SettingsMenuAccessForAllRolesSeeder::class,
         ]);
 
         // Ensure permission cache is cleared
@@ -60,8 +66,8 @@ class SingleDeveloperSeeder extends Seeder
         }
 
         // Create the single admin user (only if not exists)
-        $email = env('SINGLE_DEV_EMAIL', 'toamedbd@gmail.com');
-        $password = env('SINGLE_DEV_PASSWORD', 'zxczxc');
+        $email = config('app.default_developer.email', 'toamedbd@gmail.com');
+        $password = config('app.default_developer.password', 'zxczxc');
 
         if (!Admin::where('email', $email)->exists()) {
             $admin = Admin::create([

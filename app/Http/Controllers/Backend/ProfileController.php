@@ -125,7 +125,6 @@ class ProfileController extends Controller
 
         return redirect()
             ->route('backend.profile.edit')
-            ->with('successMessage', 'Password changed successfully.')
-            ->with('savedPassword', (string) $validated['password']);
+            ->with('successMessage', 'Password changed successfully.');
     }
 }

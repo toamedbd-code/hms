@@ -15,10 +15,10 @@ class CompanySeeder extends Seeder
     public function run()
     {
         $company = [
-            'name' => 'Example Company',
-            'short_name' => 'ExCo',
-            'phone' => '123-456-7890',
-            'email' => 'example@example.com',
+            'name' => 'ToaMed',
+            'short_name' => 'TM',
+            'phone' => '01919592638',
+            'email' => 'toamedbd@gmail.com',
             'logo' => 'path/to/logo.png',
             'favicon' => 'path/to/favicon.ico',
             'address' => '123 Main Street, City, Country',

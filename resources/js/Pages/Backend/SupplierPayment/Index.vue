@@ -2,7 +2,6 @@
 import { computed, ref } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
-import Pagination from '@/Components/Pagination.vue';
 
 const props = defineProps({
   payments: {
@@ -188,6 +187,9 @@ const canApproveStock = (payment) => {
           <Link :href="route('backend.supplierpayment.report.stock-due')" class="px-3 py-2 text-sm text-white bg-amber-600 rounded hover:bg-amber-700">
             Stock Due Report
           </Link>
+          <Link :href="route('backend.accounts.store-purchase-payments.index')" class="px-3 py-2 text-sm text-white bg-emerald-600 rounded hover:bg-emerald-700">
+            Store Supplier Payments
+          </Link>
           <Link :href="route('backend.supplierpayment.create')" class="px-3 py-2 text-sm text-white bg-indigo-600 rounded hover:bg-indigo-700">
             Add Supplier Payment
           </Link>
@@ -306,7 +308,18 @@ const canApproveStock = (payment) => {
         </table>
       </div>
 
-      <Pagination />
+      <div v-if="payments?.links?.length" class="flex justify-end gap-2 mt-4">
+        <template v-for="(link, index) in payments.links" :key="index">
+          <Link
+            v-if="link.url"
+            :href="link.url"
+            class="px-3 py-1 text-sm border rounded"
+            :class="link.active ? 'bg-emerald-600 text-white border-emerald-600' : 'text-slate-600'"
+            v-html="link.label"
+          />
+          <span v-else class="px-3 py-1 text-sm text-slate-400 border rounded" v-html="link.label" />
+        </template>
+      </div>
     </div>
 
     <div v-if="showPartialModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

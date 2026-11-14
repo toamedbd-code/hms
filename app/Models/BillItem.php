@@ -19,6 +19,7 @@ class BillItem extends Model
         'sent_at' => 'datetime',
         'delivered_at' => 'datetime',
         'commissionable' => 'boolean',
+        'discount_exempt' => 'boolean',
         'commission_rate' => 'decimal:2',
         'requires_sample' => 'boolean',
     ];
@@ -41,6 +42,11 @@ class BillItem extends Model
     public function deliveredBy()
     {
         return $this->belongsTo(Admin::class, 'delivered_by');
+    }
+
+    public function parameterResults()
+    {
+        return $this->hasMany(BillItemParameterResult::class, 'bill_item_id');
     }
 
     public function itemable()

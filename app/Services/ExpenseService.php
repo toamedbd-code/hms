@@ -16,7 +16,7 @@ class ExpenseService
 
     public function list()
     {
-        return $this->expense->with('expenseHead')
+        return $this->expense->with(['expenseHead', 'department'])
             ->orderBy('created_at', 'desc');
     }
 

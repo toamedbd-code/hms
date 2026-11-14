@@ -2,14 +2,20 @@
 import { ref, computed, onMounted } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
-import { Inertia } from '@inertiajs/inertia';
 import eventBus from '@/eventBus.js';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 
-const props = defineProps(['role', 'permissions', 'id']);
+const props = defineProps([
+    'role',
+    'permissions',
+    'id',
+    'canManageAllPermissions',
+    'isDeveloper',
+    'dashboardCategoryPermissionNames',
+]);
 const page = usePage();
 
 const form = useForm({
@@ -110,9 +116,9 @@ const submit = async () => {
                     try {
                         setTimeout(() => {
                             try {
-                                Inertia.reload({ only: ['auth.sideMenus'] });
+                                router.reload({ only: ['auth'] });
                             } catch (err) {
-                                try { Inertia.reload(); } catch (err2) { /* ignore */ }
+                                try { router.reload(); } catch (err2) { /* ignore */ }
                             }
                         }, 900);
                     } catch (e) {
@@ -137,28 +143,6 @@ const checkedPermissions = computed({
 
 const permissionSearch = ref('');
 
-const actorPermissionNames = computed(() => {
-    const raw = page.props.auth?.permissions ?? [];
-    let list = [];
-
-    if (Array.isArray(raw)) {
-        list = raw.map((p) => String(p ?? '').trim().toLowerCase());
-    } else if (raw && typeof raw === 'object') {
-        try {
-            list = Object.values(raw).map((p) => String(p ?? '').trim().toLowerCase());
-        } catch (e) {
-            list = [];
-        }
-    }
-
-    return Array.from(new Set(list.filter(Boolean)));
-});
-
-function hasActorPermission(permission) {
-    if (!permission) return false;
-    return actorPermissionNames.value.includes(String(permission).trim().toLowerCase());
-}
-
 function permissionMatches(permission, query) {
     const name = String(permission?.name ?? '').toLowerCase();
     const display = permissionDisplayLabel(permission).toLowerCase();
@@ -182,36 +166,21 @@ function filterPermissionTree(list, query) {
         .filter(Boolean);
 }
 
-function filterPermissionsByActor(list) {
-    return (list || [])
-        .map((permission) => {
-            const children = filterPermissionsByActor(permission?.child || []);
-            const hasOwnPermission = hasActorPermission(permission?.name);
-            if (!hasOwnPermission && !children.length) {
-                return null;
-            }
-            return {
-                ...permission,
-                child: children,
-            };
-        })
-        .filter(Boolean);
-}
-
 const filteredPermissions = computed(() => {
     const query = permissionSearch.value.trim().toLowerCase();
-    const filtered = filterPermissionTree(props.permissions || [], query);
-    return filterPermissionsByActor(filtered);
+    return [...filterPermissionTree(props.permissions || [], query)]
+        .sort((a, b) => {
+            if (a.name === 'dashboard' && b.name !== 'dashboard') return -1;
+            if (b.name === 'dashboard' && a.name !== 'dashboard') return 1;
+            return 0;
+        });
 });
 
 const visiblePermissionIds = computed(() => {
     const ids = new Set();
     const walk = (nodes) => {
         (nodes || []).forEach((permission) => {
-            const id = permission?.id;
-            if (id !== undefined && id !== null && id !== '') {
-                ids.add(String(id));
-            }
+            permissionIdsForNode(permission).forEach((id) => ids.add(String(id)));
             if (permission?.child && Array.isArray(permission.child)) {
                 walk(permission.child);
             }
@@ -219,29 +188,6 @@ const visiblePermissionIds = computed(() => {
     };
     walk(filteredPermissions.value);
     return ids;
-});
-
-const menuPermissionOrder = computed(() => {
-    const order = new Map();
-    const sideMenus = page.props?.auth?.sideMenus ?? [];
-    let index = 0;
-
-    const pushPermission = (permissionName) => {
-        const normalized = String(permissionName ?? '').trim().toLowerCase();
-        if (!normalized || order.has(normalized)) {
-            return;
-        }
-        order.set(normalized, index++);
-    };
-
-    sideMenus.forEach((menu) => {
-        pushPermission(menu?.permission_name);
-        (menu?.childrens ?? []).forEach((child) => {
-            pushPermission(child?.permission_name);
-        });
-    });
-
-    return order;
 });
 
 const menuPermissionLabelMap = computed(() => {
@@ -270,63 +216,88 @@ const menuPermissionLabelMap = computed(() => {
 function permissionDisplayLabel(permission) {
     const name = String(permission?.name ?? '').trim();
     const normalized = name.toLowerCase();
+    if (normalized === 'billing') {
+        return 'Module Billing';
+    }
+    if (normalized === 'prescription-management') {
+        return 'Prescription Management';
+    }
+
+    const billingModuleLabels = {
+        'billing-module-billing': 'Billing',
+        'billing-module-appointment': 'Appointment',
+        'billing-module-opd': 'OPD',
+        'billing-module-ipd': 'IPD',
+        'billing-module-prescription': 'Prescription',
+        'billing-module-ambulance': 'Ambulance',
+        'billing-module-billing-report': 'Billing Report',
+        'billing-module-bed-management': 'Bed Management',
+        'billing-module-pathology': 'Pathology',
+        'billing-module-radiology': 'Radiology',
+        'billing-module-blood-issue': 'Blood Issue',
+        'billing-module-pharmacy': 'Pharmacy',
+    };
+    if (billingModuleLabels[normalized]) {
+        return billingModuleLabels[normalized];
+    }
+
+    const dashboardCardLabels = {
+        'dashboard-card-opd-income': 'OPD Income',
+        'dashboard-card-doctor-visit-appointment': 'Doctor-wise Visit Appointment',
+        'dashboard-card-ipd-income': 'IPD Income',
+        'dashboard-card-pharmacy-income': 'Pharmacy Income',
+        'dashboard-card-pathology-income': 'Pathology Income',
+        'dashboard-card-radiology-income': 'Radiology Income',
+        'dashboard-card-disposable-income': 'Disposable Income',
+        'dashboard-card-blood-bank-income': 'Blood Bank Income',
+        'dashboard-card-expenses': 'Expenses',
+        'dashboard-card-pending-income': 'Pending Income',
+        'dashboard-card-referral-commission': 'Referral Commission',
+        'dashboard-card-net-income': 'Net Income',
+        'dashboard-card-total-income': 'Total Income',
+        'dashboard-card-refunds': 'Refunds',
+        'dashboard-card-total-discount': 'Total Discount',
+        'dashboard-card-expired-medicines': 'Expired Medicines',
+        'dashboard-card-expiring-medicines': 'Expiring Medicines',
+        'dashboard-card-product-returns': 'Product Returns',
+        'dashboard-chart-income-by-department': 'Income by Department (Bar Chart)',
+        'dashboard-chart-income-distribution': 'Income Distribution (Pie Chart)',
+    };
+    if (dashboardCardLabels[normalized]) {
+        return dashboardCardLabels[normalized];
+    }
+
+    const prescriptionPermissionLabels = {
+        'prescription-list': 'Prescription List',
+        'prescription-add': 'Prescription Add',
+        'prescription-edit': 'Prescription Edit',
+        'prescription-delete': 'Prescription Delete',
+        'prescription-print': 'Prescription Print',
+        'prescription-list-create': 'Prescription Add (Legacy)',
+        'prescription-list-edit': 'Prescription Edit (Legacy)',
+        'prescription-list-delete': 'Prescription Delete (Legacy)',
+        'prescription-settings': 'Prescription Settings',
+    };
+    if (prescriptionPermissionLabels[normalized]) {
+        return prescriptionPermissionLabels[normalized];
+    }
+
+    if (normalized.startsWith('dashboard-card-') && normalized.endsWith('-income')) {
+        const category = name.slice('dashboard-card-'.length, -'-income'.length);
+        return `${formatLabel(category)} Income`;
+    }
+
+    if (normalized.startsWith('dashboard-main-category-') && normalized.endsWith('-income')) {
+        const category = name.slice('dashboard-main-category-'.length, -'-income'.length);
+        return `Main Category - ${formatLabel(category)} Income`;
+    }
+
     const menuLabel = menuPermissionLabelMap.value.get(normalized);
     return menuLabel || formatLabel(name);
 }
 
-const initialGroupOrder = ref(new Map());
-
-onMounted(() => {
-    try {
-        const key = `role_active_permission_group_${props.id ?? 'new'}`;
-        const v = localStorage.getItem(key);
-        if (v) {
-            activePermissionGroupId.value = Number(v);
-        }
-    } catch (e) {
-        // ignore
-    }
-
-    // capture initial order of permission groups to keep UI stable
-    try {
-        const list = props.permissions || [];
-        let idx = 0;
-        list.forEach((p) => {
-            const n = String(p?.name ?? '').trim().toLowerCase();
-            if (n && !initialGroupOrder.value.has(n)) {
-                initialGroupOrder.value.set(n, idx++);
-            }
-        });
-    } catch (e) {
-        // ignore
-    }
-});
-
 const sortedPermissionGroups = computed(() => {
-    const list = [...(filteredPermissions.value ?? [])];
-    const order = menuPermissionOrder.value;
-
-    return list.sort((a, b) => {
-        const aName = String(a?.name ?? '').toLowerCase();
-        const bName = String(b?.name ?? '').toLowerCase();
-
-        // Sidebar/menu serial should win first.
-        const aMenu = order.has(aName) ? order.get(aName) : Number.MAX_SAFE_INTEGER;
-        const bMenu = order.has(bName) ? order.get(bName) : Number.MAX_SAFE_INTEGER;
-        if (aMenu !== bMenu) return aMenu - bMenu;
-
-        const aInit = initialGroupOrder.value.has(aName) ? initialGroupOrder.value.get(aName) : null;
-        const bInit = initialGroupOrder.value.has(bName) ? initialGroupOrder.value.get(bName) : null;
-
-        // Then keep stable initial captured order if needed.
-        if (aInit !== null || bInit !== null) {
-            if (aInit === null) return 1;
-            if (bInit === null) return -1;
-            if (aInit !== bInit) return aInit - bInit;
-        }
-
-        return permissionDisplayLabel(a).localeCompare(permissionDisplayLabel(b));
-    });
+    return filteredPermissions.value ?? [];
 });
 
 const activePermissionGroupId = ref(null);
@@ -339,6 +310,59 @@ const activePermissionGroup = computed(() => {
 
     const matched = groups.find((item) => Number(item.id) === Number(activePermissionGroupId.value));
     return matched ?? groups[0];
+});
+
+const dashboardCategoryPermissions = computed(() => {
+    const dashboard = (props.permissions || []).find((permission) => permission?.name === 'dashboard');
+    if (!dashboard) return [];
+
+    const categoryPermissionNames = new Set(props.dashboardCategoryPermissionNames || []);
+    return (dashboard.child || []).filter((permission) => {
+        const name = String(permission?.name ?? '').toLowerCase();
+        return categoryPermissionNames.has(name);
+    });
+});
+
+const dashboardMainCategoryPermissions = computed(() => {
+    const dashboard = (props.permissions || []).find((permission) => permission?.name === 'dashboard');
+    return (dashboard?.child || []).filter((permission) =>
+        /^dashboard-main-category-.+-income$/i.test(String(permission?.name ?? ''))
+    );
+});
+
+const defaultDashboardPermissions = computed(() => {
+    if (activePermissionGroup.value?.name !== 'dashboard') {
+        return [];
+    }
+
+    const fixedIncomePermissions = new Set([
+        'dashboard-card-opd-income',
+        'dashboard-card-doctor-visit-appointment',
+        'dashboard-card-ipd-income',
+        'dashboard-card-pharmacy-income',
+        'dashboard-card-pathology-income',
+        'dashboard-card-radiology-income',
+        'dashboard-card-disposable-income',
+        'dashboard-card-blood-bank-income',
+        'dashboard-card-expenses',
+        'dashboard-card-pending-income',
+        'dashboard-card-referral-commission',
+        'dashboard-card-net-income',
+        'dashboard-card-total-income',
+        'dashboard-card-refunds',
+        'dashboard-card-total-discount',
+        'dashboard-card-expired-medicines',
+        'dashboard-card-expiring-medicines',
+        'dashboard-card-product-returns',
+    ]);
+
+    return (activePermissionGroup.value.child || []).filter((permission) => {
+        const name = String(permission?.name ?? '').toLowerCase();
+        const isCategoryPermission = /^dashboard-card-.+-income$/.test(name)
+            && !fixedIncomePermissions.has(name);
+        const isMainCategoryPermission = /^dashboard-main-category-.+-income$/.test(name);
+        return !isCategoryPermission && !isMainCategoryPermission;
+    });
 });
 
 const setActivePermissionGroup = (permissionId) => {
@@ -367,17 +391,60 @@ function collectPermissionIds(permission) {
     const ids = [];
     const walk = (node) => {
         if (!node) return;
-        if (node.id) ids.push(node.id);
+        ids.push(...permissionIdsForNode(node));
         (node.child || []).forEach((child) => walk(child));
     };
     walk(permission);
-    return ids;
+    return Array.from(new Set(ids));
+}
+
+function permissionIdsForNode(permission) {
+    const ids = Array.isArray(permission?.assignable_permission_ids)
+        ? permission.assignable_permission_ids
+        : [permission?.id];
+    return ids
+        .filter((id) => id !== undefined && id !== null && id !== '')
+        .map((id) => Number(id))
+        .filter(Number.isInteger);
+}
+
+function isPermissionChecked(permission) {
+    const ids = permissionIdsForNode(permission);
+    return ids.length > 0 && ids.every((id) => checkedPermissions.value.some((selected) => Number(selected) === id));
+}
+
+function isPermissionPartiallyChecked(permission) {
+    const ids = permissionIdsForNode(permission);
+    const selectedCount = ids.filter((id) => checkedPermissions.value.some((selected) => Number(selected) === id)).length;
+    return selectedCount > 0 && selectedCount < ids.length;
+}
+
+function setPermissionChecked(permission, isChecked) {
+    const current = new Set(checkedPermissions.value.map((id) => Number(id)));
+    permissionIdsForNode(permission).forEach((id) => {
+        if (isChecked) {
+            current.add(id);
+        } else {
+            current.delete(id);
+        }
+    });
+    checkedPermissions.value = Array.from(current);
+}
+
+function collectPermissionNodes(permission) {
+    const nodes = [];
+    const walk = (node) => {
+        if (!node) return;
+        nodes.push(node);
+        (node.child || []).forEach((child) => walk(child));
+    };
+    walk(permission);
+    return nodes;
 }
 
 function isAllInModuleChecked(permission) {
-    const ids = collectPermissionIds(permission);
-    if (!ids.length) return false;
-    return ids.every((id) => checkedPermissions.value.includes(id));
+    const nodes = collectPermissionNodes(permission);
+    return nodes.length > 0 && nodes.every(isPermissionChecked);
 }
 
 function toggleAllInModule(permission) {
@@ -398,14 +465,42 @@ function toggleAllInModule(permission) {
     checkedPermissions.value = Array.from(current);
 }
 
+function isAllPermissionsChecked(permissions) {
+    return permissions.length > 0 && permissions.every(isPermissionChecked);
+}
+
+function togglePermissions(permissions) {
+    if (!permissions.length) return;
+
+    const shouldSelect = !isAllPermissionsChecked(permissions);
+    permissions.forEach((permission) => setPermissionChecked(permission, shouldSelect));
+}
+
+function selectDefaultDashboardPermissions() {
+    if (activePermissionGroup.value?.name !== 'dashboard') return;
+
+    const dashboardGroup = (props.permissions || []).find((permission) => permission?.name === 'dashboard');
+    const dashboardPermissionIds = new Set(collectPermissionIds(dashboardGroup || activePermissionGroup.value));
+    const selectedIds = new Set(
+        checkedPermissions.value
+            .map((id) => Number(id))
+            .filter((id) => !dashboardPermissionIds.has(id))
+    );
+
+    permissionIdsForNode(activePermissionGroup.value).forEach((id) => selectedIds.add(id));
+    defaultDashboardPermissions.value.forEach((permission) => {
+        permissionIdsForNode(permission).forEach((id) => selectedIds.add(id));
+    });
+
+    checkedPermissions.value = Array.from(selectedIds);
+}
+
 function selectedCountInModule(permission) {
-    const ids = collectPermissionIds(permission);
-    if (!ids.length) return 0;
-    return ids.filter((id) => checkedPermissions.value.includes(id)).length;
+    return collectPermissionNodes(permission).filter(isPermissionChecked).length;
 }
 
 function totalCountInModule(permission) {
-    return collectPermissionIds(permission).length;
+    return collectPermissionNodes(permission).length;
 }
 
 function formatLabel(label) {
@@ -523,7 +618,34 @@ const goBack = () => {
                                         {{ selectedCountInModule(activePermissionGroup) }}/{{ totalCountInModule(activePermissionGroup) }} selected
                                     </p>
                                 </div>
-                                <div class="flex items-center gap-2">
+                                <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+                                    <template v-if="activePermissionGroup.name === 'dashboard'">
+                                        <template v-if="props.isDeveloper">
+                                            <button
+                                                v-if="dashboardCategoryPermissions.length"
+                                                type="button"
+                                                class="whitespace-nowrap text-left text-xs font-semibold text-slate-700 hover:text-blue-700"
+                                                @click="togglePermissions(dashboardCategoryPermissions)"
+                                            >
+                                                {{ isAllPermissionsChecked(dashboardCategoryPermissions) ? 'Unselect All Categories' : 'Select All Categories' }}
+                                            </button>
+                                            <button
+                                                v-if="dashboardMainCategoryPermissions.length"
+                                                type="button"
+                                                class="whitespace-nowrap text-left text-xs font-semibold text-slate-700 hover:text-blue-700"
+                                                @click="togglePermissions(dashboardMainCategoryPermissions)"
+                                            >
+                                                {{ isAllPermissionsChecked(dashboardMainCategoryPermissions) ? 'Unselect All Main Categories' : 'Select All Main Categories' }}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="whitespace-nowrap text-left text-xs font-semibold text-slate-700 hover:text-blue-700"
+                                                @click="selectDefaultDashboardPermissions"
+                                            >
+                                                Select Default Cards
+                                            </button>
+                                        </template>
+                                    </template>
                                     <button
                                         type="button"
                                         class="text-left font-semibold text-sm text-slate-800 hover:text-blue-700"
@@ -550,12 +672,15 @@ const goBack = () => {
                                             <template v-for="childInfo in activePermissionGroup.child" :key="childInfo.id">
                                                 <li class="rounded border border-slate-200 p-2 bg-slate-50">
                                                     <div class="flex items-center">
-                                                        <input v-model="checkedPermissions" :value="childInfo.id"
+                                                        <input
+                                                            :checked="isPermissionChecked(childInfo)"
+                                                            :indeterminate="isPermissionPartiallyChecked(childInfo)"
+                                                            @change="setPermissionChecked(childInfo, $event.target.checked)"
                                                             type="checkbox" class="cursor-pointer"
                                                             :id="'permission_' + childInfo.id" />
                                                         <label :for="'permission_' + childInfo.id"
                                                             class="ml-2 cursor-pointer"
-                                                            :class="checkedPermissions.includes(childInfo.id) ? 'text-green-600' : 'text-gray-700'">
+                                                            :class="isPermissionChecked(childInfo) ? 'text-green-600' : 'text-gray-700'">
                                                             {{ permissionDisplayLabel(childInfo) }}
                                                         </label>
                                                     </div>

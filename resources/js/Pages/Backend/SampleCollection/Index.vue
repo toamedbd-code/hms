@@ -1,10 +1,15 @@
 <script setup>
-import { computed, ref } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { router, usePage } from '@inertiajs/vue3';
 import axios from 'axios';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import Pagination from '@/Components/Pagination.vue';
 import { displayWarning } from '@/responseMessage.js';
+import {
+  formatOfflineBillReference,
+  getOfflineBillingEncryptionStatus,
+  getOfflineBillingRequests,
+} from '@/offlineBillingQueue.js';
 
 const props = defineProps({
   datas: Object,
@@ -16,11 +21,97 @@ const props = defineProps({
     type: String,
     default: 'Sample Collection',
   },
+  allowedCategories: {
+    type: Array,
+    default: () => [],
+  },
 });
 
 const rows = computed(() => props.datas?.data ?? []);
+const page = usePage();
+const offlineAdminId = computed(() => Number(page.props.auth?.admin?.id || 0));
+const offlinePendingSamples = ref([]);
+const offlineQueueLocked = ref(false);
+const offlineQueueError = ref('');
 const printedBarcodes = ref({});
 const search = ref(props.filters?.search ?? '');
+
+const openBarcodePage = (billingId) => {
+  const url = route('backend.sample-collection.barcode', billingId);
+
+  const printWindow = window.open(url, '_blank');
+  if (!printWindow) {
+    displayWarning({ message: 'বারকোড পেজ খুলতে ব্রাউজারের pop-up অনুমতি দিন।' });
+    return;
+  }
+
+  printWindow.opener = null;
+  markBarcodePrinted(billingId);
+};
+
+const loadOfflinePendingSamples = async () => {
+  if (!offlineAdminId.value) return;
+
+  try {
+    const encryptionStatus = await getOfflineBillingEncryptionStatus(offlineAdminId.value);
+    const requests = await getOfflineBillingRequests(offlineAdminId.value);
+    offlineQueueLocked.value = !encryptionStatus.unlocked && requests.some(
+      (entry) => ['queued', 'syncing', 'needs_review'].includes(entry.status)
+    );
+    if (!encryptionStatus.unlocked) {
+      offlinePendingSamples.value = [];
+      offlineQueueError.value = '';
+      return;
+    }
+
+    const allowedCategories = new Set(props.allowedCategories.map((category) => String(category).toLowerCase()));
+    const query = String(search.value || '').trim().toLowerCase();
+    const excludedCategories = new Set([
+      'medicine', 'pharmacy', 'opd', 'ipd', 'appointment', 'service',
+      'store inventory', 'blood bank', 'ambulance', 'disposable',
+      'radiology', 'ecg', 'ultrasound', 'xray', 'x-ray',
+      'ultrasonogram', 'ultrasonography',
+    ]);
+
+    offlinePendingSamples.value = requests
+      .filter((entry) => (
+        entry.routeName === 'backend.billing.store'
+        && ['queued', 'syncing', 'needs_review'].includes(entry.status)
+        && entry.data
+        && !entry.data.ipd_patient_id
+      ))
+      .map((entry) => {
+        const items = (Array.isArray(entry.data.items) ? entry.data.items : []).filter((item) => {
+          const category = String(item.category || '').trim().toLowerCase();
+          return allowedCategories.has(category) && !excludedCategories.has(category);
+        });
+        const patientName = entry.data.patient_name || 'Walk-in Patient';
+        const reference = formatOfflineBillReference(entry.id);
+        const matchesSearch = !query
+          || reference.toLowerCase().includes(query)
+          || String(patientName).toLowerCase().includes(query)
+          || items.some((item) => String(item.name || '').toLowerCase().includes(query));
+
+        return {
+          id: entry.id,
+          reference,
+          patientName,
+          status: entry.status,
+          items,
+          lastError: entry.lastError || '',
+          createdAt: entry.createdAt,
+          matchesSearch,
+        };
+      })
+      .filter((entry) => entry.items.length > 0 && entry.matchesSearch)
+      .reverse();
+    offlineQueueError.value = '';
+  } catch (error) {
+    offlineQueueError.value = error instanceof Error
+      ? error.message
+      : 'Could not load the offline sample queue.';
+  }
+};
 
 // modal state for per-item collection
 const showCollectModal = ref(false);
@@ -107,6 +198,9 @@ const handleCollect = (billing) => {
 };
 
 const handleSearch = () => {
+  loadOfflinePendingSamples();
+  if (!navigator.onLine) return;
+
   router.get(
     route('backend.sample-collection.index'),
     {
@@ -129,6 +223,22 @@ const goBack = () => {
 
   router.get(route('backend.dashboard'));
 };
+
+const handleOfflineQueueUpdated = () => loadOfflinePendingSamples();
+const handleSyncedBillingRefresh = () => router.reload({ only: ['datas'] });
+
+onMounted(() => {
+  window.addEventListener('offline-billing:queue-updated', handleOfflineQueueUpdated);
+  window.addEventListener('billing:list:refresh', handleSyncedBillingRefresh);
+  window.addEventListener('sample-collection:list:refresh', handleSyncedBillingRefresh);
+  loadOfflinePendingSamples();
+});
+
+onUnmounted(() => {
+  window.removeEventListener('offline-billing:queue-updated', handleOfflineQueueUpdated);
+  window.removeEventListener('billing:list:refresh', handleSyncedBillingRefresh);
+  window.removeEventListener('sample-collection:list:refresh', handleSyncedBillingRefresh);
+});
 </script>
 
 <template>
@@ -161,6 +271,44 @@ const goBack = () => {
         </div>
       </div>
 
+      <section v-if="offlinePendingSamples.length || offlineQueueLocked || offlineQueueError" class="w-full my-4 rounded-md border border-amber-300 bg-amber-50 p-3">
+        <h2 class="mb-2 text-sm font-semibold text-amber-900">Offline samples waiting to synchronize</h2>
+        <p v-if="offlineQueueLocked" class="mb-2 text-sm text-amber-800">
+          Unlock Offline Billing from the billing page to view this browser's unsynchronized samples.
+        </p>
+        <p v-if="offlineQueueError" class="mb-2 text-sm text-red-700">{{ offlineQueueError }}</p>
+        <div v-if="offlinePendingSamples.length" class="overflow-x-auto">
+          <table class="w-full min-w-[650px] border-collapse text-sm text-gray-800">
+            <thead class="bg-amber-100">
+              <tr>
+                <th class="border px-3 py-2 text-left">Offline Reference</th>
+                <th class="border px-3 py-2 text-left">Patient</th>
+                <th class="border px-3 py-2 text-left">Pending Items</th>
+                <th class="border px-3 py-2 text-center">Count</th>
+                <th class="border px-3 py-2 text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="billing in offlinePendingSamples" :key="billing.id">
+                <td class="border px-3 py-2 font-mono">{{ billing.reference }}</td>
+                <td class="border px-3 py-2">{{ billing.patientName }}</td>
+                <td class="border px-3 py-2">{{ billing.items.map((item) => item.name).join(', ') }}</td>
+                <td class="border px-3 py-2 text-center">{{ billing.items.length }}</td>
+                <td class="border px-3 py-2">
+                  <span v-if="billing.status === 'needs_review'" class="font-semibold text-red-700">Needs review</span>
+                  <span v-else-if="billing.status === 'syncing'" class="font-semibold text-blue-700">Synchronizing</span>
+                  <span v-else class="font-semibold text-amber-800">Waiting to sync</span>
+                  <span v-if="billing.lastError" class="mt-1 block text-red-700">{{ billing.lastError }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="mt-2 text-xs text-amber-800">
+            Actual bill and sample item IDs are assigned by the server during synchronization. Sample collection becomes available in the regular list after those IDs are created.
+          </p>
+        </div>
+      </section>
+
       <div class="w-full my-4 overflow-x-auto">
         <table class="w-full text-sm text-left text-gray-700 border">
           <thead class="bg-gray-50">
@@ -178,7 +326,9 @@ const goBack = () => {
               <td class="px-3 py-2 border">
                 {{ getPatientName(billing) }}
               </td>
-              <td class="px-3 py-2 border">{{ getTestNames(billing) }}</td>
+              <td class="px-3 py-2 border" :title="getTestNames(billing)">
+                {{ getTestNames(billing) }}
+              </td>
               <td class="px-3 py-2 border">{{ getItems(billing).length }}</td>
               <td class="px-3 py-2 border">
                 <div class="flex flex-wrap gap-2">
@@ -190,15 +340,13 @@ const goBack = () => {
                   >
                     Collect Sample
                   </button>
-                  <a
-                    :href="route('backend.sample-collection.barcode', billing.id)"
-                    target="_blank"
-                    rel="noopener"
+                  <button
+                    type="button"
                     class="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-md shadow-sm hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300"
-                    @click="markBarcodePrinted(billing.id)"
+                    @click="openBarcodePage(billing.id)"
                   >
                     Print Barcode
-                  </a>
+                  </button>
                 </div>
               </td>
             </tr>
@@ -210,7 +358,7 @@ const goBack = () => {
       </div>
 
       <!-- Per-test collect modal -->
-      <div v-if="showCollectModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+      <div v-if="showCollectModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
         <div class="bg-white rounded shadow p-4 w-full max-w-2xl">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-lg font-semibold">Collect Samples - {{ modalBilling?.bill_number || '' }}</h2>

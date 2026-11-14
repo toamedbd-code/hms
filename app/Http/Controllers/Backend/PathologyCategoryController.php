@@ -7,10 +7,9 @@ use App\Http\Requests\PathologyCategoryRequest;
 use Illuminate\Support\Facades\DB;
 use App\Services\TestCategoryService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use App\Traits\SystemTrait;
+use App\Support\DefaultDeveloperManager;
 use Exception;
 
 class PathologyCategoryController extends Controller
@@ -24,11 +23,23 @@ class PathologyCategoryController extends Controller
         $this->testCategoryService = $testCategoryService;
 
         $this->middleware('auth:admin');
-        $this->middleware('permission:test-category-list');
-        $this->middleware('permission:test-category-list-create', ['only' => ['create', 'store']]);
-        $this->middleware('permission:test-category-list-edit', ['only' => ['edit', 'update']]);
-        $this->middleware('permission:test-category-list-delete', ['only' => ['destroy']]);
+        $this->middleware('permission:test-category-list', ['only' => ['index']]);
         $this->middleware('permission:test-category-list-status', ['only' => ['changeStatus']]);
+        $this->middleware(function ($request, $next) {
+            abort_unless($this->isDeveloper() || auth('admin')->user()?->can('test-category-list-create'), 403);
+
+            return $next($request);
+        })->only(['create', 'store']);
+        $this->middleware(function ($request, $next) {
+            abort_unless($this->isDeveloper() || auth('admin')->user()?->can('test-category-list-edit'), 403);
+
+            return $next($request);
+        })->only(['edit', 'update']);
+        $this->middleware(function ($request, $next) {
+            abort_unless($this->isDeveloper(), 403);
+
+            return $next($request);
+        })->only(['destroy']);
     }
 
 
@@ -41,14 +52,44 @@ class PathologyCategoryController extends Controller
                 'pageTitle' => fn() => 'Item Category List',
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
-                'datas' => fn() => $this->getDatas(),
+                'datas' => fn() => $this->getDatas(false),
+                'isMainCategory' => false,
+                'canCreateCategory' => fn() => $this->isDeveloper() || auth('admin')->user()?->can('test-category-list-create'),
             ]
         );
     }
 
-    private function getDatas()
+    public function mainIndex()
+    {
+        return Inertia::render(
+            'Backend/PathologyCategory/Index',
+            [
+                'pageTitle' => fn() => 'Main Category List',
+                'tableHeaders' => fn() => ['Sl/No', 'Main Category', 'Status', 'Action'],
+                'dataFields' => fn() => [
+                    ['fieldName' => 'index', 'class' => 'text-center'],
+                    ['fieldName' => 'category', 'class' => 'text-center'],
+                    ['fieldName' => 'status', 'class' => 'text-center'],
+                ],
+                'datas' => fn() => $this->getDatas(true),
+                'isMainCategory' => true,
+                'canCreateCategory' => fn() => $this->isDeveloper() || auth('admin')->user()?->can('test-category-list-create'),
+            ]
+        );
+    }
+
+    private function isDeveloper(): bool
+    {
+        return DefaultDeveloperManager::isDeveloper(auth('admin')->user());
+    }
+
+    private function getDatas(bool $mainCategory = false)
     {
         $query = $this->testCategoryService->list();
+
+        if ($mainCategory) {
+            $query->whereNull('parent_id');
+        }
 
         if (request()->filled('name')) {
             $search = request()->name;
@@ -63,13 +104,16 @@ class PathologyCategoryController extends Controller
 
 
 
-        $datas = $query->paginate(request()->numOfData ?? 10)->withQueryString();
+        $perPage = max(1, min(500, (int) request()->input('numOfData', 10)));
+        $datas = $query->paginate($perPage)->withQueryString();
 
-        $formatedDatas = $datas->map(function ($data, $index) {
+        $formatedDatas = $datas->map(function ($data, $index) use ($mainCategory) {
             $customData = new \stdClass();
             $customData->index = $index + 1;
             $customData->parent_id = $data?->parent?->name ?? '';
-            $customData->name = $data->name;
+            $customData->category = $data->parent_id
+                ? (($data?->parent?->name ?? '') . ' > ' . $data->name)
+                : $data->name;
             $customData->status = getStatusText($data->status);
 
             $customData->hasLink = true;
@@ -87,15 +131,15 @@ class PathologyCategoryController extends Controller
                 ];
             }
 
-            if ($user->can('test-category-list-edit')) {
+            if ($this->isDeveloper() || $user->can('test-category-list-edit')) {
                 $customData->links[] = [
                     'linkClass' => 'bg-yellow-400 text-black semi-bold',
-                    'link' => route('backend.pathologycategory.edit',  $data->id),
+                    'link' => route($mainCategory ? 'backend.pathologycategory.main.edit' : 'backend.pathologycategory.edit', $data->id),
                     'linkLabel' => getLinkLabel('Edit', null, null)
                 ];
             }
 
-            if ($user->can('test-category-list-delete')) {
+            if ($this->isDeveloper()) {
                 $customData->links[] = [
                     'linkClass' => 'deleteButton bg-red-500 text-white semi-bold',
                     'link' => route('backend.pathologycategory.destroy', $data->id),
@@ -113,8 +157,7 @@ class PathologyCategoryController extends Controller
     {
         return [
             ['fieldName' => 'index', 'class' => 'text-center'],
-            ['fieldName' => 'parent_id', 'class' => 'text-center'],
-            ['fieldName' => 'name', 'class' => 'text-center'],
+            ['fieldName' => 'category', 'class' => 'text-center'],
             ['fieldName' => 'status', 'class' => 'text-center'],
         ];
     }
@@ -123,7 +166,6 @@ class PathologyCategoryController extends Controller
         return [
             'Sl/No',
             'Category',
-            'Sub Category',
             'Status',
             'Action',
         ];
@@ -135,7 +177,20 @@ class PathologyCategoryController extends Controller
             'Backend/PathologyCategory/Form',
             [
                 'pageTitle' => fn() => 'Item Category Create',
-                'categories' => fn() => $this->testCategoryService->activeList()
+                'categories' => fn() => $this->testCategoryService->activeList(),
+                'isMainCategory' => false,
+            ]
+        );
+    }
+
+    public function mainCreate()
+    {
+        return Inertia::render(
+            'Backend/PathologyCategory/Form',
+            [
+                'pageTitle' => fn() => 'Main Category Create',
+                'categories' => fn() => [],
+                'isMainCategory' => true,
             ]
         );
     }
@@ -148,6 +203,10 @@ class PathologyCategoryController extends Controller
         try {
 
             $data = $request->validated();
+            if ($request->boolean('is_main_category')) {
+                $data['parent_id'] = null;
+            }
+            unset($data['is_main_category']);
 
             $dataInfo = $this->testCategoryService->create($data);
 
@@ -192,7 +251,22 @@ class PathologyCategoryController extends Controller
                 'pageTitle' => fn() => 'Item Category Edit',
                 'pathologycategory' => fn() => $pathologycategory,
                 'id' => fn() => $id,
-                'categories' => fn() => $this->testCategoryService->activeList()
+                'categories' => fn() => $this->testCategoryService->activeList(),
+                'isMainCategory' => false,
+            ]
+        );
+    }
+
+    public function mainEdit($id)
+    {
+        return Inertia::render(
+            'Backend/PathologyCategory/Form',
+            [
+                'pageTitle' => fn() => 'Main Category Edit',
+                'pathologycategory' => fn() => $this->testCategoryService->find($id),
+                'id' => fn() => $id,
+                'categories' => fn() => [],
+                'isMainCategory' => true,
             ]
         );
     }
@@ -203,6 +277,10 @@ class PathologyCategoryController extends Controller
         try {
 
             $data = $request->validated();
+            if ($request->boolean('is_main_category')) {
+                $data['parent_id'] = null;
+            }
+            unset($data['is_main_category']);
             $pathologycategory = $this->testCategoryService->find($id);
 
             $dataInfo = $this->testCategoryService->update($data, $id);

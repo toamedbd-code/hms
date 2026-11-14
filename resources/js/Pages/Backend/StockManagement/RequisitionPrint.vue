@@ -7,6 +7,7 @@ const props = defineProps({
   pageTitle: { type: String, default: 'Requisition Slip' },
   requisition: { type: Object, required: true },
   isIssueSlip: { type: Boolean, default: false },
+  timezone: { type: String, default: 'Asia/Dhaka' },
 });
 
 const printableEl = ref(null);
@@ -55,7 +56,14 @@ const formatDateTime = (value) => {
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
+    timeZone: props.timezone,
   });
+};
+
+const formatDate = (value) => {
+  if (!value) return '-';
+  const [year, month, day] = String(value).slice(0, 10).split('-');
+  return year && month && day ? `${day}/${month}/${year}` : String(value);
 };
 
 const downloadPdf = async () => {
@@ -121,7 +129,9 @@ onMounted(() => {
         <p><strong>Requisition No:</strong> {{ requisition.requisition_no }}</p>
         <p><strong>Status:</strong> {{ requisition.status }}</p>
         <p><strong>Department:</strong> {{ requisition.department }}</p>
-        <p><strong>Needed Date:</strong> {{ formatDateTime(requisition.needed_date) }}</p>
+        <p><strong>Needed Date:</strong> {{ formatDate(requisition.needed_date) }}</p>
+        <p><strong>Requested At:</strong> {{ formatDateTime(requisition.created_at) }}</p>
+        <p><strong>Delivered / Issued At:</strong> {{ requisition.status === 'Approved' ? formatDateTime(requisition.approved_at) : '-' }}</p>
       </div>
 
       <table class="w-full text-sm border border-gray-200">

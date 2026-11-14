@@ -6,8 +6,11 @@ use App\Models\Billing;
 use App\Models\BillItem;
 use App\Models\DueCollection;
 use App\Models\Expense;
+use App\Models\Appoinment;
 use App\Models\OpdPatient;
 use App\Models\Payment;
+use App\Models\StorePurchasePayment;
+use App\Models\SupplierPayment;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +32,7 @@ class ReportAccountingService
             'discount_type',
             'extra_flat_discount',
             'payable_amount',
+            'vat_amount',
             'due_amount',
             'return_amt'
         ]);
@@ -58,6 +62,7 @@ class ReportAccountingService
                 'discount_type',
                 'extra_flat_discount',
                 'payable_amount',
+                'vat_amount',
                 'due_amount',
                 'return_amt'
             ])
@@ -101,7 +106,16 @@ class ReportAccountingService
             $discountBase = (float) $billing->total;
             if ($billing->discount_type === 'percentage') {
                 $discountBase = (float) BillItem::where('billing_id', $billing->id)
-                    ->whereRaw('LOWER(category) NOT IN (?, ?)', ['disposable', 'pathology'])
+                    ->where('status', 'Active')
+                    ->where(function ($query) {
+                        $query->where('discount_exempt', false)
+                            ->orWhereNull('discount_exempt');
+                    })
+                    ->whereRaw('LOWER(category) <> ?', ['disposable'])
+                    ->whereRaw(
+                        'NOT (LOWER(category) = ? AND (LOWER(item_name) LIKE ? OR LOWER(item_name) LIKE ? OR LOWER(item_name) LIKE ? OR LOWER(item_name) LIKE ?))',
+                        ['pathology', '%disposable%', '%tube%', '%butterfly%', '%needle%']
+                    )
                     ->sum('total_amount');
             }
 
@@ -114,6 +128,9 @@ class ReportAccountingService
                 ->sum('discount');
             $extraDiscount = max(0, (float) $billing->extra_flat_discount);
             $calculatedDiscount = max(0, (float) $billingDiscountAmount) + max(0, $itemDiscountAmount);
+            $declaredDiscountAmount = $itemDiscountAmount > 0
+                ? max(0, $itemDiscountAmount)
+                : max(0, (float) $billingDiscountAmount);
             $storedNetAmount = max(0, (float) ($billing->payable_amount ?? 0) - (float) ($billing->vat_amount ?? 0));
             $discountAmount = $storedNetAmount > 0 || (float) $billing->payable_amount === 0
                 ? max(0, (float) $billing->total - $storedNetAmount - $extraDiscount)
@@ -151,6 +168,7 @@ class ReportAccountingService
                 'billing_date' => Carbon::parse($billing->created_at)->format('d-M-Y'),
                 'total_amount' => round((float) $billing->total, 2),
                 'discount_amount' => round($discountAmount, 2),
+                'calculated_discount_amount' => round($declaredDiscountAmount, 2),
                 'extra_discount' => round($extraDiscount, 2),
                 'vat_percent' => round($vatPercent, 2),
                 'vat_amount' => round($vatAmount, 2),
@@ -174,6 +192,14 @@ class ReportAccountingService
             'total_amount' => $billRows->sum('total_amount'),
             'discount_amount' => $billRows->sum('discount_amount'),
             'extra_discount' => $billRows->sum('extra_discount'),
+            'total_discount' => $billRows->sum(fn ($row) => (
+                $this->toCents($row['calculated_discount_amount'] ?? $row['discount_amount'] ?? 0)
+                + $this->toCents($row['extra_discount'] ?? 0)
+            )) / 100,
+            'discount_rounding_adjustment' => $billRows->sum(fn ($row) => (
+                $this->toCents($row['calculated_discount_amount'] ?? $row['discount_amount'] ?? 0)
+                - $this->toCents($row['discount_amount'] ?? 0)
+            )) / 100,
             'vat_amount' => $billRows->sum('vat_amount'),
             'net_amount' => $billRows->sum('net_amount'),
             'paid_amount' => $billRows->sum('paid_amount'),
@@ -185,26 +211,30 @@ class ReportAccountingService
     public function calculateFinalIncomeTotals(Collection $billRows, array $dateConditions): array
     {
         $totalPaidAmount = $billRows->sum('paid_amount');
-        $totalDueCollected = $billRows->sum('due_collected');
+        $totalDueCollected = $this->getDueCollectionTotal($dateConditions);
+        $totalAppointmentReceipts = $this->getInitialAppointmentReceipts($dateConditions);
+        $totalLabReceipts = $this->getLabPaymentTotal($dateConditions);
+        $totalExpense = $this->getExpenseTotal($dateConditions);
 
-        $expenseQuery = Expense::where('status', 'Active');
-        $this->applyDateFilter($expenseQuery, $dateConditions, 'date');
-        $totalExpense = $expenseQuery->sum('amount');
+        $totalRefundAmount = $this->getRefundTotal($dateConditions);
 
-        // Calculate total processed refunds from refund transactions in the selected date range.
-        // Some callers pass single_date/date_from/date_to conditions instead of single_date_range,
-        // so use the shared date filter rather than assuming the array key is always present.
-        $refundQuery = DB::table('refund_transactions');
-        $this->applyDateFilter($refundQuery, $dateConditions, 'created_at');
-        $totalRefundAmount = (float) $refundQuery->sum('refund_amount');
-
-        // Net Income = (Paid + Due Collected) - Expenses - Processed Refunds
-        $finalIncome = ($totalPaidAmount + $totalDueCollected) - $totalExpense - $totalRefundAmount;
+        // Paid amounts already reflect bill discounts; do not deduct discounts again.
+        $paidCents = $billRows->sum(fn ($row) => $this->toCents($row['paid_amount'] ?? 0));
+        $incomeBeforeExpensesCents = $paidCents
+            + $this->toCents($totalDueCollected)
+            + $this->toCents($totalAppointmentReceipts)
+            + $this->toCents($totalLabReceipts)
+            - $this->toCents($totalRefundAmount);
+        $finalIncomeCents = $incomeBeforeExpensesCents - $this->toCents($totalExpense);
+        $finalIncome = (float) ($finalIncomeCents / 100);
 
         return [
             'total_paid' => $totalPaidAmount,
             'total_due_collected' => $totalDueCollected,
+            'total_appointment_receipts' => $totalAppointmentReceipts,
+            'total_lab_receipts' => $totalLabReceipts,
             'total_expense' => $totalExpense,
+            'income_before_expenses' => (float) ($incomeBeforeExpensesCents / 100),
             // Keep legacy key but also provide the controller-expected key
             'total_return' => $totalRefundAmount,
             'total_return_amount' => $totalRefundAmount,
@@ -212,17 +242,84 @@ class ReportAccountingService
         ];
     }
 
+    private function toCents($amount): int
+    {
+        return (int) round(round((float) ($amount ?? 0), 2) * 100, 0, PHP_ROUND_HALF_UP);
+    }
+
+    public function getLabPaymentTotal(array $dateConditions): float
+    {
+        $query = DB::table('lab_payments');
+        $this->applyDateFilter($query, $dateConditions, 'payment_date');
+
+        return round((float) $query->sum('amount'), 2);
+    }
+
+    public function getInitialAppointmentReceipts(array $dateConditions): float
+    {
+        $appointmentsQuery = Appoinment::query()->whereNull('deleted_at');
+        $this->applyDateFilter($appointmentsQuery, $dateConditions, 'created_at');
+        $opdPatients = $appointmentsQuery
+            ->with('opdPatient:id,reference,paid_amount')
+            ->get(['id', 'transaction_id'])
+            ->map(fn ($appointment) => $appointment->opdPatient)
+            ->filter(fn ($opdPatient) => $opdPatient && (float) $opdPatient->paid_amount > 0)
+            ->unique('id')
+            ->values();
+
+        if ($opdPatients->isEmpty()) {
+            return 0.0;
+        }
+
+        $opdNotes = $opdPatients->map(fn ($opdPatient) =>
+            'OPD due collected for opd_patient_id:' . $opdPatient->id
+        );
+        $dueRows = DueCollection::query()
+            ->whereNull('billing_id')
+            ->whereIn('note', $opdNotes)
+            ->get(['note', 'collected_amount']);
+
+        $dueCollectedByOpdId = [];
+        foreach ($dueRows as $dueRow) {
+            if (preg_match('/opd_patient_id:(\d+)/i', (string) $dueRow->note, $matches)) {
+                $opdId = (int) $matches[1];
+                $dueCollectedByOpdId[$opdId] = ($dueCollectedByOpdId[$opdId] ?? 0)
+                    + (float) $dueRow->collected_amount;
+            }
+        }
+
+        return round((float) $opdPatients->sum(fn ($opdPatient) => max(
+            0,
+            (float) $opdPatient->paid_amount - ($dueCollectedByOpdId[$opdPatient->id] ?? 0)
+        )), 2);
+    }
+
     public function getExpenseTotal(array $dateConditions): float
     {
         $expenseQuery = Expense::where('status', 'Active');
         $this->applyDateFilter($expenseQuery, $dateConditions, 'date');
 
-        return (float) $expenseQuery->sum('amount');
+        $storePaymentsQuery = StorePurchasePayment::query();
+        $this->applyDateFilter($storePaymentsQuery, $dateConditions, 'payment_date');
+
+        $pharmacyPaymentsQuery = SupplierPayment::query()->where('paid_amount', '>', 0);
+        $this->applyDateFilter($pharmacyPaymentsQuery, $dateConditions, 'payment_date');
+
+        $labPaymentsQuery = DB::table('lab_purchase_payments');
+        $this->applyDateFilter($labPaymentsQuery, $dateConditions, 'payment_date');
+
+        return round(
+            (float) $expenseQuery->sum('amount')
+            + (float) $storePaymentsQuery->sum('amount')
+            + (float) $pharmacyPaymentsQuery->sum('paid_amount')
+            + (float) $labPaymentsQuery->sum('amount'),
+            2
+        );
     }
 
     public function getRefundTotal(array $dateConditions): float
     {
-        $refundQuery = DB::table('refund_transactions');
+        $refundQuery = DB::table('refund_transactions')->whereNull('deleted_at');
         $this->applyDateFilter($refundQuery, $dateConditions, 'created_at');
 
         return (float) $refundQuery->sum('refund_amount');
@@ -326,7 +423,11 @@ class ReportAccountingService
         $billRows = $this->getBillRowsByDate($dateConditions);
         $totals = $this->calculateFinalIncomeTotals($billRows, $dateConditions);
 
-        return (float) (($totals['total_paid'] ?? 0) + ($totals['total_due_collected'] ?? 0));
+        return (float) (
+            ($totals['total_paid'] ?? 0)
+            + ($totals['total_due_collected'] ?? 0)
+            + ($totals['total_appointment_receipts'] ?? 0)
+        );
     }
 
     private function hasDateFilter(array $dateConditions): bool

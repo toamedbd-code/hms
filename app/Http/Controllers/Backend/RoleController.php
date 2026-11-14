@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
+use App\Models\TestCategory;
 
 use Inertia\Inertia;
 use App\Http\Requests\RoleRequest;
@@ -168,9 +169,9 @@ class RoleController extends Controller
                             return trim(strtolower((string) $s));
                         })->filter()->values();
 
-                        $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
+                        $actorPermissionIds = $this->includeAssignableModulePermissions($actor->getAllPermissions()->pluck('id')->map(function ($i) {
                             return (int) $i;
-                        })->filter()->values();
+                        })->filter()->values());
                     }
                 } catch (\Throwable $e) {
                     $allowedModuleSlugs = collect();
@@ -183,7 +184,7 @@ class RoleController extends Controller
                         $nodeId = (int) ($node->id ?? 0);
 
                         if ($node->relationLoaded('child') && $node->child) {
-                            $node->child = $filterTree(collect($node->child))->filter()->values()->toArray();
+                            $node->setRelation('child', $filterTree(collect($node->child))->values());
                         }
 
                         $childCount = is_array($node->child) ? count($node->child) : (collect($node->child)->count() ?? 0);
@@ -229,9 +230,9 @@ class RoleController extends Controller
                     $actorPermissionIds = collect();
                     try {
                         if ($actor) {
-                            $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
+                            $actorPermissionIds = $this->includeAssignableModulePermissions($actor->getAllPermissions()->pluck('id')->map(function ($i) {
                                 return (int) $i;
-                            })->filter()->values();
+                            })->filter()->values());
                         }
                     } catch (\Throwable $e) {
                         $actorPermissionIds = collect();
@@ -282,9 +283,9 @@ class RoleController extends Controller
                     $actorPermissionIds = collect();
                     try {
                         if ($actor) {
-                            $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
+                            $actorPermissionIds = $this->includeAssignableModulePermissions($actor->getAllPermissions()->pluck('id')->map(function ($i) {
                                 return (int) $i;
-                            })->filter()->values();
+                            })->filter()->values());
                         }
                     } catch (\Throwable $e) {
                         $actorPermissionIds = collect();
@@ -317,6 +318,11 @@ class RoleController extends Controller
             [
                 'pageTitle' => fn() => 'Role Create',
                 'permissions' => fn() => $filtered,
+                'dashboardCategoryPermissionNames' => $this->dashboardCategoryPermissionNames(),
+                'canManageAllPermissions' => $actor && method_exists($actor, 'hasRole')
+                    && ($actor->hasRole('developer') || $isSuperAdmin),
+                'isDeveloper' => $actor && method_exists($actor, 'hasRole')
+                    && $actor->hasRole('developer'),
             ]
         );
     }
@@ -363,9 +369,9 @@ class RoleController extends Controller
                     $actorPermissionIds = collect();
                     try {
                         if ($actor) {
-                            $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
+                            $actorPermissionIds = $this->includeAssignableModulePermissions($actor->getAllPermissions()->pluck('id')->map(function ($i) {
                                 return (int) $i;
-                            })->filter()->values();
+                            })->filter()->values());
                         }
                     } catch (\Throwable $e) {
                         $actorPermissionIds = collect();
@@ -398,6 +404,7 @@ class RoleController extends Controller
                 ]);
 
                 $this->roleService->syncPermissions($dataInfo->id, $allowedPermissionIds);
+                $this->syncRoleAssignablePermissionIds($dataInfo->id, $allowedPermissionIds);
                 $message = 'Role created successfully';
                 $this->storeAdminWorkLog($dataInfo->id, 'roles', $message);
 
@@ -449,53 +456,34 @@ class RoleController extends Controller
         // same filtering as create
         $actor = auth()->guard('admin')->user();
         $isSuperAdmin = $actor && method_exists($actor, 'hasRole') && $actor->hasRole('super admin');
+        $canManageAllPermissions = $actor && method_exists($actor, 'hasRole')
+            && ($actor->hasRole('developer') || $isSuperAdmin);
         try {
-            if ($actor && method_exists($actor, 'hasRole') && ($actor->hasRole('developer') || $isSuperAdmin)) {
+            if ($canManageAllPermissions) {
                 $filtered = $allPermissions;
             } else {
-                $allowedModuleSlugs = collect();
-                $actorPermissionIds = collect();
-                try {
-                    if ($actor) {
-                        $allowedModuleSlugs = $actor->modules()->pluck('slug')->map(function ($s) {
-                            return trim(strtolower((string) $s));
-                        })->filter()->values();
-
-                        $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
-                            return (int) $i;
-                        })->filter()->values();
-                    }
-                } catch (\Throwable $e) {
-                    $allowedModuleSlugs = collect();
-                    $actorPermissionIds = collect();
+                $assignablePermissionIds = $this->roleAssignablePermissionIds((int) $id);
+                if ($assignablePermissionIds->isEmpty()) {
+                    $assignablePermissionIds = $this->actorAssignablePermissionIds($actor);
+                } elseif (!$this->actorHasRole($actor, (int) $id)) {
+                    $assignablePermissionIds = $assignablePermissionIds
+                        ->intersect($this->actorAssignablePermissionIds($actor))
+                        ->values();
                 }
 
-                $filterTree = function ($nodes) use (&$filterTree, $allowedModuleSlugs, $actorPermissionIds) {
-                    return $nodes->map(function ($node) use (&$filterTree, $allowedModuleSlugs, $actorPermissionIds) {
-                        $nodeModule = trim(strtolower((string) ($node->module_slug ?? '')));
+                $filterTree = function ($nodes) use (&$filterTree, $assignablePermissionIds) {
+                    return $nodes->map(function ($node) use (&$filterTree, $assignablePermissionIds) {
                         $nodeId = (int) ($node->id ?? 0);
 
                         if ($node->relationLoaded('child') && $node->child) {
-                            $node->child = $filterTree(collect($node->child))->filter()->values()->toArray();
+                            $node->setRelation('child', $filterTree(collect($node->child))->values());
                         }
 
                         $childCount = is_array($node->child) ? count($node->child) : (collect($node->child)->count() ?? 0);
                         $hasAllowedChild = $childCount > 0;
-                        $nodeIsActorPermission = $nodeId > 0 && $actorPermissionIds->contains($nodeId);
+                        $nodeIsAssignable = $nodeId > 0 && $assignablePermissionIds->contains($nodeId);
 
-                        if ($nodeModule !== '') {
-                            if ($nodeIsActorPermission || $hasAllowedChild) {
-                                return $node;
-                            }
-
-                            if ($childCount > 0 && $allowedModuleSlugs->contains($nodeModule)) {
-                                return $node;
-                            }
-
-                            return null;
-                        }
-
-                        if ($nodeIsActorPermission || $hasAllowedChild) {
+                        if ($nodeIsAssignable || $hasAllowedChild) {
                             return $node;
                         }
 
@@ -516,6 +504,10 @@ class RoleController extends Controller
                 'permissions' => fn() => $filtered,
                 'role' => $role,
                 'id' =>  $id,
+                'dashboardCategoryPermissionNames' => $this->dashboardCategoryPermissionNames(),
+                'canManageAllPermissions' => $canManageAllPermissions,
+                'isDeveloper' => $actor && method_exists($actor, 'hasRole')
+                    && $actor->hasRole('developer'),
             ]
         );
 
@@ -531,58 +523,57 @@ class RoleController extends Controller
 
             // Compute allowed permissions BEFORE updating the role to avoid side-effects
             $actor = auth()->guard('admin')->user();
-            $allowedModuleSlugs = collect();
-            try {
-                if ($actor) {
-                    $allowedModuleSlugs = $actor->modules()->pluck('slug')->map(function ($s) {
-                        return trim(strtolower((string) $s));
-                    })->filter()->values();
-                }
-            } catch (\Throwable $e) {
-                $allowedModuleSlugs = collect();
-            }
-
             $submittedPermissionIds = is_array($request->permission_ids) ? $request->permission_ids : (array) ($request->permission_ids ?? []);
             // sanitize ids to integers and remove falsy values
             $submittedPermissionIds = array_values(array_filter(array_map(function ($v) {
                 return is_numeric($v) ? (int) $v : null;
             }, $submittedPermissionIds)));
 
-            $permissionQuery = SpatiePermission::whereIn('id', $submittedPermissionIds)->where('guard_name', 'admin');
-            if (!($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer'))) {
-                $actorPermissionIds = collect();
-                try {
-                    if ($actor) {
-                        $actorPermissionIds = $actor->getAllPermissions()->pluck('id')->map(function ($i) {
-                            return (int) $i;
-                        })->filter()->values();
-                    }
-                } catch (\Throwable $e) {
-                    $actorPermissionIds = collect();
-                }
+            $canManageAllPermissions = $actor && method_exists($actor, 'hasRole')
+                && ($actor->hasRole('developer') || $actor->hasRole('super admin'));
+            $roleAssignablePermissionIds = $this->roleAssignablePermissionIds((int) $id);
+            if (!$canManageAllPermissions && $roleAssignablePermissionIds->isEmpty()) {
+                $roleAssignablePermissionIds = $this->actorAssignablePermissionIds($actor);
+            } elseif (!$canManageAllPermissions && !$this->actorHasRole($actor, (int) $id)) {
+                $roleAssignablePermissionIds = $roleAssignablePermissionIds
+                    ->intersect($this->actorAssignablePermissionIds($actor))
+                    ->values();
+            }
 
-                if (!($allowedModuleSlugs->count() || $actorPermissionIds->count())) {
-                    $allowedPermissionIds = [];
-                } else {
-                    $permissionQuery->where(function ($q) use ($allowedModuleSlugs, $actorPermissionIds) {
-                        if ($allowedModuleSlugs->count()) {
-                            $q->whereIn('module_slug', $allowedModuleSlugs->toArray());
-                        }
-                        if ($actorPermissionIds->count()) {
-                            $q->orWhereIn('id', $actorPermissionIds->toArray());
-                        }
-                    });
+            $currentRolePermissionIds = $this->roleService->roleHasPermission((int) $id);
+            $validSubmittedPermissionIds = SpatiePermission::query()
+                ->whereIn('id', $submittedPermissionIds)
+                ->where('guard_name', 'admin')
+                ->pluck('id')
+                ->map(fn ($permissionId) => (int) $permissionId)
+                ->all();
 
-                    $allowedPermissionIds = $permissionQuery->pluck('id')->toArray();
-                }
+            if ($canManageAllPermissions) {
+                $allowedPermissionIds = $validSubmittedPermissionIds;
             } else {
-                $allowedPermissionIds = $permissionQuery->pluck('id')->toArray();
+                $protectedPermissionIds = array_values(array_diff(
+                    $currentRolePermissionIds,
+                    $roleAssignablePermissionIds->all()
+                ));
+                $allowedPermissionIds = array_values(array_unique(array_merge(
+                    array_intersect(
+                        $validSubmittedPermissionIds,
+                        $roleAssignablePermissionIds->all()
+                    ),
+                    $protectedPermissionIds
+                )));
             }
 
             // Unauthorized check (performed BEFORE persisting role changes)
             try {
-                if (!($actor && method_exists($actor, 'hasRole') && $actor->hasRole('developer'))) {
-                    $unauthorized = array_values(array_diff($submittedPermissionIds, $allowedPermissionIds));
+                if (!$canManageAllPermissions) {
+                    $unauthorized = array_values(array_unique(array_merge(
+                        array_diff($submittedPermissionIds, $validSubmittedPermissionIds),
+                        array_diff(
+                            $validSubmittedPermissionIds,
+                            array_merge($roleAssignablePermissionIds->all(), $protectedPermissionIds ?? [])
+                        )
+                    )));
                     if (count($unauthorized) > 0) {
                         Log::warning('RoleController@update: unauthorized permission selection', [
                             'actor_id' => $actor->id ?? null,
@@ -611,14 +602,16 @@ class RoleController extends Controller
             if ($this->roleService->update($data, $id)) {
                 app(PermissionRegistrar::class)->forgetCachedPermissions();
                 $role = $this->roleService->syncPermissions($id, $allowedPermissionIds);
-                $users = $this->AdminService->list()->where('status', 'Active')->where('role_id', $id)->get();
+                if ($canManageAllPermissions) {
+                    $this->syncRoleAssignablePermissionIds($id, $allowedPermissionIds);
+                } elseif ($this->roleAssignablePermissionIds((int) $id)->isEmpty()) {
+                    $this->syncRoleAssignablePermissionIds($id, $roleAssignablePermissionIds->all());
+                }
+                $users = $this->AdminService->list()->where('role_id', $id)->get();
                 foreach ($users as $key => $user) {
                     try {
-                        // Ensure user's roles reflect the updated role only (use role name)
-                        $user->syncRoles([$role->name]);
-
-                        // Persist role_id to keep admins table in sync with assigned role
-                        try { $user->role_id = $role->id; $user->save(); } catch (\Throwable $_) { /* ignore */ }
+                        // Keep any other assigned roles while ensuring the edited role remains assigned.
+                        $user->assignRole($role);
 
                         // Remove any direct permissions to enforce role-scoped permissions
                         try { $user->syncPermissions([]); } catch (\Throwable $_) { /* ignore */ }
@@ -655,6 +648,106 @@ class RoleController extends Controller
                 ->back()
                 ->with('errorMessage', $message);
         }
+    }
+
+    private function includeAssignableModulePermissions($permissionIds)
+    {
+        $assignableRootNames = [
+            'billing',
+            'billing-add',
+            'prescription-management',
+        ];
+        $assignableParentIds = SpatiePermission::query()
+            ->whereIn('name', $assignableRootNames)
+            ->where('guard_name', 'admin')
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $permissionIds->contains($id));
+
+        if ($assignableParentIds->isEmpty()) {
+            return $permissionIds;
+        }
+
+        $childPermissionIds = SpatiePermission::query()
+            ->where('guard_name', 'admin')
+            ->whereIn('parent_id', $assignableParentIds->all())
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id);
+
+        return $permissionIds->merge($childPermissionIds)->unique()->values();
+    }
+
+    private function actorAssignablePermissionIds($actor)
+    {
+        if (!$actor) {
+            return collect();
+        }
+
+        $permissionIds = $this->includeAssignableModulePermissions(
+            $actor->getAllPermissions()
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->filter()
+                ->values()
+        );
+
+        return SpatiePermission::query()
+            ->where('guard_name', 'admin')
+            ->whereIn('id', $permissionIds->all())
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+    }
+
+    private function roleAssignablePermissionIds(int $roleId)
+    {
+        return DB::table('role_assignable_permissions')
+            ->where('role_id', $roleId)
+            ->pluck('permission_id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+    }
+
+    private function actorHasRole($actor, int $roleId): bool
+    {
+        return $actor
+            && $actor->roles()->whereKey($roleId)->exists();
+    }
+
+    private function syncRoleAssignablePermissionIds(int $roleId, array $permissionIds): void
+    {
+        DB::table('role_assignable_permissions')
+            ->where('role_id', $roleId)
+            ->delete();
+
+        $rows = collect($permissionIds)
+            ->map(fn ($permissionId) => (int) $permissionId)
+            ->filter(fn ($permissionId) => $permissionId > 0)
+            ->unique()
+            ->map(fn ($permissionId) => [
+                'role_id' => $roleId,
+                'permission_id' => $permissionId,
+            ]);
+
+        foreach ($rows->chunk(500) as $chunk) {
+            DB::table('role_assignable_permissions')->insert($chunk->all());
+        }
+    }
+
+    private function dashboardCategoryPermissionNames(): array
+    {
+        return TestCategory::query()
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->pluck('name')
+            ->map(fn ($name) => 'dashboard-card-' . trim(
+                (string) preg_replace('/[^a-z0-9]+/', '-', strtolower(trim((string) $name))),
+                '-'
+            ) . '-income')
+            ->filter(fn ($name) => $name !== 'dashboard-card--income')
+            ->unique()
+            ->values()
+            ->all();
     }
 
     public function destroy($id)

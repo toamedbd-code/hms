@@ -3,12 +3,13 @@ import { ref } from "vue";
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
-import { router } from '@inertiajs/vue3';
+import { router, useForm } from '@inertiajs/vue3';
 
 let props = defineProps({
     filters: Object,
     roles: Array,
     permissions: Array, // Add permissions prop
+    isDeveloper: Boolean,
 });
 
 const filters = ref({
@@ -18,6 +19,9 @@ const filters = ref({
     role_id: props.filters?.role_id ?? '',
     numOfData: props.filters?.numOfData ?? 10,
 });
+const csvInput = ref(null);
+const csvForm = useForm({ csv_file: null });
+const showStaffCsvActions = props.isDeveloper === true;
 
 const applyFilter = () => {
     router.get(route('backend.admin.index'), filters.value, { preserveState: true });
@@ -41,6 +45,25 @@ const goBack = () => {
         return;
     }
     router.visit(route('backend.dashboard'));
+};
+
+const openCsvPicker = () => {
+    csvInput.value?.click();
+};
+
+const uploadStaffCsv = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    csvForm.csv_file = file;
+    csvForm.post(route('backend.admin.import-csv'), {
+        forceFormData: true,
+        preserveScroll: true,
+        onFinish: () => {
+            csvForm.reset('csv_file');
+            event.target.value = '';
+        },
+    });
 };
 
 // Helper function to check permissions
@@ -78,6 +101,29 @@ const canViewRoleList = () => {
                             </svg>
                             Back
                         </button>
+                        <template v-if="showStaffCsvActions">
+                            <a
+                                :href="route('backend.admin.export-csv')"
+                                class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-green-600 rounded-md shadow-lg hover:bg-green-700"
+                            >
+                                Download All Staff
+                            </a>
+                            <input
+                                ref="csvInput"
+                                type="file"
+                                accept=".csv,text/csv"
+                                class="hidden"
+                                @change="uploadStaffCsv"
+                            />
+                            <button
+                                type="button"
+                                :disabled="csvForm.processing"
+                                @click="openCsvPicker"
+                                class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-md shadow-lg hover:bg-indigo-700 disabled:opacity-50"
+                            >
+                                {{ csvForm.processing ? 'Uploading...' : 'Upload All Staff' }}
+                            </button>
+                        </template>
                         <!-- Conditionally show Staff Add button -->
                         <button 
                             v-if="hasPermission('admin-list-create')"
@@ -133,6 +179,10 @@ const canViewRoleList = () => {
                     </div>
                 </div>
             </div>
+
+            <p v-if="csvForm.errors.csv_file" class="mb-2 px-3 py-2 text-sm text-red-700 bg-red-100 rounded-md">
+                {{ csvForm.errors.csv_file }}
+            </p>
 
             <!-- Rest of your component remains the same -->
             <div

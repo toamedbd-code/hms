@@ -7,10 +7,48 @@ use App\Models\Billing;
 use App\Models\CashCounterSession;
 use App\Models\CashCounterTransaction;
 use App\Models\DueCollection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class CashCounterService
 {
+    public function findOpenSessionForAdmin(int $adminId, string $adminName = ''): ?CashCounterSession
+    {
+        if ($adminId <= 0) {
+            return null;
+        }
+
+        $adminName = trim($adminName);
+
+        return CashCounterSession::query()
+            ->whereRaw('LOWER(status) = ?', ['open'])
+            ->where(function ($query) use ($adminId, $adminName) {
+                $query->where('created_by', $adminId);
+
+                if ($adminName !== '') {
+                    $query->orWhere(function ($subQuery) use ($adminName) {
+                        $subQuery->whereNull('created_by')
+                            ->where('user_name', $adminName);
+                    });
+                }
+            })
+            ->latest('opened_at')
+            ->first();
+    }
+
+    public function findLastClosedSessionForAdmin(int $adminId): ?CashCounterSession
+    {
+        if ($adminId <= 0) {
+            return null;
+        }
+
+        return CashCounterSession::query()
+            ->where('created_by', $adminId)
+            ->whereRaw('LOWER(status) = ?', ['closed'])
+            ->latest('closed_at')
+            ->first();
+    }
+
     public function startSession(array $data): CashCounterSession
     {
         return DB::transaction(function () use ($data) {
@@ -26,9 +64,8 @@ class CashCounterService
                 'status' => 'open',
             ]);
 
-            if (!empty($data['opening_note'])) {
-                $this->recordTransaction($session, 'opening', (float) ($data['opening_amount'] ?? 0), $data['opening_note']);
-            }
+            $this->recordTransaction($session, 'opening', (float) ($data['opening_amount'] ?? 0), $data['opening_note'] ?? 'Counter started');
+            $this->forgetAdminCounterCache($session->created_by);
 
             return $session;
         });
@@ -41,6 +78,7 @@ class CashCounterService
             $transaction = $this->recordTransaction($session, 'input', $amount, $note);
             $session->expected_amount = (float) $session->expected_amount + $amount;
             $session->save();
+            $this->forgetAdminCounterCache($session->created_by);
 
             return $transaction;
         });
@@ -60,6 +98,8 @@ class CashCounterService
             $to->handover_in_amount = (float) $to->handover_in_amount + $amount;
             $to->expected_amount = (float) $to->expected_amount + $amount;
             $to->save();
+            $this->forgetAdminCounterCache($from->created_by);
+            $this->forgetAdminCounterCache($to->created_by);
 
             return $transaction;
         });
@@ -68,33 +108,324 @@ class CashCounterService
     public function closeSession(int $sessionId, float $closingAmount, string $note = null): CashCounterSession
     {
         return DB::transaction(function () use ($sessionId, $closingAmount, $note) {
-            $session = CashCounterSession::findOrFail($sessionId);
-            $session->closing_amount = (float) $closingAmount;
-            $session->difference_amount = (float) $closingAmount - (float) $session->expected_amount;
-            $session->status = 'closed';
+            $session = CashCounterSession::query()->lockForUpdate()->findOrFail($sessionId);
+
+            if (strtolower((string) $session->status) === 'closed') {
+                throw new \RuntimeException('This counter session is already closed.');
+            }
+
             $session->closed_at = now();
+            $session->expected_amount = $this->calculateExpectedDrawerAmount($session);
+            $session->closing_amount = (float) $closingAmount;
+            $session->difference_amount = round((float) $closingAmount - (float) $session->expected_amount, 2);
+            $session->status = 'closed';
             $session->save();
 
             $this->recordTransaction($session, 'close', $closingAmount, $note);
+            $this->forgetAdminCounterCache($session->created_by);
 
-            return $session;
+            return $session->fresh();
         });
+    }
+
+    public function calculateExpectedDrawerAmount(CashCounterSession $session): float
+    {
+        return (float) ($this->getSessionMoneySummary($session)['expected_amount'] ?? 0);
+    }
+
+    public function getSessionMoneySummary(CashCounterSession $session): array
+    {
+        $from = $session->opened_at ?? $session->created_at ?? now();
+        $to = $session->closed_at ?? now();
+        $adminId = (int) ($session->created_by ?? 0);
+        $sessionUserName = trim((string) ($session->user_name ?? ''));
+
+        $inputTotal = 0.0;
+        try {
+            $inputTotal = (float) $session->transactions()
+                ->where('type', 'input')
+                ->sum('amount');
+        } catch (\Throwable $e) {
+            $inputTotal = 0.0;
+        }
+
+        $lifetimeDueByBilling = collect();
+        $sessionDueRows = collect();
+        $sessionBills = collect();
+
+        try {
+            $lifetimeDueByBilling = DueCollection::query()
+                ->select([
+                    'billing_id',
+                    DB::raw('COALESCE(SUM(collected_amount), 0) as due_collected'),
+                ])
+                ->whereNotNull('billing_id')
+                ->groupBy('billing_id')
+                ->pluck('due_collected', 'billing_id');
+        } catch (\Throwable $e) {
+            $lifetimeDueByBilling = collect();
+        }
+
+        try {
+            $sessionDueQuery = DueCollection::query()
+                ->whereBetween('created_at', [$from, $to]);
+
+            if ($adminId > 0) {
+                $sessionDueQuery->where('created_by', $adminId);
+            }
+
+            $sessionDueRows = $sessionDueQuery->get();
+        } catch (\Throwable $e) {
+            $sessionDueRows = collect();
+        }
+
+        try {
+            $sessionBillQuery = Billing::query()
+                ->whereBetween('created_at', [$from, $to]);
+
+            if ($adminId > 0) {
+                $sessionBillQuery->where('created_by', $adminId);
+            }
+
+            $sessionBills = $sessionBillQuery->orderBy('created_at')->get();
+        } catch (\Throwable $e) {
+            $sessionBills = collect();
+        }
+
+        $sessionDueByBilling = $sessionDueRows
+            ->groupBy('billing_id')
+            ->map(fn ($rows) => (float) $rows->sum('collected_amount'));
+
+        $userIds = collect()
+            ->merge($sessionBills->pluck('created_by'))
+            ->merge($sessionDueRows->pluck('created_by'))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $admins = collect();
+        if ($userIds->isNotEmpty()) {
+            $admins = Admin::query()
+                ->select('id', 'first_name', 'last_name')
+                ->whereIn('id', $userIds)
+                ->get()
+                ->keyBy('id');
+        }
+
+        $resolveUserName = function ($userId) use ($admins, $session, $sessionUserName) {
+            $admin = $admins->get($userId);
+            $resolvedName = trim((string) (($admin?->first_name ?? '') . ' ' . ($admin?->last_name ?? '')));
+            if ($resolvedName === '' && (int) $userId === (int) ($session->created_by ?? 0) && $sessionUserName !== '') {
+                $resolvedName = $sessionUserName;
+            }
+
+            return $resolvedName !== '' ? $resolvedName : ('User #' . (int) $userId);
+        };
+
+        $detailedBillingRows = $sessionBills->map(function ($row) use ($lifetimeDueByBilling, $sessionDueByBilling, $resolveUserName) {
+            $lifetimeDue = (float) ($lifetimeDueByBilling->get($row->id) ?? 0);
+            $originalPaid = max(0, round((float) ($row->paid_amt ?? 0) - $lifetimeDue, 2));
+            $dueCollected = (float) ($sessionDueByBilling->get($row->id) ?? 0);
+
+            return [
+                'billing_id' => (int) $row->id,
+                'bill_number' => (string) ($row->bill_number ?? ('BILL-' . $row->id)),
+                'billing_date' => $row->created_at,
+                'user_name' => $resolveUserName($row->created_by),
+                'user_id' => (int) ($row->created_by ?? 0),
+                'pay_mode' => (string) ($row->pay_mode ?: 'Cash'),
+                'total_amount' => (float) ($row->total ?? 0),
+                'discount_amount' => (float) ($row->discount ?? 0),
+                'extra_discount' => (float) ($row->extra_flat_discount ?? 0),
+                'net_amount' => (float) ($row->payable_amount ?? 0),
+                'paid_amount' => $originalPaid,
+                'due_amount' => (float) ($row->due_amount ?? 0),
+                'due_collected' => $dueCollected,
+                'total_collected' => $originalPaid + $dueCollected,
+            ];
+        })->values();
+
+        $sessionBillIds = $sessionBills->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $extraDueBillIds = $sessionDueRows
+            ->pluck('billing_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->reject(fn ($id) => in_array($id, $sessionBillIds, true))
+            ->values();
+
+        if ($extraDueBillIds->isNotEmpty()) {
+            $extraBills = Billing::query()->whereIn('id', $extraDueBillIds)->get()->keyBy('id');
+            foreach ($extraDueBillIds as $billingId) {
+                $bill = $extraBills->get($billingId);
+                $dueCollected = (float) ($sessionDueByBilling->get($billingId) ?? 0);
+                if ($dueCollected <= 0) {
+                    continue;
+                }
+
+                $detailedBillingRows->push([
+                    'billing_id' => (int) $billingId,
+                    'bill_number' => (string) ($bill?->bill_number ?? ('BILL-' . $billingId)),
+                    'billing_date' => $bill?->created_at,
+                    'user_name' => $resolveUserName($bill?->created_by ?? $session->created_by),
+                    'user_id' => (int) ($bill?->created_by ?? $session->created_by ?? 0),
+                    'pay_mode' => (string) ($bill?->pay_mode ?: 'Due'),
+                    'total_amount' => (float) ($bill?->total ?? 0),
+                    'discount_amount' => (float) ($bill?->discount ?? 0),
+                    'extra_discount' => (float) ($bill?->extra_flat_discount ?? 0),
+                    'net_amount' => (float) ($bill?->payable_amount ?? 0),
+                    'paid_amount' => 0.0,
+                    'due_amount' => (float) ($bill?->due_amount ?? 0),
+                    'due_collected' => $dueCollected,
+                    'total_collected' => $dueCollected,
+                ]);
+            }
+        }
+
+        $billingPaidTotal = round((float) $detailedBillingRows->sum('paid_amount'), 2);
+        $dueCollectedTotal = round((float) $sessionDueRows->sum('collected_amount'), 2);
+        $collectionTotal = round($billingPaidTotal + $dueCollectedTotal, 2);
+        $expectedAmount = round(
+            (float) $session->opening_amount
+            + $collectionTotal
+            + $inputTotal
+            + (float) $session->handover_in_amount
+            - (float) $session->handover_out_amount,
+            2
+        );
+
+        $userSummaries = $userIds->map(function ($userId) use ($sessionBills, $detailedBillingRows, $sessionDueRows, $resolveUserName) {
+            $userBills = $detailedBillingRows->where('user_id', (int) $userId);
+            $userDues = $sessionDueRows->where('created_by', (int) $userId);
+            $billingPaid = round((float) $userBills->sum('paid_amount'), 2);
+            $dueCollected = round((float) $userDues->sum('collected_amount'), 2);
+
+            return [
+                'user_id' => (int) $userId,
+                'user_name' => $resolveUserName($userId),
+                'bill_count' => (int) $sessionBills->where('created_by', (int) $userId)->count(),
+                'due_bill_id_count' => (int) $userDues->pluck('billing_id')->filter()->unique()->count(),
+                'due_collection_count' => (int) $userDues->count(),
+                'billing_paid_total' => $billingPaid,
+                'due_collection_total' => $dueCollected,
+                'total_collection' => round($billingPaid + $dueCollected, 2),
+            ];
+        })->sortByDesc('total_collection')->values();
+
+        if ($userSummaries->isEmpty() && $sessionUserName !== '') {
+            $userSummaries = collect([[
+                'user_id' => $adminId,
+                'user_name' => $sessionUserName,
+                'bill_count' => 0,
+                'due_bill_id_count' => 0,
+                'due_collection_count' => 0,
+                'billing_paid_total' => 0.0,
+                'due_collection_total' => 0.0,
+                'total_collection' => 0.0,
+            ]]);
+        }
+
+        $billingSources = $sessionBills
+            ->groupBy(fn ($bill) => strtolower((string) ($bill->pay_mode ?: 'cash')))
+            ->map(function ($rows, $source) use ($lifetimeDueByBilling) {
+                $amount = 0.0;
+                foreach ($rows as $bill) {
+                    $lifetimeDue = (float) ($lifetimeDueByBilling->get($bill->id) ?? 0);
+                    $amount += max(0, (float) ($bill->paid_amt ?? 0) - $lifetimeDue);
+                }
+
+                return [
+                    'source' => (string) $source,
+                    'item_count' => $rows->count(),
+                    'amount_total' => round($amount, 2),
+                ];
+            })
+            ->values();
+
+        $dueSources = $sessionDueRows
+            ->groupBy(fn ($row) => strtolower((string) ($row->payment_method ?: 'cash')))
+            ->map(function ($rows, $source) {
+                return [
+                    'source' => (string) $source,
+                    'item_count' => $rows->count(),
+                    'amount_total' => round((float) $rows->sum('collected_amount'), 2),
+                ];
+            })
+            ->values();
+
+        $closingAmount = (float) ($session->closing_amount ?? 0);
+        $differenceAmount = strtolower((string) $session->status) === 'closed'
+            ? round($closingAmount - $expectedAmount, 2)
+            : 0.0;
+
+        return [
+            'period' => [
+                'from' => $from,
+                'to' => $to,
+            ],
+            'opening_amount' => (float) $session->opening_amount,
+            'collection_total' => $collectionTotal,
+            'billing_paid_total' => $billingPaidTotal,
+            'due_collection_total' => $dueCollectedTotal,
+            'input_total' => $inputTotal,
+            'handover_in_amount' => (float) $session->handover_in_amount,
+            'handover_out_amount' => (float) $session->handover_out_amount,
+            'expected_amount' => $expectedAmount,
+            'closing_amount' => $closingAmount,
+            'difference_amount' => $differenceAmount,
+            'detailedBillingRows' => $detailedBillingRows,
+            'detailedTotals' => [
+                'bill_count' => (int) $detailedBillingRows->count(),
+                'total_amount' => (float) $detailedBillingRows->sum('total_amount'),
+                'discount_amount' => (float) $detailedBillingRows->sum('discount_amount'),
+                'extra_discount' => (float) $detailedBillingRows->sum('extra_discount'),
+                'net_amount' => (float) $detailedBillingRows->sum('net_amount'),
+                'paid_amount' => $billingPaidTotal,
+                'due_amount' => (float) $detailedBillingRows->sum('due_amount'),
+                'due_collected' => $dueCollectedTotal,
+                'total_collected' => $collectionTotal,
+            ],
+            'userSummaries' => $userSummaries,
+            'totals' => [
+                'bill_count' => (int) $userSummaries->sum('bill_count'),
+                'due_bill_id_count' => (int) $userSummaries->sum('due_bill_id_count'),
+                'due_collection_count' => (int) $userSummaries->sum('due_collection_count'),
+                'billing_paid_total' => $billingPaidTotal,
+                'due_collection_total' => $dueCollectedTotal,
+                'total_collection' => $collectionTotal,
+            ],
+            'sourceBreakdown' => [
+                'billing' => $billingSources,
+                'due' => $dueSources,
+            ],
+        ];
     }
 
     public function getSummary(int $sessionId): array
     {
         $session = CashCounterSession::findOrFail($sessionId);
+        $money = $this->getSessionMoneySummary($session);
 
         return [
             'session' => $session,
             'transactions' => $session->transactions()->latest('id')->get(),
-            'opening_amount' => (float) $session->opening_amount,
-            'expected_amount' => (float) $session->expected_amount,
+            'opening_amount' => $money['opening_amount'],
+            'expected_amount' => $money['expected_amount'],
+            'drawer_expected_amount' => $money['expected_amount'],
+            'collection_total' => $money['collection_total'],
             'closing_amount' => (float) $session->closing_amount,
             'difference_amount' => (float) $session->difference_amount,
-            'handover_in_amount' => (float) $session->handover_in_amount,
-            'handover_out_amount' => (float) $session->handover_out_amount,
+            'handover_in_amount' => $money['handover_in_amount'],
+            'handover_out_amount' => $money['handover_out_amount'],
         ];
+    }
+
+    protected function forgetAdminCounterCache($adminId): void
+    {
+        $adminId = (int) $adminId;
+        if ($adminId > 0) {
+            Cache::forget('cash_counter.info.' . $adminId);
+        }
     }
 
     protected function recordTransaction(CashCounterSession $session, string $type, float $amount, ?string $note): CashCounterTransaction
@@ -111,250 +442,27 @@ class CashCounterService
     public function getHandoverPrintSummary(int $sessionId, ?int $actorAdminId = null, bool $includeAllUsers = true): array
     {
         $session = CashCounterSession::findOrFail($sessionId);
-        $from = $session->opened_at ?? $session->created_at;
-        $to = $session->closed_at ?? now();
-
-        $scopeToActorOnly = !$includeAllUsers && !empty($actorAdminId);
-
-        $billingRows = Billing::query()
-            ->select([
-                'created_by',
-                DB::raw('COUNT(*) as bill_count'),
-                DB::raw('COALESCE(SUM(paid_amt), 0) as billing_paid_total'),
-                DB::raw('COALESCE(SUM(due_amount), 0) as billing_due_total'),
-            ])
-            ->whereBetween('created_at', [$from, $to])
-            ->when($scopeToActorOnly, function ($query) use ($actorAdminId) {
-                $query->where('created_by', $actorAdminId);
-            })
-            ->groupBy('created_by')
-            ->get();
-
-        $dueRows = DueCollection::query()
-            ->leftJoin('billings', 'billings.id', '=', 'due_collections.billing_id')
-            ->select([
-                DB::raw('COALESCE(due_collections.created_by, billings.created_by) as created_by'),
-                DB::raw('COUNT(DISTINCT due_collections.billing_id) as due_bill_id_count'),
-                DB::raw('COUNT(*) as due_collection_count'),
-                DB::raw('COALESCE(SUM(due_collections.collected_amount), 0) as due_collection_total'),
-            ])
-            ->whereBetween('due_collections.created_at', [$from, $to])
-            ->when($scopeToActorOnly, function ($query) use ($actorAdminId) {
-                $query->where(function ($nestedQuery) use ($actorAdminId) {
-                    $nestedQuery->where('due_collections.created_by', $actorAdminId)
-                        ->orWhere(function ($fallbackQuery) use ($actorAdminId) {
-                            $fallbackQuery->whereNull('due_collections.created_by')
-                                ->where('billings.created_by', $actorAdminId);
-                        });
-                });
-            })
-            ->groupBy('created_by')
-            ->get();
-
-        $userIds = collect()
-            ->merge($billingRows->pluck('created_by'))
-            ->merge($dueRows->pluck('created_by'))
-            ->filter()
-            ->unique()
-            ->values();
-
-        $admins = Admin::query()
-            ->select('id', 'first_name', 'last_name')
-            ->whereIn('id', $userIds)
-            ->get()
-            ->keyBy('id');
-
-        $detailRows = Billing::query()
-            ->select([
-                'id',
-                'bill_number',
-                'created_by',
-                'created_at',
-                'total',
-                'discount',
-                'extra_flat_discount',
-                'payable_amount',
-                'paid_amt',
-                'due_amount',
-            ])
-            ->whereBetween('created_at', [$from, $to])
-            ->when($scopeToActorOnly, function ($query) use ($actorAdminId) {
-                $query->where('created_by', $actorAdminId);
-            })
-            ->orderBy('created_at')
-            ->get();
-
-        $dueCollectedByBilling = DueCollection::query()
-            ->leftJoin('billings', 'billings.id', '=', 'due_collections.billing_id')
-            ->select([
-                'due_collections.billing_id',
-                DB::raw('COALESCE(SUM(due_collections.collected_amount), 0) as due_collected'),
-            ])
-            ->whereNotNull('due_collections.billing_id')
-            ->whereBetween('due_collections.created_at', [$from, $to])
-            ->when($scopeToActorOnly, function ($query) use ($actorAdminId) {
-                $query->where(function ($nestedQuery) use ($actorAdminId) {
-                    $nestedQuery->where('due_collections.created_by', $actorAdminId)
-                        ->orWhere(function ($fallbackQuery) use ($actorAdminId) {
-                            $fallbackQuery->whereNull('due_collections.created_by')
-                                ->where('billings.created_by', $actorAdminId);
-                        });
-                });
-            })
-            ->groupBy('due_collections.billing_id')
-            ->pluck('due_collected', 'due_collections.billing_id');
-
-        $detailUserIds = $detailRows->pluck('created_by')->filter()->unique()->values();
-        if ($detailUserIds->isNotEmpty()) {
-            $extraAdmins = Admin::query()
-                ->select('id', 'first_name', 'last_name')
-                ->whereIn('id', $detailUserIds)
-                ->get()
-                ->keyBy('id');
-            $admins = $admins->merge($extraAdmins);
-        }
-
-        $sessionUserName = trim((string) ($session->user_name ?? ''));
-
-        $detailedBillingRows = $detailRows->map(function ($row) use ($dueCollectedByBilling, $admins, $session, $sessionUserName) {
-            $dueCollected = (float) ($dueCollectedByBilling->get($row->id) ?? 0);
-            $admin = $admins->get($row->created_by);
-            $userName = trim((string) (($admin?->first_name ?? '') . ' ' . ($admin?->last_name ?? '')));
-            if ($userName === '' && (int) ($row->created_by ?? 0) === (int) ($session->created_by ?? 0) && $sessionUserName !== '') {
-                $userName = $sessionUserName;
-            }
-
-            $paid = (float) ($row->paid_amt ?? 0);
-
-            return [
-                'billing_id' => (int) $row->id,
-                'bill_number' => (string) ($row->bill_number ?? ('BILL-' . $row->id)),
-                'billing_date' => $row->created_at,
-                'user_name' => $userName !== '' ? $userName : ('User #' . (int) ($row->created_by ?? 0)),
-                'total_amount' => (float) ($row->total ?? 0),
-                'discount_amount' => (float) ($row->discount ?? 0),
-                'extra_discount' => (float) ($row->extra_flat_discount ?? 0),
-                'net_amount' => (float) ($row->payable_amount ?? 0),
-                'paid_amount' => $paid,
-                'due_amount' => (float) ($row->due_amount ?? 0),
-                'due_collected' => $dueCollected,
-                'total_collected' => $paid + $dueCollected,
-            ];
-        })->values();
-
-        $detailedTotals = [
-            'bill_count' => (int) $detailedBillingRows->count(),
-            'total_amount' => (float) $detailedBillingRows->sum('total_amount'),
-            'discount_amount' => (float) $detailedBillingRows->sum('discount_amount'),
-            'extra_discount' => (float) $detailedBillingRows->sum('extra_discount'),
-            'net_amount' => (float) $detailedBillingRows->sum('net_amount'),
-            'paid_amount' => (float) $detailedBillingRows->sum('paid_amount'),
-            'due_amount' => (float) $detailedBillingRows->sum('due_amount'),
-            'due_collected' => (float) $detailedBillingRows->sum('due_collected'),
-            'total_collected' => (float) $detailedBillingRows->sum('total_collected'),
-        ];
-
-        $billingByUser = $billingRows->keyBy('created_by');
-        $dueByUser = $dueRows->keyBy('created_by');
-        $userSummaries = $userIds->map(function ($userId) use ($admins, $billingByUser, $dueByUser, $session, $sessionUserName) {
-            $billing = $billingByUser->get($userId);
-            $due = $dueByUser->get($userId);
-
-            $billingPaid = (float) ($billing->billing_paid_total ?? 0);
-            $dueCollected = (float) ($due->due_collection_total ?? 0);
-
-            $admin = $admins->get($userId);
-            $resolvedName = trim((string) (($admin?->first_name ?? '') . ' ' . ($admin?->last_name ?? '')));
-            if ($resolvedName === '' && (int) $userId === (int) ($session->created_by ?? 0) && $sessionUserName !== '') {
-                $resolvedName = $sessionUserName;
-            }
-
-            return [
-                'user_id' => (int) $userId,
-                'user_name' => $resolvedName !== '' ? $resolvedName : ('User #' . $userId),
-                'bill_count' => (int) ($billing->bill_count ?? 0),
-                'due_bill_id_count' => (int) ($due->due_bill_id_count ?? 0),
-                'due_collection_count' => (int) ($due->due_collection_count ?? 0),
-                'billing_paid_total' => $billingPaid,
-                'due_collection_total' => $dueCollected,
-                'total_collection' => $billingPaid + $dueCollected,
-            ];
-        })->sortByDesc('total_collection')->values();
-
-        $totals = [
-            'bill_count' => (int) $userSummaries->sum('bill_count'),
-            'due_bill_id_count' => (int) $userSummaries->sum('due_bill_id_count'),
-            'due_collection_count' => (int) $userSummaries->sum('due_collection_count'),
-            'billing_paid_total' => (float) $userSummaries->sum('billing_paid_total'),
-            'due_collection_total' => (float) $userSummaries->sum('due_collection_total'),
-            'total_collection' => (float) $userSummaries->sum('total_collection'),
-        ];
-
-        $counterTransactions = $session->transactions()->latest('id')->get();
-
-        $billingSourceRows = Billing::query()
-            ->select([
-                DB::raw("LOWER(COALESCE(NULLIF(pay_mode, ''), 'unknown')) as source"),
-                DB::raw('COUNT(*) as item_count'),
-                DB::raw('COALESCE(SUM(paid_amt), 0) as amount_total'),
-            ])
-            ->whereBetween('created_at', [$from, $to])
-            ->when($scopeToActorOnly, function ($query) use ($actorAdminId) {
-                $query->where('created_by', $actorAdminId);
-            })
-            ->groupBy('source')
-            ->orderByDesc('amount_total')
-            ->get();
-
-        $dueSourceRows = DueCollection::query()
-            ->select([
-                DB::raw("LOWER(COALESCE(NULLIF(payment_method, ''), 'due')) as source"),
-                DB::raw('COUNT(*) as item_count'),
-                DB::raw('COALESCE(SUM(collected_amount), 0) as amount_total'),
-            ])
-            ->whereBetween('created_at', [$from, $to])
-            ->when($scopeToActorOnly, function ($query) use ($actorAdminId) {
-                $query->where('created_by', $actorAdminId);
-            })
-            ->groupBy('source')
-            ->orderByDesc('amount_total')
-            ->get();
+        $money = $this->getSessionMoneySummary($session);
 
         return [
             'session' => $session,
-            'period' => [
-                'from' => $from,
-                'to' => $to,
-            ],
-            'userSummaries' => $userSummaries,
-            'totals' => $totals,
+            'period' => $money['period'],
+            'userSummaries' => $money['userSummaries'],
+            'totals' => $money['totals'],
             'counterTotals' => [
-                'opening_amount' => (float) $session->opening_amount,
-                'expected_amount' => (float) $session->expected_amount,
-                'closing_amount' => (float) $session->closing_amount,
-                'difference_amount' => (float) $session->difference_amount,
-                'handover_in_amount' => (float) $session->handover_in_amount,
-                'handover_out_amount' => (float) $session->handover_out_amount,
+                'opening_amount' => $money['opening_amount'],
+                'collection_total' => $money['collection_total'],
+                'input_total' => $money['input_total'],
+                'expected_amount' => $money['expected_amount'],
+                'closing_amount' => $money['closing_amount'],
+                'difference_amount' => $money['difference_amount'],
+                'handover_in_amount' => $money['handover_in_amount'],
+                'handover_out_amount' => $money['handover_out_amount'],
             ],
-            'sourceBreakdown' => [
-                'billing' => $billingSourceRows->map(function ($row) {
-                    return [
-                        'source' => (string) $row->source,
-                        'item_count' => (int) $row->item_count,
-                        'amount_total' => (float) $row->amount_total,
-                    ];
-                })->values(),
-                'due' => $dueSourceRows->map(function ($row) {
-                    return [
-                        'source' => (string) $row->source,
-                        'item_count' => (int) $row->item_count,
-                        'amount_total' => (float) $row->amount_total,
-                    ];
-                })->values(),
-            ],
-            'detailedBillingRows' => $detailedBillingRows,
-            'detailedTotals' => $detailedTotals,
-            'transactions' => $counterTransactions,
+            'sourceBreakdown' => $money['sourceBreakdown'],
+            'detailedBillingRows' => $money['detailedBillingRows'],
+            'detailedTotals' => $money['detailedTotals'],
+            'transactions' => $session->transactions()->latest('id')->get(),
         ];
     }
 }

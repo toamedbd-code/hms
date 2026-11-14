@@ -1,0 +1,66 @@
+HMS - নতুন সাবডোমেইনে পূর্ণ ইনস্টল
+
+এই ZIP-এ সম্পূর্ণ HMS অ্যাপের সোর্স, প্রয়োজনীয় production PHP dependency এবং
+optimized frontend build আছে। এটি পুরোনো ডাটাবেইস, রোগী/বিলের তথ্য, লগ, পরিবেশ
+ফাইল বা সার্ভার credential-এর backup নয়।
+
+যা লাগবে
+- cPanel-এ PHP 8.3 বা তার পরের supported PHP 8.x সংস্করণ।
+- MySQL/MariaDB database এবং database user।
+- Laravel-এর PHP extensions: ctype, cURL, DOM, fileinfo, filter, hash, mbstring,
+  OpenSSL, PCRE, PDO, PDO MySQL, session, tokenizer, XML, এবং app অনুযায়ী GD/ZIP।
+- HTTPS certificate।
+- Zip extract সুবিধা। cPanel Terminal থাকলে `php`/Artisan কমান্ড চালান।
+
+ইনস্টল
+1. cPanel-এ সাবডোমেইন এবং MySQL database/user তৈরি করুন; user-কে database-এ
+   প্রয়োজনীয় privileges দিন।
+2. hms.zip আপলোড করে এমন private app folder-এ extract করুন, উদাহরণ:
+   /home/CPANEL_USER/hms
+3. সম্ভব হলে সাবডোমেইনের Document Root সেট করুন:
+   /home/CPANEL_USER/hms/public
+   সম্পূর্ণ HMS app-কে public_html-এর ভেতরে সরাসরি web-accessible করবেন না।
+4. app root-এ থাকা `.env.example` কপি করে `.env` বানান। `.env`-এ নিজের
+   HTTPS `APP_URL`, database host/name/user/password বসান।
+5. প্রথম admin-এর জন্য নিজের আলাদা email এবং শক্তিশালী, অন্য কোথাও ব্যবহার না
+   করা password `.env`-এ দিন:
+   SINGLE_DEVELOPER_SEED=true
+   SINGLE_DEV_EMAIL=আপনার-নিজস্ব-ইমেইল
+   SINGLE_DEV_PASSWORD=নিজের-দীর্ঘ-এবং-অনন্য-পাসওয়ার্ড
+   `APP_DEBUG=false` নিশ্চিত করুন। উদাহরণ/পুরোনো ডিফল্ট password ব্যবহার করবেন
+   না। `.env` ZIP করে কারও কাছে পাঠাবেন না।
+6. HMS app root-এ Terminal চালিয়ে:
+   php artisan key:generate
+   php artisan migrate --seed --force
+   php artisan storage:link
+   php artisan optimize:clear
+   `migrate --seed` fresh database-এর প্রয়োজনীয় table, menu/permission এবং admin
+   account তৈরি করে। এই seed শুধু নতুন, ফাঁকা database-এ চালান।
+7. `storage/` এবং `bootstrap/cache/`-এ PHP user-এর write permission আছে নিশ্চিত
+   করুন। সাধারণত cPanel-এ folder permission 775 যথেষ্ট; 777 এড়িয়ে চলুন।
+8. HTTPS চালু করে সাইটে লগইন, billing, file upload/print পরীক্ষা করুন।
+9. Offline billing-এর জন্য developer account দিয়ে `/view-billing-page` অনলাইনে
+   খুলুন। Developer-only panel-এ একবার device setup করে offline support প্রস্তুত
+   হওয়া পর্যন্ত অপেক্ষা করুন। নতুন client account-এ আর passphrase লাগবে না।
+
+গতি
+- ZIP-এর Vite assets production-optimized; upload-এর পরে npm/node_modules
+  ইনস্টল করে build চালানো লাগে না।
+- PHP 8.3 OPcache cPanel-এ থাকলে চালু করুন। `APP_DEBUG=false` রাখুন।
+- প্রথমবারের setup শেষে cPanel Terminal-এ `php artisan config:cache` চালানো
+  যেতে পারে; `.env` বদলালে আগে `php artisan optimize:clear` চালান।
+
+ডাটা ও নিরাপত্তা
+- ZIP-এ কোনো database dump নেই। আগের হাসপাতালের ডাটা চাইলে আলাদা করে নিরাপদ
+  database migration/import করতে হবে; এটি আগে staging-এ পরীক্ষা করুন।
+- ZIP-এ `.env`, `.env.production`, `.env.testing`, `.vscode/sftp.json`,
+  database backup, local logs, `node_modules` বা Git history নেই।
+- Offline billing কেবল HTTPS-এ (বা localhost-এ); একই browser profile-এ
+  restart-এর পরও passphrase ছাড়াই কাজ করবে। Browser data clear হলে key/data
+  হারাতে পারে। সিঙ্ক হবে অ্যাপ খোলা ও authenticated session থাকা অবস্থায়;
+  browser বন্ধ থাকলে background sync হবে না।
+- আগের passphrase-encrypted data থাকা account-কে নীরবে চালু করতে সেই account-এর
+  পুরোনো passphrase একবার লাগতে পারে; নতুন account-গুলো shared device key ব্যবহার
+  করবে।
+- ZIP-এ executable JavaScript আছে; কোনো ZIP বা obfuscation script-কে গোপন করে
+  না। Offline data encryption এবং HTTPS আলাদা সুরক্ষা।

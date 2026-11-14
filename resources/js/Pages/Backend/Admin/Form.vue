@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, watch, computed } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
@@ -9,11 +9,9 @@ import AlertMessage from '@/Components/AlertMessage.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 import AddItemModal from '@/Components/AddItemModal.vue';
 
-const props = defineProps(['user', 'id', 'roles', 'designations', 'departments', 'specialists', 'adminDetails', 'hasPassword']);
+const props = defineProps(['user', 'id', 'roles', 'designations', 'departments', 'specialists', 'adminDetails']);
 const showPassword = ref(false);
 const page = usePage();
-const lastSavedPassword = ref(page.props.flash?.savedPassword ?? '');
-const getPasswordStorageKey = () => `admin-last-saved-password-${props.id ?? 'new'}`;
 
 const showDesignationModal = ref(false);
 const showDepartmentModal = ref(false);
@@ -55,7 +53,7 @@ const form = useForm({
     designation_id: props.adminDetails?.designation_id ?? '',
     department_id: defaultDepartmentId,
     specialist_id: props.adminDetails?.specialist_id ?? '',
-    password: lastSavedPassword.value || '',
+    password: '',
     current_address: props.adminDetails?.current_address ?? '',
     permanent_address: props.adminDetails?.permanent_address ?? '',
     pan_number: props.adminDetails?.pan_number ?? '',
@@ -130,28 +128,6 @@ watch(() => form.role_id, (newRoleId) => {
     }
 });
 
-watch(() => page.props.flash?.savedPassword, (newValue) => {
-    lastSavedPassword.value = newValue ?? '';
-    if (lastSavedPassword.value) {
-        form.password = lastSavedPassword.value;
-        if (typeof window !== 'undefined') {
-            window.localStorage.setItem(getPasswordStorageKey(), lastSavedPassword.value);
-        }
-    }
-});
-
-onMounted(() => {
-    if (typeof window === 'undefined') {
-        return;
-    }
-
-    const persisted = window.localStorage.getItem(getPasswordStorageKey()) || '';
-    if (persisted) {
-        lastSavedPassword.value = persisted;
-        form.password = persisted;
-    }
-});
-
 const handleFileChange = (event, field) => {
     const file = event.target.files[0];
 
@@ -217,13 +193,6 @@ const submit = () => {
         };
     }).post(routeName, {
         onSuccess: (response) => {
-            if (form.password) {
-                lastSavedPassword.value = form.password;
-                if (typeof window !== 'undefined') {
-                    window.localStorage.setItem(getPasswordStorageKey(), form.password);
-                }
-            }
-
             if (!props.id)
                 form.reset();
             displayResponse(response);
@@ -513,8 +482,8 @@ const goToRoleList = () => {
                                 <input id="password" v-model="form.password" :type="showPassword ? 'text' : 'password'"
                                     placeholder="Password"
                                     class="block w-full p-2 pr-10 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600" />
-                                <button type="button" @click="showPassword = !showPassword"
-                                    class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                                <button v-if="form.password" type="button" @click="showPassword = !showPassword"
+                                    class="absolute inset-y-0 right-0 flex items-center border-0 bg-transparent p-0 pr-3 text-black shadow-none transition hover:bg-transparent hover:text-black">
                                     <svg v-if="!showPassword" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5"
                                         viewBox="0 0 20 20" fill="currentColor">
                                         <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
@@ -532,9 +501,6 @@ const goToRoleList = () => {
                                     </svg>
                                 </button>
                             </div>
-                            <p v-if="lastSavedPassword" class="mt-1 text-xs text-green-600">
-                                Last saved password: {{ lastSavedPassword }}
-                            </p>
                             <InputError class="mt-2" :message="form.errors.password" />
                         </div>
 

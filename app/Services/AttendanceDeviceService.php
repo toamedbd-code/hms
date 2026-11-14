@@ -8,10 +8,105 @@ use App\Models\AttendanceShift;
 use App\Models\AttendanceDevice;
 use App\Models\DutyRoster;
 use App\Models\StaffAttendance;
+use App\Services\WebSettingService;
 use Carbon\Carbon;
 
 class AttendanceDeviceService
 {
+    public function integrationSettings(): array
+    {
+        $setting = app(WebSettingService::class)->first();
+        $options = $setting?->attendance_device_options;
+
+        if (is_string($options)) {
+            $decoded = json_decode($options, true);
+            $options = is_array($decoded) ? $decoded : [];
+        }
+
+        if (!is_array($options)) {
+            $options = [];
+        }
+
+        $zkteco = is_array($options['zkteco'] ?? null) ? $options['zkteco'] : [];
+        $webhook = is_array($options['webhook'] ?? null) ? $options['webhook'] : [];
+
+        return [
+            'enabled' => (bool) ($setting?->attendance_device_enabled ?? true),
+            'type' => (string) ($setting?->attendance_device_type ?? 'both'),
+            'identifier' => trim((string) ($setting?->attendance_device_identifier ?? '')),
+            'ip' => trim((string) ($setting?->attendance_device_ip ?? '')),
+            'port' => trim((string) ($setting?->attendance_device_port ?? '')),
+            'secret' => (string) ($setting?->attendance_device_secret ?? ''),
+            'sync_mode' => (string) ($options['sync_mode'] ?? 'realtime'),
+            'sync_interval_minutes' => max(1, (int) ($options['sync_interval_minutes'] ?? 5)),
+            'zkteco' => $zkteco,
+            'webhook' => $webhook,
+        ];
+    }
+
+    public function isDeviceIntegrationEnabled(): bool
+    {
+        return $this->integrationSettings()['enabled'] === true;
+    }
+
+    public function shouldPullSync(): bool
+    {
+        $settings = $this->integrationSettings();
+        if (!$settings['enabled']) {
+            return false;
+        }
+
+        $zktecoEnabled = array_key_exists('enabled', $settings['zkteco'])
+            ? (bool) $settings['zkteco']['enabled']
+            : true;
+
+        if (!$zktecoEnabled) {
+            return false;
+        }
+
+        return (string) ($settings['zkteco']['protocol'] ?? 'push_webhook') === 'pull_sync';
+    }
+
+    public function syncConfiguredDevice(array $settings, ?string $secret = null): void
+    {
+        $identifier = trim((string) ($settings['identifier'] ?? ''));
+        if ($identifier === '') {
+            return;
+        }
+
+        $type = (string) ($settings['type'] ?? 'both');
+        $deviceType = $type === 'face' ? 'face' : 'fingerprint';
+
+        $device = AttendanceDevice::firstOrNew(['identifier' => $identifier]);
+        $device->name = $device->name ?: $identifier;
+        $device->type = $deviceType;
+        $device->status = !empty($settings['enabled']) ? 'Active' : 'Inactive';
+
+        if ($secret !== null && $secret !== '') {
+            $device->secret = $secret;
+        } elseif (empty($device->secret) && !empty($settings['secret'])) {
+            $device->secret = $settings['secret'];
+        }
+
+        $meta = is_array($device->meta) ? $device->meta : [];
+        $meta['ip'] = trim((string) ($settings['ip'] ?? '')) ?: ($meta['ip'] ?? null);
+        $meta['port'] = trim((string) ($settings['port'] ?? '')) ?: ($meta['port'] ?? null);
+        $meta['from_web_settings'] = true;
+        $device->meta = $meta;
+        $device->save();
+    }
+
+    public function ensureSettingsDevice(array $settings): ?AttendanceDevice
+    {
+        $this->syncConfiguredDevice($settings);
+        $identifier = trim((string) ($settings['identifier'] ?? ''));
+        if ($identifier === '') {
+            return null;
+        }
+
+        return AttendanceDevice::where('identifier', $identifier)->first();
+    }
+
     public function validateDeviceWebhook(array $payload, ?string $secret = null): ?AttendanceDevice
     {
         $identifier = $payload['device_id'] ?? $payload['identifier'] ?? null;

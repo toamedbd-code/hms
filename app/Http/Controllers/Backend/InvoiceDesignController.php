@@ -161,7 +161,24 @@ class InvoiceDesignController extends Controller
                 $data['footer_photo_path'] = $footerPath;
             }
 
-            unset($data['headerPhoto'], $data['header_photo'], $data['footerPhoto'], $data['footer_photo']);
+            $fullPagePadPath = $this->uploadRequestImage(
+                $request,
+                ['fullPagePad'],
+                ['fullPagePadPreview'],
+                'invoicedesigns'
+            );
+            if ($fullPagePadPath) {
+                $data['full_page_pad_path'] = $fullPagePadPath;
+            }
+            if (!isset($data['active_pad_type'])) {
+                if ($fullPagePadPath) {
+                    $data['active_pad_type'] = 'institution';
+                } elseif ($headerPath) {
+                    $data['active_pad_type'] = 'header';
+                }
+            }
+
+            unset($data['headerPhoto'], $data['header_photo'], $data['footerPhoto'], $data['footer_photo'], $data['fullPagePad']);
 
             $dataInfo = $this->invoicedesignService->create($data);
 
@@ -207,6 +224,11 @@ class InvoiceDesignController extends Controller
             'module' => $invoicedesign->module,
             'footer_content' => $invoicedesign->footer_content,
             'footer_content_position' => $invoicedesign->footer_content_position,
+            'footer_content_offset' => $invoicedesign->footer_content_offset ?? 0,
+            'active_pad_type' => $invoicedesign->active_pad_type ?? 'header',
+            'full_page_pad_path' => $invoicedesign->full_page_pad_path,
+            'full_page_pad_url' => $invoicedesign->full_page_pad_url,
+            'full_page_pad_content_offset' => $invoicedesign->full_page_pad_content_offset ?? 0,
             'header_photo_path' => $invoicedesign->header_photo_path,
             'footer_photo_path' => $invoicedesign->footer_photo_path,
             'header_photo_url' => $invoicedesign->header_photo_url,
@@ -239,6 +261,12 @@ class InvoiceDesignController extends Controller
         DB::beginTransaction();
         try {
             $data = $request->validated();
+            $existingDesign = $this->invoicedesignService->find($id);
+            $previousImagePaths = [
+                'header_photo_path' => $existingDesign?->getRawOriginal('header_photo_path'),
+                'footer_photo_path' => $existingDesign?->getRawOriginal('footer_photo_path'),
+                'full_page_pad_path' => $existingDesign?->getRawOriginal('full_page_pad_path'),
+            ];
 
             $headerPath = $this->uploadRequestImage(
                 $request,
@@ -260,7 +288,24 @@ class InvoiceDesignController extends Controller
                 $data['footer_photo_path'] = $footerPath;
             }
 
-            unset($data['headerPhoto'], $data['header_photo'], $data['footerPhoto'], $data['footer_photo']);
+            $fullPagePadPath = $this->uploadRequestImage(
+                $request,
+                ['fullPagePad'],
+                ['fullPagePadPreview'],
+                'invoicedesigns'
+            );
+            if ($fullPagePadPath) {
+                $data['full_page_pad_path'] = $fullPagePadPath;
+            }
+            if (!isset($data['active_pad_type'])) {
+                if ($fullPagePadPath) {
+                    $data['active_pad_type'] = 'institution';
+                } elseif ($headerPath) {
+                    $data['active_pad_type'] = 'header';
+                }
+            }
+
+            unset($data['headerPhoto'], $data['header_photo'], $data['footerPhoto'], $data['footer_photo'], $data['fullPagePad']);
 
             $dataInfo = $this->invoicedesignService->update($data, $id);
 
@@ -269,6 +314,13 @@ class InvoiceDesignController extends Controller
                 $this->storeAdminWorkLog($dataInfo->id, 'invoicedesigns', $message);
 
                 DB::commit();
+
+                foreach ($previousImagePaths as $column => $previousPath) {
+                    $currentPath = $dataInfo->getRawOriginal($column);
+                    if ($previousPath && $previousPath !== $currentPath) {
+                        $this->deleteReplacedDesignImage($previousPath);
+                    }
+                }
 
                 return redirect()
                     ->back()
@@ -293,6 +345,21 @@ class InvoiceDesignController extends Controller
             return redirect()
                 ->back()
                 ->with('errorMessage', $message);
+        }
+    }
+
+    private function deleteReplacedDesignImage(string $path): void
+    {
+        $isStillReferenced = InvoiceDesign::query()
+            ->where(function ($query) use ($path) {
+                $query->where('header_photo_path', $path)
+                    ->orWhere('footer_photo_path', $path)
+                    ->orWhere('full_page_pad_path', $path);
+            })
+            ->exists();
+
+        if (!$isStillReferenced && Storage::disk('public')->exists($path)) {
+            Storage::disk('public')->delete($path);
         }
     }
 
@@ -321,6 +388,13 @@ class InvoiceDesignController extends Controller
 
             if ($invoicedesign->footer_photo_path) {
                 $path = public_path('storage/' . $invoicedesign->footer_photo_path);
+                if (file_exists($path)) {
+                    unlink($path);
+                }
+            }
+
+            if ($invoicedesign->full_page_pad_path) {
+                $path = public_path('storage/' . $invoicedesign->full_page_pad_path);
                 if (file_exists($path)) {
                     unlink($path);
                 }
@@ -438,20 +512,12 @@ class InvoiceDesignController extends Controller
             Storage::disk('public')->makeDirectory($folder);
         }
 
-        $stream = fopen($realPath, 'r');
-        if ($stream === false) {
-            throw new \RuntimeException('Failed to read upload file stream.');
+        $storedPath = $image->storeAs($folder, $imageName, 'public');
+        if (!is_string($storedPath) || $storedPath === '') {
+            throw new \RuntimeException('Failed to store invoice design image.');
         }
 
-        try {
-            Storage::disk('public')->put($folder . '/' . $imageName, $stream);
-        } finally {
-            if (is_resource($stream)) {
-                fclose($stream);
-            }
-        }
-
-        return $folder . '/' . $imageName;
+        return $storedPath;
     }
 
     private function hasReadableUploadPath($file)

@@ -8,9 +8,9 @@ use App\Models\Admin;
 use App\Models\AdminDetail;
 use App\Models\Role;
 
-$role = Role::where('name', 'Receiption')->where('guard_name', 'admin')->first();
+$role = Role::where('name', 'reception')->where('guard_name', 'admin')->first();
 if (! $role) {
-    echo "Role Receiption not found\n";
+    echo "Role reception not found\n";
     exit(1);
 }
 
@@ -24,10 +24,9 @@ $admin = Admin::create([
     'password' => 'secret123',
 ]);
 
-// assign role
+// assign role (with no default permissions - permissions must be assigned via admin panel)
 try {
     $admin->syncRoles([$role->name]);
-    $admin->syncPermissions([]);
     app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
 } catch (\Throwable $e) {
     echo "Role assign error: " . $e->getMessage() . "\n";
@@ -40,3 +39,4 @@ AdminDetail::create([
 ]);
 
 echo "Created admin {$admin->id} ({$email}) with role {$role->name}\n";
+echo "Please assign permissions to this admin via the admin panel.\n";

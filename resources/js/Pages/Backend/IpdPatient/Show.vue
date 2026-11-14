@@ -1,12 +1,13 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, nextTick } from "vue";
 import BackendLayout from "@/Layouts/BackendLayout.vue";
-import { Link, router, useForm } from "@inertiajs/vue3";
+import { Link, router, useForm, usePage } from "@inertiajs/vue3";
 import { useModalSubmissionGuard } from '@/Composables/useModalSubmissionGuard';
 import Multiselect from 'vue-multiselect';
 import HospitalChargeModal from '@/Components/HospitalChargeModal.vue';
 import Modal from '@/Components/Modal.vue';
 import PathologyForm from '@/Pages/Backend/PathologyTest/Form.vue';
+import { createOfflineRequestId, saveOfflineBillingRequest } from '@/offlineBillingQueue.js';
 import 'vue-multiselect/dist/vue-multiselect.css';
 
 const APP_TIMEZONE = "Asia/Dhaka";
@@ -40,6 +41,22 @@ const props = defineProps({
   chargeUnits: Array,
   taxCategories: Array,
 });
+
+const page = usePage();
+const queueIpdBillingAction = async (requestId, url, data, routeName, label) => {
+  await saveOfflineBillingRequest({
+    id: requestId,
+    adminId: page.props.auth?.admin?.id,
+    url,
+    method: 'POST',
+    data,
+    routeName,
+    label,
+  });
+  if (typeof window?.toast === 'function') {
+    window.toast(`${label} saved on this device. It will sync when internet returns; it is not confirmed yet.`, { type: 'success' });
+  }
+};
 
 const tabs = [
   { key: "overview", label: "Overview" },
@@ -117,18 +134,6 @@ const formatMoney = (value) => {
 
 const refreshRunningBill = () => {
   router.reload({ preserveScroll: true });
-};
-
-const openPrintRoute = (url) => {
-  if (!url) return;
-  try {
-    const popup = window.open(url, '_blank', 'noopener,noreferrer');
-    if (popup) {
-      popup.focus?.();
-    }
-  } catch (error) {
-    window.location.href = url;
-  }
 };
 
 onMounted(() => {
@@ -278,12 +283,25 @@ const submitCollectDue = async () => {
   }
 
   beginDueSubmission();
+  const requestId = createOfflineRequestId();
+  const url = route('backend.ipdpatient.payments.store', props.ipdpatient.id);
+  const payload = {
+    amount,
+    payment_method: collectDueForm.payment_method || 'Cash',
+    notes: collectDueForm.notes || `Collected via ${collectDueForm.title}`,
+  };
 
   try {
-    const res = await window.axios.post(route('backend.ipdpatient.payments.store', props.ipdpatient.id), {
-      amount,
-      payment_method: collectDueForm.payment_method || 'Cash',
-      notes: collectDueForm.notes || `Collected via ${collectDueForm.title}`,
+    if (!navigator.onLine) {
+      await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.payments.store', 'IPD payment');
+      closeCollectDueModal(true);
+      return;
+    }
+    const res = await window.axios.post(url, payload, {
+      headers: {
+        'X-Offline-Request-Id': requestId,
+        'X-Offline-Admin-Id': String(page.props.auth?.admin?.id ?? ''),
+      },
     });
 
     const msg = res?.data?.message || 'Payment recorded';
@@ -291,6 +309,16 @@ const submitCollectDue = async () => {
     closeCollectDueModal(true);
     try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'payments', 'overviewTotals'], preserveState: true }); } catch (e) {}
   } catch (err) {
+    if (!err?.response) {
+      try {
+        await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.payments.store', 'IPD payment');
+        closeCollectDueModal(true);
+        return;
+      } catch (queueError) {
+        if (typeof window?.toast === 'function') window.toast(queueError instanceof Error ? queueError.message : 'Payment could not be saved offline.', { type: 'error' });
+        return;
+      }
+    }
     const msg = err?.response?.data?.message || 'Failed to collect due amount.';
     if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
   } finally {
@@ -305,16 +333,37 @@ const collectAmount = async (amount, label = 'Payment') => {
     if (typeof window?.toast === 'function') window.toast('No amount to collect.', { type: 'error' });
     return;
   }
+  const requestId = createOfflineRequestId();
+  const url = route('backend.ipdpatient.payments.store', props.ipdpatient.id);
+  const payload = {
+    amount,
+    payment_method: 'Cash',
+    notes: `Collected via quick action (${label})`,
+  };
   try {
-    const res = await window.axios.post(route('backend.ipdpatient.payments.store', props.ipdpatient.id), {
-      amount,
-      payment_method: 'Cash',
-      notes: `Collected via quick action (${label})`,
+    if (!navigator.onLine) {
+      await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.payments.store', 'IPD payment');
+      return;
+    }
+    const res = await window.axios.post(url, payload, {
+      headers: {
+        'X-Offline-Request-Id': requestId,
+        'X-Offline-Admin-Id': String(page.props.auth?.admin?.id ?? ''),
+      },
     });
     const msg = res?.data?.message || 'Payment recorded';
     if (typeof window?.toast === 'function') window.toast(msg, { type: 'success' });
     router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'payments', 'overviewTotals'], preserveState: true });
   } catch (err) {
+    if (!err?.response) {
+      try {
+        await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.payments.store', 'IPD payment');
+        return;
+      } catch (queueError) {
+        if (typeof window?.toast === 'function') window.toast(queueError instanceof Error ? queueError.message : 'Payment could not be saved offline.', { type: 'error' });
+        return;
+      }
+    }
     const msg = err?.response?.data?.message || 'Failed to record payment';
     if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
   }
@@ -330,17 +379,37 @@ const collectFullBill = () => {
 
 const applyDiscount = async () => {
   if (!props.ipdpatient?.id) return;
+  const requestId = createOfflineRequestId();
+  const url = route('backend.ipdpatient.billing.apply_discount', props.ipdpatient.id);
+  const payload = {
+    discount: discountForm.discount || 0,
+    discount_type: discountForm.discount_type,
+    extra_flat_discount: discountForm.extra_flat_discount || 0,
+  };
   try {
-    const payload = {
-      discount: discountForm.discount || 0,
-      discount_type: discountForm.discount_type,
-      extra_flat_discount: discountForm.extra_flat_discount || 0,
-    };
-    const res = await window.axios.post(route('backend.ipdpatient.billing.apply_discount', props.ipdpatient.id), payload);
+    if (!navigator.onLine) {
+      await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.billing.apply_discount', 'IPD discount');
+      return;
+    }
+    const res = await window.axios.post(url, payload, {
+      headers: {
+        'X-Offline-Request-Id': requestId,
+        'X-Offline-Admin-Id': String(page.props.auth?.admin?.id ?? ''),
+      },
+    });
     const msg = res?.data?.message || 'Discount applied';
     if (typeof window?.toast === 'function') window.toast(msg, { type: 'success' });
     router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'payments', 'overviewTotals'], preserveState: true });
   } catch (err) {
+    if (!err?.response) {
+      try {
+        await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.billing.apply_discount', 'IPD discount');
+        return;
+      } catch (queueError) {
+        if (typeof window?.toast === 'function') window.toast(queueError instanceof Error ? queueError.message : 'Discount could not be saved offline.', { type: 'error' });
+        return;
+      }
+    }
     const msg = err?.response?.data?.message || 'Failed to apply discount';
     if (typeof window?.toast === 'function') window.toast(msg, { type: 'error' });
   }
@@ -572,9 +641,25 @@ const submitHospitalCharges = async (markReady = false) => {
 
   // Send only the added charges
   const payload = { hospital_charge_ids: addedHospitalCharges.value.map(c => c.id) };
+  const requestId = createOfflineRequestId();
+  const url = route('backend.ipdpatient.charges.hospital.store', props.ipdpatient.id);
   // Use axios to avoid Inertia redirect behaviour on server redirects for XHR requests
   try {
-    const res = await window.axios.post(route('backend.ipdpatient.charges.hospital.store', props.ipdpatient.id), payload);
+    if (!navigator.onLine) {
+      await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.charges.hospital.store', 'IPD hospital charges');
+      hospitalChargesForm.reset('hospital_charge_ids');
+      addedHospitalCharges.value = [];
+      persistAddedHospitalCharges();
+      localRunningBill.value = null;
+      if (markReady) invoiceReady.value = true;
+      return true;
+    }
+    const res = await window.axios.post(url, payload, {
+      headers: {
+        'X-Offline-Request-Id': requestId,
+        'X-Offline-Admin-Id': String(page.props.auth?.admin?.id ?? ''),
+      },
+    });
     // success
     hospitalChargesForm.reset('hospital_charge_ids');
     addedHospitalCharges.value = [];
@@ -587,6 +672,19 @@ const submitHospitalCharges = async (markReady = false) => {
     } catch (e) {}
     if (markReady) invoiceReady.value = true;
   } catch (err) {
+    if (!err?.response) {
+      try {
+        await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.charges.hospital.store', 'IPD hospital charges');
+        hospitalChargesForm.reset('hospital_charge_ids');
+        addedHospitalCharges.value = [];
+        persistAddedHospitalCharges();
+        localRunningBill.value = null;
+        if (markReady) invoiceReady.value = true;
+        return true;
+      } catch (queueError) {
+        if (typeof window?.toast === 'function') window.toast(queueError instanceof Error ? queueError.message : 'Charges could not be queued offline.', { type: 'error' });
+      }
+    }
     // map validation/server error to form errors if available
     try {
       const data = err?.response?.data;
@@ -856,6 +954,8 @@ const addManualToList = async () => {
     if (typeof window?.toast === 'function') window.toast('Added to Charges', { type: 'success' });
   }
 
+  if (!navigator.onLine) return;
+
   try {
     await router.get(route('backend.ipdpatient.show', props.ipdpatient.id), { _added_manual_item: JSON.stringify(item) }, {
       preserveState: true,
@@ -892,15 +992,38 @@ const submitManualItems = async () => {
   const results = [];
   try {
     for (const item of snapshot) {
+      const payload = {
+        item_name: item.item_name,
+        unit_price: item.unit_price,
+        quantity: item.quantity,
+        category: item.category,
+      };
+      const requestId = createOfflineRequestId();
+      const url = route('backend.ipdpatient.charges.hospital.manual.store', props.ipdpatient.id);
       try {
-        const res = await window.axios.post(route('backend.ipdpatient.charges.hospital.manual.store', props.ipdpatient.id), {
-          item_name: item.item_name,
-          unit_price: item.unit_price,
-          quantity: item.quantity,
-          category: item.category,
+        if (!navigator.onLine) {
+          await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.charges.hospital.manual.store', 'IPD manual charge');
+          results.push({ ok: true, msg: 'Saved offline for synchronization' });
+          continue;
+        }
+        const res = await window.axios.post(url, payload, {
+          headers: {
+            'X-Offline-Request-Id': requestId,
+            'X-Offline-Admin-Id': String(page.props.auth?.admin?.id ?? ''),
+          },
         });
         results.push({ ok: true, msg: res?.data?.message || 'Added' });
       } catch (err) {
+        if (!err?.response) {
+          try {
+            await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.charges.hospital.manual.store', 'IPD manual charge');
+            results.push({ ok: true, msg: 'Saved offline for synchronization' });
+            continue;
+          } catch (queueError) {
+            results.push({ ok: false, msg: queueError instanceof Error ? queueError.message : 'Could not save offline' });
+            continue;
+          }
+        }
         const msg = err?.response?.data?.message || 'Failed to add item';
         results.push({ ok: false, msg });
       }
@@ -1040,15 +1163,26 @@ const submitManualCharge = async () => {
   if (addLock.value) return;
   addLock.value = true;
 
+  const payload = {
+    item_name: manualChargeForm.item_name,
+    unit_price: manualChargeForm.unit_price,
+    quantity: manualChargeForm.quantity,
+    category: manualChargeForm.category,
+  };
+  const requestId = createOfflineRequestId();
+  const url = route('backend.ipdpatient.charges.hospital.manual.store', props.ipdpatient.id);
   try {
-    const payload = {
-      item_name: manualChargeForm.item_name,
-      unit_price: manualChargeForm.unit_price,
-      quantity: manualChargeForm.quantity,
-      category: manualChargeForm.category,
-    };
-
-    const res = await window.axios.post(route('backend.ipdpatient.charges.hospital.manual.store', props.ipdpatient.id), payload);
+    if (!navigator.onLine) {
+      await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.charges.hospital.manual.store', 'IPD manual charge');
+      manualChargeForm.reset('item_name', 'unit_price', 'quantity', 'category');
+      return;
+    }
+    const res = await window.axios.post(url, payload, {
+      headers: {
+        'X-Offline-Request-Id': requestId,
+        'X-Offline-Admin-Id': String(page.props.auth?.admin?.id ?? ''),
+      },
+    });
 
     // refresh running bill and clear form
     manualChargeForm.reset('item_name', 'unit_price', 'quantity', 'category');
@@ -1079,6 +1213,15 @@ const submitManualCharge = async () => {
           }, 350);
         } catch (e) {}
   } catch (err) {
+    if (!err?.response) {
+      try {
+        await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.charges.hospital.manual.store', 'IPD manual charge');
+        manualChargeForm.reset('item_name', 'unit_price', 'quantity', 'category');
+        return;
+      } catch (queueError) {
+        if (typeof window?.toast === 'function') window.toast(queueError instanceof Error ? queueError.message : 'Manual charge could not be queued offline.', { type: 'error' });
+      }
+    }
     try {
       const data = err?.response?.data;
       if (data && data.errors) manualChargeForm.errors = data.errors;
@@ -1100,19 +1243,40 @@ const submitPayment = async () => {
   if (!props.ipdpatient?.id) return;
   if (addLock.value) return;
   addLock.value = true;
+  const requestId = createOfflineRequestId();
+  const url = route('backend.ipdpatient.payments.store', props.ipdpatient.id);
+  const payload = {
+    amount: paymentForm.amount,
+    payment_method: paymentForm.payment_method,
+    transaction_id: paymentForm.transaction_id,
+    notes: paymentForm.notes,
+  };
   try {
-    const payload = {
-      amount: paymentForm.amount,
-      payment_method: paymentForm.payment_method,
-      transaction_id: paymentForm.transaction_id,
-      notes: paymentForm.notes,
-    };
-    const res = await window.axios.post(route('backend.ipdpatient.payments.store', props.ipdpatient.id), payload);
+    if (!navigator.onLine) {
+      await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.payments.store', 'IPD payment');
+      paymentForm.reset('amount', 'payment_method', 'transaction_id', 'notes');
+      return;
+    }
+    const res = await window.axios.post(url, payload, {
+      headers: {
+        'X-Offline-Request-Id': requestId,
+        'X-Offline-Admin-Id': String(page.props.auth?.admin?.id ?? ''),
+      },
+    });
     const msg = res?.data?.message || 'Payment recorded';
     if (typeof window?.toast === 'function') window.toast(msg, { type: 'success' });
     paymentForm.reset('amount', 'payment_method', 'transaction_id', 'notes');
     try { router.get(route('backend.ipdpatient.show', props.ipdpatient.id), {}, { only: ['runningBill', 'payments', 'overviewTotals'], preserveState: true }); } catch (e) {}
   } catch (err) {
+    if (!err?.response) {
+      try {
+        await queueIpdBillingAction(requestId, url, payload, 'backend.ipdpatient.payments.store', 'IPD payment');
+        paymentForm.reset('amount', 'payment_method', 'transaction_id', 'notes');
+        return;
+      } catch (queueError) {
+        if (typeof window?.toast === 'function') window.toast(queueError instanceof Error ? queueError.message : 'Payment could not be queued offline.', { type: 'error' });
+      }
+    }
     try {
       const data = err?.response?.data;
       if (data && data.errors) paymentForm.errors = data.errors;
@@ -1376,8 +1540,33 @@ const regenerateBilling = () => {
   );
   if (!ok) return;
 
-  router.post(route("backend.ipdpatient.discharge-billing.regenerate", props.ipdpatient.id), {}, {
+  const requestId = createOfflineRequestId();
+  const url = route("backend.ipdpatient.discharge-billing.regenerate", props.ipdpatient.id);
+  const queueRegeneration = () => queueIpdBillingAction(
+    requestId,
+    url,
+    {},
+    'backend.ipdpatient.discharge-billing.regenerate',
+    'Discharge billing regeneration'
+  );
+  if (!navigator.onLine) {
+    queueRegeneration().catch((error) => {
+      if (typeof window?.toast === 'function') window.toast(error instanceof Error ? error.message : 'Discharge billing could not be queued offline.', { type: 'error' });
+    });
+    return;
+  }
+
+  router.post(url, {}, {
     preserveScroll: true,
+    headers: {
+      'X-Offline-Request-Id': requestId,
+      'X-Offline-Admin-Id': String(page.props.auth?.admin?.id ?? ''),
+    },
+    onNetworkError: () => {
+      queueRegeneration().catch((error) => {
+        if (typeof window?.toast === 'function') window.toast(error instanceof Error ? error.message : 'Discharge billing could not be queued offline.', { type: 'error' });
+      });
+    },
   });
 };
 
@@ -1556,7 +1745,7 @@ onBeforeUnmount(() => {
             </Link>
 
             <Link v-if="props.ipdpatient?.id" :href="route('backend.ipdpatient.prescription', props.ipdpatient.id)"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600 text-white rounded">
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600 !text-white rounded">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round"
@@ -1567,8 +1756,8 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="flex items-center gap-2">
-            <a v-if="props.ipdpatient?.id" :href="route('backend.print.ipd.invoice', { id: props.ipdpatient.id, auto_print: 1 })"
-              target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-rose-600 text-white rounded">
+            <a v-if="props.ipdpatient?.id" :href="route('backend.print.ipd.invoice', { id: props.ipdpatient.id })"
+              target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-rose-600 !text-white rounded">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round"
@@ -1578,8 +1767,8 @@ onBeforeUnmount(() => {
             </a>
 
             <a v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id"
-              href="#"
-              @click.prevent="openPrintRoute(route('backend.print.ipd.final-bill', { id: props.ipdpatient.id, auto_print: 1, fast_open: 1 }))"
+              :href="route('backend.print.ipd.final-bill', { id: props.ipdpatient.id, fast_open: 1 })"
+              target="_blank" rel="noopener"
               class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-fuchsia-700 text-white rounded">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-4 h-4">
@@ -1603,7 +1792,7 @@ onBeforeUnmount(() => {
 
             <div class="relative" ref="printMenuRef">
               <button type="button" @click="togglePrintMenu"
-                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded">
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-green-600 text-white rounded">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                   stroke="currentColor" class="w-4 h-4">
                   <path stroke-linecap="round" stroke-linejoin="round"
@@ -1613,13 +1802,13 @@ onBeforeUnmount(() => {
               </button>
 
               <div v-if="showPrintMenu" class="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded shadow-lg z-50">
-                <a v-if="props.ipdpatient?.id" :href="route('backend.print.ipd.invoice', { id: props.ipdpatient.id, auto_print: 1 })"
+                <a v-if="props.ipdpatient?.id" :href="route('backend.print.ipd.invoice', { id: props.ipdpatient.id })"
                   target="_blank" rel="noopener" class="block px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">
                   Print Invoice
                 </a>
                 <a v-if="props.ipdpatient?.status === 'Inactive' && props.ipdpatient?.id"
-                  href="#"
-                  @click.prevent="openPrintRoute(route('backend.print.ipd.final-bill', { id: props.ipdpatient.id, auto_print: 1, fast_open: 1 }))"
+                  :href="route('backend.print.ipd.final-bill', { id: props.ipdpatient.id, fast_open: 1 })"
+                  target="_blank" rel="noopener"
                   class="block px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">
                   Print Final Bill
                 </a>

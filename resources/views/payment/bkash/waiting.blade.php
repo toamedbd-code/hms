@@ -58,16 +58,16 @@
 </head>
 <body>
     <div class="card">
-        <div class="badge"><span class="dot"></span> bKash Sandbox Checkout</div>
+        <div class="badge"><span class="dot"></span> bKash Checkout</div>
         <h1>Complete your payment</h1>
         <p>Amount: <strong>৳{{ number_format((float) $payment->amount, 2) }}</strong></p>
         <ol>
-            <li>bKash payment opens in this tab/window.</li>
+            <li>Open the bKash checkout below in this tab.</li>
             <li>Enter sandbox wallet, OTP and PIN.</li>
-            <li>Return to the Login tab and click <strong>Confirm Payment</strong> below if this page stays open — or use the button after coming back.</li>
+            <li>After payment, return to this page and click <strong>Confirm Payment</strong>.</li>
         </ol>
         <div class="actions">
-            <a class="btn primary" id="open-bkash" href="{{ $bkashUrl }}" target="_blank" rel="noopener">
+            <a class="btn primary" id="open-bkash" href="{{ $bkashUrl }}">
                 Open bKash Payment
             </a>
             <button class="btn confirm" id="confirm-btn" type="button">
@@ -88,9 +88,10 @@
         const statusEl = document.getElementById('status');
         const confirmBtn = document.getElementById('confirm-btn');
 
-        // Do not auto-spawn another checkout tab here. Let the user open the bKash page explicitly,
-        // then confirm from this waiting page.
-        statusEl.textContent = 'Click “Open bKash Payment” to launch the checkout page, then confirm here.';
+        statusEl.textContent = 'Opening bKash checkout in this tab…';
+        window.setTimeout(() => {
+            window.location.replace(bkashUrl);
+        }, 250);
 
         confirmBtn.addEventListener('click', async () => {
             confirmBtn.disabled = true;
@@ -103,15 +104,10 @@
                 const data = await res.json();
                 statusEl.textContent = data.message || 'Done';
                 if (data.done) {
-                    if (data.invoiceUrl) {
-                        const invoiceWindow = window.open(data.invoiceUrl, '_blank', 'noopener,noreferrer');
-                        if (! invoiceWindow) {
-                            statusEl.textContent = 'Invoice opened in a new tab was blocked. Please allow popups, then print from the invoice page.';
-                        }
-                    }
+                    statusEl.textContent = 'Payment successful! Loading invoice…';
                     window.setTimeout(() => {
-                        window.location.href = data.redirect || loginUrl;
-                    }, 250);
+                        window.location.href = data.invoiceUrl || data.redirect || loginUrl;
+                    }, 300);
                     return;
                 }
             } catch (e) {

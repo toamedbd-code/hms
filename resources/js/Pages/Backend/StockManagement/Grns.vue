@@ -3,8 +3,9 @@ import { computed } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 
 const props = defineProps({
-  pageTitle: { type: String, default: 'GRN / Purchase Receive' },
+  pageTitle: { type: String, default: 'Purchase Delivery (GRN)' },
   grns: { type: Object, default: () => ({ data: [] }) },
+  timezone: { type: String, default: 'Asia/Dhaka' },
 });
 
 const rows = computed(() => props.grns?.data ?? []);
@@ -22,6 +23,7 @@ const formatDateTime = (value) => {
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
+    timeZone: props.timezone,
   });
 };
 </script>
@@ -32,8 +34,8 @@ const formatDateTime = (value) => {
       <div class="flex items-center justify-between p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h1>
         <div class="flex gap-2">
-          <a :href="route('backend.stock.index')" class="px-3 py-2 text-sm font-semibold text-white bg-red-600 rounded hover:bg-red-700">Back</a>
-          <a :href="route('backend.stock.grn.create')" class="px-3 py-2 text-sm font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700">New GRN</a>
+          <a :href="route('backend.stock.index')" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700">Back</a>
+          <a :href="route('backend.stock.grn.create')" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700">Record Delivery</a>
         </div>
       </div>
 
@@ -42,6 +44,7 @@ const formatDateTime = (value) => {
           <thead class="bg-gray-50">
             <tr>
               <th class="px-3 py-2 border">GRN No</th>
+              <th class="px-3 py-2 border">PO No</th>
               <th class="px-3 py-2 border">Date</th>
               <th class="px-3 py-2 border">Supplier</th>
               <th class="px-3 py-2 border">Invoice</th>
@@ -52,7 +55,8 @@ const formatDateTime = (value) => {
           <tbody>
             <tr v-for="row in rows" :key="row.id" class="hover:bg-gray-50 align-top">
               <td class="px-3 py-2 border text-center">{{ row.grn_no }}</td>
-              <td class="px-3 py-2 border text-center">{{ formatDateTime(row.receive_date) }}</td>
+              <td class="px-3 py-2 border text-center">{{ row.purchase_order?.purchase_order_no || '-' }}</td>
+              <td class="px-3 py-2 border text-center">{{ formatDateTime(row.created_at) }}</td>
               <td class="px-3 py-2 border">{{ row.supplier_name || '-' }}</td>
               <td class="px-3 py-2 border">{{ row.invoice_no || '-' }}</td>
               <td class="px-3 py-2 border">
@@ -67,7 +71,7 @@ const formatDateTime = (value) => {
               </td>
             </tr>
             <tr v-if="rows.length === 0">
-              <td colspan="6" class="px-3 py-6 text-center text-gray-500 border">No GRN found.</td>
+              <td colspan="7" class="px-3 py-6 text-center text-gray-500 border">No delivery / GRN found.</td>
             </tr>
           </tbody>
         </table>

@@ -67,7 +67,7 @@ const close = () => { open.value = false; };
 
 <template>
   <div class="relative">
-    <div @click.stop="toggle" :class="open ? 'bg-emerald-500 text-white border-l-2 border-emerald-600 rounded-md' : 'bg-white rounded-md'">
+    <div @click.stop="toggle" class="rounded-md">
       <slot name="trigger" />
     </div>
 

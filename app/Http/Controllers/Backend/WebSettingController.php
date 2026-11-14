@@ -6,8 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\WebSettingRequest;
 use App\Models\Menu;
 use App\Models\WebSetting;
+use App\Models\TestCategory;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
+use App\Services\AttendanceDeviceService;
 use App\Services\WebSettingService;
+use App\Services\ModuleManagementSettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
@@ -16,6 +20,7 @@ use Inertia\Inertia;
 use App\Traits\SystemTrait;
 use Exception;
 use App\Models\Admin;
+use App\Support\DefaultDeveloperManager;
 use Spatie\Permission\Models\Role;
 use Illuminate\Support\Str as SupportStr;
 use Illuminate\Support\Facades\Log;
@@ -25,13 +30,15 @@ class WebSettingController extends Controller
     use SystemTrait;
 
     protected $websettingService;
+    protected ModuleManagementSettings $moduleManagementSettings;
 
-    public function __construct(WebSettingService $websettingService)
+    public function __construct(WebSettingService $websettingService, ModuleManagementSettings $moduleManagementSettings)
     {
         $this->websettingService = $websettingService;
+        $this->moduleManagementSettings = $moduleManagementSettings;
 
-        $this->middleware('auth:admin')->except(['favicon']);
-        $this->middleware('permission:websetting-add|cms-setting|general-setting-add|sidebar-setting', ['only' => ['create', 'section', 'module', 'store']]);
+        $this->middleware('auth:admin')->except(['favicon', 'pwaManifest', 'pwaIcon']);
+        $this->middleware('permission:websetting-add|cms-setting|general-setting-add|sidebar-setting', ['only' => ['create', 'section', 'module', 'store', 'updateLabManagement']]);
     }
 
     /**
@@ -122,7 +129,7 @@ class WebSettingController extends Controller
     {
         $websetting = $this->websettingService->first() ?? null;
 
-        $availableSections = ['general', 'cms', 'sms', 'prefix', 'module', 'other', 'sidebar'];
+        $availableSections = ['general', 'pharmacy', 'cms', 'sms', 'prefix', 'module', 'other', 'sidebar'];
         $normalizedSection = strtolower(trim((string) $requestedSection));
         $activeSection = in_array($normalizedSection, $availableSections, true)
             ? $normalizedSection
@@ -136,6 +143,7 @@ class WebSettingController extends Controller
 
         $pageTitleMap = [
             'general' => 'General Setting',
+            'pharmacy' => 'Pharmacy Setting',
             'cms' => 'CMS Setting',
             'sms' => 'SMS Setting',
             'module' => 'Module Setting',
@@ -158,7 +166,7 @@ class WebSettingController extends Controller
         // discover file-based frontend templates under resources/views/frontend/templates
         $templates = [];
         $templatesDir = resource_path('views/frontend/templates');
-        if (is_dir($templatesDir)) {
+        if ((!$singleSectionMode || $activeSection === 'cms') && is_dir($templatesDir)) {
             foreach (glob($templatesDir . '/*.blade.php') as $tplPath) {
                 $templates[] = pathinfo($tplPath, PATHINFO_FILENAME);
             }
@@ -167,40 +175,69 @@ class WebSettingController extends Controller
             $templates = ['default'];
         }
 
+        $isDeveloper = DefaultDeveloperManager::isDeveloper(auth('admin')->user());
+
         return Inertia::render('Backend/WebSetting/Form', [
-            'websetting' => fn() => $websetting ? $this->decorateVatFallback($websetting) : $websetting,
-            'sidebarMenus' => fn() => Menu::whereNull('parent_id')
-                ->whereNull('deleted_at')
-                ->where('status', 'Active')
-                ->orderBy('sorting', 'ASC')
-                ->orderBy('id', 'ASC')
-                ->get(['id', 'name', 'sorting'])
-                ->map(function ($menu) {
-                    return [
-                        'id' => $menu->id,
-                        'name' => $menu->name,
-                        'sorting' => $menu->sorting,
-                    ];
-                })->values(),
+            'websetting' => function () use ($websetting, $isDeveloper) {
+                if (!$websetting) {
+                    return null;
+                }
+
+                $settings = $this->decorateVatFallback($websetting);
+                if (!$isDeveloper) {
+                    $settings->makeHidden(['pwa_app_name', 'pwa_app_icon']);
+                }
+
+                return $settings;
+            },
+            'itemCategories' => fn() => (!$singleSectionMode || in_array($activeSection, ['general', 'module'], true))
+                ? TestCategory::query()
+                    ->whereNull('parent_id')
+                    ->whereNull('deleted_at')
+                    ->where('status', 'Active')
+                    ->orderBy('name')
+                    ->get(['id', 'name'])
+                : [],
+            'sidebarMenus' => fn() => (!$singleSectionMode || $activeSection === 'sidebar')
+                ? Menu::whereNull('parent_id')
+                    ->whereNull('deleted_at')
+                    ->where('status', 'Active')
+                    ->orderBy('sorting', 'ASC')
+                    ->orderBy('id', 'ASC')
+                    ->get(['id', 'name', 'sorting'])
+                    ->map(function ($menu) {
+                        return [
+                            'id' => $menu->id,
+                            'name' => $menu->name,
+                            'sorting' => $menu->sorting,
+                        ];
+                    })->values()
+                : [],
             'pageTitle' => fn() => $pageTitle,
             'activeSection' => fn() => $activeSection,
             'activeModule' => fn() => $activeModule,
             'singleSectionMode' => fn() => $singleSectionMode,
+            'labManagementEnabled' => fn() => (!$singleSectionMode || $activeSection === 'module')
+                ? $this->moduleManagementSettings->isLabManaged()
+                : true,
+            'isDeveloper' => fn() => $isDeveloper,
             'availableTemplates' => fn() => $templates,
-            'bookingDoctors' => fn() => Admin::query()
-                ->whereNull('deleted_at')
-                ->where('status', 'Active')
-                ->whereHas('role', function ($query) {
-                    $query->where('name', 'Doctor');
-                })
-                ->get(['id', 'first_name', 'last_name', 'phone'])
-                ->map(function ($doctor) {
-                    return [
-                        'id' => $doctor->id,
-                        'name' => trim(($doctor->first_name ?? '') . ' ' . ($doctor->last_name ?? '')),
-                        'phone' => $doctor->phone,
-                    ];
-                })->values(),
+            'bookingDoctors' => fn() => (!$singleSectionMode || $activeSection === 'cms')
+                ? Admin::query()
+                    ->whereNull('deleted_at')
+                    ->where('status', 'Active')
+                    ->whereHas('role', function ($query) {
+                        $query->where('name', 'Doctor');
+                    })
+                    ->get(['id', 'first_name', 'last_name', 'phone'])
+                    ->map(function ($doctor) {
+                        return [
+                            'id' => $doctor->id,
+                            'name' => trim(($doctor->first_name ?? '') . ' ' . ($doctor->last_name ?? '')),
+                            'phone' => $doctor->phone,
+                        ];
+                    })->values()
+                : [],
         ]);
     }
 
@@ -238,6 +275,7 @@ class WebSettingController extends Controller
         try {
             $data = $request->validated();
             $settings = $this->websettingService->first();
+            $previousUploadedFiles = [];
 
             // Persist VAT values directly in DB when the columns exist, otherwise store them
             // in attendance_device_options as a fallback so the values survive page reloads.
@@ -249,6 +287,7 @@ class WebSettingController extends Controller
                     $decoded = json_decode($existingOptions, true);
                     $existingOptions = json_last_error() === JSON_ERROR_NONE && is_array($decoded) ? $decoded : [];
                 }
+
                 $existingOptions = is_array($existingOptions) ? $existingOptions : [];
                 if ($vatEnabledProvided) {
                     $existingOptions['vat_enabled'] = filter_var($request->input('vat_enabled'), FILTER_VALIDATE_BOOLEAN);
@@ -263,9 +302,14 @@ class WebSettingController extends Controller
             $section = strtolower(trim((string) ($request->input('activeSection') ?? $request->input('section') ?? 'general')));
 
             // Section-wise field whitelist to prevent cross-section overwrite.
+            $isDeveloper = DefaultDeveloperManager::isDeveloper($request->user('admin'));
             $generalFields = [
-                'company_name','company_short_name','hospital_code','address','phone','email','logo','icon','language','date_format','time_zone','currency','currency_symbol','vat_enabled','vat_percent','credit_limit','max_billing_discount_percent','low_stock_threshold','time_format','mobile_app_api_url','mobile_app_primary_color_code','mobile_app_secondary_color_code','mobile_app_logo','login_banner','login_title','login_subtitle','report_title',
+                'company_name','company_short_name','hospital_code','address','phone','email','logo','icon','language','date_format','time_zone','currency','currency_symbol','vat_enabled','vat_percent','credit_limit','max_billing_discount_percent','low_stock_threshold','time_format','mobile_app_api_url','mobile_app_primary_color_code','mobile_app_secondary_color_code','mobile_app_logo','login_banner','login_title','login_subtitle','report_title','attendance_device_options',
             ];
+            if ($isDeveloper) {
+                $generalFields[] = 'pwa_app_name';
+                $generalFields[] = 'pwa_app_icon';
+            }
             $cmsFields = [
                 'website_hero_title','website_hero_subtitle','website_about_text','website_emergency_phone','website_enabled','website_cta_text','website_featured_doctors_json','website_featured_doctor_images','website_services_json','website_facilities_json','website_testimonials_en_json','website_testimonials_bn_json','website_template',
             ];
@@ -281,9 +325,11 @@ class WebSettingController extends Controller
             $otherFields = [
                 'doctor_restriction_mode','superadmin_visibility','patient_panel','opd_invoice_header_footer','ipd_invoice_header_footer','opd_prescription_header_footer','ipd_prescription_header_footer','scan_type','current_theme',
             ];
+            $pharmacyFields = ['pharmacy_tax_number'];
 
             $sectionFieldMap = [
                 'general' => $generalFields,
+                'pharmacy' => $pharmacyFields,
                 'cms' => $cmsFields,
                 'prefix' => $prefixFields,
                 'sms' => $smsFields,
@@ -329,6 +375,27 @@ class WebSettingController extends Controller
                 }
             }
 
+            if ($section === 'module') {
+                $secret = trim((string) ($request->input('attendance_device_secret') ?? ''));
+                if ($secret === '') {
+                    unset($data['attendance_device_secret']);
+                }
+
+                if (isset($data['attendance_device_options']) && is_array($data['attendance_device_options'])) {
+                    $existingOptions = $settings?->attendance_device_options ?? [];
+                    if (is_string($existingOptions)) {
+                        $decodedExisting = json_decode($existingOptions, true);
+                        $existingOptions = json_last_error() === JSON_ERROR_NONE && is_array($decodedExisting)
+                            ? $decodedExisting
+                            : [];
+                    }
+                    if (!is_array($existingOptions)) {
+                        $existingOptions = [];
+                    }
+                    $data['attendance_device_options'] = array_replace_recursive($existingOptions, $data['attendance_device_options']);
+                }
+            }
+
             if (isset($data['website_featured_doctors_json']) && is_string($data['website_featured_doctors_json'])) {
                 $decodedDoctors = json_decode($data['website_featured_doctors_json'], true);
                 if (json_last_error() === JSON_ERROR_NONE && is_array($decodedDoctors)) {
@@ -356,27 +423,23 @@ class WebSettingController extends Controller
             unset($data['website_featured_doctor_images']);
 
             if ($request->hasFile('logo')) {
-                if ($settings && $settings->logo) {
-                    $this->deleteStoredWebSettingFile($settings->logo);
-                }
-
+                $previousUploadedFiles['logo'] = $settings?->getRawOriginal('logo');
                 $data['logo'] = $this->imageUpload($request->file('logo'), 'webSetting');
             }
 
             if ($request->hasFile('icon')) {
-                if ($settings && $settings->icon) {
-                    $this->deleteStoredWebSettingFile($settings->icon);
-                }
-
+                $previousUploadedFiles['icon'] = $settings?->getRawOriginal('icon');
                 $data['icon'] = $this->imageUpload($request->file('icon'), 'webSetting');
             }
 
             if ($request->hasFile('mobile_app_logo')) {
-                if ($settings && $settings->mobile_app_logo) {
-                    $this->deleteStoredWebSettingFile($settings->mobile_app_logo);
-                }
-
+                $previousUploadedFiles['mobile_app_logo'] = $settings?->getRawOriginal('mobile_app_logo');
                 $data['mobile_app_logo'] = $this->imageUpload($request->file('mobile_app_logo'), 'webSetting');
+            }
+
+            if ($isDeveloper && $request->hasFile('pwa_app_icon')) {
+                $previousUploadedFiles['pwa_app_icon'] = $settings?->getRawOriginal('pwa_app_icon');
+                $data['pwa_app_icon'] = $this->imageUpload($request->file('pwa_app_icon'), 'webSetting/pwa');
             }
 
             // Keep legacy consumers working that still read report_title as hospital address.
@@ -403,12 +466,42 @@ class WebSettingController extends Controller
                 unset($data['login_banner'], $data['login_title'], $data['login_subtitle']);
                 $updatedSettings = $this->websettingService->update($data, $dataInfo->id);
                 $this->syncHistoricalPrefixValues($oldSettingsSnapshot, $updatedSettings);
-                $message = ($section === 'sidebar') ? 'Sidebar menu order updated successfully' : 'General settings updated successfully';
+                $message = match ($section) {
+                    'sidebar' => 'Sidebar menu order updated successfully.',
+                    'pharmacy' => 'Pharmacy settings saved successfully.',
+                    'module' => 'Attendance module setting saved successfully.',
+                    'cms' => 'CMS setting saved successfully.',
+                    'sms' => 'SMS setting saved successfully.',
+                    'prefix' => 'Prefix setting saved successfully.',
+                    'other' => 'Other setting saved successfully.',
+                    default => 'General settings updated successfully.',
+                };
             } else {
                 unset($data['login_banner'], $data['login_title'], $data['login_subtitle']);
                 if (!empty($data)) {
+                    if ($section !== 'general') {
+                        $appName = trim((string) config('app.name', 'Hospital Management System'));
+                        $appName = $appName !== '' ? $appName : 'Hospital Management System';
+
+                        $data = array_merge([
+                            'company_name' => $appName,
+                            'company_short_name' => Str::upper(Str::substr($appName, 0, 10)),
+                            'phone' => '',
+                            'report_title' => $appName,
+                            'status' => 'Active',
+                        ], $data);
+                    }
+
                     WebSetting::create($data);
-                    $message = 'General settings created successfully';
+                    $message = match ($section) {
+                        'pharmacy' => 'Pharmacy settings saved successfully.',
+                        'cms' => 'CMS setting saved successfully.',
+                        'sms' => 'SMS setting saved successfully.',
+                        'module' => 'Attendance module setting saved successfully.',
+                        'prefix' => 'Prefix setting saved successfully.',
+                        'other' => 'Other setting saved successfully.',
+                        default => 'General settings created successfully',
+                    };
                 } else {
                     $message = 'Sidebar menu order updated successfully';
                 }
@@ -426,8 +519,10 @@ class WebSettingController extends Controller
                 }
             }
 
-            // Sync featured doctors (CMS) to Admins so they are available in appointment lists
-            try {
+            $settingsAfter = $dataInfo;
+            // Sync featured doctors (CMS) to Admins so they are available in appointment lists.
+            if ($section === 'cms') {
+                try {
                 $settingsAfter = $this->websettingService->first();
                 $raw = trim((string) ($settingsAfter->website_featured_doctors_json ?? ''));
                 if ($raw !== '') {
@@ -537,14 +632,36 @@ class WebSettingController extends Controller
             } catch (\Throwable $e) {
                 // non-fatal: ignore sync errors
             }
+            }
 
             // Refresh cache will be executed after transaction commit to
             // ensure DB changes are visible to all connections.
             // (moved to after DB::commit below)
 
-            $this->storeAdminWorkLog($dataInfo ? $dataInfo->id : WebSetting::latest()->first()->id, 'web_settings', $message);
+            if ($section === 'module') {
+                $savedSettings = $this->websettingService->first();
+                app(AttendanceDeviceService::class)->syncConfiguredDevice([
+                    'enabled' => (bool) ($savedSettings?->attendance_device_enabled ?? false),
+                    'type' => (string) ($savedSettings?->attendance_device_type ?? 'both'),
+                    'identifier' => (string) ($savedSettings?->attendance_device_identifier ?? ''),
+                    'ip' => (string) ($savedSettings?->attendance_device_ip ?? ''),
+                    'port' => (string) ($savedSettings?->attendance_device_port ?? ''),
+                    'secret' => (string) ($savedSettings?->attendance_device_secret ?? ''),
+                ], trim((string) ($request->input('attendance_device_secret') ?? '')) ?: null);
+            }
+
+            $logEntityId = $dataInfo?->id ?? WebSetting::query()->latest()->first()?->id;
+            if (!is_null($logEntityId)) {
+                $this->storeAdminWorkLog($logEntityId, 'web_settings', $message);
+            }
 
             DB::commit();
+
+            foreach ($previousUploadedFiles as $field => $previousPath) {
+                if ($previousPath && isset($data[$field]) && $previousPath !== $data[$field]) {
+                    $this->deleteStoredWebSettingFile($previousPath);
+                }
+            }
 
             // After commit, refresh cached web setting and clear any
             // session fallback that might cause stale company info to appear.
@@ -552,6 +669,14 @@ class WebSettingController extends Controller
                 get_cached_web_setting(true);
             } catch (\Throwable $e) {
                 Log::warning('Failed to refresh websetting cache after commit: ' . $e->getMessage());
+            }
+
+            if ($section === 'sidebar') {
+                try {
+                    Cache::forget('sidebar.menu_schema_version');
+                } catch (\Throwable $exception) {
+                    Log::warning('Failed to invalidate sidebar menu cache after reorder: ' . $exception->getMessage());
+                }
             }
 
             try {
@@ -570,7 +695,8 @@ class WebSettingController extends Controller
             }
 
             // Persist optional login texts into .env so admin can edit them from WebSetting form
-            try {
+            if ($section === 'general') {
+                try {
                 $envUpdates = [
                     'LOGIN_BANNER' => $request->input('login_banner', null),
                     'LOGIN_TITLE' => $request->input('login_title', null),
@@ -585,6 +711,11 @@ class WebSettingController extends Controller
             } catch (\Throwable $e) {
                 Log::warning('Failed to update .env login texts: ' . $e->getMessage());
             }
+            }
+
+            if ($section === 'pharmacy' && $request->expectsJson()) {
+                return response()->json(['successMessage' => $message]);
+            }
 
             return redirect()
                 ->back()
@@ -594,10 +725,30 @@ class WebSettingController extends Controller
             DB::rollBack();
             $this->storeSystemError('Backend', 'WebSettingController', 'store', substr($err->getMessage(), 0, 1000));
 
+            if (($section ?? null) === 'pharmacy' && $request->expectsJson()) {
+                return response()->json(['errorMessage' => 'Server error occurred. Please try again.'], 500);
+            }
+
             return redirect()
                 ->back()
                 ->with('errorMessage', 'Server error occurred. Please try again.');
         }
+    }
+
+    public function updateLabManagement(Request $request)
+    {
+        $data = $request->validate([
+            'managed' => 'required|boolean',
+        ]);
+
+        $this->moduleManagementSettings->setLabManaged(
+            (bool) $data['managed'],
+            $request->user('admin')?->id
+        );
+
+        return back()->with('successMessage', $data['managed']
+            ? 'Lab management enabled. Inventory limits and stock consumption are active.'
+            : 'Lab management disabled. Lab billing and verification will not be limited by stock.');
     }
 
     public function getSettings()
@@ -666,6 +817,61 @@ class WebSettingController extends Controller
         }
 
         abort(404);
+    }
+
+    public function pwaManifest()
+    {
+        $settings = get_cached_web_setting();
+        $appName = trim((string) ($settings?->pwa_app_name ?? '')) ?: 'HMS Smart Solution';
+        $iconPath = trim((string) ($settings?->getRawOriginal('pwa_app_icon') ?? ''));
+        $iconUrl = $iconPath !== ''
+            ? route('backend.pwa.icon', ['v' => $settings?->updated_at?->timestamp ?? 1])
+            : asset('hms-pwa-icon.svg');
+        $iconMimeType = $iconPath !== ''
+            ? (Storage::disk('public')->mimeType($iconPath) ?: 'image/png')
+            : 'image/svg+xml';
+
+        return response()->json([
+            'id' => '/',
+            'name' => $appName,
+            'short_name' => $appName,
+            'description' => $appName,
+            'start_url' => '/view-billing-page',
+            'scope' => '/',
+            'display' => 'standalone',
+            'launch_handler' => ['client_mode' => 'navigate-new'],
+            'handle_links' => 'not_handled',
+            'capture_links' => 'none',
+            'background_color' => '#f8fafc',
+            'theme_color' => '#064e3b',
+            'orientation' => 'any',
+            'icons' => [[
+                'src' => $iconUrl,
+                'sizes' => 'any',
+                'type' => $iconMimeType,
+                'purpose' => 'any',
+            ]],
+        ], 200, [
+            'Content-Type' => 'application/manifest+json; charset=utf-8',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+        ]);
+    }
+
+    public function pwaIcon()
+    {
+        $settings = get_cached_web_setting();
+        $path = trim(str_replace('\\', '/', (string) ($settings?->getRawOriginal('pwa_app_icon') ?? '')), '/');
+        abort_unless(
+            Str::startsWith($path, 'webSetting/pwa/')
+                && !str_contains($path, '..')
+                && Storage::disk('public')->exists($path),
+            404
+        );
+
+        return response()->file(Storage::disk('public')->path($path), [
+            'Cache-Control' => 'public, max-age=31536000, immutable',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     private function syncHistoricalPrefixValues(?WebSetting $oldSettings, ?WebSetting $newSettings): void

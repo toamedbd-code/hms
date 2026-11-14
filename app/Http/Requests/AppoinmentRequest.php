@@ -14,6 +14,7 @@ class AppoinmentRequest extends FormRequest
                     'patient_id' => 'required',
                     'doctor_id' => 'required',
                     'doctor_fee' => 'nullable|numeric|min:0',
+                    'amount_received' => 'nullable|numeric|min:0',
                     'shift' => 'nullable|in:Morning,Evening,Night',
                     'appoinment_date' => 'required',
                     'slot' => 'nullable|in:Morning,Noon,Evening,Night',
@@ -21,7 +22,7 @@ class AppoinmentRequest extends FormRequest
                     'payment_mode' => 'nullable|in:Cash,Cheque,Transfer to Bank Account,Upi,Online,Other',
                     'discount_percentage' => 'nullable|numeric|min:0|max:100',
                     'appoinment_status' => 'required|in:Pending,Approved,Cancelled,Completed',
-                    'live_consultant' => 'required|in:Yes,No',
+                    'live_consultant' => 'nullable|in:Yes,No',
                     'message' => 'nullable|string',
                 ];
                 break;
@@ -38,7 +39,7 @@ class AppoinmentRequest extends FormRequest
                     'payment_mode' => 'nullable|in:Cash,Cheque,Transfer to Bank Account,Upi,Online,Other',
                     'discount_percentage' => 'nullable|numeric|min:0|max:100',
                     'appoinment_status' => 'required|in:Pending,Approved,Cancelled,Completed',
-                    'live_consultant' => 'required|in:Yes,No',
+                    'live_consultant' => 'nullable|in:Yes,No',
                     'message' => 'nullable|string',
                 ];
                 break;

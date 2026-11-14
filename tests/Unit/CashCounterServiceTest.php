@@ -51,4 +51,58 @@ class CashCounterServiceTest extends TestCase
         $this->assertSame(0.0, (float) $session->difference_amount);
         $this->assertSame(200.0, (float) $targetSession->fresh()->handover_in_amount);
     }
+
+    public function test_find_open_session_is_scoped_to_admin(): void
+    {
+        $this->service->startSession([
+            'counter_name' => 'Counter 1',
+            'user_name' => 'User A',
+            'shift_name' => 'Morning',
+            'opening_amount' => 100,
+            'created_by' => 11,
+        ]);
+
+        $this->assertNotNull($this->service->findOpenSessionForAdmin(11, 'User A'));
+        $this->assertNull($this->service->findOpenSessionForAdmin(22, 'User B'));
+    }
+
+    public function test_close_session_rejects_already_closed_session(): void
+    {
+        $session = $this->service->startSession([
+            'counter_name' => 'Counter 1',
+            'user_name' => 'User A',
+            'shift_name' => 'Morning',
+            'opening_amount' => 100,
+            'created_by' => 11,
+        ]);
+
+        $this->service->closeSession($session->id, 100, 'first close');
+
+        $this->expectException(\RuntimeException::class);
+        $this->service->closeSession($session->id, 100, 'second close');
+    }
+
+    public function test_close_report_totals_match_start_and_close_amounts(): void
+    {
+        $session = $this->service->startSession([
+            'counter_name' => 'Counter 1',
+            'user_name' => 'User A',
+            'shift_name' => 'Morning',
+            'opening_amount' => 1000,
+            'created_by' => 11,
+        ]);
+
+        $this->service->recordInput($session->id, 250, 'extra cash');
+        $this->service->closeSession($session->id, 1250, 'close match');
+
+        $report = $this->service->getHandoverPrintSummary($session->id, 11, false);
+
+        $this->assertSame(1000.0, (float) $report['counterTotals']['opening_amount']);
+        $this->assertSame(0.0, (float) $report['counterTotals']['collection_total']);
+        $this->assertSame(250.0, (float) $report['counterTotals']['input_total']);
+        $this->assertSame(1250.0, (float) $report['counterTotals']['expected_amount']);
+        $this->assertSame(1250.0, (float) $report['counterTotals']['closing_amount']);
+        $this->assertSame(0.0, (float) $report['counterTotals']['difference_amount']);
+        $this->assertSame(0.0, (float) $report['totals']['total_collection']);
+    }
 }

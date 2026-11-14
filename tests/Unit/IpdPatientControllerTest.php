@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Http\Controllers\Backend\IpdPatientController;
 use Illuminate\Database\Eloquent\Builder;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class IpdPatientControllerTest extends TestCase
@@ -91,5 +92,40 @@ class IpdPatientControllerTest extends TestCase
         $method->setAccessible(true);
 
         $this->assertFalse($method->invoke($controller, $billing));
+    }
+
+    #[DataProvider('billItemCategoryProvider')]
+    public function test_it_maps_charge_names_to_bill_item_categories(?string $name, string $expected): void
+    {
+        $controller = new class extends IpdPatientController {
+            public function __construct() {}
+        };
+
+        $method = new \ReflectionMethod($controller, 'mapBillItemCategory');
+        $method->setAccessible(true);
+
+        $this->assertSame($expected, $method->invoke($controller, $name));
+    }
+
+    public static function billItemCategoryProvider(): array
+    {
+        return [
+            'pathology' => ['Pathology Test', 'Pathology'],
+            'radiology' => ['Radiology', 'Radiology'],
+            'ct scan' => ['CT Scan', 'Radiology'],
+            'medicine' => ['Medicine', 'Medicine'],
+            'room rent' => ['Room Rent', 'Room Rent'],
+            'bed charge' => ['Bed Charge', 'Bed Charge'],
+            'operation theatre' => ['OT Charge', 'OT'],
+            'doctor visit' => ['Doctor Visit', 'Doctor Visit'],
+            'opd' => ['OPD Charge', 'OPD'],
+            'empty name' => ['', 'IPD'],
+            'null name' => [null, 'IPD'],
+            // "Doctor" contains "ct" and "Others" contains "ot"; substring matching
+            // used to file these under Radiology and OT respectively.
+            'doctor charge is not radiology' => ['Doctor Charges', 'Doctor Visit'],
+            'others is not ot' => ['Others', 'IPD'],
+            'injection is not radiology' => ['Injection', 'IPD'],
+        ];
     }
 }

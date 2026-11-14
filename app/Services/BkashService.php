@@ -16,21 +16,28 @@ class BkashService
         $this->setting = BkashSetting::first();
     }
 
-    protected function baseUrl()
+    public function isLiveMode(): bool
     {
-        if ($this->setting && ! $this->setting->is_sandbox) {
-            return rtrim((string) config('bkash.production_base_url'), '/');
+        if (filter_var(config('bkash.use_production', false), FILTER_VALIDATE_BOOLEAN)) {
+            return true;
         }
 
-        if (filter_var(config('bkash.use_production', false), FILTER_VALIDATE_BOOLEAN) || app()->environment('production')) {
+        if ($this->setting && $this->setting->is_sandbox === false) {
+            return true;
+        }
+
+        return app()->environment('production');
+    }
+
+    protected function baseUrl()
+    {
+        if ($this->isLiveMode()) {
             return rtrim((string) config('bkash.production_base_url', 'https://tokenized.pay.bka.sh/v1.2.0-beta'), '/');
         }
 
         $base = rtrim((string) config('bkash.sandbox_base_url'), '/');
         $host = parse_url($base, PHP_URL_HOST) ?: '';
 
-        // https://bka.sh / .../v2 alone are not usable Grant Token hosts.
-        // Live sandbox Grant Token succeeds on v1.2.0-beta.
         if ($host === 'bka.sh' || $host === 'sandbox.bka.sh' || $base === '' || str_ends_with($base, '/v2')) {
             return 'https://tokenized.sandbox.bka.sh/v1.2.0-beta';
         }
@@ -44,20 +51,42 @@ class BkashService
             ->asJson()
             ->timeout((int) config('bkash.http_timeout', 30));
 
-        if (! config('bkash.http_verify_ssl', false)) {
+        $verifySsl = config('bkash.http_verify_ssl');
+        if ($verifySsl === null) {
+            $verifySsl = $this->isLiveMode();
+        }
+
+        if (! filter_var($verifySsl, FILTER_VALIDATE_BOOLEAN)) {
             $request = $request->withoutVerifying();
         }
 
         return $request;
     }
 
-    protected function shouldUseSandbox(): bool
+    /**
+     * bKash expects raw id_token in Authorization (not "Bearer ...").
+     */
+    protected function authorizedClient(string $token, string $appKey)
     {
-        if (app()->environment('production')) {
-            return false;
+        return $this->httpClient()->withHeaders([
+            'Authorization' => $token,
+            'X-App-Key' => $appKey,
+        ]);
+    }
+
+    protected function callbackUrl(): string
+    {
+        $configured = trim((string) config('bkash.callback_url', ''));
+        if ($configured !== '') {
+            return $configured;
         }
 
-        return true;
+        return url('/payment/bkash/callback');
+    }
+
+    protected function shouldUseSandbox(): bool
+    {
+        return ! $this->isLiveMode();
     }
 
     protected function tokenEndpoint()
@@ -214,14 +243,14 @@ class BkashService
 
     protected function credential(string $key): ?string
     {
-        $dbValue = $this->setting?->{$key} ?? null;
-        if (is_string($dbValue) && trim($dbValue) !== '') {
-            return trim($dbValue);
-        }
-
         $configValue = config("bkash.{$key}");
         if (is_string($configValue) && trim($configValue) !== '') {
             return trim($configValue);
+        }
+
+        $dbValue = $this->setting?->{$key} ?? null;
+        if (is_string($dbValue) && trim($dbValue) !== '') {
+            return trim($dbValue);
         }
 
         return null;
@@ -246,7 +275,13 @@ class BkashService
                 return $result;
             }
         } catch (\Throwable $e) {
-            // ignore and fall back to simulate page below
+            if ($this->isLiveMode()) {
+                throw $e;
+            }
+        }
+
+        if ($this->isLiveMode()) {
+            throw new \RuntimeException('bKash live checkout could not be started. Check credentials and callback URL.');
         }
 
         // Fallback: internal simulate page (public) so local testing still works
@@ -457,64 +492,66 @@ class BkashService
         // try to obtain token
         $token = $this->grantToken();
         if (! $token) {
-            // If we can't obtain a token, fall back to a publicly visible
-            // simulation URL instead of recursing into createCheckout().
+            if ($this->isLiveMode()) {
+                throw new \RuntimeException('Unable to obtain bKash live auth token.');
+            }
+
             return [
                 'redirect_url' => url('/payment/bkash/simulate-public/' . $payment->id),
                 'payment_id' => 'SIM-'.$payment->id,
             ];
         }
 
-        $endpoints = $this->getEndpointUrlCandidates($this->createPaymentEndpoint());
-
         $appKey = $this->credential('app_key');
-
-        foreach ($endpoints as $url) {
-            try {
-                $response = $this->httpClient()
-                    ->withToken($token)
-                    ->withHeaders(['X-App-Key' => (string) $appKey])
-                    ->post($url, [
-                        'mode' => '0011',
-                        'callbackURL' => url('/payment/bkash/callback'),
-                        'amount' => (string) $payment->amount,
-                        'currency' => 'BDT',
-                        'intent' => 'sale',
-                        'merchantInvoiceNumber' => (string) $payment->id,
-                    ]);
-
-                $data = $response->json();
-                $paymentId = data_get($data, 'paymentID') ?: data_get($data, 'paymentId') ?: data_get($data, 'payment_id');
-                $redirect = data_get($data, 'bkashURL')
-                    ?: data_get($data, 'redirectURL')
-                    ?: data_get($data, 'checkout_url')
-                    ?: data_get($data, 'redirect_url')
-                    ?: data_get($data, 'url')
-                    ?: data_get($data, 'payment_url');
-
-                if ($response->successful() && ! empty($redirect)) {
-                    return [
-                        'redirect_url' => $redirect,
-                        'payment_id' => $paymentId,
-                    ];
-                }
-
-                if (! empty($paymentId)) {
-                    $query = $this->queryPayment($paymentId);
-                    if (! empty($query['redirect_url'])) {
-                        return $query;
-                    }
-                }
-
-                if ($response->successful()) {
-                    return [
-                        'redirect_url' => url('/payment/bkash/simulate-public/' . $payment->id),
-                        'payment_id' => $paymentId ?: 'SIM-'.$payment->id,
-                    ];
-                }
-            } catch (\Throwable $e) {
-                continue;
+        if (! $appKey) {
+            if ($this->isLiveMode()) {
+                throw new \RuntimeException('bKash app_key is not configured.');
             }
+
+            return [
+                'redirect_url' => url('/payment/bkash/simulate-public/' . $payment->id),
+                'payment_id' => 'SIM-'.$payment->id,
+            ];
+        }
+        $url = rtrim($this->baseUrl(), '/') . '/' . ltrim(config('bkash.create_payment_endpoint'), '/');
+        $payerReference = $this->credential('merchant_number');
+
+        $payload = [
+            'mode' => '0011',
+            'callbackURL' => $this->callbackUrl(),
+            'amount' => number_format((float) $payment->amount, 2, '.', ''),
+            'currency' => 'BDT',
+            'intent' => 'sale',
+            'merchantInvoiceNumber' => (string) $payment->id,
+        ];
+
+        if ($payerReference) {
+            $payload['payerReference'] = $payerReference;
+        }
+
+        try {
+            $response = $this->authorizedClient($token, (string) $appKey)->post($url, $payload);
+            $data = $response->json() ?? [];
+            $statusCode = (string) data_get($data, 'statusCode', '');
+            $paymentId = data_get($data, 'paymentID') ?: data_get($data, 'paymentId');
+            $redirect = data_get($data, 'bkashURL')
+                ?: data_get($data, 'redirectURL')
+                ?: data_get($data, 'redirect_url');
+
+            if ($response->successful() && $statusCode === '0000' && $redirect && $paymentId) {
+                return [
+                    'redirect_url' => $redirect,
+                    'payment_id' => $paymentId,
+                ];
+            }
+        } catch (\Throwable $e) {
+            if ($this->isLiveMode()) {
+                throw $e;
+            }
+        }
+
+        if ($this->isLiveMode()) {
+            throw new \RuntimeException('bKash live create payment failed.');
         }
 
         return [
@@ -539,40 +576,34 @@ class BkashService
         }
 
         $appKey = $this->credential('app_key');
-
-        foreach ($this->getEndpointUrlCandidates(config('bkash.query_payment_endpoint')) as $url) {
-            try {
-                $response = $this->httpClient()
-                    ->withToken($token)
-                    ->withHeaders(['X-App-Key' => (string) $appKey])
-                    ->post($url, [
-                        'paymentID' => (string) $paymentId,
-                    ]);
-
-                if (! $response->successful()) {
-                    continue;
-                }
-
-                $data = $response->json();
-                $redirect = data_get($data, 'bkashURL')
-                    ?: data_get($data, 'redirectURL')
-                    ?: data_get($data, 'checkout_url')
-                    ?: data_get($data, 'redirect_url')
-                    ?: data_get($data, 'url')
-                    ?: data_get($data, 'payment_url');
-                $paymentId = data_get($data, 'paymentID') ?: data_get($data, 'paymentId') ?: data_get($data, 'payment_id');
-
-                return [
-                    'redirect_url' => $redirect,
-                    'payment_id' => $paymentId,
-                    'raw' => $data,
-                ];
-            } catch (\Throwable $e) {
-                continue;
-            }
+        if (! $appKey) {
+            return [];
         }
 
-        return [];
+        $url = rtrim($this->baseUrl(), '/') . '/' . ltrim(config('bkash.query_payment_endpoint'), '/');
+
+        try {
+            $response = $this->authorizedClient($token, (string) $appKey)
+                ->post($url, ['paymentID' => (string) $paymentId]);
+
+            if (! $response->successful()) {
+                return [];
+            }
+
+            $data = $response->json();
+            $redirect = data_get($data, 'bkashURL')
+                ?: data_get($data, 'redirectURL')
+                ?: data_get($data, 'redirect_url');
+            $resolvedId = data_get($data, 'paymentID') ?: data_get($data, 'paymentId');
+
+            return [
+                'redirect_url' => $redirect,
+                'payment_id' => $resolvedId,
+                'raw' => $data,
+            ];
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     /**
@@ -591,32 +622,27 @@ class BkashService
         }
 
         $appKey = $this->credential('app_key');
-
-        foreach ($this->getEndpointUrlCandidates(config('bkash.execute_payment_endpoint')) as $url) {
-            try {
-                $response = $this->httpClient()
-                    ->withToken($token)
-                    ->withHeaders(['X-App-Key' => (string) $appKey])
-                    ->post($url, [
-                        'paymentID' => (string) $paymentId,
-                    ]);
-
-                if (! $response->successful()) {
-                    continue;
-                }
-
-                $data = $response->json();
-
-                return [
-                    'raw' => $data,
-                    'successful' => true,
-                ];
-            } catch (\Throwable $e) {
-                continue;
-            }
+        if (! $appKey) {
+            return [];
         }
 
-        return [];
+        $url = rtrim($this->baseUrl(), '/') . '/' . ltrim(config('bkash.execute_payment_endpoint'), '/');
+
+        try {
+            $response = $this->authorizedClient($token, (string) $appKey)
+                ->post($url, ['paymentID' => (string) $paymentId]);
+
+            if (! $response->successful()) {
+                return [];
+            }
+
+            return [
+                'raw' => $response->json(),
+                'successful' => true,
+            ];
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     /**

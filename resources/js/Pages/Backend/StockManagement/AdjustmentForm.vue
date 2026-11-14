@@ -3,10 +3,11 @@ import { computed, ref } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import InputError from '@/Components/InputError.vue';
+import SearchableStoreItemSelect from '@/Components/SearchableStoreItemSelect.vue';
 import { displayWarning } from '@/responseMessage.js';
 
 const props = defineProps({
-  pageTitle: { type: String, default: 'Store Adjustment Entry' },
+  pageTitle: { type: String, default: 'Manual Stock Adjustment' },
   items: { type: Array, default: () => [] },
 });
 
@@ -15,6 +16,10 @@ const form = useForm({
   adjustment_type: 'increase',
   quantity: 1,
   unit_price: '',
+  batch_no: '',
+  expiry_date: '',
+  serial_number: '',
+  asset_tag: '',
   reason: '',
   movement_date: new Date().toISOString().split('T')[0],
   reference_no: '',
@@ -22,10 +27,11 @@ const form = useForm({
 });
 
 const selectedItem = computed(() => props.items.find((m) => Number(m.id) === Number(form.store_item_id)) || null);
+const formatItem = (item) => `${item.item_name} (Stock: ${item.current_stock})`;
 
-const syncDefaultPrice = () => {
-  if (!selectedItem.value) return;
-  form.unit_price = Number(selectedItem.value.unit_cost ?? 0).toFixed(2);
+const syncDefaultPrice = (item = selectedItem.value) => {
+  if (!item) return;
+  form.unit_price = Number(item.unit_cost ?? 0).toFixed(2);
 };
 
 const submit = () => {
@@ -43,21 +49,28 @@ const submit = () => {
         <a :href="route('backend.stock.adjustments')" class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700">Back</a>
       </div>
 
+      <div class="p-3 mt-3 text-sm border border-amber-200 rounded-lg bg-amber-50 text-amber-950">
+        <strong>For exceptional corrections only.</strong> Record supplier deliveries through Purchase Delivery and department issues through Department Requisitions. Those workflows update stock automatically; do not enter the same movement here again.
+      </div>
+
       <form class="grid grid-cols-1 gap-3 mt-4 md:grid-cols-2" @submit.prevent="submit">
         <div class="md:col-span-2">
           <label class="block mb-1 text-sm font-semibold text-slate-700">Store Item</label>
-          <select v-model="form.store_item_id" class="w-full p-2 text-sm border rounded" @change="syncDefaultPrice">
-            <option value="">Select item</option>
-            <option v-for="item in items" :key="item.id" :value="item.id">{{ item.item_name }} (Stock: {{ item.current_stock }})</option>
-          </select>
+          <SearchableStoreItemSelect
+            v-model="form.store_item_id"
+            :items="items"
+            :format-option="formatItem"
+            placeholder="Search or select item"
+            @select="syncDefaultPrice"
+          />
           <InputError class="mt-1" :message="form.errors.store_item_id" />
         </div>
 
         <div>
-          <label class="block mb-1 text-sm font-semibold text-slate-700">Adjustment Type</label>
+          <label class="block mb-1 text-sm font-semibold text-slate-700">Correction Type</label>
           <select v-model="form.adjustment_type" class="w-full p-2 text-sm border rounded">
-            <option value="increase">Increase (Stock In)</option>
-            <option value="decrease">Decrease (Stock Out)</option>
+            <option value="increase">Increase (correction / found stock)</option>
+            <option value="decrease">Decrease (damage / loss / correction)</option>
           </select>
           <InputError class="mt-1" :message="form.errors.adjustment_type" />
         </div>
@@ -80,6 +93,30 @@ const submit = () => {
           <InputError class="mt-1" :message="form.errors.movement_date" />
         </div>
 
+        <div v-if="form.adjustment_type === 'increase'">
+          <label class="block mb-1 text-sm font-semibold text-slate-700">Batch / Lot</label>
+          <input v-model="form.batch_no" type="text" class="w-full p-2 text-sm border rounded" />
+          <InputError class="mt-1" :message="form.errors.batch_no" />
+        </div>
+
+        <div v-if="form.adjustment_type === 'increase' && selectedItem?.stock_behavior !== 'reusable'">
+          <label class="block mb-1 text-sm font-semibold text-slate-700">Expiry Date</label>
+          <input v-model="form.expiry_date" type="date" class="w-full p-2 text-sm border rounded" />
+          <InputError class="mt-1" :message="form.errors.expiry_date" />
+        </div>
+
+        <div v-if="form.adjustment_type === 'increase' && selectedItem?.stock_behavior === 'reusable'">
+          <label class="block mb-1 text-sm font-semibold text-slate-700">Serial Number</label>
+          <input v-model="form.serial_number" type="text" class="w-full p-2 text-sm border rounded" />
+          <InputError class="mt-1" :message="form.errors.serial_number" />
+        </div>
+
+        <div v-if="form.adjustment_type === 'increase' && selectedItem?.stock_behavior === 'reusable'">
+          <label class="block mb-1 text-sm font-semibold text-slate-700">Asset Tag</label>
+          <input v-model="form.asset_tag" type="text" class="w-full p-2 text-sm border rounded" />
+          <InputError class="mt-1" :message="form.errors.asset_tag" />
+        </div>
+
         <div>
           <label class="block mb-1 text-sm font-semibold text-slate-700">Reference No</label>
           <input v-model="form.reference_no" type="text" class="w-full p-2 text-sm border rounded" placeholder="GRN/Issue/Transfer ref" />
@@ -99,8 +136,8 @@ const submit = () => {
         </div>
 
         <div class="md:col-span-2 flex justify-end">
-          <button type="submit" class="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded hover:bg-emerald-700" :disabled="form.processing">
-            {{ form.processing ? 'Saving...' : 'Save Adjustment' }}
+          <button type="submit" class="px-4 py-2 text-sm font-semibold text-white bg-slate-700 rounded hover:bg-slate-800" :disabled="form.processing">
+            {{ form.processing ? 'Saving...' : 'Save Manual Adjustment' }}
           </button>
         </div>
       </form>

@@ -1,6 +1,7 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { Link, useForm } from '@inertiajs/vue3';
+import axios from 'axios';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import InputError from '@/Components/InputError.vue';
@@ -17,10 +18,6 @@ const props = defineProps({
     default: () => [],
   },
   categories: {
-    type: Array,
-    default: () => [],
-  },
-  medicines: {
     type: Array,
     default: () => [],
   },
@@ -64,6 +61,42 @@ const form = useForm({
   _method: props.isEdit ? 'put' : 'post',
 });
 
+const medicineOptionsByCategory = ref({});
+const loadingMedicineOptions = ref({});
+const medicineOptionErrors = ref({});
+const categorySelectRefs = ref([]);
+
+const loadMedicineOptions = async (categoryId) => {
+  const key = String(categoryId ?? '');
+  if (!key || Object.prototype.hasOwnProperty.call(medicineOptionsByCategory.value, key)) return;
+  if (loadingMedicineOptions.value[key]) return;
+
+  loadingMedicineOptions.value[key] = true;
+  medicineOptionErrors.value[key] = '';
+
+  try {
+    const response = await axios.get(route('backend.medicinepurchase.medicine-options'), {
+      params: { medicine_category_id: key },
+    });
+    medicineOptionsByCategory.value[key] = (response.data?.medicines ?? []).map((medicine) => ({
+      name: medicine.medicine_name,
+      stock: Number(medicine.current_stock ?? 0),
+      unitPrice: Number(medicine.unit_purchase_price ?? 0),
+      sellingPrice: Number(medicine.unit_selling_price ?? 0),
+    }));
+  } catch (error) {
+    medicineOptionErrors.value[key] = error.response?.data?.message
+      || 'Could not load medicines for this category. Please try again.';
+  } finally {
+    loadingMedicineOptions.value[key] = false;
+  }
+};
+
+onMounted(() => {
+  const categoryIds = [...new Set(form.items.map((item) => String(item.medicine_category_id ?? '')).filter(Boolean))];
+  categoryIds.forEach((categoryId) => loadMedicineOptions(categoryId));
+});
+
 const addItem = () => {
   form.items.push({
     medicine_category_id: '',
@@ -76,6 +109,19 @@ const addItem = () => {
     discount: 0,
     received_quantity: 0,
   });
+};
+
+const setCategorySelectRef = (index, element) => {
+  categorySelectRefs.value[index] = element;
+};
+
+const addItemAndFocus = async (index = form.items.length - 1) => {
+  addItem();
+  await nextTick();
+  const categorySelect = categorySelectRefs.value[index + 1];
+  categorySelect?.activate?.();
+  await nextTick();
+  categorySelect?.$el?.querySelector('.multiselect__input')?.focus();
 };
 
 const removeItem = (index) => {
@@ -105,47 +151,8 @@ const selectedSupplier = computed({
   },
 });
 
-const medicineOptionsBySupplierAndCategory = computed(() => {
-  const grouped = {};
-
-  props.medicines.forEach((medicine) => {
-    const categoryKey = `${medicine.medicine_category_id ?? ''}`;
-    const allKey = 'all';
-
-    if (!grouped[categoryKey]) {
-      grouped[categoryKey] = [];
-    }
-
-    if (!grouped[allKey]) {
-      grouped[allKey] = [];
-    }
-
-    const option = {
-      name: medicine.medicine_name,
-      stock: Number(medicine.current_stock ?? 0),
-      unitPrice: Number(medicine.unit_purchase_price ?? 0),
-      sellingPrice: Number(medicine.unit_selling_price ?? 0),
-    };
-
-    grouped[categoryKey].push(option);
-    grouped[allKey].push(option);
-  });
-
-  Object.keys(grouped).forEach((key) => {
-    grouped[key] = grouped[key]
-      .filter((item, index, arr) => index === arr.findIndex((x) => x.name === item.name))
-      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
-  });
-
-  return grouped;
-});
-
 const getMedicineOptions = (categoryId) => {
-  if (categoryId) {
-    return medicineOptionsBySupplierAndCategory.value[`${categoryId}`] ?? [];
-  }
-
-  return medicineOptionsBySupplierAndCategory.value.all ?? [];
+  return medicineOptionsByCategory.value[String(categoryId ?? '')] ?? [];
 };
 
 const getSelectedCategory = (item) => {
@@ -172,6 +179,7 @@ const getSelectedMedicine = (item) => {
 
 const onCategoryChange = (index) => {
   form.items[index].medicine_name = '';
+  loadMedicineOptions(form.items[index].medicine_category_id);
 };
 
 const onSupplierChange = () => {
@@ -234,7 +242,7 @@ const submit = () => {
     <div class="w-full p-4 mt-3 bg-white rounded shadow-md">
       <div class="flex flex-wrap items-center justify-between gap-2 p-4 bg-gray-100 rounded">
         <h1 class="text-xl font-semibold text-gray-800">{{ isEdit ? 'Edit Purchase Product' : 'Add Purchase Product' }}</h1>
-        <Link :href="route('backend.medicinepurchase.index')" class="px-3 py-2 text-sm text-white bg-gray-600 rounded hover:bg-gray-700">
+        <Link :href="route('backend.medicinepurchase.index')" class="px-3 py-2 text-sm text-white bg-red-600 rounded hover:bg-red-700">
           Back
         </Link>
       </div>
@@ -291,27 +299,41 @@ const submit = () => {
 
         <div class="overflow-x-auto purchase-items-scroll">
           <div class="purchase-items-scroll__inner">
-          <table class="w-full text-sm border border-gray-200">
+          <table class="w-full table-fixed text-xs border border-gray-200 purchase-items-table">
+            <colgroup>
+              <col class="w-[145px]">
+              <col class="w-[160px]">
+              <col class="w-[65px]">
+              <col class="w-[100px]">
+              <col class="w-[115px]">
+              <col class="w-[70px]">
+              <col class="w-[100px]">
+              <col class="w-[100px]">
+              <col class="w-[80px]">
+              <col class="w-[75px]">
+              <col class="w-[75px]">
+            </colgroup>
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-3 py-2 border">Category</th>
-                <th class="px-3 py-2 border">Medicine</th>
-                <th class="px-3 py-2 border">Current Stock</th>
-                <th class="px-3 py-2 border">Batch No</th>
-                <th class="px-3 py-2 border">Expiry Date</th>
-                <th class="px-3 py-2 border">Quantity</th>
-                <th class="px-3 py-2 border">Unit Purchase Price</th>
-                <th class="px-3 py-2 border">Unit Selling Price</th>
-                <th class="px-3 py-2 border">Discount</th>
-                <th class="px-3 py-2 border">Total</th>
-                <th class="px-3 py-2 border">Action</th>
+                <th class="px-1 py-2 border break-words">Category</th>
+                <th class="px-1 py-2 border break-words">Medicine</th>
+                <th class="px-1 py-2 border break-words">Current Stock</th>
+                <th class="px-1 py-2 border break-words">Batch No</th>
+                <th class="px-1 py-2 border break-words">Expiry Date</th>
+                <th class="px-1 py-2 border break-words">Quantity</th>
+                <th class="px-1 py-2 border break-words">Unit Purchase Price</th>
+                <th class="px-1 py-2 border break-words">Unit Selling Price</th>
+                <th class="px-1 py-2 border break-words">Discount</th>
+                <th class="px-1 py-2 border break-words">Total</th>
+                <th class="px-1 py-2 border break-words">Action</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(item, index) in form.items" :key="index">
-                <td class="p-2 border">
+                <td class="p-1 border">
                   <Multiselect
-                    class="purchase-multiselect purchase-multiselect--wide"
+                    :ref="(element) => setCategorySelectRef(index, element)"
+                    class="purchase-multiselect"
                     :model-value="getSelectedCategory(item)"
                     :options="categoryOptions"
                     label="name"
@@ -327,11 +349,12 @@ const submit = () => {
                   <InputError class="mt-1" :message="form.errors[`items.${index}.medicine_category_id`]" />
                 </td>
 
-                <td class="p-2 border">
+                <td class="p-1 border">
                   <Multiselect
-                    class="purchase-multiselect purchase-multiselect--wide"
+                    class="purchase-multiselect"
                     :model-value="getSelectedMedicineOption(item)"
                     :options="getMedicineOptions(item.medicine_category_id)"
+                    :loading="loadingMedicineOptions[String(item.medicine_category_id)]"
                     label="name"
                     track-by="name"
                     placeholder="Select Medicine"
@@ -351,43 +374,49 @@ const submit = () => {
                     <template #singleLabel="{ option }">
                       <span>{{ option.name }}</span>
                     </template>
+                    <template #noResult>
+                      {{ medicineOptionErrors[String(item.medicine_category_id)] || (loadingMedicineOptions[String(item.medicine_category_id)] ? 'Loading medicines...' : 'No medicines found') }}
+                    </template>
+                    <template #noOptions>
+                      {{ medicineOptionErrors[String(item.medicine_category_id)] || (loadingMedicineOptions[String(item.medicine_category_id)] ? 'Loading medicines...' : 'Select a category first') }}
+                    </template>
                   </Multiselect>
                   <InputError class="mt-1" :message="form.errors[`items.${index}.medicine_name`]" />
                 </td>
 
-                <td class="p-2 border text-center">
+                <td class="p-1 border text-center">
                   <span class="inline-block px-2 py-1 text-xs rounded bg-blue-50 text-blue-700">
                     {{ Number(getSelectedMedicine(item)?.stock ?? 0).toFixed(2) }}
                   </span>
                 </td>
 
-                <td class="p-2 border">
-                  <input v-model="item.batch_no" type="text" class="w-full p-2 border border-gray-300 rounded" placeholder="Batch No">
+                <td class="p-1 border">
+                  <input v-model="item.batch_no" type="text" class="w-full min-w-0 p-1.5 text-xs border border-gray-300 rounded" placeholder="Batch No">
                   <InputError class="mt-1" :message="form.errors[`items.${index}.batch_no`]" />
                 </td>
 
-                <td class="p-2 border">
-                  <input v-model="item.expiry_date" type="date" class="w-full p-2 border border-gray-300 rounded">
+                <td class="p-1 border">
+                  <input v-model="item.expiry_date" type="date" class="w-full min-w-0 p-1.5 text-xs border border-gray-300 rounded">
                   <InputError class="mt-1" :message="form.errors[`items.${index}.expiry_date`]" />
                 </td>
 
-                <td class="p-2 border">
-                  <input v-model="item.quantity" type="number" min="1" class="w-full p-2 border border-gray-300 rounded">
+                <td class="p-1 border">
+                  <input v-model="item.quantity" type="number" min="1" class="w-full min-w-0 p-1.5 text-xs border border-gray-300 rounded">
                   <InputError class="mt-1" :message="form.errors[`items.${index}.quantity`]" />
                 </td>
 
-                <td class="p-2 border">
-                  <input v-model="item.unit_purchase_price" type="number" min="0" step="0.01" class="w-full p-2 border border-gray-300 rounded">
+                <td class="p-1 border">
+                  <input v-model="item.unit_purchase_price" type="number" min="0" step="0.01" class="w-full min-w-0 p-1.5 text-xs border border-gray-300 rounded">
                   <InputError class="mt-1" :message="form.errors[`items.${index}.unit_purchase_price`]" />
                 </td>
 
-                <td class="p-2 border">
-                  <input v-model="item.unit_selling_price" type="number" min="0" step="0.01" class="w-full p-2 border border-gray-300 rounded">
+                <td class="p-1 border">
+                  <input v-model="item.unit_selling_price" type="number" min="0" step="0.01" class="w-full min-w-0 p-1.5 text-xs border border-gray-300 rounded">
                   <InputError class="mt-1" :message="form.errors[`items.${index}.unit_selling_price`]" />
                 </td>
 
-                <td class="p-2 border">
-                  <input v-model="item.discount" type="number" min="0" step="0.01" class="w-full p-2 border border-gray-300 rounded">
+                <td class="p-1 border">
+                  <input v-model="item.discount" type="number" min="0" step="0.01" class="w-full min-w-0 p-1.5 text-xs border border-gray-300 rounded" @keydown.enter.prevent="addItemAndFocus(index)">
                   <InputError class="mt-1" :message="form.errors[`items.${index}.discount`]" />
                 </td>
 
@@ -406,7 +435,7 @@ const submit = () => {
           </div>
         </div>
 
-        <button type="button" class="px-3 py-2 text-sm text-white bg-indigo-600 rounded hover:bg-indigo-700" @click="addItem">
+        <button type="button" class="px-3 py-2 text-sm text-white bg-indigo-600 rounded hover:bg-indigo-700" @click="addItemAndFocus()">
           + Add Item
         </button>
 
@@ -427,18 +456,36 @@ const submit = () => {
 <style src="vue-multiselect/dist/vue-multiselect.css"></style>
 
 <style>
-.purchase-multiselect {
-  min-width: 180px;
-}
-
-.purchase-multiselect--wide {
-  min-width: 260px;
+.purchase-items-table {
+  min-width: 1085px;
 }
 
 .purchase-multiselect .multiselect__tags {
-  min-height: 42px;
+  min-height: 40px;
+  height: auto;
+  padding: 8px 32px 8px 8px;
   border-color: rgb(209 213 219);
   border-radius: 0.25rem;
+}
+
+.purchase-multiselect .multiselect__single {
+  position: relative;
+  display: block;
+  height: auto;
+  margin-bottom: 0;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  line-height: 1.25;
+}
+
+.purchase-multiselect .multiselect__input,
+.purchase-multiselect .multiselect__placeholder {
+  max-width: 100%;
+  margin-bottom: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .purchase-multiselect .multiselect__content-wrapper {
@@ -463,13 +510,14 @@ const submit = () => {
   z-index: 50;
 }
 
-.purchase-multiselect--wide .multiselect__content-wrapper {
-  min-width: 260px;
+.purchase-multiselect .multiselect__content-wrapper {
+  min-width: 100%;
+  max-width: min(320px, 80vw);
 }
 
 .purchase-multiselect .multiselect__input,
 .purchase-multiselect .multiselect__single,
 .purchase-multiselect .multiselect__placeholder {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
 }
 </style>

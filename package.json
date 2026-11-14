@@ -3,27 +3,27 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && php artisan cache:sidebar-refresh"
+    "build": "php artisan ziggy:generate resources/js/ziggy.js && vite build && php artisan cache:sidebar-refresh"
   },
   "devDependencies": {
-    "@inertiajs/vue3": "^3.6.1",
+    "@inertiajs/vue3": "^3.8.0",
     "@tailwindcss/forms": "^0.5.11",
+    "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/typography": "^0.5.20",
-    "@vitejs/plugin-vue": "^6.0.8",
-    "@vue/server-renderer": "^3.5.40",
-    "autoprefixer": "^10.5.4",
-    "axios": "^1.19.0",
-    "esbuild": "^0.28.1",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "@vue/server-renderer": "^3.5.43",
+    "autoprefixer": "^10.6.1",
+    "axios": "^1.20.0",
+    "esbuild": "^0.28.2",
     "lodash": "^4.18.1",
-    "playwright": "^1.62.0",
-    "postcss": "^8.5.25",
-    "tailwindcss": "^3.4.4",
-    "vite": "^8.1.5",
-    "vue": "^3.5.40"
+    "playwright": "^1.63.0",
+    "postcss": "^8.5.29",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.3",
+    "vue": "^3.5.43"
   },
   "dependencies": {
-    "@inertiajs/inertia": "^0.11.1",
-    "@vueuse/core": "^14.4.0",
+    "@vueuse/core": "^15.0.0",
     "chart.js": "^4.5.1",
     "date-fns": "^4.4.0",
     "feather-icons": "^4.29.2",
@@ -34,20 +34,20 @@
     "jquery": "^4.0.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
-    "mammoth": "^1.12.0",
+    "mammoth": "^1.13.0",
     "mitt": "^3.0.1",
-    "pdfjs-dist": "^6.2.108",
+    "pdfjs-dist": "^6.4.299",
     "qrcode": "^1.5.4",
     "sweetalert2": "^11.26.25",
     "toastr": "^2.1.4",
     "vue-chartjs": "^5.3.4",
     "vue-multiselect": "^3.5.0",
     "xlsx": "^0.18.5",
-    "ziggy-js": "^2.6.3"
+    "ziggy-js": "^2.6.4"
   },
   "name": "base-laravel-inertiajs",
   "description": "<p align=\"center\"><a href=\"https://laravel.com\" target=\"_blank\"><img src=\"https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg\" width=\"400\" alt=\"Laravel Logo\"></a></p>",
-  "version": "2.1.1",
+  "version": "2.2.2",
   "main": "postcss.config.js",
   "directories": {
     "test": "tests"

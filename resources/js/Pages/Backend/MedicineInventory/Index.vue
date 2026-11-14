@@ -3,10 +3,11 @@ import { computed, ref } from "vue";
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import BaseTable from '@/Components/BaseTable.vue';
 import Pagination from '@/Components/Pagination.vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { Link, router, usePage } from '@inertiajs/vue3';
 
 const props = defineProps({
     filters: Object,
+    isDeveloper: Boolean,
 });
 
 const filters = ref({
@@ -60,7 +61,30 @@ const setExpiryFilter = (value) => {
                     {{ $page.props.pageTitle }}
                 </h1>
 
-                <div class="p-4">
+                <div class="p-4 flex items-center gap-2">
+                    <Link
+                        :href="route('backend.dashboard')"
+                        class="inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-md shadow hover:bg-red-700"
+                    >
+                        Back
+                    </Link>
+                    <Link
+                        :href="route('backend.websetting.section.pharmacy')"
+                        class="inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-md shadow hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 transition-all"
+                    >
+                        Pharmacy Settings
+                    </Link>
+                    <a
+                        v-if="isDeveloper"
+                        :href="route('backend.medicineinventory.export.csv')"
+                        class="inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded-md shadow hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-300 active:scale-95 transition-all"
+                    >
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 3v12m0 0l-4-4m4 4l4-4M5 17v3h14v-3" />
+                        </svg>
+                        Download All CSV
+                    </a>
                     <button
                         @click="goToInventoryAdd"
                         class="inline-flex items-center px-4 py-2 text-sm font-semibold text-white rounded-md shadow"

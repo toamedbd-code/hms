@@ -10,22 +10,22 @@
         }
 
         @page {
-            margin: 0mm;
-            size: A4;
+            margin: 10mm;
+            size: auto;
         }
 
         body {
             font-family: Arial, sans-serif;
             font-size: 12px;
             margin: 0;
-            padding: 10px;
+            padding: 0;
             color: #111827;
             -webkit-font-smoothing: antialiased;
         }
 
         .page {
-            width: 210mm;
-            max-width: 210mm;
+            width: 100%;
+            max-width: 100%;
             margin: 0 auto;
             padding: 8mm 10mm 18mm 10mm;
             box-shadow: none;
@@ -190,11 +190,12 @@
             .title { font-size: 16px; }
         }
     </style>
+    @include('prints.partials._responsive_invoice_print')
 </head>
 
 <body>
     <div class="page">
-        @includeIf('prints.partials._header')
+        @includeIf('prints.partials._header', ['module' => 'ipd_final'])
 
         @php
             $ipd_serial = prefixed_serial('ipd_no_prefix', 'IPDN', $ipdpatient->id, 4) ?? ($ipdpatient?->id ?? 'N/A');
@@ -380,7 +381,11 @@
             $footerFallbackLine = trim((string) config('app.invoice_footer_fallback_line', ''));
         @endphp
 
-        @include('prints.partials._footer', ['footer_image' => $footerImage ?? null, 'footer_content' => $footerContent ?? ($footerFallbackLine ?: null)])
+        @include('prints.partials._footer', [
+            'footer_image' => $footerImage ?? null,
+            'footer_content' => $footerContent ?? ($footerFallbackLine ?: null),
+            'module' => 'ipd_final',
+        ])
     </div>
 </body>
 

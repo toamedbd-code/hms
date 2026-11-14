@@ -6,9 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Billing;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Services\LedgerService;
 
 class RefundController extends Controller
 {
+    public function __construct(private LedgerService $ledgerService)
+    {
+    }
+
     /**
      * Get list of bills with refund amounts available
      */
@@ -81,12 +86,28 @@ class RefundController extends Controller
                 'billing_id' => $billing->id,
                 'bill_number' => $billing->bill_number,
                 'refund_amount' => $validated['refund_amount'],
-                'payment_method' => $validated['payment_method'] ?? 'cash',
+                'payment_method' => $validated['payment_method'] ?? 'Cash',
                 'note' => $validated['note'] ?? null,
                 'processed_by' => auth('admin')->id(),
                 'created_at' => now(),
                 'updated_at' => now()
             ]);
+
+            try {
+                $counterAccount = $this->ledgerService->resolvePaymentAccountCode($validated['payment_method'] ?? 'Cash');
+                $this->ledgerService->recordIncomeRefund(
+                    'DIAG_INC',
+                    $counterAccount,
+                    (float) $validated['refund_amount'],
+                    'Patient refund for bill ' . ($billing->bill_number ?? $billing->id),
+                    now()->toDateString(),
+                    'BillingRefund',
+                    $billing->id,
+                    auth('admin')->id()
+                );
+            } catch (\Throwable $e) {
+                report($e);
+            }
 
             DB::commit();
 

@@ -14,6 +14,7 @@ class Expense extends Model
 
     protected $fillable = [
         'expense_header_id',
+        'department_id',
         'invoice_number',
         'bill_number',
         'case_id',
@@ -48,6 +49,11 @@ class Expense extends Model
     public function expenseHead()
     {
         return $this->belongsTo(ExpenseHead::class, 'expense_header_id');
+    }
+
+    public function department()
+    {
+        return $this->belongsTo(Department::class);
     }
 
     public function creator()

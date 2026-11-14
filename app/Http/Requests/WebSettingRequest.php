@@ -13,7 +13,7 @@ class WebSettingRequest extends FormRequest
      */
     public function rules()
     {
-        $section = $this->input('activeSection') ?? $this->input('section') ?? null;
+        $section = strtolower(trim((string) ($this->input('activeSection') ?? $this->input('section') ?? 'general')));
 
         if ($section === 'sidebar') {
             return [
@@ -22,8 +22,13 @@ class WebSettingRequest extends FormRequest
             ];
         }
 
+        if ($section === 'pharmacy') {
+            return [
+                'pharmacy_tax_number' => 'nullable|string|max:100',
+            ];
+        }
+
         if ($section === 'cms') {
-            // Only CMS fields required, rest nullable
             return [
                 'website_hero_title' => 'required|string|max:255',
                 'website_hero_subtitle' => 'nullable|string',
@@ -41,6 +46,105 @@ class WebSettingRequest extends FormRequest
                 'website_featured_doctor_images.*' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
             ];
         }
+
+        if ($section === 'other') {
+            return [
+                'doctor_restriction_mode' => 'nullable|boolean',
+                'superadmin_visibility' => 'nullable|boolean',
+                'patient_panel' => 'nullable|boolean',
+                'opd_invoice_header_footer' => 'nullable|boolean',
+                'ipd_invoice_header_footer' => 'nullable|boolean',
+                'opd_prescription_header_footer' => 'nullable|boolean',
+                'ipd_prescription_header_footer' => 'nullable|boolean',
+                'scan_type' => 'nullable|in:Barcode,QR Code',
+                'current_theme' => 'nullable|in:default,red,blue,gray,emerald,amber,rose,indigo',
+            ];
+        }
+
+        if ($section === 'sms') {
+            return [
+                'sms_enabled' => 'nullable|boolean',
+                'sms_api_url' => 'nullable|url|max:255',
+                'sms_api_key' => 'nullable|string|max:255',
+                'sms_sender_id' => 'nullable|string|max:100',
+                'sms_route' => 'nullable|string|max:50',
+                'sms_is_unicode' => 'nullable|boolean',
+                'sms_additional_params' => 'nullable|string',
+                'personal_bkash_number' => 'nullable|string|max:30',
+                'personal_nagad_number' => 'nullable|string|max:30',
+            ];
+        }
+
+        if ($section === 'module') {
+            return [
+                'attendance_device_enabled' => 'nullable|boolean',
+                'attendance_device_type' => 'nullable|in:face,fingerprint,both',
+                'attendance_device_identifier' => 'nullable|string|max:255',
+                'attendance_device_ip' => 'nullable|ip',
+                'attendance_device_port' => 'nullable|string|max:20',
+                'attendance_device_secret' => 'nullable|string|max:255',
+                'attendance_device_options' => 'nullable|string',
+            ];
+        }
+
+        if ($section === 'prefix') {
+            return [
+                'ipd_no_prefix' => 'required|string|max:20',
+                'opd_no_prefix' => 'required|string|max:20',
+                'ipd_prescription_prefix' => 'required|string|max:20',
+                'opd_prescription_prefix' => 'required|string|max:20',
+                'appointment_prefix' => 'required|string|max:20',
+                'pharmacy_bill_prefix' => 'required|string|max:20',
+                'billing_bill_prefix' => 'required|string|max:20',
+                'operation_reference_no_prefix' => 'required|string|max:20',
+                'blood_bank_bill_prefix' => 'required|string|max:20',
+                'ambulance_call_bill_prefix' => 'required|string|max:20',
+                'radiology_bill_prefix' => 'required|string|max:20',
+                'pathology_bill_prefix' => 'required|string|max:20',
+                'opd_checkup_id_prefix' => 'required|string|max:20',
+                'pharmacy_purchase_no_prefix' => 'required|string|max:20',
+                'transaction_id_prefix' => 'required|string|max:20',
+                'birth_record_reference_no_prefix' => 'required|string|max:20',
+                'death_record_reference_no_prefix' => 'required|string|max:20',
+                'report_title' => 'required|string|max:255',
+            ];
+        }
+
+        if ($section === 'general') {
+            return [
+                'company_name' => 'required|string|max:255',
+                'company_short_name' => 'required|string|max:100',
+                'hospital_code' => 'nullable|string|max:100',
+                'address' => 'required|string|max:500',
+                'phone' => 'required|string|max:255',
+                'email' => 'required|email|max:255',
+                'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+                'icon' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,ico|max:1024',
+                'language' => 'required|string|max:50',
+                'date_format' => 'required|string|max:50',
+                'time_zone' => 'required|string|max:100',
+                'currency' => 'required|string|max:20',
+                'currency_symbol' => 'required|string|max:20',
+                'vat_enabled' => 'nullable|boolean',
+                'vat_percent' => 'nullable|numeric|min:0|max:100',
+                'credit_limit' => 'required|numeric|min:0',
+                'max_billing_discount_percent' => 'required|numeric|min:0|max:100',
+                'low_stock_threshold' => 'nullable|integer|min:0|max:100000',
+                'time_format' => 'required|string|max:20',
+                'mobile_app_api_url' => 'nullable|string|max:255',
+                'mobile_app_primary_color_code' => 'nullable|string|max:20',
+                'mobile_app_secondary_color_code' => 'nullable|string|max:20',
+                'mobile_app_logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+                'pwa_app_name' => 'nullable|string|max:255',
+                'pwa_app_icon' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
+                'login_banner' => 'nullable|string|max:255',
+                'login_title' => 'nullable|string|max:255',
+                'login_subtitle' => 'nullable|string|max:255',
+                'report_title' => 'required|string|max:255',
+                'attendance_device_options' => 'nullable|string',
+            ];
+        }
+
         switch ($this->method()) {
             case 'POST':
                 return [
@@ -59,6 +163,7 @@ class WebSettingRequest extends FormRequest
                     'currency_symbol' => 'required|string|max:20',
                     'vat_enabled' => 'nullable|boolean',
                     'vat_percent' => 'nullable|numeric|min:0|max:100',
+                    'pharmacy_tax_number' => 'nullable|string|max:100',
                     'credit_limit' => 'required|numeric|min:0',
                     'max_billing_discount_percent' => 'required|numeric|min:0|max:100',
                     'low_stock_threshold' => 'nullable|integer|min:0|max:100000',
@@ -67,6 +172,8 @@ class WebSettingRequest extends FormRequest
                     'mobile_app_primary_color_code' => 'nullable|string|max:20',
                     'mobile_app_secondary_color_code' => 'nullable|string|max:20',
                     'mobile_app_logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+                    'pwa_app_name' => 'nullable|string|max:255',
+                    'pwa_app_icon' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
                     'doctor_restriction_mode' => 'nullable|boolean',
                     'superadmin_visibility' => 'nullable|boolean',
                     'patient_panel' => 'nullable|boolean',
@@ -76,7 +183,6 @@ class WebSettingRequest extends FormRequest
                     'ipd_prescription_header_footer' => 'nullable|boolean',
                     'scan_type' => 'required|in:Barcode,QR Code',
                     'current_theme' => 'required|in:default,red,blue,gray,emerald,amber,rose,indigo',
-                    // Bulk SMS settings
                     'sms_enabled' => 'nullable|boolean',
                     'sms_api_url' => 'nullable|url|max:255',
                     'sms_api_key' => 'nullable|string|max:255',
@@ -121,7 +227,6 @@ class WebSettingRequest extends FormRequest
                     'website_facilities_json' => 'nullable|string',
                     'website_testimonials_en_json' => 'nullable|string',
                     'website_testimonials_bn_json' => 'nullable|string',
-                    // Attendance device settings
                     'attendance_device_enabled' => 'nullable|boolean',
                     'attendance_device_type' => 'nullable|in:face,fingerprint,both',
                     'attendance_device_identifier' => 'nullable|string|max:255',
@@ -150,6 +255,7 @@ class WebSettingRequest extends FormRequest
                     'currency_symbol' => 'required|string|max:20',
                     'vat_enabled' => 'nullable|boolean',
                     'vat_percent' => 'nullable|numeric|min:0|max:100',
+                    'pharmacy_tax_number' => 'nullable|string|max:100',
                     'credit_limit' => 'required|numeric|min:0',
                     'max_billing_discount_percent' => 'required|numeric|min:0|max:100',
                     'low_stock_threshold' => 'nullable|integer|min:0|max:100000',
@@ -158,6 +264,8 @@ class WebSettingRequest extends FormRequest
                     'mobile_app_primary_color_code' => 'nullable|string|max:20',
                     'mobile_app_secondary_color_code' => 'nullable|string|max:20',
                     'mobile_app_logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+                    'pwa_app_name' => 'nullable|string|max:255',
+                    'pwa_app_icon' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
                     'doctor_restriction_mode' => 'nullable|boolean',
                     'superadmin_visibility' => 'nullable|boolean',
                     'patient_panel' => 'nullable|boolean',
@@ -202,7 +310,6 @@ class WebSettingRequest extends FormRequest
                     'website_facilities_json' => 'nullable|string',
                     'website_testimonials_en_json' => 'nullable|string',
                     'website_testimonials_bn_json' => 'nullable|string',
-                    // Attendance device settings
                     'attendance_device_enabled' => 'nullable|boolean',
                     'attendance_device_type' => 'nullable|in:face,fingerprint,both',
                     'attendance_device_identifier' => 'nullable|string|max:255',
@@ -210,7 +317,6 @@ class WebSettingRequest extends FormRequest
                     'attendance_device_port' => 'nullable|string|max:20',
                     'attendance_device_secret' => 'nullable|string|max:255',
                     'attendance_device_options' => 'nullable|string',
-                    // Bulk SMS settings
                     'sms_enabled' => 'nullable|boolean',
                     'sms_api_url' => 'nullable|url|max:255',
                     'sms_api_key' => 'nullable|string|max:255',
@@ -222,6 +328,18 @@ class WebSettingRequest extends FormRequest
                     'personal_nagad_number' => 'nullable|string|max:30',
                 ];
                 break;
+        }
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $emptyAsNull = ['attendance_device_ip', 'attendance_device_port', 'attendance_device_identifier'];
+
+        foreach ($emptyAsNull as $field) {
+            $value = $this->input($field);
+            if (is_string($value) && trim($value) === '') {
+                $this->merge([$field => null]);
+            }
         }
     }
 

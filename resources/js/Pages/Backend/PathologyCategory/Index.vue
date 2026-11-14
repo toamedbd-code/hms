@@ -7,6 +7,8 @@ import { router } from '@inertiajs/vue3';
 
 let props = defineProps({
     filters: Object,
+    isMainCategory: { type: Boolean, default: false },
+    canCreateCategory: { type: Boolean, default: true },
 });
 
 const filters = ref({
@@ -15,11 +17,11 @@ const filters = ref({
 });
 
 const applyFilter = () => {
-    router.get(route('backend.pathologycategory.index'), filters.value, { preserveState: true });
+    router.get(route(props.isMainCategory ? 'backend.maincategory.index' : 'backend.pathologycategory.index'), filters.value, { preserveState: true });
 };
 
 const goToTestCategoryAdd = () => {
-    router.get(route('backend.pathologycategory.create'));
+    router.get(route(props.isMainCategory ? 'backend.maincategory.create' : 'backend.pathologycategory.create'));
 };
 
 const goBack = () => {
@@ -55,7 +57,7 @@ const goBack = () => {
                         </button>
 
                         <div class="flex items-center bg-gray-50 dark:bg-gray-800 rounded-lg p-1 shadow-inner">
-                            <button @click="goToTestCategoryAdd"
+                            <button v-if="props.canCreateCategory" @click="goToTestCategoryAdd"
                                 class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white border-0 rounded-md shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 active:scale-95 transform transition-all duration-150 ease-in-out"
                                 style="background: linear-gradient(to right, #3b82f6, #60a5fa);"
                                 onmouseover="this.style.background='linear-gradient(to right, #2563eb, #3b82f6)';"
@@ -65,7 +67,7 @@ const goBack = () => {
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15">
                                     </path>
                                 </svg>
-                                Item Category Add
+                                {{ props.isMainCategory ? 'Main Category Add' : 'Item Category Add' }}
                             </button>
                         </div>
                     </div>

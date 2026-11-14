@@ -112,10 +112,7 @@ const handleLinkClick = (linkInfo, event) => {
 const visitLink = (link, target) => {
     if (!link) return;
     if (target === '_blank') {
-        const popup = window.open(link, '_blank', 'noopener,noreferrer');
-        if (popup) {
-            try { popup.opener = null; } catch (e) {}
-        }
+        window.open(link, '_blank', 'noopener,noreferrer');
         return;
     }
     router.visit(link);
@@ -127,7 +124,7 @@ const visitLink = (link, target) => {
 <thead :class="isDark ? 'text-slate-200 bg-slate-800' : 'text-gray-700 bg-gray-100'">
 <tr class="text-[12px]">
 <template v-for="(header, index) in $page.props.tableHeaders">
-<th :class="['px-6 py-3', isDark ? 'border border-gray-700' : 'border border-gray-300', $page.props.dataFields?.[index]?.class]">
+<th :class="['px-6 py-3', isDark ? 'border border-gray-700' : 'border border-gray-300', $page.props.actionColumnFirst ? (index === 0 ? 'text-center' : $page.props.dataFields?.[index - 1]?.class) : $page.props.dataFields?.[index]?.class]">
 {{ header }}
 </th>
 </template>
@@ -138,6 +135,26 @@ const visitLink = (link, target) => {
 <template v-for="data in $page.props.datas.data">
 <tr :class="[isDark ? 'border-b border-gray-700 hover:bg-slate-800' : 'border-b border-gray-200 hover:bg-gray-50', 'transition-colors']">
 
+<!-- ACTION BUTTONS -->
+<td v-if="$page.props.actionColumnFirst && data.links" class="px-4 py-2 border border-gray-200">
+<div class="flex justify-center w-full space-x-1">
+<template v-for="linkInfo in data.links">
+<button
+type="button"
+@click.stop.prevent="handleLinkClick(linkInfo, $event)"
+class="px-3 py-1 rounded transition cursor-pointer hover:opacity-90"
+:class="linkInfo.linkClass"
+:style="linkInfo.linkStyle ?? linkInfo.style ?? null"
+:disabled="props.isProcessing && !!getActionName(linkInfo)"
+:data-action="getActionName(linkInfo)"
+:data-action-id="getActionId(linkInfo)"
+>
+<span v-html="linkInfo.linkLabel"></span>
+</button>
+</template>
+</div>
+</td>
+
 <!-- DATA FIELDS -->
 <template v-for="dateField in $page.props.dataFields">
 <td :class="['px-4 py-2', isDark ? 'border border-gray-700' : 'border border-gray-200', dateField.class]">
@@ -146,7 +163,7 @@ const visitLink = (link, target) => {
 </template>
 
 <!-- ACTION BUTTONS -->
-<td v-if="data.links" class="px-4 py-2 border border-gray-200">
+<td v-if="!$page.props.actionColumnFirst && data.links" class="px-4 py-2 border border-gray-200">
 <div class="flex justify-center w-full space-x-1">
 
 <template v-for="linkInfo in data.links">

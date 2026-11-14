@@ -9,11 +9,6 @@ return new class extends Migration
     public function up()
     {
         DB::table('testcategories')->updateOrInsert(
-            ['name' => 'ECHO & ECG'],
-            ['status' => 'Active', 'created_at' => now(), 'updated_at' => now()]
-        );
-
-        DB::table('testcategories')->updateOrInsert(
             ['name' => 'Ultrasound'],
             ['status' => 'Active', 'created_at' => now(), 'updated_at' => now()]
         );
@@ -21,6 +16,6 @@ return new class extends Migration
 
     public function down()
     {
-        DB::table('testcategories')->whereIn('name', ['ECHO & ECG', 'Ultrasound'])->delete();
+        DB::table('testcategories')->where('name', 'Ultrasound')->delete();
     }
 };

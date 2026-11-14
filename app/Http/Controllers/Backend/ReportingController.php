@@ -8,12 +8,15 @@ use App\Models\Billing;
 use App\Models\InvoiceDesign;
 use App\Models\PathologyTestParameter;
 use App\Models\BillItemParameterResult;
+use App\Models\MainCategory;
 use App\Models\RadiologyTest;
 use App\Models\Test;
+use App\Models\TestCategory;
 use App\Models\WebSetting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 
@@ -40,7 +43,16 @@ class ReportingController extends Controller
         $this->middleware('auth:admin');
         // Allow users with general reporting permission OR specific radiology reporting permissions
         // Allow users with general reporting permission OR specific department reporting permissions
-        $this->middleware('permission:reporting|pathology-reporting|ultrasound-reporting|xray-reporting');
+        // Also allow report-delivery permission for report printing/delivery access
+        $this->middleware('permission:reporting|report-delivery|pathology-reporting|ultrasound-reporting|xray-reporting');
+    }
+
+    public function sessionHeartbeat()
+    {
+        return response()
+            ->json(['csrf_token' => csrf_token()])
+            ->header('Cache-Control', 'no-store, private')
+            ->header('Pragma', 'no-cache');
     }
 
     /**
@@ -48,7 +60,7 @@ class ReportingController extends Controller
      */
     public function pathologyIndex(Request $request)
     {
-        $allowedCategories = ['Pathology'];
+        $allowedCategories = $this->categoryNamesMatching(['pathology', 'micro', 'biology', 'hematology', 'haematology', 'cbc'], ['Pathology', 'Hematology', 'CBC']);
         $billNumber = trim((string) $request->input('bill_number', ''));
         $includeReported = $request->boolean('include_reported');
 
@@ -102,7 +114,7 @@ class ReportingController extends Controller
     public function ultrasoundIndex(Request $request)
     {
         // Ultrasound items are sometimes stored under `Radiology` category with names like "USG...".
-        $allowedCategories = ['Ultrasound', 'Ultrasonogram', 'Ultrasonography', 'Radiology'];
+        $allowedCategories = $this->categoryNamesMatching(['ultrasound', 'ultrasonogram', 'ultrasonography'], ['Ultrasound', 'Ultrasonogram', 'Ultrasonography', 'Radiology']);
         $billNumber = trim((string) $request->input('bill_number', ''));
         $includeReported = $request->boolean('include_reported');
 
@@ -167,7 +179,7 @@ class ReportingController extends Controller
      */
     public function xrayIndex(Request $request)
     {
-        $allowedCategories = ['Radiology'];
+        $allowedCategories = $this->categoryNamesMatching(['radiology', 'radiolog', 'xray', 'x-ray'], ['Radiology']);
         $billNumber = trim((string) $request->input('bill_number', ''));
         $includeReported = $request->boolean('include_reported');
 
@@ -181,13 +193,15 @@ class ReportingController extends Controller
                 $query->where('bill_number', 'like', '%' . $billNumber . '%');
             })
             ->whereHas('billItems', function ($query) use ($includeReported, $allowedCategories) {
+                // Show all Radiology items that are NOT ultrasound/USG items.
+                // This covers test names like "CXR", "PA View", "Chest AP", etc.
                 $query->whereIn('category', $allowedCategories)
                     ->whereNotNull('sample_collected_at')
                     ->where(function ($q2) {
-                        $q2->where('item_name', 'like', '%xray%')
-                            ->orWhere('item_name', 'like', '%x-ray%')
-                            ->orWhere('item_name', 'like', '%radiograph%')
-                            ->orWhere('item_name', 'like', '%x ray%');
+                        $q2->where('item_name', 'not like', '%usg%')
+                            ->where('item_name', 'not like', '%ultrasound%')
+                            ->where('item_name', 'not like', '%ultrasonogram%')
+                            ->where('item_name', 'not like', '%ultrasonography%');
                     });
 
                 if (!$includeReported) {
@@ -200,10 +214,10 @@ class ReportingController extends Controller
                     $query->whereIn('category', $allowedCategories)
                         ->whereNotNull('sample_collected_at')
                         ->where(function ($q2) {
-                            $q2->where('item_name', 'like', '%xray%')
-                                ->orWhere('item_name', 'like', '%x-ray%')
-                                ->orWhere('item_name', 'like', '%radiograph%')
-                                ->orWhere('item_name', 'like', '%x ray%');
+                            $q2->where('item_name', 'not like', '%usg%')
+                                ->where('item_name', 'not like', '%ultrasound%')
+                                ->where('item_name', 'not like', '%ultrasonogram%')
+                                ->where('item_name', 'not like', '%ultrasonography%');
                         })
                         ->with('collectedBy');
 
@@ -341,7 +355,7 @@ class ReportingController extends Controller
             $allowedCategories = ['Radiology'];
             $nameKeywords = ['xray', 'x-ray', 'x ray', 'radiograph', 'radiography'];
         } elseif ($requestedDept === 'pathology') {
-            $allowedCategories = ['Pathology'];
+            $allowedCategories = ['Pathology', 'Hematology', 'CBC', 'Haematology'];
             $nameKeywords = [];
         } else {
             $allowedCategories = $this->resolveDepartmentCategories();
@@ -424,14 +438,26 @@ class ReportingController extends Controller
         if (!$department) {
             $names = $billing->billItems->pluck('item_name')->map(fn($s) => strtolower((string) $s))->all();
             $cats = $billing->billItems->pluck('category')->map(fn($s) => strtolower((string) $s))->all();
-
             $nameText = implode(' ', $names) . ' ' . implode(' ', $cats);
-            if (str_contains($nameText, 'ultrasound') || str_contains($nameText, 'ultrason') || str_contains($nameText, 'usg')) {
+
+            $hasPathologyLikeItem = collect($billing->billItems)->some(function ($item) {
+                $category = strtolower((string) ($item->category ?? ''));
+                $name = strtolower((string) ($item->item_name ?? ''));
+                return str_contains($category, 'pathology')
+                    || str_contains($category, 'hematology')
+                    || str_contains($category, 'haematology')
+                    || str_contains($category, 'cbc')
+                    || str_contains($name, 'cbc')
+                    || str_contains($name, 'hematology')
+                    || str_contains($name, 'haematology');
+            });
+
+            if ($hasPathologyLikeItem) {
+                $department = 'pathology';
+            } elseif (str_contains($nameText, 'ultrasound') || str_contains($nameText, 'ultrason') || str_contains($nameText, 'usg')) {
                 $department = 'ultrasound';
             } elseif (str_contains($nameText, 'xray') || str_contains($nameText, 'x-ray') || str_contains($nameText, 'radiograph')) {
                 $department = 'xray';
-            } elseif (in_array('pathology', $cats, true)) {
-                $department = 'pathology';
             }
         }
 
@@ -464,12 +490,24 @@ class ReportingController extends Controller
                     ->map(fn($s) => strtolower((string) $s))->all();
 
                 $nameText = implode(' ', $names) . ' ' . implode(' ', $cats);
-                if (str_contains($nameText, 'ultrasound') || str_contains($nameText, 'ultrason') || str_contains($nameText, 'usg')) {
+                $hasPathologyLikeItem = collect(\App\Models\BillItem::query()->where('billing_id', $billing->id)->get())->some(function ($item) {
+                    $category = strtolower((string) ($item->category ?? ''));
+                    $name = strtolower((string) ($item->item_name ?? ''));
+                    return str_contains($category, 'pathology')
+                        || str_contains($category, 'hematology')
+                        || str_contains($category, 'haematology')
+                        || str_contains($category, 'cbc')
+                        || str_contains($name, 'cbc')
+                        || str_contains($name, 'hematology')
+                        || str_contains($name, 'haematology');
+                });
+
+                if ($hasPathologyLikeItem) {
+                    $requestedDept = 'pathology';
+                } elseif (str_contains($nameText, 'ultrasound') || str_contains($nameText, 'ultrason') || str_contains($nameText, 'usg')) {
                     $requestedDept = 'ultrasound';
                 } elseif (str_contains($nameText, 'xray') || str_contains($nameText, 'x-ray') || str_contains($nameText, 'radiograph')) {
                     $requestedDept = 'xray';
-                } elseif (in_array('pathology', $cats, true)) {
-                    $requestedDept = 'pathology';
                 }
             } catch (\Throwable $_) {
                 // ignore detection failures and fall back to explicit categories
@@ -482,7 +520,7 @@ class ReportingController extends Controller
         } elseif ($requestedDept === 'xray') {
             $allowedCategories = ['Radiology'];
         } elseif ($requestedDept === 'pathology') {
-            $allowedCategories = ['Pathology'];
+            $allowedCategories = ['Pathology', 'Hematology', 'CBC', 'Haematology'];
         } else {
             $allowedCategories = $this->resolveDepartmentCategories();
         }
@@ -490,33 +528,60 @@ class ReportingController extends Controller
         // Eager-load patient and fetch bill items explicitly so department filtering is enforced reliably
         $billing->load('patient');
 
-            $rawItemsQuery = \App\Models\BillItem::query()
-                ->where('billing_id', $billing->id)
-                ->whereNotNull('sample_collected_at');
-
-            if (!$includeReported) {
-                $rawItemsQuery->whereNull('reported_at');
-            }
-
-            // apply category filter
-            $rawItemsQuery->whereIn('category', $allowedCategories);
-
-            // apply department-specific name filters for radiology-derived departments
+        // Build a helper that applies the department-specific name filter to a query builder.
+        // This is reused for both the reported/pending check and the main data fetch so the
+        // two queries are always consistent with each other.
+        $applyDeptNameFilter = function (\Illuminate\Database\Eloquent\Builder $q) use ($requestedDept): void {
             if ($requestedDept === 'ultrasound') {
-                $rawItemsQuery->where(function ($q2) {
+                $q->where(function ($q2) {
                     $q2->where('item_name', 'like', '%usg%')
                         ->orWhere('item_name', 'like', '%ultrasound%')
                         ->orWhere('item_name', 'like', '%ultrasonogram%')
-                        ->orWhere('item_name', 'like', '%ultrasonography%');
+                        ->orWhere('item_name', 'like', '%ultrasonography%')
+                        ->orWhere('category', 'like', '%ultrasound%')
+                        ->orWhere('category', 'like', '%ultrasonogram%')
+                        ->orWhere('category', 'like', '%ultrasonography%');
                 });
             } elseif ($requestedDept === 'xray') {
-                $rawItemsQuery->where(function ($q2) {
-                    $q2->where('item_name', 'like', '%xray%')
-                        ->orWhere('item_name', 'like', '%x-ray%')
-                        ->orWhere('item_name', 'like', '%radiograph%')
-                        ->orWhere('item_name', 'like', '%x ray%');
+                // Include all Radiology items that are NOT ultrasound/USG so that tests
+                // named "CXR", "PA View", "Chest AP" etc. are accessible without
+                // requiring explicit "xray" or "radiograph" keywords in the name.
+                $q->where(function ($q2) {
+                    $q2->where('item_name', 'not like', '%usg%')
+                        ->where('item_name', 'not like', '%ultrasound%')
+                        ->where('item_name', 'not like', '%ultrasonogram%')
+                        ->where('item_name', 'not like', '%ultrasonography%');
                 });
             }
+        };
+
+        // Calculate reported/pending status scoped ONLY to the current department's
+        // items so that items from other departments (e.g. already-reported USG while
+        // pathology is still pending) do not incorrectly block the form.
+        $deptScopedItemsForCheck = \App\Models\BillItem::query()
+            ->where('billing_id', $billing->id)
+            ->whereNotNull('sample_collected_at')
+            ->whereIn('category', $allowedCategories);
+        $applyDeptNameFilter($deptScopedItemsForCheck);
+        $deptScopedItems = $deptScopedItemsForCheck->get();
+
+        $hasReportedItems = $deptScopedItems->contains(fn ($item) => !empty($item->reported_at));
+        $hasPendingItems  = $deptScopedItems->contains(fn ($item) => empty($item->reported_at));
+        $showOnlyReportedItems = $hasReportedItems && $hasPendingItems;
+
+        $rawItemsQuery = \App\Models\BillItem::query()
+            ->where('billing_id', $billing->id)
+            ->whereNotNull('sample_collected_at');
+
+        if ($showOnlyReportedItems && $includeReported) {
+            $rawItemsQuery->whereNotNull('reported_at');
+        } elseif (!$includeReported) {
+            $rawItemsQuery->whereNull('reported_at');
+        }
+
+        // apply category filter then department name filter
+        $rawItemsQuery->whereIn('category', $allowedCategories);
+        $applyDeptNameFilter($rawItemsQuery);
 
         $rawItems = $rawItemsQuery->with('collectedBy')->get();
 
@@ -534,29 +599,33 @@ class ReportingController extends Controller
                 ? route('backend.reporting.item.file', $item->id)
                 : null;
 
-            $defaultRange = $item->category === 'Pathology'
-                ? ($normalRangeMap[$item->item_id] ?? null)
-                : null;
+            // Always try stored parameter range first (covers all categories, not just Pathology).
+            $defaultRange = !empty($item->item_id) ? ($normalRangeMap[$item->item_id] ?? null) : null;
 
-            // Fallback AI-style range suggestion by test name/category when a predefined range is absent.
+            // Fallback: suggest a range by test name only when no stored range exists.
             if (empty($defaultRange)) {
                 $defaultRange = $this->suggestNormalRangeByTestName($item);
             }
 
-            // Attach parameter definitions only for Urine R/E / M/E pathology tests.
-            if ($item->category === 'Pathology') {
+            // Attach parameter definitions for pathology-like tests, including CBC/Hematology results.
+            if ($this->isPathologyLikeCategory((string) ($item->category ?? '')) || $this->looksLikeCbcTest($item)) {
                 $iname = trim(strtolower((string) ($item->item_name ?? '')));
                 $test = null;
                 $tname = '';
                 if (!empty($item->item_id)) {
                     $test = Test::find($item->item_id);
                     $tname = trim(strtolower($test?->test_name ?? $test?->test_short_name ?? ''));
+                    $storedFunction = trim((string) ($test?->report_function ?? ''));
+                    $item->report_function = $storedFunction !== ''
+                        ? $storedFunction
+                        : $this->autoDetectTestFunction((string) ($item->item_name ?? ''), (string) ($item->category ?? ''));
                 }
 
                 $isUrineName = (str_contains($iname, 'urine') || preg_match('/\br\/?e\b/i', $iname) || preg_match('/\bm\/?e\b/i', $iname));
                 $isUrineTest = ($tname !== '' && (str_contains($tname, 'urine') || preg_match('/\br\/?e\b/i', $tname) || preg_match('/\bm\/?e\b/i', $tname)));
 
-                if ($isUrineName || $isUrineTest) {
+                $pathologyLike = $this->isPathologyLikeCategory((string) ($item->category ?? '')) || $this->looksLikeCbcTest($item);
+                if ($pathologyLike) {
                     $params = PathologyTestParameter::query()
                         ->where('pathology_test_id', $item->item_id)
                     ->where('pathology_test_id', $item->item_id)
@@ -566,7 +635,7 @@ class ReportingController extends Controller
                     ->map(function ($p) {
                         return [
                             'id' => $p->id,
-                            'name' => trim((string) ($p->name ?? data_get($p, 'testParameter.name') ?? '')),
+                            'name' => trim((string) ($p->name ?: data_get($p, 'testParameter.name') ?: '')),
                             'reference_from' => trim((string) ($p->reference_from ?? '')),
                             'reference_to' => trim((string) ($p->reference_to ?? '')),
                             'unit' => trim((string) (data_get($p, 'pathologyUnit.name') ?? '')),
@@ -587,7 +656,7 @@ class ReportingController extends Controller
                                     ->map(function ($p) {
                                         return [
                                             'id' => $p->id,
-                                            'name' => trim((string) ($p->name ?? '')),
+                                            'name' => trim((string) ($p->name ?: data_get($p, 'testParameter.name') ?: '')),
                                             'reference_from' => trim((string) ($p->referance_from ?? $p->reference_from ?? '')),
                                             'reference_to' => trim((string) ($p->referance_to ?? $p->reference_to ?? '')),
                                             'unit' => trim((string) ($p->pathologyUnit->name ?? '')),
@@ -604,7 +673,32 @@ class ReportingController extends Controller
                     }
                 }
 
-                // If still empty, synthesize a common Urine R/E parameter set for urine-related tests
+                // Auto-build the standard parameter format for known profile tests.
+                // Tests outside these profiles keep the normal single result field.
+                if ($params->isEmpty()) {
+                    $template = $this->parameterTemplateForTest($iname . ' ' . $tname);
+                    if (!empty($template)) {
+                        $params = collect($template);
+                    }
+                }
+
+                // CBC/Hematology tests should always use the standard CBC template rather than a generic
+                // single-row placeholder that may exist in legacy pathology mappings.
+                if ($this->looksLikeCbcTest($item)) {
+                    $template = $this->parameterTemplateForTest('cbc');
+                    if (!empty($template)) {
+                        $nameSet = $params->map(fn ($p) => strtolower((string) ($p['name'] ?? '')))->filter()->values();
+                        $hasOnlyGenericCbcRow = $params->count() <= 1 || $nameSet->every(fn ($value) => str_contains($value, 'cbc') || str_contains($value, 'complete blood count') || str_contains($value, 'hematology') || str_contains($value, 'haematology'));
+
+                        if ($params->isEmpty() || $hasOnlyGenericCbcRow) {
+                            $params = collect($template);
+                        }
+                    }
+                }
+
+                // If still empty, synthesize a common Urine R/E parameter set for urine-related tests.
+                // CBC/Hematology items should also receive their default parameter table even when no saved
+                // PathologyTestParameter rows exist for the specific test.
                 if ($params->isEmpty()) {
                     try {
                         $test = Test::find($item->item_id);
@@ -627,7 +721,7 @@ class ReportingController extends Controller
 
                             $gen = collect($synth)->map(function ($name, $i) {
                                 return [
-                                    'id' => 'gen:' . preg_replace('/[^A-Za-z0-9_\-]/', '_', strtolower($name)),
+                                    'id' => 'gen:' . $name,
                                     'name' => $name,
                                     'reference_from' => '',
                                     'reference_to' => '',
@@ -640,64 +734,255 @@ class ReportingController extends Controller
                                 $params = $gen;
                             }
                         }
+
+                        if ($params->isEmpty() && $this->looksLikeCbcTest($item)) {
+                            $params = collect($this->parameterTemplateForTest('cbc'));
+                        }
                     } catch (\Throwable $_) {
                         // ignore
                     }
                 }
 
-                // Group parameters into common sections (Physical / Chemical / Microscopic)
-                // Check Microscopic keywords before Chemical so crystal subtypes map correctly
-                $groupRules = [
-                    'Physical Examination' => ['colour', 'color', 'appearance', 'sediment', 'specific gravity', 'sg'],
-                    'Microscopic Examination' => ['pus', 'pus cell', 'pus cells', 'epithelial', 'epithelial cell', 'epithelial cells', 'rbc', 'rbc cast', 'rbc casts', 'bacteria', 'hyaline', 'crystal', 'casts', 'oxalate', 'triple', 'uric', 'cal-oxalate', 'amorphous'],
-                    'Chemical Examination' => ['reaction', 'phosphate', 'albumin', 'sugar', 'bile', 'bile salt', 'bile pigment', 'ketone', 'ph', 'bilirubin'],
-                ];
+                $params = $params->map(function (array $parameter) {
+                    if (empty($parameter['id'])) {
+                        $parameter['id'] = 'gen:' . trim((string) ($parameter['name'] ?? ''));
+                    }
 
-                $grouped = [];
-                foreach (array_keys($groupRules) as $g) {
-                    $grouped[$g] = [];
-                }
-                $grouped['Other'] = [];
+                    return $parameter;
+                });
 
-                $genCounter = 0;
-                foreach ($params as $p) {
-                    $placed = false;
-                    $lname = mb_strtolower($p['name'] ?? '');
-                    foreach ($groupRules as $g => $keywords) {
-                        foreach ($keywords as $kw) {
-                            if (mb_stripos($lname, $kw) !== false) {
-                                $grouped[$g][] = $p;
-                                $placed = true;
-                                break 2;
+                if ($this->looksLikeCbcTest($item)) {
+                    $normalizeCbcParameterName = fn ($name) => strtolower(preg_replace('/[^a-z0-9]+/i', '', trim((string) $name)));
+                    $cbcParameterAliases = [
+                        'haemoglobin' => 'hemoglobin',
+                        'haemoglobinhb' => 'hemoglobin',
+                        'hemoglobinhb' => 'hemoglobin',
+                        'hb' => 'hemoglobin',
+                        'hgb' => 'hemoglobin',
+                        'esrwestergren' => 'esr',
+                        'wbccount' => 'totalwbccount',
+                        'whitebloodcellcount' => 'totalwbccount',
+                        'neutrophil' => 'neutrophils',
+                        'lymphocyte' => 'lymphocytes',
+                        'monocyte' => 'monocytes',
+                        'eosinophil' => 'eosinophils',
+                        'basophil' => 'basophils',
+                        'atypicalcell' => 'blastatypical',
+                        'blastatypicalcell' => 'blastatypical',
+                        'blastatypicalpercent' => 'blastatypical',
+                        'blastyatypical' => 'blastatypical',
+                        'blastyatypicalcell' => 'blastatypical',
+                        'blastyatypicalpercent' => 'blastatypical',
+                        'myelocytespercent' => 'myelocytes',
+                        'totalcireosinophil' => 'totalcireosinophils',
+                        'totalcirculatingeosinophils' => 'totalcireosinophils',
+                        'rbccount' => 'totalrbccount',
+                        'hematocrit' => 'hctpcv',
+                        'plateletcount' => 'totalplateletcount',
+                        'plcr' => 'plcr',
+                        'bleedingtime' => 'bt',
+                        'clottingtime' => 'ct',
+                    ];
+                    $canonicalizeCbcParameterName = function ($name) use ($normalizeCbcParameterName, $cbcParameterAliases) {
+                        $normalized = $normalizeCbcParameterName($name);
+                        return $cbcParameterAliases[$normalized] ?? $normalized;
+                    };
+                    $existingNames = $params
+                        ->map(fn ($parameter) => $canonicalizeCbcParameterName($parameter['name'] ?? ''))
+                        ->all();
+                    foreach ($this->parameterTemplateForTest('cbc') as $parameter) {
+                        $name = trim((string) ($parameter['name'] ?? ''));
+                        $normalizedName = $canonicalizeCbcParameterName($name);
+                        if ($name === '' || in_array($normalizedName, $existingNames, true)) {
+                            continue;
+                        }
+
+                        $params->push(array_merge($parameter, [
+                            'id' => 'gen:' . $name,
+                            'generated' => true,
+                        ]));
+                        $existingNames[] = $normalizedName;
+                    }
+
+                    $existingParameterNames = $params
+                        ->map(fn ($parameter) => strtolower(trim((string) ($parameter['name'] ?? ''))))
+                        ->filter()
+                        ->all();
+
+                    BillItemParameterResult::query()
+                        ->where('bill_item_id', $item->id)
+                        ->whereNull('pathology_test_parameter_id')
+                        ->whereNotNull('name')
+                        ->get(['name', 'unit'])
+                        ->each(function (BillItemParameterResult $result) use ($params, &$existingParameterNames) {
+                            $name = trim((string) $result->name);
+                            $normalizedName = strtolower($name);
+                            if ($name === '' || in_array($normalizedName, $existingParameterNames, true)) {
+                                return;
                             }
+
+                            $params->push([
+                                'id' => 'gen:' . $name,
+                                'name' => $name,
+                                'reference_from' => '',
+                                'reference_to' => '',
+                                'unit' => trim((string) $result->unit),
+                                'generated' => true,
+                            ]);
+                            $existingParameterNames[] = $normalizedName;
+                        });
+                }
+
+                // Preserve the original parameter sequence exactly as defined in the template.
+                // CBC/Hematology reports must follow the serial layout from the reference sheet,
+                // not the heuristic grouping used for urine/other pathology tests.
+                if ($this->looksLikeCbcTest($item)) {
+                    $cbcParameterMap = [
+                        'Hemoglobin' => ['Hemoglobin'],
+                        'ESR' => ['ESR'],
+                        'Total Count' => ['Total WBC Count'],
+                        'Differential Count' => [
+                            'Neutrophils', 'Lymphocytes', 'Monocytes', 'Eosinophils', 'Basophils',
+                            'Blast/Atypical %', 'Myelocytes %', 'Total Cir. Eosinophils',
+                        ],
+                        'RBC Panel' => ['Total RBC Count', 'HCT/PCV', 'MCV', 'MCH', 'MCHC', 'RDW-CV', 'RDW-SD'],
+                        'Platelet Panel' => ['Platelet Count', 'MPV', 'PCT', 'PDW', 'P-LCR'],
+                        'Clotting Time' => ['BT', 'CT'],
+                        'Blood Film' => ['Blood Film'],
+                    ];
+                    $normalizeCbcParameterName = fn ($name) => strtolower(preg_replace('/[^a-z0-9]+/i', '', trim((string) $name)));
+                    $cbcParameterAliases = [
+                        'haemoglobin' => 'hemoglobin',
+                        'haemoglobinhb' => 'hemoglobin',
+                        'hemoglobinhb' => 'hemoglobin',
+                        'hb' => 'hemoglobin',
+                        'hgb' => 'hemoglobin',
+                        'esrwestergren' => 'esr',
+                        'wbccount' => 'totalwbccount',
+                        'whitebloodcellcount' => 'totalwbccount',
+                        'neutrophil' => 'neutrophils',
+                        'lymphocyte' => 'lymphocytes',
+                        'monocyte' => 'monocytes',
+                        'eosinophil' => 'eosinophils',
+                        'basophil' => 'basophils',
+                        'atypicalcell' => 'blastatypical',
+                        'blastatypicalcell' => 'blastatypical',
+                        'blastatypicalpercent' => 'blastatypical',
+                        'blastyatypical' => 'blastatypical',
+                        'blastyatypicalcell' => 'blastatypical',
+                        'blastyatypicalpercent' => 'blastatypical',
+                        'myelocytespercent' => 'myelocytes',
+                        'totalcireosinophil' => 'totalcireosinophils',
+                        'totalcirculatingeosinophils' => 'totalcireosinophils',
+                        'rbccount' => 'totalrbccount',
+                        'hematocrit' => 'hctpcv',
+                        'plateletcount' => 'totalplateletcount',
+                        'bleedingtime' => 'bt',
+                        'clottingtime' => 'ct',
+                    ];
+
+                    $orderedCbcGroups = [];
+                    foreach ($cbcParameterMap as $title => $names) {
+                        $normalizedNames = collect($names)->map(function ($name) use ($normalizeCbcParameterName, $cbcParameterAliases) {
+                            $normalized = $normalizeCbcParameterName($name);
+                            return $cbcParameterAliases[$normalized] ?? $normalized;
+                        })->all();
+                        $groupParams = [];
+                        foreach ($normalizedNames as $normalizedName) {
+                            $parameter = $params->first(function ($parameter) use ($normalizedName, $normalizeCbcParameterName, $cbcParameterAliases) {
+                                $normalized = $normalizeCbcParameterName($parameter['name'] ?? '');
+                                $normalized = $cbcParameterAliases[$normalized] ?? $normalized;
+                                return $normalized === $normalizedName;
+                            });
+                            if ($parameter !== null) {
+                                $groupParams[] = $parameter;
+                            }
+                        }
+
+                        if (!empty($groupParams)) {
+                            $orderedCbcGroups[] = [
+                                'title' => $title,
+                                'parameters' => $groupParams,
+                            ];
                         }
                     }
 
-                    if (!$placed) {
-                        $grouped['Other'][] = $p;
-                    }
-                }
+                    $item->parameter_groups = $orderedCbcGroups ?: [[
+                        'title' => 'Other',
+                        'parameters' => $params->values()->all(),
+                    ]];
+                } else {
+                    // Group parameters into common sections (Physical / Chemical / Microscopic)
+                    // Check Microscopic keywords before Chemical so crystal subtypes map correctly
+                    $groupRules = [
+                        'Physical Examination' => ['colour', 'color', 'appearance', 'sediment', 'specific gravity', 'sg'],
+                        'Microscopic Examination' => ['pus', 'pus cell', 'pus cells', 'epithelial', 'epithelial cell', 'epithelial cells', 'rbc', 'rbc cast', 'rbc casts', 'bacteria', 'hyaline', 'crystal', 'casts', 'oxalate', 'triple', 'uric', 'cal-oxalate', 'amorphous'],
+                        'Chemical Examination' => ['reaction', 'phosphate', 'albumin', 'sugar', 'bile', 'bile salt', 'bile pigment', 'ketone', 'ph', 'bilirubin'],
+                    ];
 
-                // Convert to indexed groups and attach
-                $item->parameter_groups = collect($grouped)
-                    ->map(function ($rows, $title) {
-                        return [
-                            'title' => $title,
-                            'parameters' => array_values($rows),
-                        ];
-                    })->values()->toArray();
+                    $grouped = [];
+                    foreach (array_keys($groupRules) as $g) {
+                        $grouped[$g] = [];
+                    }
+                    $grouped['Other'] = [];
+
+                    foreach ($params as $p) {
+                        $placed = false;
+                        $lname = mb_strtolower($p['name'] ?? '');
+                        foreach ($groupRules as $g => $keywords) {
+                            foreach ($keywords as $kw) {
+                                if (mb_stripos($lname, $kw) !== false) {
+                                    $grouped[$g][] = $p;
+                                    $placed = true;
+                                    break 2;
+                                }
+                            }
+                        }
+
+                        if (!$placed) {
+                            $grouped['Other'][] = $p;
+                        }
+                    }
+
+                    $item->parameter_groups = collect($grouped)
+                        ->filter(fn ($rows) => !empty($rows))
+                        ->map(function ($rows, $title) {
+                            return [
+                                'title' => $title,
+                                'parameters' => array_values($rows),
+                            ];
+                        })->values()->toArray();
+                }
 
                 // Keep legacy flat array for backward compatibility
                     $item->parameters = $params->toArray();
 
                     // load any previously saved parameter results for this bill item
-                    $existing = BillItemParameterResult::query()
-                        ->where('bill_item_id', $item->id)
-                        ->whereIn('pathology_test_parameter_id', array_filter($params->pluck('id')->all(), fn($v) => $v !== null))
-                        ->pluck('value', 'pathology_test_parameter_id')
-                        ->toArray();
+                    $parameterIds = $params->pluck('id')->filter(fn ($id) => is_numeric($id))->map(fn ($id) => (int) $id)->all();
+                    $generatedParameterNames = $params
+                        ->filter(fn ($parameter) => str_starts_with((string) ($parameter['id'] ?? ''), 'gen:'))
+                        ->map(fn ($parameter) => trim((string) ($parameter['name'] ?? '')))
+                        ->filter()
+                        ->all();
 
-                    $item->saved_parameter_values = $existing;
+                    $item->saved_parameter_values = BillItemParameterResult::query()
+                        ->where('bill_item_id', $item->id)
+                        ->get()
+                        ->filter(function (BillItemParameterResult $result) use ($parameterIds, $generatedParameterNames) {
+                            if ($result->pathology_test_parameter_id !== null) {
+                                return in_array((int) $result->pathology_test_parameter_id, $parameterIds, true);
+                            }
+
+                            return in_array((string) $result->name, $generatedParameterNames, true);
+                        })
+                        ->mapWithKeys(function (BillItemParameterResult $result) {
+                            $key = $result->pathology_test_parameter_id !== null
+                                ? (string) $result->pathology_test_parameter_id
+                                : 'gen:' . (string) $result->name;
+
+                            return [$key => $result->value];
+                        })
+                        ->all();
                 } else {
                     // not a urine/R&E test: ensure no parameter groups/parameters are exposed
                     $item->parameters = [];
@@ -707,6 +992,26 @@ class ReportingController extends Controller
             }
 
             $item->default_report_range = $defaultRange;
+
+            // Ensure every item has a report_function label (auto-detect if not already set).
+            if (empty($item->report_function)) {
+                $item->report_function = $this->autoDetectTestFunction(
+                    (string) ($item->item_name ?? ''),
+                    (string) ($item->category ?? '')
+                );
+            }
+
+            // Resolve main_category_name from the test record for display in report titles.
+            if (empty($item->main_category_name)) {
+                $mcName = '';
+                if (!empty($item->item_id)) {
+                    $mcId = Test::query()->whereKey($item->item_id)->value('main_category_id');
+                    if ($mcId) {
+                        $mcName = trim((string) (MainCategory::query()->whereKey($mcId)->value('name') ?? ''));
+                    }
+                }
+                $item->main_category_name = $mcName;
+            }
 
             return $item;
         });
@@ -727,18 +1032,17 @@ class ReportingController extends Controller
                 return $matchesKeyword;
             })->values();
         } elseif ($requestedDept === 'xray') {
+            // Show all Radiology items that are NOT ultrasound so that tests named
+            // "CXR", "PA View", "Chest AP", etc. are included even without "xray" in the name.
             $items = $items->filter(function ($it) {
                 $name = strtolower((string) ($it->item_name ?? ''));
-                $cat = strtolower((string) ($it->category ?? ''));
-                $keywords = ['xray', 'x-ray', 'radiograph', 'radiography', 'x ray'];
-                $matchesKeyword = false;
-                foreach ($keywords as $kw) {
-                    if (str_contains($name, $kw) || str_contains($cat, $kw)) {
-                        $matchesKeyword = true;
-                        break;
+                $usgKeywords = ['usg', 'ultrasound', 'ultrasonogram', 'ultrasonography'];
+                foreach ($usgKeywords as $kw) {
+                    if (str_contains($name, $kw)) {
+                        return false;
                     }
                 }
-                return $matchesKeyword;
+                return true;
             })->values();
         }
 
@@ -987,6 +1291,42 @@ class ReportingController extends Controller
         return trim((string) $normalized);
     }
 
+    private function splitTrailingUnit(string $value, ?string $preferredUnit = null): array
+    {
+        $raw = trim((string) $value);
+        $fallbackUnit = trim((string) ($preferredUnit ?? ''));
+
+        if ($raw === '') {
+            return ['', $fallbackUnit];
+        }
+
+        $unit = $fallbackUnit;
+        $clean = $raw;
+
+        if ($raw !== '') {
+            if (preg_match('/^(?<number>.*?)(?:\s+)?(?<unit>[\p{L}µμ%\/]+(?:\s*[\p{L}µμ%\/]+)*)\s*$/u', $raw, $m)) {
+                $candidateUnit = trim((string) ($m['unit'] ?? ''));
+                $candidateNumber = trim((string) ($m['number'] ?? ''));
+
+                if ($candidateUnit !== '' && preg_match('/[0-9]/u', $candidateNumber) === 1) {
+                    $clean = $candidateNumber;
+                    $unit = $candidateUnit;
+                }
+            }
+        }
+
+        if ($unit === '' && $fallbackUnit !== '') {
+            $unit = $fallbackUnit;
+        }
+
+        if ($unit !== '' && $clean !== '') {
+            $clean = preg_replace('/\s*' . preg_quote($unit, '/') . '$/iu', '', $clean);
+            $clean = trim((string) $clean);
+        }
+
+        return [$clean, $unit];
+    }
+
     private function buildNormalRangeMap(array $testIds): array
     {
         if (empty($testIds)) {
@@ -1081,6 +1421,10 @@ class ReportingController extends Controller
         foreach ($items as $item) {
             $note = $validated['report_notes'][$item->id] ?? null;
             $file = $request->file("report_files.{$item->id}");
+            $resultText = trim(str_replace('[[FULL_PAGE]]', '', strip_tags((string) $note)));
+            if ($resultText === '') {
+                continue;
+            }
 
             if ($file) {
                 $path = $file->store('reports', 'public');
@@ -1150,6 +1494,26 @@ class ReportingController extends Controller
             'parameter_values.*' => ['nullable', 'string'],
         ]);
 
+        $reportNote = trim((string) $request->input('report_note', ''));
+        $reportNote = trim(str_replace('[[FULL_PAGE]]', '', strip_tags($reportNote)));
+        $reportNote = trim((string) preg_replace('/\[\[CBC_HISTOGRAM:(?:SHOW|HIDE)\]\]/i', '', $reportNote));
+        $hasParameterValues = collect($request->input('parameter_values', []))
+            ->contains(fn ($value) => trim((string) $value) !== '');
+        if (
+            $reportNote === ''
+            && !$hasParameterValues
+        ) {
+            $message = 'Enter and save a result before printing this report.';
+            if ($request->expectsJson() || $request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'message' => $message,
+                    'errors' => ['report_note' => [$message]],
+                ], 422);
+            }
+
+            return back()->withErrors(['report_note' => $message])->withInput();
+        }
+
         // Validate department context more strictly: allow explicit ultrasound names
         $isAllowedByCategory = in_array($billItem->category, $allowedCategories, true);
         $nameLc = strtolower((string) ($billItem->item_name ?? ''));
@@ -1177,80 +1541,60 @@ class ReportingController extends Controller
 
         $file = $request->file('report_file');
 
-        if ($file) {
-            $path = $file->store('reports', 'public');
-            $billItem->report_file = $path;
-        }
-
-        $billItem->report_note = $request->input('report_note');
-        $billItem->report_range = $request->input('report_range');
-        if (empty($billItem->reported_at)) {
-            $billItem->reported_at = now();
-            $billItem->reported_by = auth('admin')->id();
-        }
-        $billItem->save();
-
-        // If saving from pathology or xray department, mark other matching
-        // bill items in the same billing as reported as well so that the
-        // department view shows all tests as ready.
-        try {
-            if ($requestedDept === 'pathology') {
-                \App\Models\BillItem::query()
-                    ->where('billing_id', $billItem->billing_id)
-                    ->where('category', 'Pathology')
-                    ->whereNull('reported_at')
-                    ->update([
-                        'reported_at' => now(),
-                        'reported_by' => auth('admin')->id(),
-                    ]);
-            } elseif ($requestedDept === 'xray') {
-                // Mark other radiology items that look like xray/radiograph
-                \App\Models\BillItem::query()
-                    ->where('billing_id', $billItem->billing_id)
-                    ->where('category', 'Radiology')
-                    ->whereNull('reported_at')
-                    ->where(function ($q) {
-                        $q->where('item_name', 'like', '%xray%')
-                          ->orWhere('item_name', 'like', '%x-ray%')
-                          ->orWhere('item_name', 'like', '%radiograph%')
-                          ->orWhere('item_name', 'like', '%radiography%')
-                          ->orWhere('item_name', 'like', '%x ray%');
-                    })
-                    ->update([
-                        'reported_at' => now(),
-                        'reported_by' => auth('admin')->id(),
-                    ]);
-            }
-        } catch (\Throwable $_) {
-            // ignore marking failures; main item already saved
-        }
-
-        // Persist structured parameter results (if provided)
+        $storedReportPath = $file ? $file->store('reports', 'public') : null;
         $parameterValues = $request->input('parameter_values', []);
-        if (is_array($parameterValues)) {
-            BillItemParameterResult::where('bill_item_id', $billItem->id)->delete();
-            foreach ($parameterValues as $paramId => $val) {
-                $val = trim((string) ($val ?? ''));
-                if ($val === '') continue;
+        $reportRange = $request->input('report_range');
+        $hasReportRange = $request->exists('report_range');
 
-                $genName = null;
-                $paramModel = null;
-
-                if (is_string($paramId) && str_starts_with($paramId, 'gen:')) {
-                    $genName = trim(substr($paramId, 4));
-                } else {
-                    $paramModel = PathologyTestParameter::with('pathologyUnit', 'testParameter')->find($paramId);
-                }
-
-                BillItemParameterResult::create([
-                    'bill_item_id' => $billItem->id,
-                    'pathology_test_parameter_id' => $paramModel ? $paramModel->id : null,
-                    'name' => $paramModel ? trim((string) ($paramModel->name ?? data_get($paramModel, 'testParameter.name') ?? '')) : ($genName ?: null),
-                    'value' => $val,
-                    'unit' => $paramModel ? trim((string) data_get($paramModel, 'pathologyUnit.name') ?? '') : null,
-                ]);
+        DB::transaction(function () use ($billItem, $request, $storedReportPath, $parameterValues, $reportRange, $hasReportRange) {
+            if ($storedReportPath) {
+                $billItem->report_file = $storedReportPath;
             }
-        }
+
+            $billItem->report_note = $request->input('report_note');
+            $billItem->report_range = $reportRange;
+            if (empty($billItem->reported_at)) {
+                $billItem->reported_at = now();
+                $billItem->reported_by = auth('admin')->id();
+            }
+            $billItem->save();
+
+            if ($hasReportRange && $billItem->category === 'Pathology' && !empty($billItem->item_id)) {
+                $this->syncPathologyItemNormalRanges((int) $billItem->item_id, (string) ($reportRange ?? ''));
+            }
+
+            if (is_array($parameterValues)) {
+                $generatedUnits = BillItemParameterResult::query()
+                    ->where('bill_item_id', $billItem->id)
+                    ->whereNull('pathology_test_parameter_id')
+                    ->whereNotNull('name')
+                    ->pluck('unit', 'name');
+                BillItemParameterResult::where('bill_item_id', $billItem->id)->delete();
+                foreach ($parameterValues as $paramId => $val) {
+                    $val = trim((string) ($val ?? ''));
+                    if ($val === '') continue;
+
+                    $genName = null;
+                    $paramModel = null;
+
+                    if (is_string($paramId) && str_starts_with($paramId, 'gen:')) {
+                        $genName = trim(substr($paramId, 4));
+                    } else {
+                        $paramModel = PathologyTestParameter::with('pathologyUnit', 'testParameter')->find($paramId);
+                    }
+
+                    BillItemParameterResult::create([
+                        'bill_item_id' => $billItem->id,
+                        'pathology_test_parameter_id' => $paramModel ? $paramModel->id : null,
+                        'name' => $paramModel ? trim((string) ($paramModel->name ?? data_get($paramModel, 'testParameter.name') ?? '')) : ($genName ?: null),
+                        'value' => $val,
+                        'unit' => $paramModel
+                            ? (trim((string) data_get($paramModel, 'pathologyUnit.name') ?? '') ?: null)
+                            : ($genName ? ($generatedUnits->get($genName) ?: null) : null),
+                    ]);
+                }
+            }
+        });
         // If this is an XHR/Inertia visit, return JSON so the client can
         // show a toast and update UI without performing a full redirect.
         $billingId = $billItem->billing_id ?? ($billItem->billing?->id ?? null);
@@ -1286,7 +1630,107 @@ class ReportingController extends Controller
             ]);
     }
 
-    public function print(BillItem $billItem)
+    private function syncPathologyItemNormalRanges(int $testId, string $reportRange): void
+    {
+        $test = Test::query()->find($testId);
+        $parameters = PathologyTestParameter::query()
+            ->where('pathology_test_id', $testId)
+            ->with('pathologyUnit:id,name')
+            ->orderBy('id')
+            ->get();
+
+        if ($parameters->isNotEmpty()) {
+            $ranges = $this->splitReportRanges($reportRange, $parameters->count());
+            if ($ranges === null) {
+                return;
+            }
+
+            foreach ($parameters->values() as $index => $parameter) {
+                [$from, $to] = $this->parseReportNormalRange(
+                    $ranges[$index],
+                    trim((string) ($parameter->pathologyUnit?->name ?? ''))
+                );
+                $parameter->reference_from = $from;
+                $parameter->reference_to = $to;
+                $parameter->save();
+            }
+
+            return;
+        }
+
+        if (!$test) {
+            return;
+        }
+
+        $legacyParameters = $test->test_parameters;
+        if (is_string($legacyParameters)) {
+            $legacyParameters = json_decode($legacyParameters, true);
+        }
+        if (!is_array($legacyParameters) || $legacyParameters === []) {
+            return;
+        }
+
+        $ranges = $this->splitReportRanges($reportRange, count($legacyParameters));
+        if ($ranges === null) {
+            return;
+        }
+
+        $legacyParameters = array_values($legacyParameters);
+        foreach ($legacyParameters as $index => &$parameter) {
+            if (!is_array($parameter)) {
+                continue;
+            }
+
+            [$from, $to] = $this->parseReportNormalRange($ranges[$index], '');
+            $fromKey = array_key_exists('reference_from', $parameter) ? 'reference_from' : 'referance_from';
+            $toKey = array_key_exists('reference_to', $parameter) ? 'reference_to' : 'referance_to';
+            $parameter[$fromKey] = $from;
+            $parameter[$toKey] = $to;
+        }
+        unset($parameter);
+
+        $test->test_parameters = json_encode($legacyParameters, JSON_UNESCAPED_UNICODE);
+        $test->save();
+    }
+
+    private function splitReportRanges(string $reportRange, int $parameterCount): ?array
+    {
+        if ($parameterCount < 1) {
+            return null;
+        }
+
+        if (trim($reportRange) === '') {
+            return array_fill(0, $parameterCount, '');
+        }
+
+        $ranges = preg_split('/\s*\|\s*/u', trim($reportRange)) ?: [];
+        if (count($ranges) === $parameterCount) {
+            return $ranges;
+        }
+
+        return $parameterCount === 1 ? [$reportRange] : null;
+    }
+
+    private function parseReportNormalRange(string $range, string $unit): array
+    {
+        $range = trim($range);
+        if ($range === '') {
+            return [null, null];
+        }
+
+        if ($unit !== '') {
+            $range = trim((string) preg_replace('/\s*' . preg_quote($unit, '/') . '\s*$/iu', '', $range));
+        }
+
+        $normalizedRange = trim((string) preg_replace('/[–—]/u', '-', $range));
+        if (preg_match('/^([+-]?\d+(?:[.,]\d+)?)\s*(?:-|to)\s*([+-]?\d+(?:[.,]\d+)?)$/iu', $normalizedRange, $matches)) {
+            return [trim($matches[1]), trim($matches[2])];
+        }
+
+        return [$normalizedRange !== '' ? $normalizedRange : null, null];
+    }
+
+    public function print(BillItem $billItem, bool $fromPatientPortal = false)
     {
         // Debug trace: record entry to help diagnose blank/500 print pages.
         try {
@@ -1301,6 +1745,36 @@ class ReportingController extends Controller
                 ->with('warning', 'Reporting/print not available for IPD invoices.');
         }
 
+        $portalPatient = $fromPatientPortal ? auth('patient')->user() : null;
+        $isPatientPortalPrint = $portalPatient
+            && (int) ($billItem->billing?->patient_id ?? 0) === (int) $portalPatient->id
+            && (float) ($billItem->billing?->due_amount ?? 0) <= 0
+            && !Billing::query()
+                ->where('patient_id', $portalPatient->id)
+                ->where('due_amount', '>', 0)
+                ->exists()
+            && in_array((string) $billItem->category, ['Pathology', 'Radiology'], true)
+            && !empty($billItem->reported_at)
+            && (
+                trim((string) ($billItem->report_note ?? '')) !== ''
+                || trim((string) ($billItem->report_range ?? '')) !== ''
+                || trim((string) ($billItem->report_file ?? '')) !== ''
+            );
+
+        $hasSavedParameterResults = BillItemParameterResult::query()
+            ->where('bill_item_id', $billItem->id)
+            ->exists();
+        $hasSavedReportResult = trim(str_replace(
+            '[[FULL_PAGE]]',
+            '',
+            strip_tags((string) ($billItem->report_note ?? ''))
+        )) !== ''
+            || $hasSavedParameterResults;
+
+        if (!$isPatientPortalPrint && (empty($billItem->reported_at) || !$hasSavedReportResult)) {
+            abort(404);
+        }
+
         $allowedCategories = $this->resolveDepartmentCategories();
 
         // If the item category is not within the user's resolved department scope,
@@ -1308,7 +1782,8 @@ class ReportingController extends Controller
         // (e.g., `ultrasound-reporting`, `xray-reporting`, `pathology-reporting`),
         // or when they have the global `reporting`/`report-delivery` permission.
         $user = auth('admin')->user();
-        $categoryAllowedByScope = in_array($billItem->category, $allowedCategories, true);
+        $categoryAllowedByScope = $isPatientPortalPrint
+            || in_array($billItem->category, $allowedCategories, true);
 
         $explicitAllow = false;
         try {
@@ -1345,11 +1820,6 @@ class ReportingController extends Controller
         if (! $categoryAllowedByScope && ! $explicitAllow) {
             return redirect()->route('backend.reporting.index')
                 ->with('warning', 'Invalid report item.');
-        }
-
-        if (empty($billItem->reported_at)) {
-            return redirect()->route('backend.reporting.index')
-                ->with('warning', 'Report is not ready for print.');
         }
 
         // Disable debugbar for print rendering to avoid injected JS errors
@@ -1415,20 +1885,40 @@ class ReportingController extends Controller
             $identitySettings = [];
         }
 
+        $reportTitle = $this->resolveReportTitle($billItem);
+        $reportingDepartment = $this->resolveReportingDepartment($billItem, $reportTitle);
+        $departmentSettings = $reportingDepartment
+            ? data_get($attendanceOptions, "reporting.departments.{$reportingDepartment}", [])
+            : [];
+        $departmentSettings = is_array($departmentSettings) ? $departmentSettings : [];
+
         $layoutSettings = data_get($attendanceOptions, 'reporting.layout', []);
         if (!is_array($layoutSettings)) {
             $layoutSettings = [];
         }
+        $departmentLayoutSettings = data_get($departmentSettings, 'layout', []);
+        if (is_array($departmentLayoutSettings)) {
+            $layoutSettings = array_replace($layoutSettings, $departmentLayoutSettings);
+        }
+        $departmentSignatureSettings = data_get($departmentSettings, 'signature', []);
+        if (is_array($departmentSignatureSettings)) {
+            $signatureSettings = array_replace($signatureSettings, $departmentSignatureSettings);
+        }
 
         $signatureMarginTop = max((int) ($signatureSettings['margin_top'] ?? 160), 0);
         $signatureMarginLeft = max((int) ($signatureSettings['margin_left'] ?? 96), 0);
+        $cbcSignatureMarginTop = max(-500, min(500, (int) data_get($attendanceOptions, 'reporting.cbc.signature.margin_top', 14)));
         $pageMarginTop = max((int) ($layoutSettings['page_margin_top'] ?? 0), 0);
         $pageMarginBottom = max((int) ($layoutSettings['page_margin_bottom'] ?? 0), 0);
+        $pageMarginLeft = max((int) ($layoutSettings['page_margin_left'] ?? 48), 0);
+        $pageMarginRight = max((int) ($layoutSettings['page_margin_right'] ?? 48), 0);
 
         // header/footer heights (pixels). Defaults chosen to keep previous look:
         // default header ~115px (≈1.2in), footer default 70px.
         $reportHeaderHeight = max((int) ($layoutSettings['header_height'] ?? 115), 0);
         $reportFooterHeight = max((int) ($layoutSettings['footer_height'] ?? 70), 0);
+        $reportFooterContentOffset = max(-50, min(50, (int) ($layoutSettings['footer_content_offset'] ?? 0)));
+        $reportFontSizeAdjustment = max(0, min(10, (int) ($layoutSettings['font_size_adjustment'] ?? 0)));
         $reportHeaderHeight = max((int) ($layoutSettings['header_height'] ?? 115), 0); // px
 
         $invoiceDesign = InvoiceDesign::where('status', 'Active')->where('module', 'billing')->first();
@@ -1438,6 +1928,14 @@ class ReportingController extends Controller
         if (!$invoiceDesign) {
             $invoiceDesign = InvoiceDesign::where('status', 'Active')->first();
         }
+
+        $fullPageInstitutionPadEnabled = array_key_exists('full_page_institution_pad', $departmentSettings)
+            ? (bool) $departmentSettings['full_page_institution_pad']
+            : (bool) data_get($attendanceOptions, 'reporting.full_page_institution_pad', false);
+        $fullPageInstitutionPadImage = $fullPageInstitutionPadEnabled
+            ? $this->resolvePublicStorageImageDataUri((string) (InvoiceDesign::reportFullPagePad()?->full_page_pad_path ?? ''))
+            : '';
+        $fullPageInstitutionPadContentOffset = max(0, min(100, (int) ($layoutSettings['full_page_pad_content_offset'] ?? 0)));
 
         // Final header/footer algorithm:
         // Header: invoice header image > report header html > empty
@@ -1464,6 +1962,13 @@ class ReportingController extends Controller
             ? (bool) $settingShowFooter
             : ($settingShowHeaderFooter !== null ? (bool) $settingShowHeaderFooter : true);
 
+        if (array_key_exists('show_header', $departmentSettings)) {
+            $showHeader = (bool) $departmentSettings['show_header'];
+        }
+        if (array_key_exists('show_footer', $departmentSettings)) {
+            $showFooter = (bool) $departmentSettings['show_footer'];
+        }
+
         // If header is disabled, clear header data so view won't render or reserve space.
         if (!$showHeader) {
             $headerImageBase64 = '';
@@ -1485,38 +1990,58 @@ class ReportingController extends Controller
         // apply page bottom margin if provided (already set above)
         $reportFooterHeight = max((int) ($layoutSettings['footer_height'] ?? 70), 0); // px
 
-        $resolveSignatureImage = function (?string $path): string {
-            $rawPath = trim((string) $path);
-            if ($rawPath === '') {
-                return '';
+        $resolveSignatureImage = fn (?string $path): string => $this->makeSignatureBackgroundTransparent(
+            $this->resolvePublicStorageImageDataUri($path)
+        );
+
+        $resolveDepartmentSignature = function (string $field) use ($departmentSettings, $settings, $resolveSignatureImage): string {
+            $departmentImage = $resolveSignatureImage(
+                trim((string) ($departmentSettings[$field] ?? ''))
+            );
+            if ($departmentImage !== '') {
+                return $departmentImage;
             }
 
-            $storagePath = storage_path('app/public/' . ltrim($rawPath, '/'));
-            if (!file_exists($storagePath)) {
-                return '';
-            }
-
-            $extension = strtolower(pathinfo($storagePath, PATHINFO_EXTENSION));
-            $mime = match ($extension) {
-                'jpg', 'jpeg' => 'image/jpeg',
-                'gif' => 'image/gif',
-                'webp' => 'image/webp',
-                default => 'image/png',
-            };
-
-            return 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($storagePath));
+            return $resolveSignatureImage((string) ($settings?->{$field} ?? ''));
         };
+        $technologistSignature = $resolveDepartmentSignature('technologist_signature');
+        $sampleCollectedBySignature = $resolveDepartmentSignature('sample_collected_by_signature');
+        $pathologistSignature = $resolveDepartmentSignature('pathologist_signature');
+        $pathologistName = array_key_exists('pathologist_name', $departmentSettings)
+            ? trim((string) $departmentSettings['pathologist_name'])
+            : trim((string) ($settings?->pathologist_name ?? ''));
+        $pathologistDesignation = array_key_exists('pathologist_designation', $departmentSettings)
+            ? trim((string) $departmentSettings['pathologist_designation'])
+            : trim((string) ($settings?->pathologist_designation ?? ''));
 
-        $technologistSignature = $resolveSignatureImage((string) ($settings?->technologist_signature ?? ''));
-        $sampleCollectedBySignature = $resolveSignatureImage((string) ($settings?->sample_collected_by_signature ?? ''));
-        $pathologistSignature = $resolveSignatureImage((string) ($settings?->pathologist_signature ?? ''));
-        $pathologistName = trim((string) ($settings?->pathologist_name ?? ''));
-        $pathologistDesignation = trim((string) ($settings?->pathologist_designation ?? ''));
+        $technologistNameSetting = array_key_exists('technologist_name', $departmentSettings)
+            ? trim((string) $departmentSettings['technologist_name'])
+            : trim((string) ($identitySettings['technologist_name'] ?? ''));
+        $technologistDesignationSetting = array_key_exists('technologist_designation', $departmentSettings)
+            ? trim((string) $departmentSettings['technologist_designation'])
+            : trim((string) ($identitySettings['technologist_designation'] ?? ''));
+        $sampleCollectedByNameSetting = array_key_exists('sample_collected_by_name', $departmentSettings)
+            ? trim((string) $departmentSettings['sample_collected_by_name'])
+            : trim((string) ($identitySettings['sample_collected_by_name'] ?? ''));
+        $sampleCollectedByDesignationSetting = array_key_exists('sample_collected_by_designation', $departmentSettings)
+            ? trim((string) $departmentSettings['sample_collected_by_designation'])
+            : trim((string) ($identitySettings['sample_collected_by_designation'] ?? ''));
+        $machineInfoLine = trim((string) data_get($attendanceOptions, 'reporting.machine_info_line', ''));
+        if ($machineInfoLine === '') {
+            $machineInfoLine = 'Estimations were carried out by Macfura F-580 Automatic Haematology Analyzer & Verified manually';
+        }
 
-        $technologistNameSetting = trim((string) ($identitySettings['technologist_name'] ?? ''));
-        $technologistDesignationSetting = trim((string) ($identitySettings['technologist_designation'] ?? ''));
-        $sampleCollectedByNameSetting = trim((string) ($identitySettings['sample_collected_by_name'] ?? ''));
-        $sampleCollectedByDesignationSetting = trim((string) ($identitySettings['sample_collected_by_designation'] ?? ''));
+        $categorySpecificMachineInfo = $this->resolveMachineInfoByCategory($billItem, $attendanceOptions, $machineInfoLine);
+        $machineInfoLine = $categorySpecificMachineInfo['text'];
+        $machineInfoLineEnabled = $categorySpecificMachineInfo['enabled'];
+        if ($reportingDepartment && array_key_exists('machine_info_line', $departmentSettings)) {
+            $departmentMachineInfoLine = trim((string) $departmentSettings['machine_info_line']);
+            $machineInfoLine = $departmentMachineInfoLine;
+            $machineInfoLineEnabled = $departmentMachineInfoLine !== '';
+        }
+        if ($reportingDepartment && array_key_exists('machine_info_line_enabled', $departmentSettings)) {
+            $machineInfoLineEnabled = $machineInfoLineEnabled && (bool) $departmentSettings['machine_info_line_enabled'];
+        }
 
         $contactNo = $billing?->patient_mobile ?? $patient?->phone ?? $patient?->mobile ?? 'N/A';
         $gender = $billing?->gender ?? $patient?->gender ?? 'N/A';
@@ -1537,14 +2062,48 @@ class ReportingController extends Controller
 
         $refdBy = $billing?->doctor_name ?? 'N/A';
 
-        $singleItemCategories = ['Radiology', 'Ultrasonogram', 'Ultrasonography', 'ECG'];
-        $isSingleItemCategory = in_array((string) $billItem->category, $singleItemCategories, true);
-        $isCbc = str_contains(strtolower((string) $billItem->item_name), 'cbc');
+        $requestedItemIds = collect(explode(',', (string) request()->query('item_ids', '')))
+            ->filter(fn ($id) => ctype_digit(trim((string) $id)))
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+        $isCbc = $this->looksLikeCbcTest($billItem);
 
-        if ($isSingleItemCategory || $isCbc) {
+        if (request()->boolean('single_item')) {
+            $items = collect([$billItem]);
+        } elseif ($requestedItemIds->isNotEmpty()) {
+            $selectedItems = BillItem::query()
+                ->where('billing_id', $billItem->billing_id)
+                ->where('category', $billItem->category)
+                ->whereIn('id', $requestedItemIds)
+                ->whereNotNull('reported_at')
+                ->orderBy('id')
+                ->get();
+
+            $itemsWithParameterResults = BillItemParameterResult::query()
+                ->whereIn('bill_item_id', $selectedItems->pluck('id'))
+                ->distinct()
+                ->pluck('bill_item_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+            $items = $selectedItems->filter(function ($item) use ($itemsWithParameterResults) {
+                $note = trim(str_replace(
+                    '[[FULL_PAGE]]',
+                    '',
+                    strip_tags((string) ($item->report_note ?? ''))
+                ));
+
+                return $note !== ''
+                    || in_array((int) $item->id, $itemsWithParameterResults, true);
+            })->values();
+
+            abort_unless($items->contains('id', $billItem->id), 404);
+        } elseif ($isCbc) {
             $items = collect([$billItem]);
         } else {
-            // Build base query for pathology items in the same billing
+            // Build base query for pathology items in the same billing.
+            // Include items with or without reported_at so draft/unsaved items
+            // can be printed together in one batch.
             $allItemsQuery = BillItem::query()
                 ->where('billing_id', $billItem->billing_id)
                 ->where('category', 'Pathology')
@@ -1554,12 +2113,25 @@ class ReportingController extends Controller
                         ->orWhereRaw("LOWER(item_name) NOT LIKE '%cbc%'");
                 });
 
-            // If the primary bill item references a test, try to limit the group
-            // to the same pathology test category to avoid mixing Biochemistry/Electrolyte sets.
+            // Group by main_category_id first (broader grouping); fall back to
+            // test_category_id so tests of the same department print together.
             if (!empty($billItem->item_id)) {
                 $primaryTest = Test::query()->find($billItem->item_id);
+                $primaryMainCategoryId = $primaryTest?->main_category_id ?? null;
                 $primaryCategoryId = $primaryTest?->test_category_id ?? null;
-                if (!empty($primaryCategoryId)) {
+
+                if (!empty($primaryMainCategoryId)) {
+                    // Collect all test IDs that share the same main category
+                    $relatedTestIds = Test::query()
+                        ->where('main_category_id', $primaryMainCategoryId)
+                        ->pluck('id')
+                        ->all();
+
+                    if (!empty($relatedTestIds)) {
+                        $allItemsQuery->whereIn('item_id', $relatedTestIds);
+                    }
+                } elseif (!empty($primaryCategoryId)) {
+                    // Fallback: group by test_category_id
                     $relatedTestIds = Test::query()
                         ->where('test_category_id', $primaryCategoryId)
                         ->pluck('id')
@@ -1572,6 +2144,22 @@ class ReportingController extends Controller
             }
 
             $allItems = $allItemsQuery->orderBy('id')->get();
+            $itemsWithParameterResults = BillItemParameterResult::query()
+                ->whereIn('bill_item_id', $allItems->pluck('id'))
+                ->distinct()
+                ->pluck('bill_item_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+            $allItems = $allItems->filter(function ($item) use ($itemsWithParameterResults) {
+                $note = trim(str_replace(
+                    '[[FULL_PAGE]]',
+                    '',
+                    strip_tags((string) ($item->report_note ?? ''))
+                ));
+
+                return $note !== ''
+                    || in_array((int) $item->id, $itemsWithParameterResults, true);
+            })->values();
 
             $chunks = $allItems->chunk(4);
             $items = $chunks->first(function ($chunk) use ($billItem) {
@@ -1579,11 +2167,117 @@ class ReportingController extends Controller
             }) ?? collect([$billItem]);
         }
 
-        $reportTitle = $this->resolveReportTitle($billItem);
         $isUltrasonogramReport = $this->isUltrasonogramBillItem($billItem, $reportTitle);
 
         // If structured parameter results exist for items, prefer them for printing
         foreach ($items as $it) {
+            $storedReportNote = (string) ($it->report_note ?? '');
+            $histogramPreference = 'SHOW';
+            if (preg_match('/\[\[CBC_HISTOGRAM:(SHOW|HIDE)\]\]/i', $storedReportNote, $histogramMatch) === 1) {
+                $histogramPreference = strtoupper($histogramMatch[1]);
+                $it->report_note = trim((string) preg_replace('/\s*\[\[CBC_HISTOGRAM:(?:SHOW|HIDE)\]\]\s*/i', "\n", $storedReportNote));
+            }
+
+            $histogramPayload = $it->getAttribute('cbc_histogram_data')
+                ?? $it->getAttribute('histogram_data')
+                ?? [];
+            if (is_string($histogramPayload)) {
+                $decodedHistogramPayload = json_decode($histogramPayload, true);
+                $histogramPayload = json_last_error() === JSON_ERROR_NONE && is_array($decodedHistogramPayload)
+                    ? $decodedHistogramPayload
+                    : [];
+            }
+            $histogramData = [];
+            if (is_array($histogramPayload)) {
+                foreach (['WBC' => 'wbc', 'RBC' => 'rbc', 'PLT' => 'plt'] as $label => $key) {
+                    $values = $histogramPayload[$label] ?? $histogramPayload[$key] ?? null;
+                    if (is_array($values) && count($values) > 1) {
+                        $numericValues = array_values(array_filter($values, fn ($value) => is_numeric($value) && is_finite((float) $value)));
+                        if (count($numericValues) > 1) {
+                            $histogramData[$label] = array_map('floatval', $numericValues);
+                        }
+                    }
+                }
+            }
+            foreach (['WBC' => 'wbc', 'RBC' => 'rbc', 'PLT' => 'plt'] as $label => $key) {
+                if (isset($histogramData[$label])) {
+                    continue;
+                }
+                $values = $it->getAttribute($key . '_histogram_data') ?? $it->getAttribute($key . '_histogram');
+                if (is_string($values)) {
+                    $decodedValues = json_decode($values, true);
+                    $values = json_last_error() === JSON_ERROR_NONE ? $decodedValues : null;
+                }
+                if (is_array($values) && count($values) > 1) {
+                    $numericValues = array_values(array_filter($values, fn ($value) => is_numeric($value) && is_finite((float) $value)));
+                    if (count($numericValues) > 1) {
+                        $histogramData[$label] = array_map('floatval', $numericValues);
+                    }
+                }
+            }
+            $it->cbc_histogram_data = $histogramData;
+            $it->show_cbc_histogram = $histogramPreference === 'SHOW' && $histogramData !== [];
+
+            $reportFunction = '';
+            $mainCategoryName = '';
+            $defaultParamRange = '';
+            $defaultParamUnit = '';
+
+            if (!empty($it->item_id)) {
+                $testRecord = Test::query()->whereKey($it->item_id)->first(['report_function', 'main_category_id']);
+                $reportFunction = trim((string) ($testRecord?->report_function ?? ''));
+
+                // Resolve main category name
+                if ($testRecord && $testRecord->main_category_id) {
+                    $mainCategoryName = trim((string) (MainCategory::query()->whereKey($testRecord->main_category_id)->value('name') ?? ''));
+                }
+
+                // Fetch stored parameter range (used when no BillItemParameterResult exists yet)
+                $firstParam = PathologyTestParameter::query()
+                    ->where('pathology_test_id', $it->item_id)
+                    ->with('pathologyUnit:id,name')
+                    ->orderBy('id')
+                    ->first();
+                if ($firstParam) {
+                    $pFrom = trim((string) ($firstParam->reference_from ?? ''));
+                    $pTo   = trim((string) ($firstParam->reference_to ?? ''));
+                    $defaultParamUnit = trim((string) ($firstParam->pathologyUnit->name ?? ''));
+                    if ($pFrom !== '' && $pTo !== '') {
+                        $defaultParamRange = $pFrom . ' - ' . $pTo;
+                    } elseif ($pFrom !== '') {
+                        $defaultParamRange = $pFrom;
+                    } elseif ($pTo !== '') {
+                        $defaultParamRange = $pTo;
+                    }
+                    if ($defaultParamRange !== '' && $defaultParamUnit !== '') {
+                        $defaultParamRange .= ' ' . $defaultParamUnit;
+                    } elseif ($defaultParamUnit !== '') {
+                        $defaultParamRange = $defaultParamUnit;
+                    }
+                }
+            }
+
+            if ($reportFunction === '') {
+                $reportFunction = $this->autoDetectTestFunction((string) ($it->item_name ?? ''), (string) ($it->category ?? ''));
+            }
+            $it->report_function = $reportFunction;
+            $it->main_category_name = $mainCategoryName;
+            // Use stored bill-item range if present, else fall back to parameter-derived range.
+            $it->resolved_print_range = trim((string) ($it->report_range ?? '')) ?: $defaultParamRange;
+            $it->resolved_print_unit  = $defaultParamUnit;
+
+            $cbcParameterDefinitions = collect();
+            $cbcTemplateDefinitions = collect();
+            if ($this->looksLikeCbcTest($it)) {
+                $cbcTemplateDefinitions = collect($this->parameterTemplateForTest('cbc'))
+                    ->keyBy(fn ($parameter) => mb_strtolower(trim((string) $parameter['name'])));
+                $cbcParameterDefinitions = PathologyTestParameter::query()
+                    ->where('pathology_test_id', $it->item_id)
+                    ->with('pathologyUnit:id,name', 'testParameter:id,name')
+                    ->get()
+                    ->keyBy(fn ($parameter) => mb_strtolower(trim((string) ($parameter->name ?: $parameter->testParameter?->name))));
+            }
+
             $results = BillItemParameterResult::query()->where('bill_item_id', $it->id)->orderBy('id')->get();
             if ($results->isNotEmpty()) {
                 $plainLines = [];
@@ -1595,7 +2289,13 @@ class ReportingController extends Controller
                         $param = PathologyTestParameter::query()->find($r->pathology_test_parameter_id);
                     }
 
-                    $name = trim((string) ($r->name ?? '')) ?: trim((string) data_get($r, 'pathologyTestParameter.name') ?? '');
+                    $name = trim((string) ($param?->name ?: data_get($param, 'testParameter.name') ?: $r->name ?: data_get($r, 'pathologyTestParameter.name') ?: ''));
+
+                    // Older results may contain the unit in the name column.
+                    // Use the bill item's test name so printed reports remain readable.
+                    if ($name !== '' && preg_match('/^(mg(\/dl)?|mmol(\/l)?|g\/dl|[uμ]?mol\/l|[uμ]?iu(\/ml|\/l)?|miu(\/ml|\/l)?|iu|%|unit)$/iu', $name)) {
+                        $name = trim((string) ($it->item_name ?? ''));
+                    }
 
                     // If name is still empty, try to infer it from any stored result_html
                     // This helps when older records stored a single HTML string like "Uric acid: 4.5"
@@ -1614,13 +2314,27 @@ class ReportingController extends Controller
                     }
                     $unit = trim((string) ($r->unit ?? ''));
                     $val = trim((string) ($r->value ?? ''));
-
-                    $displayValue = $val . ($unit !== '' ? ' ' . $unit : '');
+                    $cbcDefinition = $cbcParameterDefinitions->get(mb_strtolower($name));
+                    $cbcTemplateDefinition = $cbcTemplateDefinitions->get(mb_strtolower($name));
 
                     // Build normal range string from parameter definition when available
-                    $from = $param ? trim((string) ($param->reference_from ?? '')) : '';
-                    $to = $param ? trim((string) ($param->reference_to ?? '')) : '';
-                    $paramUnit = $param ? trim((string) data_get($param, 'pathologyUnit.name') ?? '') : '';
+                    $from = trim((string) ($param?->reference_from ?? ''))
+                        ?: trim((string) data_get($cbcDefinition, 'reference_from', ''))
+                        ?: trim((string) data_get($cbcTemplateDefinition, 'reference_from', ''));
+                    $to = trim((string) ($param?->reference_to ?? ''))
+                        ?: trim((string) data_get($cbcDefinition, 'reference_to', ''))
+                        ?: trim((string) data_get($cbcTemplateDefinition, 'reference_to', ''));
+                    $paramUnit = trim((string) data_get($param, 'pathologyUnit.name', ''))
+                        ?: trim((string) data_get($cbcDefinition, 'pathologyUnit.name', ''))
+                        ?: trim((string) data_get($cbcTemplateDefinition, 'unit', ''));
+                    $rangeUnit = '';
+                    $rangeSource = trim($from . ' ' . $to);
+                    if ($rangeSource !== '' && preg_match('/([\p{L}µμ]+(?:\/[\p{L}]+)?)\s*$/u', $rangeSource, $unitMatch)) {
+                        $rangeUnit = trim($unitMatch[1]);
+                    }
+                    $displayUnit = $paramUnit !== '' ? $paramUnit : ($unit !== '' ? $unit : $rangeUnit);
+                    [$cleanValue, $displayUnit] = $this->splitTrailingUnit($val, $displayUnit);
+                    $displayValue = $cleanValue !== '' ? $cleanValue : trim((string) $val);
 
                     if ($from !== '' && $to !== '') {
                         $rangeStr = $from . ' - ' . $to;
@@ -1636,6 +2350,11 @@ class ReportingController extends Controller
                         $rangeStr = $rangeStr !== '' ? $rangeStr . ' ' . $paramUnit : $paramUnit;
                     } elseif ($unit !== '') {
                         $rangeStr = $rangeStr !== '' ? $rangeStr . ' ' . $unit : $unit;
+                    }
+
+                    [$rangeValue, $rangeUnit] = $this->splitTrailingUnit($rangeStr, $displayUnit);
+                    if ($rangeValue !== '' && $rangeUnit !== '') {
+                        $rangeStr = trim($rangeValue . ' ' . $rangeUnit);
                     }
 
                     // numeric comparison to detect out-of-range
@@ -1721,9 +2440,13 @@ class ReportingController extends Controller
                         'result_html' => $resultHtmlLine,
                         'param' => $name,
                         'value' => $displayValue,
+                        'unit' => $displayUnit,
                         'normal_range' => $rangeStr,
                         'is_out' => $isOut,
                         'value_num' => $valNum,
+                        'main_category_name' => $it->main_category_name ?? '',
+                        'report_function' => $it->report_function ?? '',
+                        'item_name' => $it->item_name ?? '',
                     ];
 
                         // Temporary debug log for all parameters (will help diagnose mismatches)
@@ -1782,16 +2505,26 @@ class ReportingController extends Controller
                             }
                         }
 
-                        $displayValue = $val . ($unit !== '' ? ' ' . $unit : '');
+                        $displayUnit = trim((string) $unit);
+                        $cleanValue = trim((string) $val);
+                        if ($displayUnit !== '' && $cleanValue !== '') {
+                            $cleanValue = preg_replace('/\s*' . preg_quote($displayUnit, '/') . '$/iu', '', $cleanValue);
+                            $cleanValue = trim((string) $cleanValue);
+                        }
+                        $displayValue = $cleanValue !== '' ? $cleanValue : trim((string) $val);
 
-                        // Build a candidate range from item-level report_range or suggested defaults
-                        $rangeStr = trim((string) ($it->report_range ?? ''));
+                        // Build a candidate range: use resolved_print_range (parameter-derived) first.
+                        $rangeStr = trim((string) ($it->resolved_print_range ?? $it->report_range ?? ''));
                         if ($rangeStr === '') {
                             try {
                                 $rangeStr = (string) ($this->suggestNormalRangeByTestName($it) ?? '');
                             } catch (\Throwable $_) {
                                 $rangeStr = '';
                             }
+                        }
+                        // Use parameter-derived unit if line-parsed unit is empty
+                        if ($displayUnit === '') {
+                            $displayUnit = trim((string) ($it->resolved_print_unit ?? ''));
                         }
 
                         $valNum = $this->parseNumeric($val);
@@ -1837,7 +2570,7 @@ class ReportingController extends Controller
                         // If parsed name looks like a unit (eg 'mg/dl'), try to infer real parameter name
                         if ($name !== '') {
                             $nameLc = mb_strtolower($name);
-                            if (preg_match('/^(mg|mg\/dl|mmol\/l|mmol|mmol\/L|mmol\/l|g\/dl|μmol\/l|umol\/l|mmol\/L|mmol\/l|mmol\/L|mmol\/L|mmol\/?l|mg\/?dl)$/i', $nameLc) || preg_match('/^[\p{L}\/\s%]+$/u', $nameLc) && strlen(trim($nameLc)) <= 5) {
+                            if (preg_match('/^(mg(\/dl)?|mmol(\/l)?|g\/dl|[uμ]?mol\/l|[uμ]?iu(\/ml|\/l)?|miu(\/ml|\/l)?|iu|unit|%)$/iu', $nameLc) || (preg_match('/^[\p{L}\/\s%]+$/u', $nameLc) && mb_strlen(trim($nameLc)) <= 8)) {
                                 // try to find a known parameter token in the full line
                                 $tokens = ['creatinine','creat','s\.creatinine','s creatinine','urea','triglyceride','triglycerides','triglycerid','cholesterol','hdl','ldl','glucose','rbs','hba1c','uric acid','uricacid','uric'];
                                 $found = '';
@@ -1859,9 +2592,13 @@ class ReportingController extends Controller
                             'result_html' => ($name === '' ? ($isOut ? '<strong>' . e($displayValue) . '</strong>' : e($displayValue)) : e($name) . ': ' . ($isOut ? '<strong>' . e($displayValue) . '</strong>' : e($displayValue))),
                             'param' => $name,
                             'value' => $displayValue,
+                            'unit' => $displayUnit,
                             'normal_range' => $rangeStr,
                             'is_out' => $isOut,
                             'value_num' => $valNum,
+                            'main_category_name' => $it->main_category_name ?? '',
+                            'report_function' => $it->report_function ?? '',
+                            'item_name' => $it->item_name ?? '',
                         ];
                     }
                 }
@@ -1907,6 +2644,12 @@ class ReportingController extends Controller
             return view('backend.reporting.print', [
             'items' => $items,
             'primaryItem' => $billItem,
+            'printedDeliveryUrls' => $items->map(
+                fn ($item) => route('backend.report-delivery.deliver', $item->id)
+            )->values(),
+            'trackPrintedDelivery' => request()->boolean('mark_delivered')
+                && !$isPatientPortalPrint
+                && auth('admin')->check(),
             'reportTitle' => $reportTitle,
             'isUltrasonogramReport' => $isUltrasonogramReport,
             'billing' => $billing,
@@ -1918,6 +2661,8 @@ class ReportingController extends Controller
             'footer_content' => $footerContent,
             'footer_content_position' => in_array(strtolower((string) ($invoiceDesign?->footer_content_position ?? '')), ['above', 'below']) ? strtolower((string) $invoiceDesign?->footer_content_position) : 'above',
             'invoiceDesign' => $invoiceDesign,
+            'fullPageInstitutionPadImage' => $fullPageInstitutionPadImage,
+            'fullPageInstitutionPadContentOffset' => $fullPageInstitutionPadContentOffset,
             'hasHeader' => $hasHeader,
             'hasFooter' => $hasFooter,
             'reportDateTime' => $reportDateTime,
@@ -1927,9 +2672,15 @@ class ReportingController extends Controller
             'refd_by' => $refdBy,
             'signatureMarginTop' => $signatureMarginTop,
             'signatureMarginLeft' => $signatureMarginLeft,
+            'cbcSignatureMarginTop' => $cbcSignatureMarginTop,
             'pageMarginTop' => $pageMarginTop,
+            'pageMarginBottom' => $pageMarginBottom,
+            'pageMarginLeft' => $pageMarginLeft,
+            'pageMarginRight' => $pageMarginRight,
             'reportHeaderHeight' => $reportHeaderHeight,
             'reportFooterHeight' => $reportFooterHeight,
+            'reportFooterContentOffset' => $reportFooterContentOffset,
+            'reportFontSizeAdjustment' => $reportFontSizeAdjustment,
             'technologistSignature' => $technologistSignature,
             'sampleCollectedBySignature' => $sampleCollectedBySignature,
             'pathologistSignature' => $pathologistSignature,
@@ -1939,6 +2690,8 @@ class ReportingController extends Controller
             'technologistDesignationSetting' => $technologistDesignationSetting,
             'sampleCollectedByNameSetting' => $sampleCollectedByNameSetting,
             'sampleCollectedByDesignationSetting' => $sampleCollectedByDesignationSetting,
+            'machineInfoLine' => $machineInfoLine,
+            'machineInfoLineEnabled' => $machineInfoLineEnabled,
             // raw values for blade logic (empty string when not set)
             'pathologistNameRaw' => $pathologistName,
             'pathologistDesignationRaw' => $pathologistDesignation,
@@ -2004,10 +2757,10 @@ class ReportingController extends Controller
 
         if ($billItem->category === 'Pathology' && !empty($billItem->item_id)) {
             $test = Test::query()
-                ->with('pathologyCategory')
+                ->with(['pathologyCategory', 'mainCategory'])
                 ->find($billItem->item_id);
 
-            $categoryName = trim((string) ($test?->pathologyCategory?->name ?? ''));
+            $categoryName = trim((string) ($test?->mainCategory?->name ?? $test?->pathologyCategory?->name ?? ''));
         } elseif ($billItem->category === 'Radiology' && !empty($billItem->item_id)) {
             // `bill_items.item_id` may reference either a RadiologyTest record
             // or directly a Test record. Try both patterns to reliably resolve
@@ -2017,9 +2770,9 @@ class ReportingController extends Controller
             // Try as RadiologyTest id -> RadiologyTest->test->pathologyCategory
             try {
                 $radiologyTest = RadiologyTest::query()
-                    ->with('test.pathologyCategory')
+                    ->with(['test.pathologyCategory', 'test.mainCategory'])
                     ->find($billItem->item_id);
-                $categoryName = trim((string) ($radiologyTest?->test?->pathologyCategory?->name ?? ''));
+                $categoryName = trim((string) ($radiologyTest?->test?->mainCategory?->name ?? $radiologyTest?->test?->pathologyCategory?->name ?? ''));
             } catch (\Throwable $_) {
                 // ignore
             }
@@ -2027,8 +2780,8 @@ class ReportingController extends Controller
             // If not found, try interpreting item_id as Test id
             if ($categoryName === '') {
                 try {
-                    $t = Test::query()->with('pathologyCategory')->find($billItem->item_id);
-                    $categoryName = trim((string) ($t?->pathologyCategory?->name ?? ''));
+                    $t = Test::query()->with(['pathologyCategory', 'mainCategory'])->find($billItem->item_id);
+                    $categoryName = trim((string) ($t?->mainCategory?->name ?? $t?->pathologyCategory?->name ?? ''));
                 } catch (\Throwable $_) {
                     // ignore
                 }
@@ -2042,8 +2795,8 @@ class ReportingController extends Controller
                 if ($itemable) {
                     // common patterns: test_id or test_category_id
                     if (isset($itemable->test_id) && !empty($itemable->test_id)) {
-                        $t = Test::with('pathologyCategory')->find($itemable->test_id);
-                        $categoryName = trim((string) ($t?->pathologyCategory?->name ?? ''));
+                        $t = Test::with(['pathologyCategory', 'mainCategory'])->find($itemable->test_id);
+                        $categoryName = trim((string) ($t?->mainCategory?->name ?? $t?->pathologyCategory?->name ?? ''));
                     }
 
                     if ($categoryName === '' && isset($itemable->test_category_id) && !empty($itemable->test_category_id)) {
@@ -2054,8 +2807,8 @@ class ReportingController extends Controller
                     // some itemables expose a `test` relation
                     if ($categoryName === '' && method_exists($itemable, 'test')) {
                         try {
-                            $t2 = $itemable->test()->with('pathologyCategory')->first();
-                            $categoryName = trim((string) ($t2?->pathologyCategory?->name ?? ''));
+                            $t2 = $itemable->test()->with(['pathologyCategory', 'mainCategory'])->first();
+                            $categoryName = trim((string) ($t2?->mainCategory?->name ?? $t2?->pathologyCategory?->name ?? ''));
                         } catch (\Throwable $_) {
                             // ignore
                         }
@@ -2109,7 +2862,7 @@ class ReportingController extends Controller
         }
 
         $radiologyTest = RadiologyTest::query()
-            ->with('test.pathologyCategory')
+            ->with(['test.pathologyCategory', 'test.mainCategory'])
             ->find($billItem->item_id);
 
         if (!$radiologyTest) {
@@ -2119,6 +2872,7 @@ class ReportingController extends Controller
         $lookupTexts = [
             data_get($radiologyTest, 'test.test_name'),
             data_get($radiologyTest, 'test.test_short_name'),
+            data_get($radiologyTest, 'test.mainCategory.name'),
             data_get($radiologyTest, 'test.pathologyCategory.name'),
         ];
 
@@ -2129,6 +2883,421 @@ class ReportingController extends Controller
         }
 
         return false;
+    }
+
+    private function parameterTemplateForTest(string $testText): array
+    {
+        $text = strtolower(trim($testText));
+
+        $differentialTemplate = [
+            ['name' => 'Differential Count', 'reference_from' => '', 'reference_to' => '', 'unit' => ''],
+            ['name' => 'Neutrophils', 'reference_from' => '40', 'reference_to' => '75', 'unit' => '%'],
+            ['name' => 'Lymphocytes', 'reference_from' => '20', 'reference_to' => '45', 'unit' => '%'],
+            ['name' => 'Monocytes', 'reference_from' => '2', 'reference_to' => '10', 'unit' => '%'],
+            ['name' => 'Eosinophils', 'reference_from' => '1', 'reference_to' => '6', 'unit' => '%'],
+            ['name' => 'Basophils', 'reference_from' => '0', 'reference_to' => '1', 'unit' => '%'],
+            ['name' => 'Total Cir. Eosinophils', 'reference_from' => '0', 'reference_to' => '500', 'unit' => '/µl'],
+        ];
+
+        $hctTemplate = [
+            ['name' => 'HCT/PCV', 'reference_from' => '36', 'reference_to' => '46', 'unit' => '%'],
+        ];
+
+        $plateletTemplate = [
+            ['name' => 'Platelet Count', 'reference_from' => '150,000', 'reference_to' => '450,000', 'unit' => '/µl'],
+            ['name' => 'MPV', 'reference_from' => '7.5', 'reference_to' => '11.5', 'unit' => 'fl'],
+            ['name' => 'PDW', 'reference_from' => '10', 'reference_to' => '18', 'unit' => 'fl'],
+            ['name' => 'P-LCR', 'reference_from' => '15', 'reference_to' => '35', 'unit' => '%'],
+            ['name' => 'PCT', 'reference_from' => '0.10', 'reference_to' => '0.50', 'unit' => '%'],
+        ];
+
+        $cbcTemplate = [
+            ['name' => 'Hemoglobin', 'reference_from' => '12', 'reference_to' => '17', 'unit' => 'g/dl'],
+            ['name' => 'ESR', 'reference_from' => '0', 'reference_to' => '20', 'unit' => 'mm/hr'],
+            ['name' => 'Total WBC Count', 'reference_from' => '4,000', 'reference_to' => '11,000', 'unit' => '/µl'],
+            ['name' => 'Differential Count', 'reference_from' => '', 'reference_to' => '', 'unit' => ''],
+            ['name' => 'Neutrophils', 'reference_from' => '40', 'reference_to' => '75', 'unit' => '%'],
+            ['name' => 'Lymphocytes', 'reference_from' => '20', 'reference_to' => '45', 'unit' => '%'],
+            ['name' => 'Monocytes', 'reference_from' => '2', 'reference_to' => '10', 'unit' => '%'],
+            ['name' => 'Eosinophils', 'reference_from' => '1', 'reference_to' => '6', 'unit' => '%'],
+            ['name' => 'Basophils', 'reference_from' => '0', 'reference_to' => '1', 'unit' => '%'],
+            ['name' => 'Blast/Atypical %', 'reference_from' => '', 'reference_to' => '', 'unit' => '%'],
+            ['name' => 'Myelocytes %', 'reference_from' => '', 'reference_to' => '', 'unit' => '%'],
+            ['name' => 'Total Cir. Eosinophils', 'reference_from' => '0', 'reference_to' => '500', 'unit' => '/µl'],
+            ['name' => 'BT', 'reference_from' => '2', 'reference_to' => '7', 'unit' => 'min'],
+            ['name' => 'CT', 'reference_from' => '4', 'reference_to' => '11', 'unit' => 'min'],
+            ['name' => 'Blood Film', 'reference_from' => '', 'reference_to' => '', 'unit' => ''],
+            ['name' => 'Total RBC Count', 'reference_from' => '4.2', 'reference_to' => '5.4', 'unit' => 'million/µl'],
+            ['name' => 'HCT/PCV', 'reference_from' => '36', 'reference_to' => '46', 'unit' => '%'],
+            ['name' => 'MCV', 'reference_from' => '80', 'reference_to' => '100', 'unit' => 'fl'],
+            ['name' => 'MCH', 'reference_from' => '27', 'reference_to' => '32', 'unit' => 'pg'],
+            ['name' => 'MCHC', 'reference_from' => '32', 'reference_to' => '36', 'unit' => 'g/dl'],
+            ['name' => 'Platelet Count', 'reference_from' => '150,000', 'reference_to' => '450,000', 'unit' => '/µl'],
+            ['name' => 'RDW-CV', 'reference_from' => '11.5', 'reference_to' => '14.5', 'unit' => '%'],
+            ['name' => 'RDW-SD', 'reference_from' => '35', 'reference_to' => '56', 'unit' => 'fl'],
+            ['name' => 'MPV', 'reference_from' => '7.5', 'reference_to' => '11.5', 'unit' => 'fl'],
+            ['name' => 'PDW', 'reference_from' => '10', 'reference_to' => '18', 'unit' => 'fl'],
+            ['name' => 'P-LCR', 'reference_from' => '15', 'reference_to' => '35', 'unit' => '%'],
+            ['name' => 'PCT', 'reference_from' => '0.10', 'reference_to' => '0.50', 'unit' => '%'],
+        ];
+
+        // helper: wrap parameter rows for returning
+        $wrap = function (array $rows): array {
+            return array_map(function (array $p) {
+                return array_merge(['reference_from' => '', 'reference_to' => '', 'unit' => ''], $p, [
+                    'id'        => 'gen:' . ($p['name'] ?? uniqid()),
+                    'generated' => true,
+                ]);
+            }, $rows);
+        };
+
+        // ── Widal Test ────────────────────────────────────────────────────
+        if (str_contains($text, 'widal')) {
+            return $wrap([
+                ['name' => 'S. Typhi O',      'reference_to' => '1:20', 'unit' => 'Titre'],
+                ['name' => 'S. Typhi H',      'reference_to' => '1:20', 'unit' => 'Titre'],
+                ['name' => 'S. Paratyphi AH', 'reference_to' => '1:20', 'unit' => 'Titre'],
+                ['name' => 'S. Paratyphi BH', 'reference_to' => '1:20', 'unit' => 'Titre'],
+            ]);
+        }
+
+        // ── Well-Felix / Weil-Felix ───────────────────────────────────────
+        if (preg_match('/weil.?felix|well.?felix/', $text)) {
+            return $wrap([
+                ['name' => 'OX K',  'reference_to' => 'Up to 1:80'],
+                ['name' => 'OX 2',  'reference_to' => 'Up to 1:80'],
+                ['name' => 'OX 19', 'reference_to' => 'Up to 1:80'],
+            ]);
+        }
+
+        // ── LFT / Liver Function Test ─────────────────────────────────────
+        if (preg_match('/\blft\b|liver function/', $text)) {
+            return $wrap([
+                ['name' => 'SGPT (ALT)',         'reference_from' => '7',   'reference_to' => '56',  'unit' => 'U/L'],
+                ['name' => 'SGOT (AST)',         'reference_from' => '10',  'reference_to' => '40',  'unit' => 'U/L'],
+                ['name' => 'ALP',                'reference_from' => '44',  'reference_to' => '147', 'unit' => 'U/L'],
+                ['name' => 'GGT',                'reference_from' => '8',   'reference_to' => '61',  'unit' => 'U/L'],
+                ['name' => 'Total Bilirubin',    'reference_from' => '0.2', 'reference_to' => '1.2', 'unit' => 'mg/dL'],
+                ['name' => 'Direct Bilirubin',   'reference_from' => '0',   'reference_to' => '0.3', 'unit' => 'mg/dL'],
+                ['name' => 'Indirect Bilirubin', 'reference_from' => '0.1', 'reference_to' => '0.8', 'unit' => 'mg/dL'],
+                ['name' => 'Total Protein',      'reference_from' => '6.0', 'reference_to' => '8.3', 'unit' => 'g/dL'],
+                ['name' => 'Albumin',            'reference_from' => '3.5', 'reference_to' => '5.0', 'unit' => 'g/dL'],
+                ['name' => 'Globulin',           'reference_from' => '2.3', 'reference_to' => '3.5', 'unit' => 'g/dL'],
+            ]);
+        }
+
+        // ── RFT / KFT / Renal/Kidney Function ───────────────────────────
+        if (preg_match('/\b(rft|kft)\b|renal function|kidney function/', $text)) {
+            return $wrap([
+                ['name' => 'Serum Creatinine', 'reference_from' => '0.6', 'reference_to' => '1.2', 'unit' => 'mg/dL'],
+                ['name' => 'Blood Urea',       'reference_from' => '15',  'reference_to' => '40',  'unit' => 'mg/dL'],
+                ['name' => 'Uric Acid',        'reference_from' => '3.5', 'reference_to' => '7.2', 'unit' => 'mg/dL'],
+                ['name' => 'eGFR',             'reference_from' => '60',  'reference_to' => '',    'unit' => 'mL/min/1.73m²'],
+            ]);
+        }
+
+        // ── Lipid Profile ─────────────────────────────────────────────────
+        if (str_contains($text, 'lipid profile') || str_contains($text, 'lipid panel')) {
+            return $wrap([
+                ['name' => 'Total Cholesterol', 'reference_from' => '0',  'reference_to' => '200', 'unit' => 'mg/dL'],
+                ['name' => 'Triglycerides',     'reference_from' => '0',  'reference_to' => '150', 'unit' => 'mg/dL'],
+                ['name' => 'HDL Cholesterol',   'reference_from' => '40', 'reference_to' => '',    'unit' => 'mg/dL'],
+                ['name' => 'LDL Cholesterol',   'reference_from' => '0',  'reference_to' => '100', 'unit' => 'mg/dL'],
+                ['name' => 'VLDL Cholesterol',  'reference_from' => '0',  'reference_to' => '30',  'unit' => 'mg/dL'],
+            ]);
+        }
+
+        // ── TFT / Thyroid Function Test ───────────────────────────────────
+        if (preg_match('/\btft\b|thyroid function test/', $text)) {
+            return $wrap([
+                ['name' => 'TSH', 'reference_from' => '0.27', 'reference_to' => '4.20', 'unit' => 'µIU/mL'],
+                ['name' => 'T3',  'reference_from' => '0.8',  'reference_to' => '2.0',  'unit' => 'ng/mL'],
+                ['name' => 'T4',  'reference_from' => '5.0',  'reference_to' => '12.0', 'unit' => 'µg/dL'],
+                ['name' => 'FT3', 'reference_from' => '2.3',  'reference_to' => '4.2',  'unit' => 'pg/mL'],
+                ['name' => 'FT4', 'reference_from' => '0.93', 'reference_to' => '1.70', 'unit' => 'ng/dL'],
+            ]);
+        }
+
+        // ── Coagulation Profile ───────────────────────────────────────────
+        if (preg_match('/coagulation profile|pt\/aptt|bleeding.?clotting/', $text)) {
+            return $wrap([
+                ['name' => 'Prothrombin Time (PT)', 'reference_from' => '11', 'reference_to' => '14', 'unit' => 'seconds'],
+                ['name' => 'APTT',                  'reference_from' => '25', 'reference_to' => '35', 'unit' => 'seconds'],
+                ['name' => 'INR',                   'reference_from' => '0.8','reference_to' => '1.2','unit' => ''],
+                ['name' => 'Bleeding Time',         'reference_from' => '2',  'reference_to' => '4',  'unit' => 'minutes'],
+                ['name' => 'Clotting Time',         'reference_from' => '4',  'reference_to' => '10', 'unit' => 'minutes'],
+            ]);
+        }
+
+        // ── Electrolytes ──────────────────────────────────────────────────
+        if (str_contains($text, 'electrolyte')) {
+            return $wrap([
+                ['name' => 'Sodium (Na+)',       'reference_from' => '135', 'reference_to' => '145', 'unit' => 'mmol/L'],
+                ['name' => 'Potassium (K+)',     'reference_from' => '3.5', 'reference_to' => '5.2', 'unit' => 'mmol/L'],
+                ['name' => 'Chloride (Cl-)',     'reference_from' => '96',  'reference_to' => '108', 'unit' => 'mmol/L'],
+                ['name' => 'Bi-Carbonate (HCO3-)','reference_from'=> '22',  'reference_to' => '28',  'unit' => 'mmol/L'],
+                ['name' => 'Calcium',            'reference_from' => '8.5', 'reference_to' => '10.5','unit' => 'mg/dL'],
+                ['name' => 'Phosphorus',         'reference_from' => '2.5', 'reference_to' => '4.5', 'unit' => 'mg/dL'],
+                ['name' => 'Magnesium',          'reference_from' => '1.7', 'reference_to' => '2.2', 'unit' => 'mEq/L'],
+            ]);
+        }
+
+        // ── Iron Studies ──────────────────────────────────────────────────
+        if (preg_match('/iron stud|iron profile|tibc/', $text)) {
+            return $wrap([
+                ['name' => 'Serum Iron',            'reference_from' => '60',  'reference_to' => '170', 'unit' => 'µg/dL'],
+                ['name' => 'TIBC',                  'reference_from' => '250', 'reference_to' => '370', 'unit' => 'µg/dL'],
+                ['name' => 'Transferrin Saturation','reference_from' => '20',  'reference_to' => '50',  'unit' => '%'],
+                ['name' => 'Serum Ferritin',        'reference_from' => '12',  'reference_to' => '300', 'unit' => 'ng/mL'],
+            ]);
+        }
+
+        // ── Cardiac Enzymes / Markers ─────────────────────────────────────
+        if (preg_match('/cardiac enzyme|cardiac marker|cardiac profile/', $text)) {
+            return $wrap([
+                ['name' => 'Troponin I', 'reference_from' => '0',  'reference_to' => '0.04','unit' => 'ng/mL'],
+                ['name' => 'CK-MB',     'reference_from' => '0',  'reference_to' => '25',  'unit' => 'U/L'],
+                ['name' => 'CPK',       'reference_from' => '22', 'reference_to' => '198', 'unit' => 'U/L'],
+                ['name' => 'LDH',       'reference_from' => '135','reference_to' => '225', 'unit' => 'U/L'],
+            ]);
+        }
+
+        // ── Hormone Profile / Fertility ───────────────────────────────────
+        if (preg_match('/hormone profile|fertility profile|reproductive/', $text)) {
+            return $wrap([
+                ['name' => 'FSH',         'reference_from' => '1.5', 'reference_to' => '12.4', 'unit' => 'mIU/mL'],
+                ['name' => 'LH',          'reference_from' => '1.7', 'reference_to' => '15.0', 'unit' => 'mIU/mL'],
+                ['name' => 'Prolactin',   'reference_from' => '4.0', 'reference_to' => '23.0', 'unit' => 'ng/mL'],
+                ['name' => 'Estradiol',   'reference_from' => '30',  'reference_to' => '400',  'unit' => 'pg/mL'],
+                ['name' => 'Progesterone','reference_from' => '0.3', 'reference_to' => '1.2',  'unit' => 'ng/mL'],
+                ['name' => 'Testosterone','reference_from' => '300', 'reference_to' => '1000', 'unit' => 'ng/dL'],
+            ]);
+        }
+
+        // ── Semen Analysis ────────────────────────────────────────────────
+        if (preg_match('/semen|sperm|seminogram/', $text)) {
+            return $wrap([
+                ['name' => 'Volume',               'reference_from' => '1.5','reference_to' => '5.0', 'unit' => 'mL'],
+                ['name' => 'pH',                   'reference_from' => '7.2','reference_to' => '8.0', 'unit' => ''],
+                ['name' => 'Sperm Count',          'reference_from' => '15', 'reference_to' => '',    'unit' => 'million/mL'],
+                ['name' => 'Total Motility',       'reference_from' => '40', 'reference_to' => '',    'unit' => '%'],
+                ['name' => 'Progressive Motility', 'reference_from' => '32', 'reference_to' => '',    'unit' => '%'],
+                ['name' => 'Normal Morphology',    'reference_from' => '4',  'reference_to' => '',    'unit' => '%'],
+                ['name' => 'Liquefaction Time',    'reference_from' => '15', 'reference_to' => '30',  'unit' => 'minutes'],
+            ]);
+        }
+
+        $templates = [
+            'lipid' => [
+                ['name' => 'S. Cholesterol (Total)', 'reference_to' => '<200', 'unit' => 'mg/dl'],
+                ['name' => 'S. Cholesterol (HDL)', 'reference_to' => '<40', 'unit' => 'mg/dl'],
+                ['name' => 'S. Cholesterol (LDL)', 'reference_to' => '<150', 'unit' => 'mg/dl'],
+                ['name' => 'Triglycerides', 'reference_to' => '190', 'unit' => 'mg/dl'],
+            ],
+            'cholesterol' => [
+                ['name' => 'S. Cholesterol (Total)', 'reference_to' => '<200', 'unit' => 'mg/dl'],
+            ],
+            'electrolyte' => [
+                ['name' => 'Sodium (Na+)', 'reference_from' => '135', 'reference_to' => '145', 'unit' => 'mmol/l'],
+                ['name' => 'Potassium (K+)', 'reference_from' => '3.5', 'reference_to' => '5.2', 'unit' => 'mmol/l'],
+                ['name' => 'Chloride (Cl-)', 'reference_from' => '96', 'reference_to' => '108', 'unit' => 'mmol/l'],
+                ['name' => 'Bi-Carbonate (HCO3-)', 'reference_from' => '22', 'reference_to' => '28', 'unit' => 'mmol/l'],
+            ],
+            'differential count' => $differentialTemplate,
+            'hematocrit' => $hctTemplate,
+            'hct/pcv' => $hctTemplate,
+            'pcv' => $hctTemplate,
+            'platelet count' => $plateletTemplate,
+            'platelet' => $plateletTemplate,
+            'complete blood count' => $cbcTemplate,
+            'cbc' => $cbcTemplate,
+            'hematology' => $cbcTemplate,
+            'haematology' => $cbcTemplate,
+            'tsh' => [
+                ['name' => 'TSH', 'reference_from' => '0.27', 'reference_to' => '4.20', 'unit' => 'µIU/ml'],
+            ],
+        ];
+
+        foreach ($templates as $keyword => $parameters) {
+            if (!str_contains($text, $keyword)) {
+                continue;
+            }
+
+            return array_map(function (array $parameter) {
+                return array_merge($parameter, [
+                    'id' => 'gen:' . $parameter['name'],
+                    'generated' => true,
+                ]);
+            }, $parameters);
+        }
+
+        return [];
+    }
+
+    /**
+     * Auto-detect the medical function/category label for a test based on its name.
+     * Returns a human-readable label like "Liver Function Test", "Thyroid Function", etc.
+     * Used as a fallback when the test's report_function field is empty.
+     */
+    private function autoDetectTestFunction(string $name, string $category = ''): string
+    {
+        $n = strtolower(trim($name));
+        $c = strtolower(trim($category));
+        $ctx = $n . ' ' . $c;
+
+        // ── Liver Function Test ───────────────────────────────────────────
+        if (preg_match('/\b(sgpt|sgot|alt\b|ast\b|alp\b|alkaline phosphatase|ggt|ggtp|gamma.?gt|bilirubin|bili\b|albumin|globulin|total protein|serum protein|prothrombin|liver function|lft\b)\b/i', $ctx)) {
+            return 'Liver Function Test';
+        }
+
+        // ── Kidney / Renal Function Test ──────────────────────────────────
+        if (preg_match('/\b(creatinine|s\.creatinine|urea\b|bun\b|blood urea|uric acid|egfr|cystatin|renal function|kidney function|kft\b|rft\b)\b/i', $ctx)) {
+            return 'Kidney Function Test';
+        }
+
+        // ── Blood Sugar / Diabetes ────────────────────────────────────────
+        if (preg_match('/\b(glucose|fbs\b|rbs\b|ppbs\b|hba1c|hb ?a1c|glycated|blood sugar|fasting sugar|oral glucose|ogtt|gtt\b|diabetes)\b/i', $ctx)) {
+            return 'Blood Sugar / Diabetes';
+        }
+
+        // ── Lipid Profile ─────────────────────────────────────────────────
+        if (preg_match('/\b(cholesterol|triglyceride|hdl\b|ldl\b|vldl\b|lipid profile|lipid panel|non.?hdl)\b/i', $ctx)) {
+            return 'Lipid Profile';
+        }
+
+        // ── Complete Blood Count ──────────────────────────────────────────
+        if (preg_match('/\b(cbc\b|complete blood count|hemoglobin|haemoglobin|hgb\b|hb\b|wbc\b|rbc\b|platelet|thrombocyte|hematocrit|haematocrit|pcv\b|mcv\b|mch\b|mchc\b|reticulocyte|differential count|blood count|esr\b)\b/i', $ctx)) {
+            return 'Complete Blood Count';
+        }
+
+        // ── Thyroid Function ──────────────────────────────────────────────
+        if (preg_match('/\b(tsh\b|t3\b|t4\b|ft3\b|ft4\b|free t3|free t4|anti.?tpo|thyroglobulin|thyroid stimulating|thyroid function|tft\b|thyroid)\b/i', $ctx)) {
+            return 'Thyroid Function Test';
+        }
+
+        // ── Cardiac Markers ───────────────────────────────────────────────
+        if (preg_match('/\b(troponin|ck.?mb|cpk\b|ldh\b|bnp\b|nt.?probnp|myoglobin|cardiac enzyme|cardiac marker|pro.?bnp)\b/i', $ctx)) {
+            return 'Cardiac Marker';
+        }
+
+        // ── Coagulation ───────────────────────────────────────────────────
+        if (preg_match('/\b(prothrombin time|pt\b|aptt\b|ptt\b|inr\b|fibrinogen|d.?dimer|bleeding time|clotting time|coagulation|factor viii|factor ix)\b/i', $ctx)) {
+            return 'Coagulation Test';
+        }
+
+        // ── Tumor Markers ─────────────────────────────────────────────────
+        if (preg_match('/\b(psa\b|afp\b|cea\b|ca.?125|ca.?19.?9|ca.?15.?3|beta.?hcg|b.?hcg|tumor marker|tumour marker|ca 125|ca 19|ca 15)\b/i', $ctx)) {
+            return 'Tumor Marker';
+        }
+
+        // ── Hormones / Reproductive ───────────────────────────────────────
+        if (preg_match('/\b(cortisol|insulin\b|fsh\b|lh\b|estrogen|estradiol|testosterone|prolactin|dhea|progesterone|amh\b|anti.?mullerian|androgen|hormone|hcg\b|beta hcg)\b/i', $ctx)) {
+            return 'Hormone Test';
+        }
+
+        // ── Inflammation / Acute Phase ────────────────────────────────────
+        if (preg_match('/\b(c.?reactive protein|crp\b|procalcitonin|interleukin|il.?6|esr\b|erythrocyte sedimentation|ferritin|serum ferritin)\b/i', $ctx)) {
+            return 'Inflammation Marker';
+        }
+
+        // ── Iron Studies ──────────────────────────────────────────────────
+        if (preg_match('/\b(serum iron|tibc\b|transferrin|iron study|iron deficiency|iron profile)\b/i', $ctx)) {
+            return 'Iron Studies';
+        }
+
+        // ── Vitamins / Minerals ───────────────────────────────────────────
+        if (preg_match('/\b(vitamin d|25.?oh|25.?hydroxy|vitamin b12|vit b12|cobalamin|folate|folic acid|vitamin b9|zinc\b|magnesium|calcium\b|phosphorus|parathyroid|pth\b)\b/i', $ctx)) {
+            return 'Vitamin / Mineral Test';
+        }
+
+        // ── Electrolytes ──────────────────────────────────────────────────
+        if (preg_match('/\b(sodium\b|potassium\b|chloride\b|bicarbonate\b|electrolyte|na\+?\/k\+?|serum na|serum k\b)\b/i', $ctx)) {
+            return 'Electrolyte Test';
+        }
+
+        // ── Weil-Felix / Well-Felix (Rickettsial) ────────────────────────
+        if (preg_match('/weil.?felix|well.?felix/i', $ctx)) {
+            return 'Serological Test';
+        }
+
+        // ── Widal (Enteric Fever) ─────────────────────────────────────────
+        if (preg_match('/\bwidal\b/i', $ctx)) {
+            return 'Serological Test';
+        }
+
+        // ── Serology / Infection ──────────────────────────────────────────
+        if (preg_match('/\b(vdrl\b|tpha\b|hiv\b|hbsag\b|hepatitis b|hepatitis c|hcv\b|hbs\b|dengue|malaria|widal\b|aslo\b|aso\b|ra factor|rpr\b|torch\b|cmv\b|ebv\b|toxoplasma|syphilis|serology|antibody titer)\b/i', $ctx)) {
+            return 'Serology / Infection Test';
+        }
+
+        // ── Urine Analysis ────────────────────────────────────────────────
+        if (preg_match('/\b(urine r\/e|urine m\/e|urinalysis|urine analysis|urine culture|urine protein|microalbumin|urine routine|urine exam)\b/i', $ctx)
+            || (str_contains($n, 'urine') && preg_match('/\b(r\/?e\b|m\/?e\b|routine|exam|analysis|culture)\b/i', $n))) {
+            return 'Urine Analysis';
+        }
+
+        // ── Stool Analysis ────────────────────────────────────────────────
+        if (preg_match('/\b(stool r\/e|stool m\/e|stool culture|stool obt|stool occult|stool exam|stool routine|stool analysis|faecal|fecal)\b/i', $ctx)
+            || (str_contains($n, 'stool') && preg_match('/\b(r\/?e\b|m\/?e\b|routine|exam|culture|occult)\b/i', $n))) {
+            return 'Stool Analysis';
+        }
+
+        // ── Microbiology / Culture & Sensitivity ─────────────────────────
+        if (preg_match('/\b(culture|sensitivity|c\/s\b|gram stain|afb\b|mrsa\b|blood culture|sputum culture|wound culture|pus culture|throat culture)\b/i', $ctx)) {
+            return 'Microbiology';
+        }
+
+        // ── Immunology / Autoimmune ───────────────────────────────────────
+        if (preg_match('/\b(ana\b|anti.?dsdna|anca\b|anti.?ccp|anti.?ccp|rheumatoid factor|complement c3|complement c4|immunoglobulin|igg|igm|iga|autoimmune)\b/i', $ctx)) {
+            return 'Immunology / Autoimmune';
+        }
+
+        // ── Pancreatic Function ───────────────────────────────────────────
+        if (preg_match('/\b(amylase|lipase|pancreatic)\b/i', $ctx)) {
+            return 'Pancreatic Function';
+        }
+
+        // ── Drug Monitoring ───────────────────────────────────────────────
+        if (preg_match('/\b(digoxin|phenytoin|lithium|valproate|vancomycin|drug level|therapeutic drug|tdm\b)\b/i', $ctx)) {
+            return 'Drug Level Monitoring';
+        }
+
+        // ── Semen Analysis ────────────────────────────────────────────────
+        if (preg_match('/\b(semen|sperm|seminogram|spermiogram)\b/i', $ctx)) {
+            return 'Semen Analysis';
+        }
+
+        // ── Ultrasonography ───────────────────────────────────────────────
+        if (preg_match('/\b(usg\b|ultrasonogram|ultrasonography|ultrasound)\b/i', $ctx)) {
+            return 'Ultrasonography';
+        }
+
+        // ── X-Ray ─────────────────────────────────────────────────────────
+        if (preg_match('/\b(x.?ray|xray\b|radiograph|cxr\b)\b/i', $ctx)) {
+            return 'Radiology / X-Ray';
+        }
+
+        // ── ECG ───────────────────────────────────────────────────────────
+        if (preg_match('/\b(ecg\b|ekg\b|electrocardiogram|electrocardiograph)\b/i', $ctx)) {
+            return 'ECG';
+        }
+
+        // ── Haematology (generic) ─────────────────────────────────────────
+        if (str_contains($c, 'hematology') || str_contains($c, 'haematology')) {
+            return 'Haematology';
+        }
+
+        // ── Biochemistry (generic) ────────────────────────────────────────
+        if (str_contains($c, 'biochem')) {
+            return 'Biochemistry';
+        }
+
+        // ── Microbiology (generic) ────────────────────────────────────────
+        if (str_contains($c, 'micro') || str_contains($c, 'biology')) {
+            return 'Microbiology';
+        }
+
+        return '';
     }
 
     private function suggestNormalRangeByTestName(BillItem $item): ?string
@@ -2142,40 +3311,247 @@ class ReportingController extends Controller
         }
 
         // Curated quick suggestions for common tests.
+        // Uses regex with word boundaries (\b) to prevent partial matches
+        // (e.g. "ft4" must NOT match the "t4" rule, "ft3" must NOT match "t3").
         $rules = [
-            ['keywords' => ['hemoglobin', 'hb'], 'range' => 'Male: 13 - 17 g/dL | Female: 12 - 15 g/dL'],
-            ['keywords' => ['wbc', 'white blood cell'], 'range' => '4,000 - 11,000 /uL'],
-            ['keywords' => ['rbc', 'red blood cell'], 'range' => 'Male: 4.5 - 5.9 M/uL | Female: 4.1 - 5.1 M/uL'],
-            ['keywords' => ['platelet'], 'range' => '150,000 - 450,000 /uL'],
-            ['keywords' => ['esr'], 'range' => 'Male: 0 - 15 mm/hr | Female: 0 - 20 mm/hr'],
-            ['keywords' => ['glucose', 'fbs', 'fasting blood sugar'], 'range' => '70 - 99 mg/dL'],
-            ['keywords' => ['rbs', 'random blood sugar'], 'range' => '70 - 140 mg/dL'],
-            ['keywords' => ['hba1c'], 'range' => '4.0 - 5.6 %'],
-            ['keywords' => ['creatinine'], 'range' => '0.6 - 1.2 mg/dL'],
-            ['keywords' => ['urea'], 'range' => '15 - 40 mg/dL'],
-            ['keywords' => ['alt', 'sgpt'], 'range' => '7 - 56 U/L'],
-            ['keywords' => ['ast', 'sgot'], 'range' => '10 - 40 U/L'],
-            ['keywords' => ['bilirubin'], 'range' => '0.2 - 1.2 mg/dL'],
-            ['keywords' => ['cholesterol'], 'range' => '< 200 mg/dL'],
-            ['keywords' => ['triglyceride', 'triglycerides'], 'range' => '< 150 mg/dL'],
-            ['keywords' => ['ldl'], 'range' => '< 100 mg/dL'],
-            ['keywords' => ['hdl'], 'range' => 'Male: > 40 mg/dL | Female: > 50 mg/dL'],
-            ['keywords' => ['tsh'], 'range' => '0.4 - 4.0 mIU/L'],
-            ['keywords' => ['t3'], 'range' => '0.8 - 2.0 ng/mL'],
-            ['keywords' => ['t4'], 'range' => '5.0 - 12.0 ug/dL'],
-            ['keywords' => ['ecg'], 'range' => 'Heart Rate: 60 - 100 bpm'],
-            ['keywords' => ['ultrasonogram', 'ultrasonography', 'usg'], 'range' => 'Impression based on clinical and sonographic findings'],
+            // ── Thyroid ──────────────────────────────────────────────────
+            // Free T3/T4 must come BEFORE plain T3/T4 to avoid substring collision.
+            ['pattern' => '/\bfree\s*t3\b|\bft3\b/i',  'range' => '2.3 - 4.2 pg/mL'],
+            ['pattern' => '/\bfree\s*t4\b|\bft4\b/i',  'range' => '0.93 - 1.70 ng/dL'],
+            ['pattern' => '/\btsh\b/i',                 'range' => '0.4 - 4.0 mIU/L'],
+            // Plain T3/T4 only when NOT preceded by 'f' (i.e. not FT3/FT4)
+            ['pattern' => '/(?<![a-z])t3\b/i',          'range' => '0.8 - 2.0 ng/mL'],
+            ['pattern' => '/(?<![a-z])t4\b/i',          'range' => '5.0 - 12.0 ug/dL'],
+            // ── Haematology ───────────────────────────────────────────────
+            ['pattern' => '/\bhemoglobin\b|\bhaemoglobin\b|\bhgb\b/i', 'range' => 'Male: 13 - 17 g/dL | Female: 12 - 15 g/dL'],
+            ['pattern' => '/\bwbc\b|\bwhite blood cell\b/i',           'range' => '4,000 - 11,000 /uL'],
+            ['pattern' => '/\brbc\b|\bred blood cell\b/i',             'range' => 'Male: 4.5 - 5.9 M/uL | Female: 4.1 - 5.1 M/uL'],
+            ['pattern' => '/\bplatelet\b/i',                           'range' => '150,000 - 450,000 /uL'],
+            ['pattern' => '/\besr\b/i',                                'range' => 'Male: 0 - 15 mm/hr | Female: 0 - 20 mm/hr'],
+            // ── Blood Sugar ───────────────────────────────────────────────
+            ['pattern' => '/\bfbs\b|\bfasting blood sugar\b/i',        'range' => '70 - 99 mg/dL'],
+            ['pattern' => '/\brbs\b|\brandom blood sugar\b/i',         'range' => '70 - 140 mg/dL'],
+            ['pattern' => '/\bppbs\b/i',                               'range' => '< 140 mg/dL'],
+            ['pattern' => '/\bglucose\b/i',                            'range' => '70 - 99 mg/dL'],
+            ['pattern' => '/\bhba1c\b|\bhb\s*a1c\b/i',                'range' => '4.0 - 5.6 %'],
+            // ── Kidney ────────────────────────────────────────────────────
+            ['pattern' => '/\bs\.?\s*creatinine\b|\bserum creatinine\b|\bcreatinine\b/i', 'range' => '0.6 - 1.2 mg/dL'],
+            ['pattern' => '/\burea\b|\bbun\b/i',                       'range' => '15 - 40 mg/dL'],
+            ['pattern' => '/\buric acid\b/i',                          'range' => 'Male: 3.5 - 7.2 mg/dL | Female: 2.6 - 6.0 mg/dL'],
+            // ── Liver ─────────────────────────────────────────────────────
+            ['pattern' => '/\balt\b|\bsgpt\b/i',                       'range' => '7 - 56 U/L'],
+            ['pattern' => '/\bast\b|\bsgot\b/i',                       'range' => '10 - 40 U/L'],
+            ['pattern' => '/\balp\b|\balkaline phosphatase\b/i',       'range' => '44 - 147 U/L'],
+            ['pattern' => '/\bggt\b|\bggtp\b/i',                       'range' => 'Male: 8 - 61 U/L | Female: 5 - 36 U/L'],
+            ['pattern' => '/\bbilirubin\b/i',                          'range' => '0.2 - 1.2 mg/dL'],
+            ['pattern' => '/\balbumin\b/i',                            'range' => '3.5 - 5.0 g/dL'],
+            // ── Lipid ─────────────────────────────────────────────────────
+            ['pattern' => '/\bldl\b/i',                                'range' => '< 100 mg/dL'],
+            ['pattern' => '/\bhdl\b/i',                                'range' => 'Male: > 40 mg/dL | Female: > 50 mg/dL'],
+            ['pattern' => '/\bvldl\b/i',                               'range' => '< 30 mg/dL'],
+            ['pattern' => '/\btriglyceride/i',                         'range' => '< 150 mg/dL'],
+            ['pattern' => '/\bcholesterol\b/i',                        'range' => '< 200 mg/dL'],
+            // ── Misc ──────────────────────────────────────────────────────
+            ['pattern' => '/\becg\b|\bekg\b/i',                        'range' => 'Heart Rate: 60 - 100 bpm'],
+            ['pattern' => '/\busg\b|\bultrasonogram|\bultrasonography/i', 'range' => 'Impression based on clinical and sonographic findings'],
         ];
 
         foreach ($rules as $rule) {
-            foreach ($rule['keywords'] as $keyword) {
-                if (str_contains($context, $keyword)) {
-                    return $rule['range'];
-                }
+            if (preg_match($rule['pattern'], $context)) {
+                return $rule['range'];
             }
         }
 
         return null;
+    }
+
+    private function extractTrailingUnit(string $input): string
+    {
+        $text = trim((string) $input);
+        if ($text === '') {
+            return '';
+        }
+
+        $text = preg_replace('/[–—]/u', '-', $text);
+        if (preg_match('/(?:^|[\s\-])([A-Za-zµμ%\/]+(?:\/[A-Za-zµμ%\/]+)?)\s*$/u', $text, $matches)) {
+            return trim((string) $matches[1]);
+        }
+
+        if (preg_match('/([A-Za-zµμ%\/]+(?:\/[A-Za-zµμ%\/]+)?)\s*$/u', $text, $matches)) {
+            return trim((string) $matches[1]);
+        }
+
+        return '';
+    }
+
+    private function resolveReportingDepartment(BillItem $billItem, ?string $reportTitle = null): ?string
+    {
+        $category = strtolower(trim((string) $billItem->category));
+        if (str_contains($category, 'patholog')) {
+            return 'pathology';
+        }
+
+        if ($this->isUltrasonogramBillItem($billItem, $reportTitle)) {
+            return 'ultrasound';
+        }
+
+        if (
+            str_contains($category, 'radiolog')
+            || str_contains($category, 'xray')
+            || str_contains($category, 'x-ray')
+            || str_contains($category, 'x ray')
+        ) {
+            return 'xray';
+        }
+
+        return null;
+    }
+
+    private function resolveMachineInfoByCategory(BillItem $billItem, array $attendanceOptions, string $fallbackText): array
+    {
+        $configured = data_get($attendanceOptions, 'reporting.machine_info_by_category', []);
+        $configured = is_array($configured) ? $configured : [];
+
+        $categoryCandidates = [];
+
+        if (!empty($billItem->category)) {
+            $categoryCandidates[] = (string) $billItem->category;
+        }
+
+        if (!empty($billItem->item_id)) {
+            try {
+                $test = Test::query()->with(['mainCategory', 'pathologyCategory'])->find($billItem->item_id);
+                if ($test) {
+                    $categoryCandidates[] = (string) ($test->mainCategory?->name ?? '');
+                    $categoryCandidates[] = (string) ($test->pathologyCategory?->name ?? '');
+                }
+            } catch (\Throwable $_) {
+                // ignore
+            }
+        }
+
+        $categoryCandidates[] = $this->resolveReportTitle($billItem);
+
+        $categoryNames = [];
+        foreach ($categoryCandidates as $candidate) {
+            $trimmed = trim((string) $candidate);
+            if ($trimmed === '') {
+                continue;
+            }
+            $categoryNames[] = $trimmed;
+        }
+
+        $categoryNames = array_values(array_unique($categoryNames));
+
+        foreach ($categoryNames as $categoryName) {
+            $normalizedKey = $this->normalizeMachineInfoCategoryKey($categoryName);
+            if ($normalizedKey === '') {
+                continue;
+            }
+
+            if (isset($configured[$categoryName])) {
+                $item = $configured[$categoryName];
+                if (is_array($item)) {
+                    $text = trim((string) ($item['text'] ?? ''));
+                    $enabled = $item['enabled'] ?? true;
+                    if (is_string($enabled)) {
+                        $enabled = in_array(strtolower($enabled), ['1', 'true', 'yes', 'on'], true);
+                    }
+                    return ['text' => $text !== '' ? $text : $fallbackText, 'enabled' => (bool) $enabled];
+                }
+            }
+
+            foreach ($configured as $configuredKey => $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+
+                if ($this->normalizeMachineInfoCategoryKey((string) $configuredKey) === $normalizedKey) {
+                    $text = trim((string) ($item['text'] ?? ''));
+                    $enabled = $item['enabled'] ?? true;
+                    if (is_string($enabled)) {
+                        $enabled = in_array(strtolower($enabled), ['1', 'true', 'yes', 'on'], true);
+                    }
+                    return ['text' => $text !== '' ? $text : $fallbackText, 'enabled' => (bool) $enabled];
+                }
+            }
+        }
+
+        $globalEnabled = data_get($attendanceOptions, 'reporting.machine_info_line_enabled', true);
+        $globalEnabled = filter_var($globalEnabled, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($globalEnabled === null) {
+            $globalEnabled = true;
+        }
+
+        return ['text' => $fallbackText, 'enabled' => (bool) $globalEnabled];
+    }
+
+    private function normalizeMachineInfoCategoryKey(string $value): string
+    {
+        $normalized = strtolower(trim((string) $value));
+        $normalized = preg_replace('/[^a-z0-9]+/', ' ', $normalized);
+        $normalized = trim((string) $normalized);
+
+        if ($normalized === '') {
+            return '';
+        }
+
+        if (str_contains($normalized, 'hemat') || str_contains($normalized, 'haemat')) {
+            return 'hematology';
+        }
+
+        if (str_contains($normalized, 'biochem')) {
+            return 'biochemistry';
+        }
+
+        if (str_contains($normalized, 'hormone')) {
+            return 'hormone analysis';
+        }
+
+        if (str_contains($normalized, 'cbc')) {
+            return 'cbc';
+        }
+
+        if (str_contains($normalized, 'pathology')) {
+            return 'pathology';
+        }
+
+        if (str_contains($normalized, 'micro')) {
+            return 'microbiology';
+        }
+
+        if (str_contains($normalized, 'urine')) {
+            return 'urine';
+        }
+
+        return $normalized;
+    }
+
+    private function isPathologyLikeCategory(string $category): bool
+    {
+        $normalized = strtolower(trim($category));
+        if ($normalized === '') {
+            return false;
+        }
+
+        return str_contains($normalized, 'pathology')
+            || str_contains($normalized, 'micro')
+            || str_contains($normalized, 'biology')
+            || str_contains($normalized, 'hematology')
+            || str_contains($normalized, 'haematology')
+            || str_contains($normalized, 'cbc');
+    }
+
+    private function looksLikeCbcTest($item): bool
+    {
+        $combined = strtolower(trim((string) (($item->item_name ?? '') . ' ' . ($item->category ?? '') . ' ' . ($item->report_function ?? ''))));
+        return str_contains($combined, 'cbc')
+            || str_contains($combined, 'complete blood count')
+            || str_contains($combined, 'hematology')
+            || str_contains($combined, 'haematology')
+            || str_contains($combined, 'hemogram')
+            || str_contains($combined, 'haemogram')
+            || str_contains($combined, 'blood count');
     }
 
     private function resolveDepartmentCategories(): array
@@ -2185,11 +3561,11 @@ class ReportingController extends Controller
         $scopeText = trim($departmentName . ' ' . $designationName);
 
         if (str_contains($scopeText, 'pathology') || str_contains($scopeText, 'patholog')) {
-            return ['Pathology'];
+            return $this->categoryNamesMatching(['pathology', 'micro', 'biology', 'hematology', 'haematology', 'cbc'], ['Pathology', 'Hematology', 'CBC']);
         }
 
         if (str_contains($scopeText, 'radiology') || str_contains($scopeText, 'radiolog')) {
-            return ['Radiology'];
+            return $this->categoryNamesMatching(['radiology', 'radiolog', 'xray', 'x-ray'], ['Radiology']);
         }
 
         if (
@@ -2201,10 +3577,31 @@ class ReportingController extends Controller
         }
 
         if (str_contains($scopeText, 'ecg') || str_contains($scopeText, 'e.c.g')) {
-            return ['ECG'];
+            return $this->categoryNamesMatching(['ecg', 'echo'], ['ECG']);
         }
 
-        return ['Pathology', 'Radiology', 'Ultrasonogram', 'Ultrasonography', 'ECG'];
+        return $this->categoryNamesMatching(
+            ['pathology', 'micro', 'biology', 'radiology', 'radiolog', 'ultrasound', 'ultrasonogram', 'ultrasonography', 'ecg', 'echo'],
+            ['Pathology', 'Radiology', 'Ultrasonogram', 'Ultrasonography', 'ECG']
+        );
+    }
+
+    private function categoryNamesMatching(array $keywords, array $fallback): array
+    {
+        $names = TestCategory::query()
+            ->whereNull('parent_id')
+            ->whereNull('deleted_at')
+            ->where('status', 'Active')
+            ->pluck('name')
+            ->map(fn ($name) => trim((string) $name))
+            ->filter()
+            ->filter(function ($name) use ($keywords) {
+                $normalized = strtolower($name);
+                return collect($keywords)->contains(fn ($keyword) => str_contains($normalized, $keyword));
+            })
+            ->all();
+
+        return array_values(array_unique(array_merge($fallback, $names), SORT_STRING));
     }
 
     private function parseNumeric(?string $s): ?float
@@ -2240,9 +3637,9 @@ class ReportingController extends Controller
 
         $resolvedPath = null;
         foreach ($candidates as $candidate) {
-            $fullPath = storage_path('app/public/' . ltrim($candidate, '/'));
-            if (file_exists($fullPath)) {
-                $resolvedPath = $fullPath;
+            $candidate = ltrim($candidate, '/');
+            if (Storage::disk('public')->exists($candidate)) {
+                $resolvedPath = $candidate;
                 break;
             }
         }
@@ -2260,6 +3657,67 @@ class ReportingController extends Controller
             default => 'image/png',
         };
 
-        return 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($resolvedPath));
+        return 'data:' . $mime . ';base64,' . base64_encode(Storage::disk('public')->get($resolvedPath));
+    }
+
+    private function makeSignatureBackgroundTransparent(string $dataUri): string
+    {
+        if (!extension_loaded('gd') || preg_match('#^data:image/(?:png|jpe?g|gif|webp);base64,#i', $dataUri) !== 1) {
+            return $dataUri;
+        }
+
+        $encodedImage = substr($dataUri, strpos($dataUri, ',') + 1);
+        $imageBytes = base64_decode($encodedImage, true);
+        $source = $imageBytes === false ? false : @imagecreatefromstring($imageBytes);
+        if (!$source instanceof \GdImage) {
+            return $dataUri;
+        }
+
+        $width = imagesx($source);
+        $height = imagesy($source);
+        $transparentImage = imagecreatetruecolor($width, $height);
+        imagealphablending($transparentImage, false);
+        imagesavealpha($transparentImage, true);
+
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $pixel = imagecolorat($source, $x, $y);
+                $sourceAlpha = 1 - (($pixel >> 24) & 0x7F) / 127;
+                $red = ($pixel >> 16) & 0xFF;
+                $green = ($pixel >> 8) & 0xFF;
+                $blue = $pixel & 0xFF;
+                $minimumChannel = min($red, $green, $blue);
+                $maximumChannel = max($red, $green, $blue);
+                $colorSpread = $maximumChannel - $minimumChannel;
+
+                if ($sourceAlpha <= 0 || ($minimumChannel >= 230 && $colorSpread < 20)) {
+                    $color = imagecolorallocatealpha($transparentImage, 255, 255, 255, 127);
+                } elseif ($minimumChannel > 205 && $colorSpread < 20) {
+                    $inkOpacity = (255 - $minimumChannel) / 50;
+                    $alpha = (int) round(127 * (1 - $sourceAlpha * $inkOpacity));
+                    $red = (int) round(max(0, min(255, ($red - (1 - $inkOpacity) * 255) / $inkOpacity)));
+                    $green = (int) round(max(0, min(255, ($green - (1 - $inkOpacity) * 255) / $inkOpacity)));
+                    $blue = (int) round(max(0, min(255, ($blue - (1 - $inkOpacity) * 255) / $inkOpacity)));
+                    $color = imagecolorallocatealpha($transparentImage, $red, $green, $blue, $alpha);
+                } else {
+                    $alpha = (int) round(127 * (1 - $sourceAlpha));
+                    $color = imagecolorallocatealpha($transparentImage, $red, $green, $blue, $alpha);
+                }
+
+                imagesetpixel($transparentImage, $x, $y, $color);
+            }
+        }
+
+        ob_start();
+        imagepng($transparentImage);
+        $transparentImageBytes = ob_get_clean();
+        imagedestroy($source);
+        imagedestroy($transparentImage);
+
+        if (!is_string($transparentImageBytes) || $transparentImageBytes === '') {
+            return $dataUri;
+        }
+
+        return 'data:image/png;base64,' . base64_encode($transparentImageBytes);
     }
 }

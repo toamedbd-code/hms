@@ -40,39 +40,23 @@ export default {
         if (typeof obj[snake] !== 'undefined' && obj[snake] !== null) return Number(obj[snake] || 0);
         return 0;
       };
-      // debug value
-      try {
-        // eslint-disable-next-line no-console
-        // removed console.debug to avoid noisy logs
-      } catch (e) {}
+      const incomeItems = Array.isArray(this.dashboardData.chartIncomeItems)
+        ? this.dashboardData.chartIncomeItems
+        : [
+          { name: 'OPD', amount: val(this.dashboardData.opdIncome) },
+          { name: 'IPD', amount: val(this.dashboardData.ipdIncome) },
+          { name: 'Pharmacy', amount: val(this.dashboardData.pharmacyIncome) },
+          { name: 'Disposable', amount: get(this.dashboardData, 'disposableIncome') },
+          { name: 'Pathology', amount: val(this.dashboardData.pathologyIncome) },
+          { name: 'Radiology', amount: val(this.dashboardData.radiologyIncome) }
+        ];
+      const palette = ['#4F46E5', '#10B981', '#3B82F6', '#A78BFA', '#F59E0B', '#EF4444', '#06B6D4', '#84CC16'];
       return {
-        labels: ["OPD", "IPD", "Pharmacy", "Disposable", "Pathology", "Radiology", "Pending", "Expense", "Final Income"],
+        labels: incomeItems.map((item) => item.name),
         datasets: [
           {
-            data: [
-              val(this.dashboardData.opdIncome),
-              val(this.dashboardData.ipdIncome),
-              val(this.dashboardData.pharmacyIncome),
-              get(this.dashboardData, 'disposableIncome'),
-              val(this.dashboardData.pathologyIncome),
-              val(this.dashboardData.radiologyIncome),
-              val(this.dashboardData.pendingIncome),
-              val(this.dashboardData.expenses),
-              val(this.dashboardData.netIncome)
-            ],
-
-            backgroundColor: [
-              "#4F46E5",
-              "#10B981",
-              "#3B82F6",
-              "#A78BFA", // Disposable - lavender
-              "#F59E0B",
-              "#EF4444",
-              "#6B7280",
-              "#0F172A",
-              "#22C55E"
-            ],
-
+            data: incomeItems.map((item) => Number(item.amount) || 0),
+            backgroundColor: incomeItems.map((_, index) => palette[index % palette.length]),
             borderWidth: 1
           }
         ]
@@ -89,7 +73,13 @@ export default {
           legend: {
             position: "right",
             labels: {
-              color: textColor
+              color: textColor,
+              boxWidth: 10,
+              boxHeight: 10,
+              padding: 4,
+              font: {
+                size: 9
+              }
             }
           },
 

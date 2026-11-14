@@ -56,6 +56,10 @@ class Handler extends ExceptionHandler
 
     public function render($request, Throwable $exception)
     {
+        if ($exception instanceof TokenMismatchException && $request->header('X-Inertia')) {
+            return Inertia::location(route('backend.auth.login2'));
+        }
+
         if ($request->expectsJson() || $request->ajax()) {
             if ($exception instanceof AuthenticationException) {
                 if ($request->header('X-Inertia')) {

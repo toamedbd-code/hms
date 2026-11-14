@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, onMounted, watch, computed, nextTick } from 'vue';
 import BackendLayout from '@/Layouts/BackendLayout.vue';
 import { router, useForm, usePage } from '@inertiajs/vue3';
 import InputError from '@/Components/InputError.vue';
@@ -8,10 +8,32 @@ import PrimaryButton from '@/Components/PrimaryButton.vue';
 import AlertMessage from '@/Components/AlertMessage.vue';
 import { displayResponse, displayWarning } from '@/responseMessage.js';
 
-const props = defineProps(['expense', 'expenseHeads', 'id']);
+const props = defineProps(['expense', 'expenseHeads', 'departments', 'defaultDepartmentId', 'departmentScope', 'id']);
+const DRAFT_KEY = 'expense-form-draft';
+const suspendDraftPersistence = ref(false);
+const departmentSearch = ref('');
+const showDepartmentSuggestions = ref(false);
+const highlightedDepartmentIndex = ref(0);
 const expenseHeadSearch = ref('');
 const showExpenseHeadSuggestions = ref(false);
 const highlightedExpenseHeadIndex = ref(0);
+
+const sortedDepartments = computed(() => {
+    return [...(props.departments || [])].sort((a, b) => {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return nameA.localeCompare(nameB, 'en', { numeric: true });
+    });
+});
+
+const filteredDepartments = computed(() => {
+    const query = departmentSearch.value.trim().toLowerCase();
+    if (!query) {
+        return sortedDepartments.value;
+    }
+
+    return sortedDepartments.value.filter((department) => department.name?.toLowerCase().includes(query));
+});
 
 const sortedExpenseHeads = computed(() => {
     return [...(props.expenseHeads || [])].sort((a, b) => {
@@ -32,6 +54,9 @@ const filteredExpenseHeads = computed(() => {
 
 const form = useForm({
     expense_header_id: props.expense?.expense_header_id ?? '',
+    expense_head_name: '',
+    department_id: props.expense?.department_id ?? props.defaultDepartmentId ?? '',
+    department_name: '',
     bill_number: props.expense?.bill_number ?? '',
     case_id: props.expense?.case_id ?? '',
     name: props.expense?.name ?? '',
@@ -61,18 +86,138 @@ const removeDocument = () => {
     document.getElementById('document').value = '';
 };
 
+const syncDepartmentSearch = () => {
+    const selectedDepartment = (props.departments || []).find((department) => String(department.id) === String(form.department_id));
+    const nextValue = selectedDepartment?.name || departmentSearch.value || '';
+    departmentSearch.value = nextValue;
+    form.department_name = nextValue;
+};
+
+const selectDepartment = (department) => {
+    if (!department) return;
+
+    form.department_id = department.id;
+    form.department_name = department.name;
+    departmentSearch.value = department.name;
+    highlightedDepartmentIndex.value = 0;
+    showDepartmentSuggestions.value = false;
+    focusNextField('name');
+};
+
+const resolveDepartmentMatch = (value) => {
+    const trimmedValue = (value || '').trim();
+    const matchedDepartment = sortedDepartments.value.find((department) => department.name?.toLowerCase() === trimmedValue.toLowerCase());
+
+    if (matchedDepartment) {
+        form.department_id = matchedDepartment.id;
+        form.department_name = matchedDepartment.name;
+        departmentSearch.value = matchedDepartment.name;
+        highlightedDepartmentIndex.value = filteredDepartments.value.findIndex((department) => department.id === matchedDepartment.id);
+        return true;
+    }
+
+    form.department_id = '';
+    form.department_name = trimmedValue;
+    highlightedDepartmentIndex.value = 0;
+    return false;
+};
+
+const handleDepartmentInput = (event) => {
+    const value = event.target.value;
+    departmentSearch.value = value;
+    showDepartmentSuggestions.value = true;
+
+    if (!value.trim()) {
+        form.department_id = '';
+        form.department_name = '';
+        return;
+    }
+
+    resolveDepartmentMatch(value);
+};
+
+const handleDepartmentKeydown = (event) => {
+    if (event.key === 'Escape') {
+        showDepartmentSuggestions.value = false;
+        return;
+    }
+
+    if (!showDepartmentSuggestions.value || !filteredDepartments.value.length) {
+        if (event.key === 'Enter' && departmentSearch.value.trim()) {
+            if (resolveDepartmentMatch(departmentSearch.value)) {
+                event.preventDefault();
+                return;
+            }
+            event.preventDefault();
+            focusNextField('name');
+        }
+        return;
+    }
+
+    if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        highlightedDepartmentIndex.value = Math.min(highlightedDepartmentIndex.value + 1, filteredDepartments.value.length - 1);
+    } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        highlightedDepartmentIndex.value = Math.max(highlightedDepartmentIndex.value - 1, 0);
+    } else if (event.key === 'Enter') {
+        event.preventDefault();
+        const selectedDepartment = filteredDepartments.value[highlightedDepartmentIndex.value];
+        if (selectedDepartment) {
+            selectDepartment(selectedDepartment);
+            return;
+        }
+        if (resolveDepartmentMatch(departmentSearch.value)) {
+            return;
+        }
+        focusNextField('name');
+    }
+};
+
+const focusDepartmentInput = () => {
+    showDepartmentSuggestions.value = true;
+};
+
+const hideDepartmentSuggestions = () => {
+    setTimeout(() => {
+        showDepartmentSuggestions.value = false;
+    }, 120);
+};
+
 const syncExpenseHeadSearch = () => {
     const selectedHead = (props.expenseHeads || []).find((head) => String(head.id) === String(form.expense_header_id));
-    expenseHeadSearch.value = selectedHead?.name || '';
+    const nextValue = selectedHead?.name || expenseHeadSearch.value || '';
+    expenseHeadSearch.value = nextValue;
+    form.expense_head_name = nextValue;
 };
 
 const selectExpenseHead = (head) => {
     if (!head) return;
 
     form.expense_header_id = head.id;
+    form.expense_head_name = head.name;
     expenseHeadSearch.value = head.name;
     highlightedExpenseHeadIndex.value = 0;
     showExpenseHeadSuggestions.value = false;
+    focusNextField('name');
+};
+
+const resolveExpenseHeadMatch = (value) => {
+    const trimmedValue = (value || '').trim();
+    const matchedHead = sortedExpenseHeads.value.find((head) => head.name?.toLowerCase() === trimmedValue.toLowerCase());
+
+    if (matchedHead) {
+        form.expense_header_id = matchedHead.id;
+        form.expense_head_name = matchedHead.name;
+        expenseHeadSearch.value = matchedHead.name;
+        highlightedExpenseHeadIndex.value = filteredExpenseHeads.value.findIndex((head) => head.id === matchedHead.id);
+        return true;
+    }
+
+    form.expense_header_id = '';
+    form.expense_head_name = trimmedValue;
+    highlightedExpenseHeadIndex.value = 0;
+    return false;
 };
 
 const handleExpenseHeadInput = (event) => {
@@ -80,14 +225,13 @@ const handleExpenseHeadInput = (event) => {
     expenseHeadSearch.value = value;
     showExpenseHeadSuggestions.value = true;
 
-    const matchedHead = sortedExpenseHeads.value.find((head) => head.name?.toLowerCase() === value.trim().toLowerCase());
-    if (matchedHead) {
-        form.expense_header_id = matchedHead.id;
-        highlightedExpenseHeadIndex.value = filteredExpenseHeads.value.findIndex((head) => head.id === matchedHead.id);
-    } else {
+    if (!value.trim()) {
         form.expense_header_id = '';
-        highlightedExpenseHeadIndex.value = 0;
+        form.expense_head_name = '';
+        return;
     }
+
+    resolveExpenseHeadMatch(value);
 };
 
 const handleExpenseHeadKeydown = (event) => {
@@ -98,10 +242,12 @@ const handleExpenseHeadKeydown = (event) => {
 
     if (!showExpenseHeadSuggestions.value || !filteredExpenseHeads.value.length) {
         if (event.key === 'Enter' && expenseHeadSearch.value.trim()) {
-            const matchedHead = sortedExpenseHeads.value.find((head) => head.name?.toLowerCase() === expenseHeadSearch.value.trim().toLowerCase());
-            if (matchedHead) {
-                selectExpenseHead(matchedHead);
+            if (resolveExpenseHeadMatch(expenseHeadSearch.value)) {
+                event.preventDefault();
+                return;
             }
+            event.preventDefault();
+            focusNextField('name');
         }
         return;
     }
@@ -117,7 +263,12 @@ const handleExpenseHeadKeydown = (event) => {
         const selectedHead = filteredExpenseHeads.value[highlightedExpenseHeadIndex.value];
         if (selectedHead) {
             selectExpenseHead(selectedHead);
+            return;
         }
+        if (resolveExpenseHeadMatch(expenseHeadSearch.value)) {
+            return;
+        }
+        focusNextField('name');
     }
 };
 
@@ -131,6 +282,101 @@ const hideExpenseHeadSuggestions = () => {
     }, 120);
 };
 
+const focusNextField = (fieldId) => {
+    nextTick(() => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            field.focus();
+            field.select?.();
+        }
+    });
+};
+
+const persistDraft = () => {
+    if (props.id || props.expense?.id || suspendDraftPersistence.value) {
+        return;
+    }
+
+    try {
+        const draft = {
+            department_id: form.department_id,
+            department_name: form.department_name,
+            expense_header_id: form.expense_header_id,
+            expense_head_name: form.expense_head_name,
+            name: form.name,
+            bill_number: form.bill_number,
+            description: form.description,
+            amount: form.amount,
+            date: form.date,
+        };
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch (error) {
+        console.warn('Expense draft could not be saved:', error);
+    }
+};
+
+const loadDraft = () => {
+    try {
+        const saved = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}');
+        if (!saved || Object.keys(saved).length === 0) {
+            return;
+        }
+
+        if (saved.department_id) form.department_id = saved.department_id;
+        if (saved.department_name) form.department_name = saved.department_name;
+        if (saved.expense_header_id) form.expense_header_id = saved.expense_header_id;
+        if (saved.expense_head_name) form.expense_head_name = saved.expense_head_name;
+        if (saved.name) form.name = saved.name;
+        if (saved.bill_number) form.bill_number = saved.bill_number;
+        if (saved.description) form.description = saved.description;
+        if (saved.amount) form.amount = String(saved.amount);
+        if (saved.date) form.date = saved.date;
+    } catch (error) {
+        console.warn('Expense draft could not be loaded:', error);
+    }
+};
+
+const clearDraft = () => {
+    try {
+        localStorage.removeItem(DRAFT_KEY);
+    } catch (error) {
+        console.warn('Expense draft could not be cleared:', error);
+    }
+};
+
+const resetCreateForm = async () => {
+    suspendDraftPersistence.value = true;
+    form.reset();
+    form.clearErrors();
+
+    const scopedDepartmentId = props.departmentScope ? (props.defaultDepartmentId ?? '') : '';
+    const scopedDepartment = (props.departments || []).find(
+        (department) => String(department.id) === String(scopedDepartmentId),
+    );
+
+    form.department_id = scopedDepartmentId;
+    form.department_name = scopedDepartment?.name ?? '';
+    form.expense_header_id = '';
+    form.expense_head_name = '';
+    form.date = new Date().toISOString().split('T')[0];
+
+    departmentSearch.value = scopedDepartment?.name ?? '';
+    expenseHeadSearch.value = '';
+    showDepartmentSuggestions.value = false;
+    showExpenseHeadSuggestions.value = false;
+    highlightedDepartmentIndex.value = 0;
+    highlightedExpenseHeadIndex.value = 0;
+
+    const documentInput = document.getElementById('document');
+    if (documentInput) {
+        documentInput.value = '';
+    }
+
+    await nextTick();
+    clearDraft();
+    suspendDraftPersistence.value = false;
+};
+
 const submit = () => {
     const routeName = props.id ? route('backend.expense.update', props.id) : route('backend.expense.store');
 
@@ -139,11 +385,9 @@ const submit = () => {
         remember: '',
         isDirty: false,
     })).post(routeName, {
-        onSuccess: (response) => {
-            if (!props.id) {
-                form.reset();
-                // Reset date to today
-                form.date = new Date().toISOString().split('T')[0];
+        onSuccess: async (response) => {
+            if (!props.id && response?.props?.flash?.successMessage) {
+                await resetCreateForm();
             }
             displayResponse(response);
         },
@@ -168,16 +412,30 @@ const formatAmount = (event) => {
     form.amount = value;
 };
 
-watch(() => form.expense_header_id, () => {
-    syncExpenseHeadSearch();
+watch(() => form.department_id, () => {
+    syncDepartmentSearch();
+    persistDraft();
 }, { immediate: true });
 
+watch(() => form.expense_header_id, () => {
+    syncExpenseHeadSearch();
+    persistDraft();
+}, { immediate: true });
+
+watch(() => [form.name, form.bill_number, form.description, form.amount, form.date], () => {
+    persistDraft();
+}, { deep: true });
+
 onMounted(() => {
-    // Set today's date as default if creating new expense
-    if (!props.expense?.id) {
-        form.date = new Date().toISOString().split('T')[0];
+    if (!props.expense?.id && !props.id) {
+        loadDraft();
     }
 
+    if (!props.expense?.id) {
+        form.date = form.date || new Date().toISOString().split('T')[0];
+    }
+
+    syncDepartmentSearch();
     syncExpenseHeadSearch();
 });
 
@@ -235,7 +493,35 @@ const goBack = () => {
             <form @submit.prevent="submit" class="p-4">
 
                 <!-- First Row: Expense Head, Name, Invoice Number, Date -->
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4 mb-4">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-5 mb-4">
+                    <div class="col-span-1 relative">
+                        <InputLabel for="department_id" value="Department *" />
+                        <input id="department_id" v-model="departmentSearch" type="text"
+                            placeholder="Select Department"
+                            :disabled="!!props.departmentScope"
+                            class="block w-full p-2 text-sm rounded-md shadow-sm border-slate-300 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-200 focus:border-indigo-300 dark:focus:border-slate-600"
+                            @input="handleDepartmentInput"
+                            @focus="focusDepartmentInput"
+                            @keydown="handleDepartmentKeydown"
+                            @blur="hideDepartmentSuggestions" />
+
+                        <ul v-if="showDepartmentSuggestions && filteredDepartments.length"
+                            class="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg dark:border-slate-600 dark:bg-slate-800">
+                            <li v-for="(department, index) in filteredDepartments" :key="department.id"
+                                @mousedown.prevent="selectDepartment(department)"
+                                :class="[
+                                    'cursor-pointer px-3 py-2 text-sm',
+                                    highlightedDepartmentIndex === index
+                                        ? 'bg-indigo-100 text-indigo-700 dark:bg-slate-700 dark:text-indigo-200'
+                                        : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700'
+                                ]">
+                                {{ department.name }}
+                            </li>
+                        </ul>
+
+                        <InputError class="mt-2" :message="form.errors.department_id" />
+                    </div>
+
                     <!-- Expense Head -->
                     <div class="col-span-1 relative">
                         <InputLabel for="expense_header_id" value="Expense Head *" />

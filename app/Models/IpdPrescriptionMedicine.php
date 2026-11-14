@@ -12,6 +12,8 @@ class IpdPrescriptionMedicine extends Model
     protected $fillable = [
         'ipd_prescription_id',
         'medicine_name',
+        'generic_name',
+        'quantity',
         'dose',
         'frequency',
         'duration',

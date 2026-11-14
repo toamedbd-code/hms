@@ -26,6 +26,18 @@ const searchBillNumber = ref(props.filters?.bill_number ?? '');
 
 const getItems = (billing) => billing.bill_items ?? billing.billItems ?? [];
 
+const getItemNames = (billing) => getItems(billing)
+  .map((item) => String(item.item_name ?? '').trim())
+  .filter((name) => name !== '');
+
+const getItemNamesText = (billing) => getItemNames(billing).join(', ') || 'N/A';
+
+const getItemNamesPreview = (billing) => {
+  const names = getItemNames(billing);
+  if (names.length <= 4) return names.join(', ') || 'N/A';
+  return `${names.slice(0, 4).join(', ')}, ...`;
+};
+
 const getCollectorNames = (billing) => {
   const items = getItems(billing);
   const names = items
@@ -37,6 +49,8 @@ const getCollectorNames = (billing) => {
 const hasReportedItems = (billing) => getItems(billing).some((item) => !!item.reported_at);
 
 const hasPendingItems = (billing) => getItems(billing).some((item) => !item.reported_at);
+
+const getCompletedItems = (billing) => getItems(billing).filter((item) => !!item.reported_at);
 
 const submitSearch = () => {
   const value = searchBillNumber.value.trim();
@@ -96,11 +110,23 @@ const buildEditRoute = (billing, includeReported = false) => {
       </div>
 
       <div class="w-full my-4 overflow-x-auto">
-        <table class="w-full text-sm text-left text-gray-700 border">
+        <table
+          class="w-full text-sm text-left text-gray-700 border"
+          :class="{ 'table-fixed': department === 'pathology' }"
+        >
+          <colgroup v-if="department === 'pathology'">
+            <col style="width: 14%">
+            <col style="width: 13%">
+            <col style="width: 36%">
+            <col style="width: 12%">
+            <col style="width: 10%">
+            <col style="width: 15%">
+          </colgroup>
           <thead class="bg-gray-50">
             <tr>
               <th class="px-3 py-2 border">Bill No</th>
               <th class="px-3 py-2 border">Patient</th>
+              <th v-if="department === 'pathology'" class="px-3 py-2 border">Item Name</th>
               <th class="px-3 py-2 border">Collected By</th>
               <th class="px-3 py-2 border">Test Count</th>
               <th class="px-3 py-2 border">Action</th>
@@ -112,27 +138,32 @@ const buildEditRoute = (billing, includeReported = false) => {
               <td class="px-3 py-2 border">
                 {{ billing.patient?.name || billing.patient_name || 'N/A' }}
               </td>
+              <td v-if="department === 'pathology'" class="max-w-0 px-3 py-2 border">
+                <span class="block truncate whitespace-nowrap" :title="getItemNamesText(billing)">
+                  {{ getItemNamesPreview(billing) }}
+                </span>
+              </td>
               <td class="px-3 py-2 border">{{ getCollectorNames(billing) }}</td>
-              <td class="px-3 py-2 border">{{ getItems(billing).length }}</td>
+              <td class="px-3 py-2 border">{{ getCompletedItems(billing).length || getItems(billing).length }}</td>
               <td class="px-3 py-2 border">
                 <Link
-                  v-if="hasPendingItems(billing)"
-                  class="px-3 py-1 text-xs text-white bg-emerald-600 rounded hover:bg-emerald-700"
-                  :href="buildEditRoute(billing, false)"
-                >
-                  Add Report
-                </Link>
-                <Link
-                  v-else-if="hasReportedItems(billing)"
+                  v-if="hasReportedItems(billing)"
                   class="px-3 py-1 text-xs text-white bg-indigo-600 rounded hover:bg-indigo-700"
                   :href="buildEditRoute(billing, true)"
                 >
                   Edit Report
                 </Link>
+                <Link
+                  v-else-if="hasPendingItems(billing)"
+                  class="px-3 py-1 text-xs text-white bg-emerald-600 rounded hover:bg-emerald-700"
+                  :href="buildEditRoute(billing, false)"
+                >
+                  Add Report
+                </Link>
               </td>
             </tr>
             <tr v-if="rows.length === 0">
-              <td colspan="5" class="px-3 py-6 text-center text-gray-500">No pending reports.</td>
+              <td :colspan="department === 'pathology' ? 6 : 5" class="px-3 py-6 text-center text-gray-500">No pending reports.</td>
             </tr>
           </tbody>
         </table>

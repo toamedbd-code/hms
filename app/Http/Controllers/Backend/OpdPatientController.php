@@ -88,7 +88,7 @@ class OpdPatientController extends Controller
         return Inertia::render(
             'Backend/OpdPatient/Index',
             [
-                'pageTitle' => fn() => 'Opd Patient List',
+                'pageTitle' => fn() => 'OPD Bill List',
                 'filters' => fn() => request()->only(['name', 'numOfData']),
                 'tableHeaders' => fn() => $this->getTableHeaders(),
                 'dataFields' => fn() => $this->dataFields(),
@@ -592,6 +592,7 @@ class OpdPatientController extends Controller
             'items' => 'nullable|array',
             'items.*.test_name' => 'nullable|string',
             'items.*.medicine_name' => 'nullable|string',
+            'items.*.generic_name' => 'nullable|string|max:255',
             'items.*.dose' => 'nullable|string',
             'items.*.duration' => 'nullable|string',
             'items.*.frequency' => 'nullable|string',
@@ -603,6 +604,10 @@ class OpdPatientController extends Controller
         $medicineItems = collect($validated['items'] ?? [])
             ->filter(function ($item) {
                 return trim((string) ($item['medicine_name'] ?? '')) !== '';
+            })
+            ->unique(function ($item) {
+                $name = preg_replace('/\s+/', ' ', trim((string) ($item['medicine_name'] ?? '')));
+                return strtolower($name);
             })
             ->values();
 
@@ -691,6 +696,7 @@ class OpdPatientController extends Controller
                     'opd_prescription_id' => $prescription->id,
                     'test_name' => null,
                     'medicine_name' => trim((string) ($item['medicine_name'] ?? '')),
+                    'generic_name' => trim((string) ($item['generic_name'] ?? '')) ?: null,
                     'dose' => trim((string) ($item['dose'] ?? 'N/A')),
                     'duration' => trim((string) ($item['duration'] ?? 'N/A')),
                     'frequency' => $item['frequency'] ?? null,
@@ -935,6 +941,7 @@ class OpdPatientController extends Controller
             ->map(function ($item) use ($safeText) {
                 return [
                     'medicine_name' => $safeText($item->medicine_name),
+                    'generic_name' => $safeText($item->generic_name, ''),
                     'dose' => $safeText($item->dose),
                     'duration' => $safeText($item->duration),
                     'frequency' => $safeText($item->frequency, ''),
@@ -1003,6 +1010,7 @@ class OpdPatientController extends Controller
             'headerImage' => $headerImageBase64,
             'footerImage' => $footerImageBase64,
             'footerContent' => $showHeaderFooter ? ($invoiceDesign->footer_content ?? '') : '',
+            'footerContentOffset' => max(-50, min(50, (int) ($invoiceDesign?->footer_content_offset ?? 0))),
             'prescriptionCode' => $prescriptionCode,
             'printedAt' => $printedAt,
             'qrCodeImage' => $qrCodeImage,
