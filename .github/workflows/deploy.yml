@@ -28,6 +28,16 @@ jobs:
             # ensure repo up to date
             git fetch --all --prune
             git reset --hard origin/main
+            # Keep cPanel's PHP 8.3 handler after git reset overwrites its generated .htaccess setting.
+            if ! grep -q 'AddHandler application/x-httpd-ea-php83' .htaccess; then
+              cat >> .htaccess <<'PHP83_HANDLER'
+
+# cPanel PHP 8.3 handler
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php83 .php .php8 .phtml
+</IfModule>
+PHP83_HANDLER
+            fi
             # install php deps (optional, safe to run)
             if command -v composer >/dev/null 2>&1; then
               composer install --no-dev --prefer-dist --optimize-autoloader
