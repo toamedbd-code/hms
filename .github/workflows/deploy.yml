@@ -12,6 +12,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate production deployment secrets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_PATH: ${{ secrets.PROD_PATH }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          test -n "$PROD_HOST" || { echo "::error::Missing required repository secret PROD_HOST"; exit 1; }
+          test -n "$PROD_USER" || { echo "::error::Missing required repository secret PROD_USER"; exit 1; }
+          test -n "$PROD_PATH" || { echo "::error::Missing required repository secret PROD_PATH"; exit 1; }
+          test -n "$SSH_KEY" || { echo "::error::Missing required repository secret SSH_KEY"; exit 1; }
+
       - name: Run remote deploy script via SSH
         uses: appleboy/ssh-action@v0.1.8
         with:
